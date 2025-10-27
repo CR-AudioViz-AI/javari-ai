@@ -6,6 +6,8 @@ import { ChatHistory } from '@/components/javari/ChatHistory';
 import { ProjectManager } from '@/components/javari/ProjectManager';
 import SubProjectsManager from '@/components/javari/SubProjectsManager';
 import { BuildHealthMonitor } from '@/components/javari/BuildHealthMonitor';
+import WorkLogViewer from '@/components/javari/WorkLogViewer';
+import ProjectAnalytics from '@/components/javari/ProjectAnalytics';
 import { Settings } from '@/components/javari/Settings';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -25,6 +27,8 @@ import {
   Settings as SettingsIcon,
   Menu,
   GitBranch,
+  FileText,
+  BarChart3,
   Plus,
   History,
 } from 'lucide-react';
@@ -225,6 +229,14 @@ export default function JavariDashboard() {
                 <HeartPulse className="w-4 h-4" />
                 Build Health
               </TabsTrigger>
+              <TabsTrigger value="worklog" className="gap-2">
+                <FileText className="w-4 h-4" />
+                Work Log
+              </TabsTrigger>
+              <TabsTrigger value="analytics" className="gap-2">
+                <BarChart3 className="w-4 h-4" />
+                Analytics
+              </TabsTrigger>
               <TabsTrigger value="settings" className="gap-2">
                 <SettingsIcon className="w-4 h-4" />
                 Settings
@@ -315,6 +327,20 @@ export default function JavariDashboard() {
             </TabsContent>
 
             {/* Settings Tab */}
+            {/* Work Log Tab */}
+            <TabsContent value="worklog" className="h-full m-0">
+              <div className="h-full overflow-y-auto p-6">
+                <WorkLogViewer />
+              </div>
+            </TabsContent>
+
+            {/* Analytics Tab */}
+            <TabsContent value="analytics" className="h-full m-0">
+              <div className="h-full overflow-y-auto p-6">
+                <ProjectAnalytics projects={projects} />
+              </div>
+            </TabsContent>
+
             <TabsContent value="settings" className="h-full m-0">
               <div className="h-full overflow-y-auto p-6">
                 <Settings />
