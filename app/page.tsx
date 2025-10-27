@@ -1,93 +1,146 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { ChatInterface } from '@/components/javari/ChatInterface';
+import { ProjectManager } from '@/components/javari/ProjectManager';
+import { BuildHealthMonitor } from '@/components/javari/BuildHealthMonitor';
+import { Settings } from '@/components/javari/Settings';
+
+type TabType = 'chat' | 'projects' | 'health' | 'settings';
+
+interface Stats {
+  totalProjects: number;
+  activeChats: number;
+  healthScore: number;
+  buildsToday: number;
+}
 
 export default function JavariDashboard() {
-  const [stats] = useState({
+  const [activeTab, setActiveTab] = useState<TabType>('chat');
+  const [stats, setStats] = useState<Stats>({
     totalProjects: 0,
     activeChats: 0,
     healthScore: 100,
     buildsToday: 0
   });
+  const [loading, setLoading] = useState(true);
+
+  // Fetch stats on mount
+  useEffect(() => {
+    async function fetchStats() {
+      try {
+        const response = await fetch('/api/health');
+        if (response.ok) {
+          const data = await response.json();
+          setStats({
+            totalProjects: data.totalProjects || 0,
+            activeChats: data.activeChats || 0,
+            healthScore: data.overallHealth || 100,
+            buildsToday: data.buildsToday || 0
+          });
+        }
+      } catch (error) {
+        console.error('Failed to fetch stats:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchStats();
+    // Refresh stats every 30 seconds
+    const interval = setInterval(fetchStats, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const tabs = [
+    { id: 'chat' as TabType, name: 'AI Chat', icon: '💬' },
+    { id: 'projects' as TabType, name: 'Projects', icon: '📊' },
+    { id: 'health' as TabType, name: 'Health', icon: '🏥' },
+    { id: 'settings' as TabType, name: 'Settings', icon: '⚙️' }
+  ];
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
       {/* Header */}
-      <header className="bg-slate-900/50 backdrop-blur-sm border-b border-blue-500/20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <header className="bg-slate-900/50 backdrop-blur-sm border-b border-blue-500/20 sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
               <div className="text-4xl">🤖</div>
               <div>
-                <h1 className="text-3xl font-bold text-white">Javari AI</h1>
-                <p className="text-blue-300">Autonomous Development Assistant</p>
+                <h1 className="text-2xl font-bold text-white">Javari AI</h1>
+                <p className="text-sm text-blue-300">Autonomous Development Assistant</p>
               </div>
             </div>
             
-            <div className="flex items-center space-x-2">
-              <div className="w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
-              <span className="text-green-400 font-medium">Operational</span>
+            <div className="flex items-center space-x-6">
+              {/* Stats Mini Display */}
+              <div className="hidden md:flex items-center space-x-4 text-sm">
+                <div className="flex items-center space-x-2">
+                  <span className="text-gray-400">Projects:</span>
+                  <span className="text-white font-semibold">{stats.totalProjects}</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <span className="text-gray-400">Chats:</span>
+                  <span className="text-white font-semibold">{stats.activeChats}</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <span className="text-gray-400">Health:</span>
+                  <span className={`font-semibold ${
+                    stats.healthScore >= 80 ? 'text-green-400' : 
+                    stats.healthScore >= 50 ? 'text-yellow-400' : 'text-red-400'
+                  }`}>{stats.healthScore}%</span>
+                </div>
+              </div>
+              
+              <div className="flex items-center space-x-2">
+                <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                <span className="text-green-400 font-medium text-sm">Operational</span>
+              </div>
             </div>
           </div>
+          
+          {/* Navigation Tabs */}
+          <nav className="mt-4 flex space-x-1">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                  activeTab === tab.id
+                    ? 'bg-blue-600 text-white'
+                    : 'text-gray-400 hover:text-white hover:bg-slate-800/50'
+                }`}
+              >
+                <span className="mr-2">{tab.icon}</span>
+                {tab.name}
+              </button>
+            ))}
+          </nav>
         </div>
       </header>
 
-      {/* Stats Grid */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
-          <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-blue-500/20 p-6">
-            <div className="text-blue-400 text-sm font-medium mb-2">Total Projects</div>
-            <div className="text-4xl font-bold text-white">{stats.totalProjects}</div>
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {loading ? (
+          <div className="flex items-center justify-center h-96">
+            <div className="text-white text-lg">Loading...</div>
           </div>
-          
-          <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-green-500/20 p-6">
-            <div className="text-green-400 text-sm font-medium mb-2">Active Chats</div>
-            <div className="text-4xl font-bold text-white">{stats.activeChats}</div>
-          </div>
-          
-          <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-purple-500/20 p-6">
-            <div className="text-purple-400 text-sm font-medium mb-2">Health Score</div>
-            <div className="text-4xl font-bold text-white">{stats.healthScore}</div>
-          </div>
-          
-          <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-orange-500/20 p-6">
-            <div className="text-orange-400 text-sm font-medium mb-2">Builds Today</div>
-            <div className="text-4xl font-bold text-white">{stats.buildsToday}</div>
-          </div>
-        </div>
-
-        {/* Welcome Message */}
-        <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-blue-500/20 p-8 text-center">
-          <div className="text-6xl mb-4">🚀</div>
-          <h2 className="text-2xl font-bold text-white mb-4">Javari AI is Operational!</h2>
-          <p className="text-gray-400 mb-6">
-            Your autonomous development assistant is ready to help you build, monitor, and optimize your projects.
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-3xl mx-auto">
-            <div className="bg-slate-900/50 rounded-lg p-4">
-              <div className="text-2xl mb-2">📊</div>
-              <h3 className="font-semibold text-white mb-1">Project Tracking</h3>
-              <p className="text-sm text-gray-400">Monitor all your projects in one place</p>
-            </div>
-            <div className="bg-slate-900/50 rounded-lg p-4">
-              <div className="text-2xl mb-2">🏥</div>
-              <h3 className="font-semibold text-white mb-1">Health Monitoring</h3>
-              <p className="text-sm text-gray-400">Real-time build health tracking</p>
-            </div>
-            <div className="bg-slate-900/50 rounded-lg p-4">
-              <div className="text-2xl mb-2">🤖</div>
-              <h3 className="font-semibold text-white mb-1">Self-Healing</h3>
-              <p className="text-sm text-gray-400">Auto-fix build errors automatically</p>
-            </div>
-          </div>
-        </div>
+        ) : (
+          <>
+            {activeTab === 'chat' && <ChatInterface />}
+            {activeTab === 'projects' && <ProjectManager />}
+            {activeTab === 'health' && <BuildHealthMonitor />}
+            {activeTab === 'settings' && <Settings />}
+          </>
+        )}
       </main>
 
       {/* Footer */}
-      <footer className="bg-slate-900/30 backdrop-blur-sm border-t border-blue-500/10 py-8">
+      <footer className="bg-slate-900/30 backdrop-blur-sm border-t border-blue-500/10 py-6 mt-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <p className="text-gray-400">
-            Javari AI • Built for CR AudioViz AI • Powered by Next.js, TypeScript & Supabase
+          <p className="text-gray-400 text-sm">
+            Javari AI v1.0 • Built for CR AudioViz AI • Powered by Next.js, TypeScript & Supabase
           </p>
         </div>
       </footer>
