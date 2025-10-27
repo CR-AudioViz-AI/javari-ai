@@ -4,7 +4,7 @@
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase';
+import { createServerClient } from '@/lib/supabase';
 
 interface ChatSession {
   id: string;
@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
 
       // Store session in database
       try {
-        const supabase = createClient();
+        const supabase = createServerClient();
         await supabase.from('javari_chat_sessions').insert({
           id: newSessionId,
           project_id: projectId || null,
@@ -132,7 +132,7 @@ export async function POST(request: NextRequest) {
 
         // Log the interaction to database
         try {
-          const supabase = createClient();
+          const supabase = createServerClient();
           await supabase.from('javari_chat_sessions').update({
             message_count: session.messages.length - 1, // Exclude system message
             token_count: data.usage?.total_tokens || 0,
