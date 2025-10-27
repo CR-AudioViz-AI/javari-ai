@@ -6,7 +6,7 @@ import { ChatHistory } from '@/components/javari/ChatHistory';
 import { ProjectManager } from '@/components/javari/ProjectManager';
 import { BuildHealthMonitor } from '@/components/javari/BuildHealthMonitor';
 import { Settings } from '@/components/javari/Settings';
-import { Menu, X } from 'lucide-react';
+import { Menu, X, GitBranch } from 'lucide-react';
 
 type TabType = 'chat' | 'projects' | 'health' | 'settings';
 
@@ -25,12 +25,15 @@ interface Message {
 
 interface Conversation {
   id: string;
+  numeric_id: number;
   title: string;
+  summary?: string;
   messages: Message[];
   status: 'active' | 'inactive' | 'archived';
   starred: boolean;
   continuation_depth: number;
   message_count: number;
+  parent_id?: string;
   created_at: string;
   updated_at: string;
 }
@@ -47,40 +50,49 @@ export default function JavariDashboard() {
     buildsToday: 0
   });
   const [loading, setLoading] = useState(true);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [creatingContinuation, setCreatingContinuation] = useState(false);
+  const [continuationParent, setContinuationParent] = useState<Conversation | null>(null);
 
-  // Fetch stats on mount
   useEffect(() => {
-    async function fetchStats() {
-      try {
-        const response = await fetch('/api/health');
-        if (response.ok) {
-          const data = await response.json();
-          setStats({
-            totalProjects: data.totalProjects || 0,
-            activeChats: data.activeChats || 0,
-            healthScore: data.overallHealth || 100,
-            buildsToday: data.buildsToday || 0
-          });
-        }
-      } catch (error) {
-        console.error('Failed to fetch stats:', error);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    fetchStats();
-    // Refresh stats every 30 seconds
-    const interval = setInterval(fetchStats, 30000);
-    return () => clearInterval(interval);
+    loadStats();
   }, []);
+
+  const loadStats = async () => {
+    try {
+      setLoading(true);
+      
+      // Load conversations count
+      const conversationsResponse = await fetch(`/api/javari/conversations?userId=${userId}&limit=1`);
+      if (conversationsResponse.ok) {
+        const conversationsData = await conversationsResponse.json();
+        setStats(prev => ({ ...prev, activeChats: conversationsData.total || 0 }));
+      }
+
+      // Load projects count
+      const projectsResponse = await fetch('/api/projects');
+      if (projectsResponse.ok) {
+        const projectsData = await projectsResponse.json();
+        setStats(prev => ({ ...prev, totalProjects: projectsData.projects?.length || 0 }));
+      }
+
+      // TODO: Load actual health and builds data
+      setStats(prev => ({ ...prev, healthScore: 100, buildsToday: 0 }));
+      
+    } catch (error) {
+      console.error('Error loading stats:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSelectConversation = (conversation: Conversation) => {
     setCurrentConversation(conversation);
+    setContinuationParent(null);
     // Convert timestamp strings to Date objects
     const messagesWithDates = conversation.messages.map(msg => ({
       ...msg,
-      timestamp: new Date(msg.timestamp)
+      timestamp: new Date(msg.timestamp).toISOString()
     }));
     setCurrentConversation({
       ...conversation,
@@ -90,11 +102,64 @@ export default function JavariDashboard() {
 
   const handleNewChat = () => {
     setCurrentConversation(null);
+    setContinuationParent(null);
   };
 
   const handleConversationCreated = (conversationId: string) => {
-    // Conversation was created, refresh sidebar
-    // The ChatHistory component will auto-refresh
+    // Refresh the sidebar to show new conversation
+    setRefreshTrigger(prev => prev + 1);
+    loadStats(); // Update stats
+  };
+
+  const handleCreateContinuation = async (parentConversation: Conversation) => {
+    setCreatingContinuation(true);
+    setContinuationParent(parentConversation);
+    
+    try {
+      // Generate summary if doesn't exist
+      if (!parentConversation.summary) {
+        const summaryResponse = await fetch('/api/javari/conversations/summary', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ conversationId: parentConversation.id })
+        });
+        
+        if (summaryResponse.ok) {
+          const summaryData = await summaryResponse.json();
+          parentConversation.summary = summaryData.summary;
+        }
+      }
+
+      // Create new conversation as continuation
+      const response = await fetch('/api/javari/conversations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          parentId: parentConversation.id,
+          title: `${parentConversation.title} (continued)`,
+          summary: parentConversation.summary,
+          messages: [],
+          model: 'gpt-4-turbo-preview'
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const newConversation = data.conversation;
+        
+        // Set the new conversation as current
+        setCurrentConversation(newConversation);
+        setRefreshTrigger(prev => prev + 1);
+      } else {
+        throw new Error('Failed to create continuation');
+      }
+    } catch (error) {
+      console.error('Error creating continuation:', error);
+      alert('Failed to create continuation. Please try again.');
+    } finally {
+      setCreatingContinuation(false);
+    }
   };
 
   const tabs = [
@@ -114,18 +179,26 @@ export default function JavariDashboard() {
               {activeTab === 'chat' && (
                 <button
                   onClick={() => setSidebarOpen(!sidebarOpen)}
-                  className="p-2 hover:bg-slate-800 rounded-lg transition-colors lg:hidden"
+                  className="p-2 hover:bg-slate-800 rounded-lg transition-colors"
+                  title={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
                 >
-                  {sidebarOpen ? <X size={24} className="text-white" /> : <Menu size={24} className="text-white" />}
+                  {sidebarOpen ? <X size={20} className="text-white" /> : <Menu size={20} className="text-white" />}
                 </button>
               )}
-              <div className="text-4xl">🤖</div>
-              <div>
-                <h1 className="text-2xl font-bold text-white">Javari AI</h1>
-                <p className="text-sm text-blue-300">Autonomous Development Assistant</p>
+              
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                  <span className="text-2xl">🤖</span>
+                </div>
+                <div>
+                  <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+                    Javari AI
+                  </h1>
+                  <p className="text-sm text-gray-400">Autonomous Development Assistant</p>
+                </div>
               </div>
             </div>
-            
+
             <div className="flex items-center space-x-6">
               {/* Stats Mini Display */}
               <div className="hidden md:flex items-center space-x-4 text-sm">
@@ -173,6 +246,26 @@ export default function JavariDashboard() {
         </div>
       </header>
 
+      {/* Continuation Banner */}
+      {continuationParent && (
+        <div className="bg-blue-900/30 border-b border-blue-500/30 px-4 py-2">
+          <div className="max-w-7xl mx-auto flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm text-blue-300">
+              <GitBranch size={16} />
+              <span>
+                Continuing from: <strong>{continuationParent.title}</strong>
+              </span>
+            </div>
+            <button
+              onClick={() => setContinuationParent(null)}
+              className="text-blue-400 hover:text-blue-300 text-sm"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Content with Sidebar */}
       <main className="flex-1 flex overflow-hidden">
         {activeTab === 'chat' ? (
@@ -185,18 +278,39 @@ export default function JavariDashboard() {
                 userId={userId}
                 onSelectConversation={handleSelectConversation}
                 onNewChat={handleNewChat}
+                onCreateContinuation={handleCreateContinuation}
                 currentConversationId={currentConversation?.id}
+                refreshTrigger={refreshTrigger}
               />
             </aside>
 
             {/* Chat Area */}
-            <div className="flex-1 overflow-hidden">
-              <ChatInterface
-                userId={userId}
-                conversationId={currentConversation?.id}
-                initialMessages={currentConversation?.messages as any || []}
-                onConversationCreated={handleConversationCreated}
-              />
+            <div className="flex-1 overflow-hidden flex flex-col">
+              {continuationParent?.summary && (
+                <div className="bg-gray-900/50 border-b border-gray-800 px-6 py-4">
+                  <h3 className="text-sm font-semibold text-blue-400 mb-2">Context from previous conversation:</h3>
+                  <div className="text-sm text-gray-300 whitespace-pre-wrap">
+                    {continuationParent.summary}
+                  </div>
+                </div>
+              )}
+              
+              {creatingContinuation ? (
+                <div className="flex-1 flex items-center justify-center">
+                  <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+                    <p className="text-gray-400">Creating continuation...</p>
+                  </div>
+                </div>
+              ) : (
+                <ChatInterface
+                  userId={userId}
+                  conversationId={currentConversation?.id}
+                  initialMessages={currentConversation?.messages as any || []}
+                  onConversationCreated={handleConversationCreated}
+                  parentId={continuationParent?.id}
+                />
+              )}
             </div>
           </>
         ) : (
