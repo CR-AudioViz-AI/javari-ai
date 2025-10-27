@@ -121,8 +121,8 @@ export default function JavariChatInterface({ projectId, sessionId }: JavariChat
 
             try {
               const parsed = JSON.parse(data);
-              if (parsed.content) {
-                fullResponse += parsed.content;
+              if (parsed.chunk) {
+                fullResponse += parsed.chunk;
                 setStreamingMessage(fullResponse);
               }
             } catch (e) {
