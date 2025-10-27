@@ -1,0 +1,15 @@
+# Deployment Trigger
+Last deployed: 2025-10-27 17:11:18
+
+This file triggers Vercel deployments.
+
+## Latest Changes:
+- ✅ Added Anthropic API key
+- ✅ Added @anthropic-ai/sdk dependency
+- ✅ Added lucide-react dependency
+- ✅ All 8 Javari AI Phase 4 files deployed
+- ✅ Multi-model support (OpenAI + Anthropic)
+- ✅ Knowledge base system
+- ✅ Function calling
+- ✅ Model selector UI
+- ✅ Chat embed widget
