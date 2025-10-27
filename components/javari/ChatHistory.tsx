@@ -9,7 +9,10 @@ import {
   Search,
   ChevronRight,
   Plus,
-  Filter
+  Filter,
+  Download,
+  GitBranch,
+  MoreVertical
 } from 'lucide-react';
 
 interface Message {
@@ -28,6 +31,7 @@ interface Conversation {
   starred: boolean;
   continuation_depth: number;
   message_count: number;
+  parent_id?: string;
   created_at: string;
   updated_at: string;
 }
@@ -37,7 +41,9 @@ interface ChatHistoryProps {
   projectId?: string;
   onSelectConversation: (conversation: Conversation) => void;
   onNewChat: () => void;
+  onCreateContinuation?: (parentConversation: Conversation) => void;
   currentConversationId?: string;
+  refreshTrigger?: number;
 }
 
 export function ChatHistory({
@@ -45,17 +51,20 @@ export function ChatHistory({
   projectId,
   onSelectConversation,
   onNewChat,
-  currentConversationId
+  onCreateContinuation,
+  currentConversationId,
+  refreshTrigger = 0
 }: ChatHistoryProps) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterStarred, setFilterStarred] = useState(false);
   const [filterStatus, setFilterStatus] = useState<'active' | 'archived'>('active');
+  const [actionMenuOpen, setActionMenuOpen] = useState<string | null>(null);
 
   useEffect(() => {
     loadConversations();
-  }, [userId, projectId, search, filterStarred, filterStatus]);
+  }, [userId, projectId, search, filterStarred, filterStatus, refreshTrigger]);
 
   const loadConversations = async () => {
     try {
@@ -128,6 +137,87 @@ export function ChatHistory({
     }
   };
 
+  const exportConversation = async (conversation: Conversation) => {
+    try {
+      // Create export data
+      const exportData = {
+        id: conversation.id,
+        numeric_id: conversation.numeric_id,
+        title: conversation.title,
+        summary: conversation.summary,
+        status: conversation.status,
+        starred: conversation.starred,
+        continuation_depth: conversation.continuation_depth,
+        parent_id: conversation.parent_id,
+        created_at: conversation.created_at,
+        updated_at: conversation.updated_at,
+        messages: conversation.messages.map(msg => ({
+          role: msg.role,
+          content: msg.content,
+          timestamp: msg.timestamp
+        }))
+      };
+
+      // Create downloadable file
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `javari-conversation-${conversation.numeric_id}-${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error exporting conversation:', error);
+      alert('Failed to export conversation');
+    }
+  };
+
+  const exportAllConversations = async () => {
+    try {
+      const exportData = {
+        exported_at: new Date().toISOString(),
+        user_id: userId,
+        total_conversations: conversations.length,
+        conversations: conversations.map(conv => ({
+          id: conv.id,
+          numeric_id: conv.numeric_id,
+          title: conv.title,
+          summary: conv.summary,
+          status: conv.status,
+          starred: conv.starred,
+          continuation_depth: conv.continuation_depth,
+          parent_id: conv.parent_id,
+          message_count: conv.message_count,
+          created_at: conv.created_at,
+          updated_at: conv.updated_at,
+          messages: conv.messages
+        }))
+      };
+
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `javari-all-conversations-${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error exporting all conversations:', error);
+      alert('Failed to export conversations');
+    }
+  };
+
+  const handleCreateContinuation = async (conversation: Conversation) => {
+    if (onCreateContinuation) {
+      onCreateContinuation(conversation);
+    }
+    setActionMenuOpen(null);
+  };
+
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     const now = new Date();
@@ -147,7 +237,7 @@ export function ChatHistory({
   return (
     <div className="flex flex-col h-full bg-gray-900 border-r border-gray-800">
       {/* Header */}
-      <div className="p-4 border-b border-gray-800">
+      <div className="p-4 border-b border-gray-800 space-y-2">
         <button
           onClick={onNewChat}
           className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
@@ -155,6 +245,16 @@ export function ChatHistory({
           <Plus size={20} />
           New Chat
         </button>
+        
+        {conversations.length > 0 && (
+          <button
+            onClick={exportAllConversations}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg text-sm font-medium transition-colors"
+          >
+            <Download size={16} />
+            Export All
+          </button>
+        )}
       </div>
 
       {/* Search & Filters */}
@@ -215,10 +315,12 @@ export function ChatHistory({
                     ? 'bg-blue-600/20 border border-blue-500/30'
                     : 'hover:bg-gray-800 border border-transparent'
                 }`}
-                onClick={() => onSelectConversation(conv)}
               >
                 <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1 min-w-0">
+                  <div 
+                    className="flex-1 min-w-0"
+                    onClick={() => onSelectConversation(conv)}
+                  >
                     <div className="flex items-center gap-2 mb-1">
                       <MessageSquare size={14} className="text-gray-400 flex-shrink-0" />
                       <h3 className="text-sm font-medium text-white truncate">
@@ -239,44 +341,83 @@ export function ChatHistory({
                     )}
                   </div>
 
-                  {/* Actions */}
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {/* Actions Menu */}
+                  <div className="relative">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        toggleStar(conv.id, conv.starred);
+                        setActionMenuOpen(actionMenuOpen === conv.id ? null : conv.id);
                       }}
-                      className="p-1 hover:bg-gray-700 rounded"
-                      title={conv.starred ? 'Unstar' : 'Star'}
+                      className="p-1 hover:bg-gray-700 rounded opacity-0 group-hover:opacity-100 transition-opacity"
                     >
-                      <Star
-                        size={16}
-                        className={conv.starred ? 'text-yellow-400 fill-yellow-400' : 'text-gray-400'}
-                      />
+                      <MoreVertical size={16} className="text-gray-400" />
                     </button>
 
-                    {filterStatus === 'active' ? (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          archiveConversation(conv.id);
-                        }}
-                        className="p-1 hover:bg-gray-700 rounded"
-                        title="Archive"
-                      >
-                        <Archive size={16} className="text-gray-400" />
-                      </button>
-                    ) : (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteConversation(conv.id);
-                        }}
-                        className="p-1 hover:bg-gray-700 rounded"
-                        title="Delete permanently"
-                      >
-                        <Trash2 size={16} className="text-red-400" />
-                      </button>
+                    {actionMenuOpen === conv.id && (
+                      <div className="absolute right-0 mt-1 w-48 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-10">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleStar(conv.id, conv.starred);
+                            setActionMenuOpen(null);
+                          }}
+                          className="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
+                        >
+                          <Star size={14} className={conv.starred ? 'fill-yellow-400 text-yellow-400' : ''} />
+                          {conv.starred ? 'Unstar' : 'Star'}
+                        </button>
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCreateContinuation(conv);
+                          }}
+                          className="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
+                        >
+                          <GitBranch size={14} />
+                          Create Continuation
+                        </button>
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            exportConversation(conv);
+                            setActionMenuOpen(null);
+                          }}
+                          className="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
+                        >
+                          <Download size={14} />
+                          Export
+                        </button>
+
+                        <div className="border-t border-gray-700 my-1"></div>
+
+                        {filterStatus === 'active' ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              archiveConversation(conv.id);
+                              setActionMenuOpen(null);
+                            }}
+                            className="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-700 flex items-center gap-2"
+                          >
+                            <Archive size={14} />
+                            Archive
+                          </button>
+                        ) : (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteConversation(conv.id);
+                              setActionMenuOpen(null);
+                            }}
+                            className="w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-gray-700 flex items-center gap-2"
+                          >
+                            <Trash2 size={14} />
+                            Delete
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
