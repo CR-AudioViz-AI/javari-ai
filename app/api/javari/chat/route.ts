@@ -1,412 +1,227 @@
-// ============================================================================
-// ENHANCED API ROUTE: /api/javari/chat
-// Handles AI chat with OpenAI GPT-4 + Function Calling
-// Connects to real Javari AI backend APIs
-// ============================================================================
+/**
+ * Javari AI Chat API Route
+ * Handles chat requests with multi-model support and function calling
+ * 
+ * @route /api/javari/chat
+ * @version 4.0.0
+ * @last-updated 2025-10-27
+ */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { createJavariMultiModel, type AIModel } from '@/lib/javari-multi-model';
+import { javariKB, enhanceResponseWithKnowledge } from '@/lib/javari-knowledge-base';
+import { JAVARI_GREETING } from '@/lib/javari-system-prompt';
 
-interface ChatSession {
-  id: string;
-  projectId?: string;
-  messages: Array<{ role: 'user' | 'assistant' | 'system' | 'function'; content: string; name?: string }>;
-  createdAt: string;
+export const runtime = 'edge';
+export const dynamic = 'force-dynamic';
+
+interface ChatRequest {
+  message: string;
+  model?: AIModel;
+  conversationHistory?: Array<{ role: string; content: string }>;
+  userId?: string;
+  sessionId?: string;
+  stream?: boolean;
 }
 
-const sessions = new Map<string, ChatSession>();
-
-// System prompt for Javari AI with function calling context
-const SYSTEM_PROMPT = `You are Javari AI, an autonomous development assistant for CR AudioViz AI.
-
-You have access to real-time data about projects, builds, and system health through function calls. When users ask about:
-- Projects: Call list_projects or get_project_details
-- Build failures: Call get_build_health or get_recent_failures
-- Work logs: Call get_work_logs
-- Creating projects: Call create_project
-
-Always use your function calling capabilities to provide REAL data instead of generic responses.
-
-Your personality:
-- Professional but friendly
-- Direct and action-oriented
-- Proactive in offering help
-- Detail-oriented but concise
-
-When you receive function results, analyze them and provide clear, actionable insights.`;
-
-// Define available functions for GPT-4 to call
-const JAVARI_FUNCTIONS = [
-  {
-    name: 'list_projects',
-    description: 'Get a list of all projects in the Javari AI system',
-    parameters: {
-      type: 'object',
-      properties: {
-        limit: {
-          type: 'number',
-          description: 'Maximum number of projects to return (default: 10)'
-        }
-      }
-    }
-  },
-  {
-    name: 'get_project_details',
-    description: 'Get detailed information about a specific project',
-    parameters: {
-      type: 'object',
-      properties: {
-        projectId: {
-          type: 'string',
-          description: 'The UUID of the project to get details for'
-        }
-      },
-      required: ['projectId']
-    }
-  },
-  {
-    name: 'get_build_health',
-    description: 'Get build health status for a project',
-    parameters: {
-      type: 'object',
-      properties: {
-        projectId: {
-          type: 'string',
-          description: 'The UUID of the project to check build health for'
-        },
-        limit: {
-          type: 'number',
-          description: 'Number of recent builds to return (default: 5)'
-        }
-      },
-      required: ['projectId']
-    }
-  },
-  {
-    name: 'get_recent_failures',
-    description: 'Get recent build failures across all projects or a specific project',
-    parameters: {
-      type: 'object',
-      properties: {
-        projectId: {
-          type: 'string',
-          description: 'Optional: Filter by specific project UUID'
-        },
-        limit: {
-          type: 'number',
-          description: 'Number of failures to return (default: 10)'
-        }
-      }
-    }
-  },
-  {
-    name: 'get_work_logs',
-    description: 'Get work logs for a specific chat session',
-    parameters: {
-      type: 'object',
-      properties: {
-        chatSessionId: {
-          type: 'string',
-          description: 'The UUID of the chat session to get work logs for'
-        },
-        limit: {
-          type: 'number',
-          description: 'Number of logs to return (default: 20)'
-        }
-      },
-      required: ['chatSessionId']
-    }
-  },
-  {
-    name: 'create_project',
-    description: 'Create a new project in Javari AI',
-    parameters: {
-      type: 'object',
-      properties: {
-        name: {
-          type: 'string',
-          description: 'The name of the project'
-        },
-        description: {
-          type: 'string',
-          description: 'A description of the project'
-        },
-        githubRepo: {
-          type: 'string',
-          description: 'GitHub repository URL (optional)'
-        },
-        vercelProject: {
-          type: 'string',
-          description: 'Vercel project ID (optional)'
-        }
-      },
-      required: ['name']
-    }
-  }
-];
-
-// Execute function calls by calling actual Javari AI APIs
-async function executeFunctionCall(functionName: string, args: any): Promise<any> {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-  
-  try {
-    switch (functionName) {
-      case 'list_projects': {
-        const limit = args.limit || 10;
-        const response = await fetch(`${baseUrl}/api/projects?limit=${limit}`);
-        const data = await response.json();
-        return data.projects || data;
-      }
-
-      case 'get_project_details': {
-        const response = await fetch(`${baseUrl}/api/projects?id=${args.projectId}`);
-        const data = await response.json();
-        return data.project || data;
-      }
-
-      case 'get_build_health': {
-        const limit = args.limit || 5;
-        const response = await fetch(`${baseUrl}/api/health?projectId=${args.projectId}&limit=${limit}`);
-        const data = await response.json();
-        return data.builds || data;
-      }
-
-      case 'get_recent_failures': {
-        const limit = args.limit || 10;
-        const params = new URLSearchParams({
-          status: 'failed',
-          limit: String(limit)
-        });
-        if (args.projectId) {
-          params.append('projectId', args.projectId);
-        }
-        const response = await fetch(`${baseUrl}/api/health?${params}`);
-        const data = await response.json();
-        return data.builds || data;
-      }
-
-      case 'get_work_logs': {
-        const limit = args.limit || 20;
-        const response = await fetch(`${baseUrl}/api/work/log?chatSessionId=${args.chatSessionId}&limit=${limit}`);
-        const data = await response.json();
-        return data.logs || data;
-      }
-
-      case 'create_project': {
-        const response = await fetch(`${baseUrl}/api/projects`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: args.name,
-            description: args.description,
-            github_repo: args.githubRepo,
-            vercel_project: args.vercelProject
-          })
-        });
-        const data = await response.json();
-        return data.project || data;
-      }
-
-      default:
-        return { error: `Unknown function: ${functionName}` };
-    }
-  } catch (error) {
-    console.error(`Error executing function ${functionName}:`, error);
-    return { error: `Failed to execute ${functionName}: ${error}` };
-  }
-}
-
+/**
+ * POST /api/javari/chat
+ * Main chat endpoint
+ */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { action, sessionId, message, projectId } = body;
+    const body: ChatRequest = await request.json();
+    const {
+      message,
+      model = 'claude-3-5-sonnet-20241022',
+      conversationHistory = [],
+      userId,
+      sessionId,
+      stream = false
+    } = body;
 
-    // Initialize new chat session
-    if (action === 'init') {
-      const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      sessions.set(newSessionId, {
-        id: newSessionId,
-        projectId,
-        messages: [{ role: 'system', content: SYSTEM_PROMPT }],
-        createdAt: new Date().toISOString()
-      });
-
-      // Store session in database
-      try {
-        const supabase = createServerClient();
-        await supabase.from('javari_chat_sessions').insert({
-          id: newSessionId,
-          project_id: projectId || null,
-          user_id: '00000000-0000-0000-0000-000000000000', // TODO: Get from auth
-          title: 'New Chat Session',
-          status: 'active'
-        });
-      } catch (dbError) {
-        console.error('Failed to store session in DB:', dbError);
-      }
-
-      return NextResponse.json({ sessionId: newSessionId });
+    // Validate request
+    if (!message || typeof message !== 'string') {
+      return NextResponse.json(
+        { error: 'Message is required and must be a string' },
+        { status: 400 }
+      );
     }
 
-    // Send message with function calling support
-    if (action === 'message') {
-      if (!sessionId || !message) {
-        return NextResponse.json(
-          { error: 'Session ID and message are required' },
-          { status: 400 }
-        );
+    // Get API keys from environment
+    const openaiKey = process.env.OPENAI_API_KEY;
+    const anthropicKey = process.env.ANTHROPIC_API_KEY;
+
+    if (!openaiKey || !anthropicKey) {
+      return NextResponse.json(
+        { error: 'AI service configuration error' },
+        { status: 500 }
+      );
+    }
+
+    // Initialize multi-model handler
+    const javari = createJavariMultiModel(openaiKey, anthropicKey);
+
+    // Enhance user query with knowledge base context
+    const { knowledge, suggestions } = await enhanceResponseWithKnowledge(message);
+    
+    let contextualMessage = message;
+    if (suggestions.length > 0) {
+      contextualMessage += `\n\n[Knowledge Base Context: ${suggestions.join('; ')}]`;
+    }
+
+    // Prepare messages for AI
+    const messages = [
+      ...conversationHistory.map(msg => ({
+        role: msg.role as 'user' | 'assistant',
+        content: msg.content
+      })),
+      {
+        role: 'user' as const,
+        content: contextualMessage
       }
+    ];
 
-      let session = sessions.get(sessionId);
-      if (!session) {
-        session = {
-          id: sessionId,
-          messages: [{ role: 'system', content: SYSTEM_PROMPT }],
-          createdAt: new Date().toISOString()
-        };
-        sessions.set(sessionId, session);
-      }
+    // Handle streaming response
+    if (stream) {
+      const encoder = new TextEncoder();
+      const readable = new ReadableStream({
+        async start(controller) {
+          try {
+            const interactionId = `int_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            let fullResponse = '';
+            const startTime = Date.now();
 
-      // Add user message to history
-      session.messages.push({ role: 'user', content: message });
+            // Stream response chunks
+            for await (const chunk of javari.chatStream({
+              model,
+              messages,
+              userId,
+              sessionId
+            })) {
+              fullResponse += chunk;
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ chunk, interactionId })}\n\n`));
+            }
 
-      let functionCallLoop = 0;
-      let finalResponse = '';
-
-      // Function calling loop (allow up to 5 function calls)
-      while (functionCallLoop < 5) {
-        try {
-          // Call OpenAI API with function calling
-          const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
-            },
-            body: JSON.stringify({
-              model: 'gpt-4',
-              messages: session.messages,
-              functions: JAVARI_FUNCTIONS,
-              temperature: 0.7,
-              max_tokens: 2000
-            })
-          });
-
-          if (!openaiResponse.ok) {
-            const error = await openaiResponse.text();
-            console.error('OpenAI API error:', error);
-            return NextResponse.json(
-              { error: 'Failed to get response from AI' },
-              { status: 500 }
-            );
-          }
-
-          const data = await openaiResponse.json();
-          const choice = data.choices[0];
-
-          // Check if GPT wants to call a function
-          if (choice.finish_reason === 'function_call' && choice.message.function_call) {
-            const functionCall = choice.message.function_call;
-            const functionName = functionCall.name;
-            const functionArgs = JSON.parse(functionCall.arguments);
-
-            console.log(`Executing function: ${functionName}`, functionArgs);
-
-            // Execute the function
-            const functionResult = await executeFunctionCall(functionName, functionArgs);
-
-            // Add function call and result to message history
-            session.messages.push({
-              role: 'assistant',
-              content: '',
-              function_call: functionCall
-            } as any);
-
-            session.messages.push({
-              role: 'function',
-              name: functionName,
-              content: JSON.stringify(functionResult)
+            // Record interaction in knowledge base
+            const duration = Date.now() - startTime;
+            await javariKB.recordInteraction({
+              userId: userId || 'anonymous',
+              sessionId: sessionId || 'unknown',
+              query: message,
+              response: fullResponse,
+              wasHelpful: null,
+              toolsUsed: [],
+              functionsCall: [],
+              duration
             });
 
-            functionCallLoop++;
-            continue;
+            controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+            controller.close();
+          } catch (error) {
+            console.error('Streaming error:', error);
+            controller.error(error);
           }
-
-          // Got final response
-          finalResponse = choice.message.content;
-          session.messages.push({ role: 'assistant', content: finalResponse });
-          break;
-
-        } catch (error) {
-          console.error('Error in function calling loop:', error);
-          return NextResponse.json(
-            { error: 'Failed to process message' },
-            { status: 500 }
-          );
         }
-      }
+      });
 
-      // Limit message history
-      if (session.messages.length > 21) {
-        session.messages = [
-          session.messages[0], // Keep system prompt
-          ...session.messages.slice(-20)
-        ];
-      }
-
-      // Update session in database
-      try {
-        const supabase = createServerClient();
-        await supabase.from('javari_chat_sessions').update({
-          message_count: session.messages.filter(m => m.role === 'user' || m.role === 'assistant').length,
-          updated_at: new Date().toISOString()
-        }).eq('id', sessionId);
-      } catch (dbError) {
-        console.error('Failed to update session in DB:', dbError);
-      }
-
-      return NextResponse.json({
-        response: finalResponse
+      return new Response(readable, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive'
+        }
       });
     }
 
-    return NextResponse.json(
-      { error: 'Invalid action' },
-      { status: 400 }
-    );
+    // Non-streaming response
+    const startTime = Date.now();
+    const response = await javari.chat({
+      model,
+      messages,
+      userId,
+      sessionId
+    });
+    const duration = Date.now() - startTime;
+
+    // Record interaction
+    const interactionId = `int_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    await javariKB.recordInteraction({
+      userId: userId || 'anonymous',
+      sessionId: sessionId || 'unknown',
+      query: message,
+      response,
+      wasHelpful: null,
+      toolsUsed: [],
+      functionsCall: [],
+      duration
+    });
+
+    return NextResponse.json({
+      response,
+      interactionId,
+      model,
+      tokensUsed: Math.ceil((message.length + response.length) / 4), // Rough estimate
+      processingTime: duration
+    });
 
   } catch (error) {
-    console.error('Chat API error:', error);
+    console.error('Javari chat error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      {
+        error: 'An error occurred while processing your request',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     );
   }
 }
 
-export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
-  const sessionId = searchParams.get('sessionId');
-
-  if (!sessionId) {
-    return NextResponse.json(
-      { error: 'Session ID required' },
-      { status: 400 }
-    );
-  }
-
-  const session = sessions.get(sessionId);
-  if (!session) {
-    return NextResponse.json(
-      { error: 'Session not found' },
-      { status: 404 }
-    );
-  }
-
+/**
+ * GET /api/javari/chat
+ * Get Javari greeting message
+ */
+export async function GET() {
   return NextResponse.json({
-    sessionId: session.id,
-    messageCount: session.messages.filter(m => m.role === 'user' || m.role === 'assistant').length,
-    createdAt: session.createdAt
+    greeting: JAVARI_GREETING,
+    models: ['claude-3-5-sonnet-20241022', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+    features: [
+      'Multi-model support',
+      'Function calling',
+      'Knowledge base integration',
+      'Learning from interactions',
+      'Streaming responses'
+    ]
   });
+}
+
+/**
+ * PUT /api/javari/chat
+ * Update interaction feedback
+ */
+export async function PUT(request: NextRequest) {
+  try {
+    const { interactionId, wasHelpful, feedback } = await request.json();
+
+    if (!interactionId || typeof wasHelpful !== 'boolean') {
+      return NextResponse.json(
+        { error: 'interactionId and wasHelpful are required' },
+        { status: 400 }
+      );
+    }
+
+    await javariKB.learnFromFeedback(interactionId, wasHelpful, feedback);
+
+    return NextResponse.json({
+      success: true,
+      message: 'Thank you for your feedback! I\'ll learn from this.'
+    });
+
+  } catch (error) {
+    console.error('Feedback error:', error);
+    return NextResponse.json(
+      { error: 'Failed to process feedback' },
+      { status: 500 }
+    );
+  }
 }
