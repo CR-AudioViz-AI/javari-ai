@@ -1,14 +1,15 @@
 /**
- * Javari AI Chat API Route - OpenAI Version
- * Using GPT-4 for reliable chat functionality
+ * Javari AI Chat API Route - With Conversation Saving
+ * Using GPT-4 with automatic conversation persistence
  * 
  * @route /api/javari/chat
- * @version 1.2.0 - WORKING WITH OPENAI
- * @last-updated 2025-10-27 12:10 PM ET
+ * @version 1.3.0 - Now saves to database
+ * @last-updated 2025-10-27 2:42 PM ET
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { createClient } from '@supabase/supabase-js';
 
 export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
@@ -17,6 +18,11 @@ export const dynamic = 'force-dynamic';
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || '',
 });
+
+// Initialize Supabase client
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -28,16 +34,18 @@ interface ChatRequest {
   history?: ChatMessage[];
   projectId?: string;
   sessionId?: string;
+  userId?: string;
+  conversationId?: string;
 }
 
 /**
  * POST /api/javari/chat
- * Main chat endpoint with streaming support using OpenAI GPT-4
+ * Main chat endpoint with streaming support and conversation saving
  */
 export async function POST(request: NextRequest) {
   try {
     const body: ChatRequest = await request.json();
-    const { message, history = [], projectId, sessionId } = body;
+    const { message, history = [], projectId, sessionId, userId, conversationId } = body;
 
     // Validate request
     if (!message || typeof message !== 'string' || !message.trim()) {
@@ -81,7 +89,8 @@ Always:
 
 Current context:
 ${projectId ? `Project ID: ${projectId}` : 'No project context'}
-${sessionId ? `Session ID: ${sessionId}` : 'New session'}`;
+${sessionId ? `Session ID: ${sessionId}` : 'New session'}
+${conversationId ? `Conversation ID: ${conversationId}` : 'New conversation'}`;
 
     // Build messages array for OpenAI
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
@@ -92,6 +101,9 @@ ${sessionId ? `Session ID: ${sessionId}` : 'New session'}`;
       })),
       { role: 'user', content: message },
     ];
+
+    let fullResponse = '';
+    let newConversationId = conversationId;
 
     // Create streaming response
     const encoder = new TextEncoder();
@@ -111,18 +123,75 @@ ${sessionId ? `Session ID: ${sessionId}` : 'New session'}`;
           for await (const chunk of response) {
             const content = chunk.choices[0]?.delta?.content || '';
             if (content) {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ chunk: content })}\n\n`));
+              fullResponse += content;
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ chunk: content })}\\n\\n`));
             }
           }
 
-          // Send completion signal
-          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          // Save to database after streaming completes
+          if (userId) {
+            try {
+              const updatedMessages = [
+                ...history,
+                { role: 'user' as const, content: message, timestamp: new Date().toISOString() },
+                { role: 'assistant' as const, content: fullResponse, timestamp: new Date().toISOString() }
+              ];
+
+              if (conversationId) {
+                // Update existing conversation
+                await supabase
+                  .from('conversations')
+                  .update({
+                    messages: updatedMessages,
+                    message_count: updatedMessages.length,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', conversationId);
+              } else {
+                // Create new conversation
+                const title = message.slice(0, 100); // First 100 chars as title
+                const { data } = await supabase
+                  .from('conversations')
+                  .insert({
+                    user_id: userId,
+                    project_id: projectId,
+                    title,
+                    messages: updatedMessages,
+                    message_count: updatedMessages.length,
+                    model: 'gpt-4-turbo-preview',
+                    status: 'active',
+                    starred: false,
+                    continuation_depth: 0,
+                  })
+                  .select()
+                  .single();
+
+                if (data) {
+                  newConversationId = data.id;
+                }
+              }
+            } catch (dbError) {
+              console.error('Error saving conversation:', dbError);
+              // Don't fail the request if DB save fails
+            }
+          }
+
+          // Send completion signal with conversation ID
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({ 
+                done: true, 
+                conversationId: newConversationId 
+              })}\\n\\n`
+            )
+          );
+          controller.enqueue(encoder.encode('data: [DONE]\\n\\n'));
           controller.close();
         } catch (error) {
           console.error('Streaming error:', error);
           const errorMessage = error instanceof Error ? error.message : 'Unknown streaming error';
           controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ error: errorMessage })}\n\n`)
+            encoder.encode(`data: ${JSON.stringify({ error: errorMessage })}\\n\\n`)
           );
           controller.close();
         }
@@ -147,26 +216,4 @@ ${sessionId ? `Session ID: ${sessionId}` : 'New session'}`;
       { status: 500 }
     );
   }
-}
-
-/**
- * GET /api/javari/chat
- * Get Javari info and capabilities
- */
-export async function GET() {
-  return NextResponse.json({
-    name: 'Javari AI',
-    version: '1.2.0',
-    status: 'operational',
-    model: 'gpt-4-turbo-preview',
-    provider: 'OpenAI',
-    features: [
-      'Real-time streaming responses',
-      'Conversation history support',
-      'Project context awareness',
-      'Code generation and debugging',
-      'Self-healing capabilities',
-    ],
-    greeting: "Hey! I'm Javari, your AI development partner. How can I help you build something amazing today?",
-  });
 }
