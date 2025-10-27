@@ -1,10 +1,10 @@
 /**
- * Javari AI Chat API Route - With Conversation Saving
- * Using GPT-4 with automatic conversation persistence
+ * Javari AI Chat API Route - With Conversation Saving & Continuations
+ * Using GPT-4 with automatic conversation persistence and parent linking
  * 
  * @route /api/javari/chat
- * @version 1.3.0 - Now saves to database
- * @last-updated 2025-10-27 2:42 PM ET
+ * @version 1.4.0 - Now supports conversation continuations
+ * @last-updated 2025-10-27 3:30 PM ET
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -36,6 +36,7 @@ interface ChatRequest {
   sessionId?: string;
   userId?: string;
   conversationId?: string;
+  parentId?: string; // NEW: For conversation continuations
 }
 
 /**
@@ -45,7 +46,7 @@ interface ChatRequest {
 export async function POST(request: NextRequest) {
   try {
     const body: ChatRequest = await request.json();
-    const { message, history = [], projectId, sessionId, userId, conversationId } = body;
+    const { message, history = [], projectId, sessionId, userId, conversationId, parentId } = body;
 
     // Validate request
     if (!message || typeof message !== 'string' || !message.trim()) {
@@ -90,7 +91,7 @@ Always:
 Current context:
 ${projectId ? `Project ID: ${projectId}` : 'No project context'}
 ${sessionId ? `Session ID: ${sessionId}` : 'New session'}
-${conversationId ? `Conversation ID: ${conversationId}` : 'New conversation'}`;
+${conversationId ? `Conversation ID: ${conversationId}` : parentId ? 'Continuation of previous conversation' : 'New conversation'}`;
 
     // Build messages array for OpenAI
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
@@ -124,7 +125,7 @@ ${conversationId ? `Conversation ID: ${conversationId}` : 'New conversation'}`;
             const content = chunk.choices[0]?.delta?.content || '';
             if (content) {
               fullResponse += content;
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ chunk: content })}\\n\\n`));
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ chunk: content })}\n\n`));
             }
           }
 
@@ -148,6 +149,20 @@ ${conversationId ? `Conversation ID: ${conversationId}` : 'New conversation'}`;
                   })
                   .eq('id', conversationId);
               } else {
+                // Calculate continuation depth if has parent
+                let continuationDepth = 0;
+                if (parentId) {
+                  const { data: parent } = await supabase
+                    .from('conversations')
+                    .select('continuation_depth')
+                    .eq('id', parentId)
+                    .single();
+
+                  if (parent) {
+                    continuationDepth = parent.continuation_depth + 1;
+                  }
+                }
+
                 // Create new conversation
                 const title = message.slice(0, 100); // First 100 chars as title
                 const { data } = await supabase
@@ -155,13 +170,14 @@ ${conversationId ? `Conversation ID: ${conversationId}` : 'New conversation'}`;
                   .insert({
                     user_id: userId,
                     project_id: projectId,
+                    parent_id: parentId || null, // NEW: Link to parent
                     title,
                     messages: updatedMessages,
                     message_count: updatedMessages.length,
                     model: 'gpt-4-turbo-preview',
                     status: 'active',
                     starred: false,
-                    continuation_depth: 0,
+                    continuation_depth: continuationDepth, // NEW: Track depth
                   })
                   .select()
                   .single();
@@ -182,16 +198,16 @@ ${conversationId ? `Conversation ID: ${conversationId}` : 'New conversation'}`;
               `data: ${JSON.stringify({ 
                 done: true, 
                 conversationId: newConversationId 
-              })}\\n\\n`
+              })}\n\n`
             )
           );
-          controller.enqueue(encoder.encode('data: [DONE]\\n\\n'));
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
           controller.close();
         } catch (error) {
           console.error('Streaming error:', error);
           const errorMessage = error instanceof Error ? error.message : 'Unknown streaming error';
           controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ error: errorMessage })}\\n\\n`)
+            encoder.encode(`data: ${JSON.stringify({ error: errorMessage })}\n\n`)
           );
           controller.close();
         }
