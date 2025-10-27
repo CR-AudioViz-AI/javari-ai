@@ -103,8 +103,8 @@ export function ChatInterface({ projectId }: ChatInterfaceProps) {
 
               try {
                 const parsed = JSON.parse(data);
-                if (parsed.content) {
-                  assistantContent += parsed.content;
+                if (parsed.chunk) {
+                  assistantContent += parsed.chunk;
                   // Update the placeholder message with streaming content
                   setMessages(prev =>
                     prev.map(m =>
@@ -342,7 +342,7 @@ export function ChatInterface({ projectId }: ChatInterfaceProps) {
               </div>
             ))}
           </>
-        )}
+          )}
         <div ref={messagesEndRef} />
       </div>
 
@@ -379,7 +379,7 @@ export function ChatInterface({ projectId }: ChatInterfaceProps) {
           </button>
         </div>
         <div className="text-xs text-gray-500 mt-2 text-center">
-          Press <kbd className="px-1.5 py-0.5 bg-slate-700 rounded">Enter</kbd> to send •{' '}
+          Press <kbd className="px-1.5 py-0.5 bg-slate-700 rounded">Enter</kbd> to send • {' '}
           <kbd className="px-1.5 py-0.5 bg-slate-700 rounded">Shift + Enter</kbd> for new line
         </div>
       </div>
