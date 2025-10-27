@@ -1,21 +1,21 @@
 /**
- * Javari AI Chat API Route - FIXED & WORKING
- * Handles chat requests with Anthropic Claude
+ * Javari AI Chat API Route - OpenAI Version
+ * Using GPT-4 for reliable chat functionality
  * 
  * @route /api/javari/chat
- * @version 1.1.0 - SIMPLIFIED & WORKING
- * @last-updated 2025-10-27 11:40 AM ET
+ * @version 1.2.0 - WORKING WITH OPENAI
+ * @last-updated 2025-10-27 12:10 PM ET
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 
 export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
-// Initialize Anthropic client
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || '',
+// Initialize OpenAI client
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY || '',
 });
 
 interface ChatMessage {
@@ -32,7 +32,7 @@ interface ChatRequest {
 
 /**
  * POST /api/javari/chat
- * Main chat endpoint with streaming support
+ * Main chat endpoint with streaming support using OpenAI GPT-4
  */
 export async function POST(request: NextRequest) {
   try {
@@ -48,25 +48,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Check API key
-    if (!process.env.ANTHROPIC_API_KEY) {
-      console.error('ANTHROPIC_API_KEY is not configured');
+    if (!process.env.OPENAI_API_KEY) {
+      console.error('OPENAI_API_KEY is not configured');
       return NextResponse.json(
         { error: 'AI service is not properly configured' },
         { status: 500 }
       );
     }
-
-    // Build conversation history for Claude
-    const messages: Anthropic.MessageParam[] = [
-      ...history.map((msg) => ({
-        role: msg.role,
-        content: msg.content,
-      })),
-      {
-        role: 'user' as const,
-        content: message,
-      },
-    ];
 
     // System prompt for Javari
     const systemPrompt = `You are Javari AI, an autonomous AI assistant for CR AudioViz AI developers.
@@ -95,25 +83,35 @@ Current context:
 ${projectId ? `Project ID: ${projectId}` : 'No project context'}
 ${sessionId ? `Session ID: ${sessionId}` : 'New session'}`;
 
+    // Build messages array for OpenAI
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+      { role: 'system', content: systemPrompt },
+      ...history.map((msg) => ({
+        role: msg.role as 'user' | 'assistant',
+        content: msg.content,
+      })),
+      { role: 'user', content: message },
+    ];
+
     // Create streaming response
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          // Create streaming request to Claude
-          const response = await anthropic.messages.create({
-            model: 'claude-3-5-sonnet-20240620',
-            max_tokens: 4096,
-            system: systemPrompt,
+          // Create streaming request to OpenAI
+          const response = await openai.chat.completions.create({
+            model: 'gpt-4-turbo-preview',
             messages: messages,
             stream: true,
+            max_tokens: 4096,
+            temperature: 0.7,
           });
 
           // Stream the response chunks
-          for await (const event of response) {
-            if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-              const chunk = event.delta.text;
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ chunk })}\n\n`));
+          for await (const chunk of response) {
+            const content = chunk.choices[0]?.delta?.content || '';
+            if (content) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ chunk: content })}\n\n`));
             }
           }
 
@@ -158,9 +156,10 @@ ${sessionId ? `Session ID: ${sessionId}` : 'New session'}`;
 export async function GET() {
   return NextResponse.json({
     name: 'Javari AI',
-    version: '1.1.0',
+    version: '1.2.0',
     status: 'operational',
-    model: 'claude-3-5-sonnet-20240620',
+    model: 'gpt-4-turbo-preview',
+    provider: 'OpenAI',
     features: [
       'Real-time streaming responses',
       'Conversation history support',
