@@ -102,7 +102,7 @@ ${sessionId ? `Session ID: ${sessionId}` : 'New session'}`;
         try {
           // Create streaming request to Claude
           const response = await anthropic.messages.create({
-            model: 'claude-3-5-sonnet-20241022',
+            model: 'claude-3-5-sonnet-20240620',
             max_tokens: 4096,
             system: systemPrompt,
             messages: messages,
@@ -160,7 +160,7 @@ export async function GET() {
     name: 'Javari AI',
     version: '1.1.0',
     status: 'operational',
-    model: 'claude-3-5-sonnet-20241022',
+    model: 'claude-3-5-sonnet-20240620',
     features: [
       'Real-time streaming responses',
       'Conversation history support',
