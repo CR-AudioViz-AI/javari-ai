@@ -2,9 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import { ChatInterface } from '@/components/javari/ChatInterface';
+import { ChatHistory } from '@/components/javari/ChatHistory';
 import { ProjectManager } from '@/components/javari/ProjectManager';
 import { BuildHealthMonitor } from '@/components/javari/BuildHealthMonitor';
 import { Settings } from '@/components/javari/Settings';
+import { Menu, X } from 'lucide-react';
 
 type TabType = 'chat' | 'projects' | 'health' | 'settings';
 
@@ -15,8 +17,29 @@ interface Stats {
   buildsToday: number;
 }
 
+interface Message {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+}
+
+interface Conversation {
+  id: string;
+  title: string;
+  messages: Message[];
+  status: 'active' | 'inactive' | 'archived';
+  starred: boolean;
+  continuation_depth: number;
+  message_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export default function JavariDashboard() {
   const [activeTab, setActiveTab] = useState<TabType>('chat');
+  const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [userId] = useState('demo-user'); // TODO: Get from auth
   const [stats, setStats] = useState<Stats>({
     totalProjects: 0,
     activeChats: 0,
@@ -52,6 +75,28 @@ export default function JavariDashboard() {
     return () => clearInterval(interval);
   }, []);
 
+  const handleSelectConversation = (conversation: Conversation) => {
+    setCurrentConversation(conversation);
+    // Convert timestamp strings to Date objects
+    const messagesWithDates = conversation.messages.map(msg => ({
+      ...msg,
+      timestamp: new Date(msg.timestamp)
+    }));
+    setCurrentConversation({
+      ...conversation,
+      messages: messagesWithDates as any
+    });
+  };
+
+  const handleNewChat = () => {
+    setCurrentConversation(null);
+  };
+
+  const handleConversationCreated = (conversationId: string) => {
+    // Conversation was created, refresh sidebar
+    // The ChatHistory component will auto-refresh
+  };
+
   const tabs = [
     { id: 'chat' as TabType, name: 'AI Chat', icon: '💬' },
     { id: 'projects' as TabType, name: 'Projects', icon: '📊' },
@@ -60,12 +105,20 @@ export default function JavariDashboard() {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 flex flex-col">
       {/* Header */}
       <header className="bg-slate-900/50 backdrop-blur-sm border-b border-blue-500/20 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
+              {activeTab === 'chat' && (
+                <button
+                  onClick={() => setSidebarOpen(!sidebarOpen)}
+                  className="p-2 hover:bg-slate-800 rounded-lg transition-colors lg:hidden"
+                >
+                  {sidebarOpen ? <X size={24} className="text-white" /> : <Menu size={24} className="text-white" />}
+                </button>
+              )}
               <div className="text-4xl">🤖</div>
               <div>
                 <h1 className="text-2xl font-bold text-white">Javari AI</h1>
@@ -120,27 +173,54 @@ export default function JavariDashboard() {
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {loading ? (
-          <div className="flex items-center justify-center h-96">
-            <div className="text-white text-lg">Loading...</div>
-          </div>
-        ) : (
+      {/* Main Content with Sidebar */}
+      <main className="flex-1 flex overflow-hidden">
+        {activeTab === 'chat' ? (
           <>
-            {activeTab === 'chat' && <ChatInterface />}
-            {activeTab === 'projects' && <ProjectManager />}
-            {activeTab === 'health' && <BuildHealthMonitor />}
-            {activeTab === 'settings' && <Settings />}
+            {/* Sidebar */}
+            <aside className={`${
+              sidebarOpen ? 'w-80' : 'w-0'
+            } transition-all duration-300 overflow-hidden border-r border-gray-800`}>
+              <ChatHistory
+                userId={userId}
+                onSelectConversation={handleSelectConversation}
+                onNewChat={handleNewChat}
+                currentConversationId={currentConversation?.id}
+              />
+            </aside>
+
+            {/* Chat Area */}
+            <div className="flex-1 overflow-hidden">
+              <ChatInterface
+                userId={userId}
+                conversationId={currentConversation?.id}
+                initialMessages={currentConversation?.messages as any || []}
+                onConversationCreated={handleConversationCreated}
+              />
+            </div>
           </>
+        ) : (
+          <div className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 overflow-auto">
+            {loading ? (
+              <div className="flex items-center justify-center h-96">
+                <div className="text-white text-lg">Loading...</div>
+              </div>
+            ) : (
+              <>
+                {activeTab === 'projects' && <ProjectManager />}
+                {activeTab === 'health' && <BuildHealthMonitor />}
+                {activeTab === 'settings' && <Settings />}
+              </>
+            )}
+          </div>
         )}
       </main>
 
       {/* Footer */}
-      <footer className="bg-slate-900/30 backdrop-blur-sm border-t border-blue-500/10 py-6 mt-12">
+      <footer className="bg-slate-900/30 backdrop-blur-sm border-t border-blue-500/10 py-6">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <p className="text-gray-400 text-sm">
-            Javari AI v1.0 • Built for CR AudioViz AI • Powered by Next.js, TypeScript & Supabase
+            Javari AI v1.2 • Phase 1.2 Complete • Built for CR AudioViz AI
           </p>
         </div>
       </footer>
