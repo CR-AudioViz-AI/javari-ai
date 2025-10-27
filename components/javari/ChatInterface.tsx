@@ -15,6 +15,7 @@ interface ChatInterfaceProps {
   projectId?: string;
   userId?: string;
   conversationId?: string;
+  parentId?: string; // NEW: Support for continuations
   initialMessages?: Message[];
   onConversationCreated?: (conversationId: string) => void;
 }
@@ -23,6 +24,7 @@ export function ChatInterface({
   projectId, 
   userId = 'demo-user',
   conversationId: initialConversationId,
+  parentId,
   initialMessages = [],
   onConversationCreated
 }: ChatInterfaceProps) {
@@ -38,6 +40,8 @@ export function ChatInterface({
   useEffect(() => {
     if (initialMessages.length > 0) {
       setMessages(initialMessages);
+    } else {
+      setMessages([]); // Clear messages for new conversation
     }
   }, [initialConversationId]);
 
@@ -106,6 +110,7 @@ export function ChatInterface({
           projectId,
           userId,
           conversationId,
+          parentId, // NEW: Pass parent ID for continuations
           history: messages.map(m => ({
             role: m.role,
             content: m.content
@@ -270,10 +275,13 @@ export function ChatInterface({
               <MessageSquare className="w-8 h-8 text-purple-400" />
             </div>
             <h2 className="text-xl font-bold text-white mb-2">
-              Start a conversation with Javari AI
+              {parentId ? 'Continue your conversation with Javari AI' : 'Start a conversation with Javari AI'}
             </h2>
             <p className="text-gray-400 max-w-md">
-              Ask me anything about your projects, request code help, or discuss technical challenges.
+              {parentId 
+                ? 'This is a continuation of your previous conversation. Context has been preserved.'
+                : 'Ask me anything about your projects, request code help, or discuss technical challenges.'
+              }
             </p>
           </div>
         ) : (
@@ -317,7 +325,7 @@ export function ChatInterface({
             </button>
           </div>
           <p className="text-xs text-gray-500 mt-2">
-            {conversationId ? `Conversation ID: ${conversationId.slice(0, 8)}...` : 'New conversation'}
+            {conversationId ? `Conversation ID: ${conversationId.slice(0, 8)}...` : parentId ? 'New continuation' : 'New conversation'}
           </p>
         </div>
       </div>
