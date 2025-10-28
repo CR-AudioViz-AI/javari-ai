@@ -1,343 +1,404 @@
+// app/page.tsx
+// CR AUDIOVIZ AI - Javari AI Main Dashboard
+// Session: Tuesday, October 28, 2025 - 11:58 AM EST
+// Purpose: Main dashboard with project overview, health metrics, and quick actions
+
 'use client';
 
-import { useState, useEffect } from 'react';
-import { ChatInterface } from '@/components/javari/ChatInterface';
-import { ChatHistory } from '@/components/javari/ChatHistory';
-import { ProjectManager } from '@/components/javari/ProjectManager';
-import { BuildHealthMonitor } from '@/components/javari/BuildHealthMonitor';
-import { Settings } from '@/components/javari/Settings';
-import { Menu, X, GitBranch } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { 
+  Activity, 
+  AlertCircle, 
+  CheckCircle2, 
+  Clock, 
+  Code2, 
+  Folder, 
+  GitBranch,
+  Heart,
+  Loader2,
+  MessageSquare,
+  Plus,
+  Star,
+  TrendingUp,
+  Zap
+} from 'lucide-react';
+import Link from 'next/link';
 
-type TabType = 'chat' | 'projects' | 'health' | 'settings';
-
-interface Stats {
-  totalProjects: number;
-  activeChats: number;
-  healthScore: number;
-  buildsToday: number;
-}
-
-interface Message {
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: string;
-}
-
-interface Conversation {
-  id: string;
-  numeric_id: number;
-  title: string;
-  summary?: string;
-  messages: Message[];
-  status: 'active' | 'inactive' | 'archived';
+interface ProjectHealth {
+  project_id: string;
+  name: string;
+  health_score: number;
+  active_chats: number;
+  total_subprojects: number;
   starred: boolean;
-  continuation_depth: number;
-  message_count: number;
-  parent_id?: string;
-  created_at: string;
-  updated_at: string;
+  last_activity: string;
+  status: 'healthy' | 'warning' | 'critical';
+}
+
+interface RecentActivity {
+  id: string;
+  type: 'chat' | 'build' | 'suggestion' | 'review';
+  title: string;
+  description: string;
+  time: string;
+  status: 'success' | 'pending' | 'error';
+}
+
+interface QuickStat {
+  label: string;
+  value: string;
+  change: string;
+  trend: 'up' | 'down' | 'neutral';
+  icon: React.ReactNode;
 }
 
 export default function JavariDashboard() {
-  const [activeTab, setActiveTab] = useState<TabType>('chat');
-  const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [userId] = useState('demo-user'); // TODO: Get from auth
-  const [stats, setStats] = useState<Stats>({
-    totalProjects: 0,
-    activeChats: 0,
-    healthScore: 100,
-    buildsToday: 0
-  });
+  const [projects, setProjects] = useState<ProjectHealth[]>([]);
+  const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
+  const [stats, setStats] = useState<QuickStat[]>([]);
   const [loading, setLoading] = useState(true);
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [creatingContinuation, setCreatingContinuation] = useState(false);
-  const [continuationParent, setContinuationParent] = useState<Conversation | null>(null);
 
   useEffect(() => {
-    loadStats();
+    loadDashboardData();
   }, []);
 
-  const loadStats = async () => {
+  const loadDashboardData = async () => {
     try {
       setLoading(true);
-      
-      // Load conversations count
-      const conversationsResponse = await fetch(`/api/javari/conversations?userId=${userId}&limit=1`);
-      if (conversationsResponse.ok) {
-        const conversationsData = await conversationsResponse.json();
-        setStats(prev => ({ ...prev, activeChats: conversationsData.total || 0 }));
-      }
 
-      // Load projects count
-      const projectsResponse = await fetch('/api/projects');
-      if (projectsResponse.ok) {
-        const projectsData = await projectsResponse.json();
-        setStats(prev => ({ ...prev, totalProjects: projectsData.projects?.length || 0 }));
-      }
+      // Load projects with health scores
+      // TODO: Replace with real API calls when tables are migrated
+      const mockProjects: ProjectHealth[] = [
+        {
+          project_id: '1',
+          name: 'CR AudioViz AI Website',
+          health_score: 95,
+          active_chats: 3,
+          total_subprojects: 8,
+          starred: true,
+          last_activity: '5 minutes ago',
+          status: 'healthy'
+        },
+        {
+          project_id: '2',
+          name: 'Javari AI Platform',
+          health_score: 88,
+          active_chats: 1,
+          total_subprojects: 5,
+          starred: true,
+          last_activity: '2 hours ago',
+          status: 'healthy'
+        },
+        {
+          project_id: '3',
+          name: 'Gaming Platform',
+          health_score: 72,
+          active_chats: 0,
+          total_subprojects: 3,
+          starred: false,
+          last_activity: '1 day ago',
+          status: 'warning'
+        }
+      ];
 
-      // TODO: Load actual health and builds data
-      setStats(prev => ({ ...prev, healthScore: 100, buildsToday: 0 }));
-      
+      // Mock recent activity
+      const mockActivity: RecentActivity[] = [
+        {
+          id: '1',
+          type: 'chat',
+          title: 'Fixed build errors in website',
+          description: 'Added force-dynamic exports to API routes',
+          time: '5 minutes ago',
+          status: 'success'
+        },
+        {
+          id: '2',
+          type: 'build',
+          title: 'Deployment successful',
+          description: 'craudiovizai-website deployed to production',
+          time: '1 hour ago',
+          status: 'success'
+        },
+        {
+          id: '3',
+          type: 'suggestion',
+          title: 'Code optimization suggested',
+          description: 'Reduce bundle size by implementing code splitting',
+          time: '2 hours ago',
+          status: 'pending'
+        }
+      ];
+
+      // Mock quick stats
+      const mockStats: QuickStat[] = [
+        {
+          label: 'Active Projects',
+          value: '14',
+          change: '+2 this week',
+          trend: 'up',
+          icon: <Folder className="w-5 h-5" />
+        },
+        {
+          label: 'Open Chats',
+          value: '4',
+          change: 'No change',
+          trend: 'neutral',
+          icon: <MessageSquare className="w-5 h-5" />
+        },
+        {
+          label: 'Health Score',
+          value: '85%',
+          change: '+3% vs last week',
+          trend: 'up',
+          icon: <Heart className="w-5 h-5" />
+        },
+        {
+          label: 'Code Reviews',
+          value: '0',
+          change: 'All clear',
+          trend: 'neutral',
+          icon: <Code2 className="w-5 h-5" />
+        }
+      ];
+
+      setProjects(mockProjects);
+      setRecentActivity(mockActivity);
+      setStats(mockStats);
     } catch (error) {
-      console.error('Error loading stats:', error);
+      console.error('Failed to load dashboard:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSelectConversation = (conversation: Conversation) => {
-    setCurrentConversation(conversation);
-    setContinuationParent(null);
-    // Convert timestamp strings to Date objects
-    const messagesWithDates = conversation.messages.map(msg => ({
-      ...msg,
-      timestamp: new Date(msg.timestamp).toISOString()
-    }));
-    setCurrentConversation({
-      ...conversation,
-      messages: messagesWithDates as any
-    });
+  const getHealthColor = (score: number) => {
+    if (score >= 90) return 'text-green-600 bg-green-50 border-green-200';
+    if (score >= 70) return 'text-yellow-600 bg-yellow-50 border-yellow-200';
+    return 'text-red-600 bg-red-50 border-red-200';
   };
 
-  const handleNewChat = () => {
-    setCurrentConversation(null);
-    setContinuationParent(null);
+  const getHealthIcon = (status: ProjectHealth['status']) => {
+    if (status === 'healthy') return <CheckCircle2 className="w-5 h-5 text-green-600" />;
+    if (status === 'warning') return <AlertCircle className="w-5 h-5 text-yellow-600" />;
+    return <AlertCircle className="w-5 h-5 text-red-600" />;
   };
 
-  const handleConversationCreated = (conversationId: string) => {
-    // Refresh the sidebar to show new conversation
-    setRefreshTrigger(prev => prev + 1);
-    loadStats(); // Update stats
-  };
-
-  const handleCreateContinuation = async (parentConversation: Conversation) => {
-    setCreatingContinuation(true);
-    setContinuationParent(parentConversation);
-    
-    try {
-      // Generate summary if doesn't exist
-      if (!parentConversation.summary) {
-        const summaryResponse = await fetch('/api/javari/conversations/summary', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ conversationId: parentConversation.id })
-        });
-        
-        if (summaryResponse.ok) {
-          const summaryData = await summaryResponse.json();
-          parentConversation.summary = summaryData.summary;
-        }
-      }
-
-      // Create new conversation as continuation
-      const response = await fetch('/api/javari/conversations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId,
-          parentId: parentConversation.id,
-          title: `${parentConversation.title} (continued)`,
-          summary: parentConversation.summary,
-          messages: [],
-          model: 'gpt-4-turbo-preview'
-        })
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const newConversation = data.conversation;
-        
-        // Set the new conversation as current
-        setCurrentConversation(newConversation);
-        setRefreshTrigger(prev => prev + 1);
-      } else {
-        throw new Error('Failed to create continuation');
-      }
-    } catch (error) {
-      console.error('Error creating continuation:', error);
-      alert('Failed to create continuation. Please try again.');
-    } finally {
-      setCreatingContinuation(false);
+  const getActivityIcon = (type: RecentActivity['type']) => {
+    switch (type) {
+      case 'chat': return <MessageSquare className="w-4 h-4" />;
+      case 'build': return <Zap className="w-4 h-4" />;
+      case 'suggestion': return <TrendingUp className="w-4 h-4" />;
+      case 'review': return <Code2 className="w-4 h-4" />;
     }
   };
 
-  const tabs = [
-    { id: 'chat' as TabType, name: 'AI Chat', icon: '💬' },
-    { id: 'projects' as TabType, name: 'Projects', icon: '📊' },
-    { id: 'health' as TabType, name: 'Health', icon: '🏥' },
-    { id: 'settings' as TabType, name: 'Settings', icon: '⚙️' }
-  ];
+  const getActivityStatusColor = (status: RecentActivity['status']) => {
+    switch (status) {
+      case 'success': return 'bg-green-500';
+      case 'pending': return 'bg-yellow-500';
+      case 'error': return 'bg-red-500';
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4 text-purple-600" />
+          <p className="text-gray-600">Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 flex flex-col">
-      {/* Header */}
-      <header className="bg-slate-900/50 backdrop-blur-sm border-b border-blue-500/20 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              {activeTab === 'chat' && (
-                <button
-                  onClick={() => setSidebarOpen(!sidebarOpen)}
-                  className="p-2 hover:bg-slate-800 rounded-lg transition-colors"
-                  title={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+    <div className="min-h-screen bg-gray-50 p-6">
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Javari AI Dashboard</h1>
+            <p className="text-gray-600 mt-1">Autonomous development companion for CR AudioViz AI</p>
+          </div>
+          <button className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
+            <Plus className="w-5 h-5" />
+            New Chat
+          </button>
+        </div>
+
+        {/* Quick Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {stats.map((stat, index) => (
+            <div key={index} className="bg-white rounded-lg p-6 border border-gray-200 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <div className="p-2 bg-purple-50 rounded-lg text-purple-600">
+                  {stat.icon}
+                </div>
+                {stat.trend === 'up' && <TrendingUp className="w-4 h-4 text-green-600" />}
+                {stat.trend === 'down' && <TrendingUp className="w-4 h-4 text-red-600 rotate-180" />}
+              </div>
+              <h3 className="text-2xl font-bold text-gray-900 mb-1">{stat.value}</h3>
+              <p className="text-sm font-medium text-gray-600 mb-1">{stat.label}</p>
+              <p className="text-xs text-gray-500">{stat.change}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Projects Health */}
+          <div className="lg:col-span-2 bg-white rounded-lg border border-gray-200 shadow-sm">
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-bold text-gray-900">Projects Health</h2>
+                <Link href="/projects" className="text-sm text-purple-600 hover:text-purple-700">
+                  View all →
+                </Link>
+              </div>
+            </div>
+            <div className="p-6 space-y-4">
+              {projects.map((project) => (
+                <Link
+                  key={project.project_id}
+                  href={`/projects/${project.project_id}`}
+                  className="block p-4 border border-gray-200 rounded-lg hover:border-purple-300 hover:shadow-md transition-all"
                 >
-                  {sidebarOpen ? <X size={20} className="text-white" /> : <Menu size={20} className="text-white" />}
-                </button>
-              )}
-              
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-                  <span className="text-2xl">🤖</span>
-                </div>
-                <div>
-                  <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-                    Javari AI
-                  </h1>
-                  <p className="text-sm text-gray-400">Autonomous Development Assistant</p>
-                </div>
-              </div>
-            </div>
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-start gap-3 flex-1">
+                      {project.starred && <Star className="w-5 h-5 text-yellow-500 fill-yellow-500 flex-shrink-0 mt-0.5" />}
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-semibold text-gray-900 truncate">{project.name}</h3>
+                        <p className="text-sm text-gray-500">Last activity: {project.last_activity}</p>
+                      </div>
+                    </div>
+                    {getHealthIcon(project.status)}
+                  </div>
 
-            <div className="flex items-center space-x-6">
-              {/* Stats Mini Display */}
-              <div className="hidden md:flex items-center space-x-4 text-sm">
-                <div className="flex items-center space-x-2">
-                  <span className="text-gray-400">Projects:</span>
-                  <span className="text-white font-semibold">{stats.totalProjects}</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <span className="text-gray-400">Chats:</span>
-                  <span className="text-white font-semibold">{stats.activeChats}</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <span className="text-gray-400">Health:</span>
-                  <span className={`font-semibold ${
-                    stats.healthScore >= 80 ? 'text-green-400' : 
-                    stats.healthScore >= 50 ? 'text-yellow-400' : 'text-red-400'
-                  }`}>{stats.healthScore}%</span>
-                </div>
-              </div>
-              
-              <div className="flex items-center space-x-2">
-                <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-                <span className="text-green-400 font-medium text-sm">Operational</span>
-              </div>
+                  <div className="flex items-center gap-4 text-sm text-gray-600">
+                    <div className="flex items-center gap-1.5">
+                      <Folder className="w-4 h-4" />
+                      <span>{project.total_subprojects} subprojects</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <MessageSquare className="w-4 h-4" />
+                      <span>{project.active_chats} active chats</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Heart className="w-4 h-4" />
+                      <span>{project.health_score}% health</span>
+                    </div>
+                  </div>
+
+                  {/* Health Score Bar */}
+                  <div className="mt-3">
+                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full transition-all ${
+                          project.health_score >= 90 ? 'bg-green-500' :
+                          project.health_score >= 70 ? 'bg-yellow-500' :
+                          'bg-red-500'
+                        }`}
+                        style={{ width: `${project.health_score}%` }}
+                      />
+                    </div>
+                  </div>
+                </Link>
+              ))}
             </div>
           </div>
-          
-          {/* Navigation Tabs */}
-          <nav className="mt-4 flex space-x-1">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                  activeTab === tab.id
-                    ? 'bg-blue-600 text-white'
-                    : 'text-gray-400 hover:text-white hover:bg-slate-800/50'
-                }`}
-              >
-                <span className="mr-2">{tab.icon}</span>
-                {tab.name}
-              </button>
-            ))}
-          </nav>
-        </div>
-      </header>
 
-      {/* Continuation Banner */}
-      {continuationParent && (
-        <div className="bg-blue-900/30 border-b border-blue-500/30 px-4 py-2">
-          <div className="max-w-7xl mx-auto flex items-center justify-between">
-            <div className="flex items-center gap-2 text-sm text-blue-300">
-              <GitBranch size={16} />
-              <span>
-                Continuing from: <strong>{continuationParent.title}</strong>
-              </span>
+          {/* Recent Activity */}
+          <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+            <div className="p-6 border-b border-gray-200">
+              <h2 className="text-xl font-bold text-gray-900">Recent Activity</h2>
             </div>
-            <button
-              onClick={() => setContinuationParent(null)}
-              className="text-blue-400 hover:text-blue-300 text-sm"
+            <div className="p-6 space-y-4">
+              {recentActivity.map((activity) => (
+                <div key={activity.id} className="flex gap-3">
+                  <div className="flex-shrink-0">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white ${
+                      activity.status === 'success' ? 'bg-green-500' :
+                      activity.status === 'pending' ? 'bg-yellow-500' :
+                      'bg-red-500'
+                    }`}>
+                      {getActivityIcon(activity.type)}
+                    </div>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="text-sm font-semibold text-gray-900 truncate">
+                      {activity.title}
+                    </h4>
+                    <p className="text-xs text-gray-600 mt-0.5 line-clamp-2">
+                      {activity.description}
+                    </p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <Clock className="w-3 h-3 text-gray-400" />
+                      <span className="text-xs text-gray-500">{activity.time}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Quick Actions */}
+        <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
+          <h2 className="text-xl font-bold text-gray-900 mb-4">Quick Actions</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <Link
+              href="/chat"
+              className="flex items-center gap-3 p-4 border border-gray-200 rounded-lg hover:border-purple-300 hover:shadow-md transition-all group"
             >
-              Dismiss
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Main Content with Sidebar */}
-      <main className="flex-1 flex overflow-hidden">
-        {activeTab === 'chat' ? (
-          <>
-            {/* Sidebar */}
-            <aside className={`${
-              sidebarOpen ? 'w-80' : 'w-0'
-            } transition-all duration-300 overflow-hidden border-r border-gray-800`}>
-              <ChatHistory
-                userId={userId}
-                onSelectConversation={handleSelectConversation}
-                onNewChat={handleNewChat}
-                onCreateContinuation={handleCreateContinuation}
-                currentConversationId={currentConversation?.id}
-                refreshTrigger={refreshTrigger}
-              />
-            </aside>
-
-            {/* Chat Area */}
-            <div className="flex-1 overflow-hidden flex flex-col">
-              {continuationParent?.summary && (
-                <div className="bg-gray-900/50 border-b border-gray-800 px-6 py-4">
-                  <h3 className="text-sm font-semibold text-blue-400 mb-2">Context from previous conversation:</h3>
-                  <div className="text-sm text-gray-300 whitespace-pre-wrap">
-                    {continuationParent.summary}
-                  </div>
-                </div>
-              )}
-              
-              {creatingContinuation ? (
-                <div className="flex-1 flex items-center justify-center">
-                  <div className="text-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-                    <p className="text-gray-400">Creating continuation...</p>
-                  </div>
-                </div>
-              ) : (
-                <ChatInterface
-                  userId={userId}
-                  conversationId={currentConversation?.id}
-                  initialMessages={currentConversation?.messages as any || []}
-                  onConversationCreated={handleConversationCreated}
-                  parentId={continuationParent?.id}
-                />
-              )}
-            </div>
-          </>
-        ) : (
-          <div className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 overflow-auto">
-            {loading ? (
-              <div className="flex items-center justify-center h-96">
-                <div className="text-white text-lg">Loading...</div>
+              <div className="p-2 bg-purple-50 rounded-lg text-purple-600 group-hover:bg-purple-100">
+                <MessageSquare className="w-5 h-5" />
               </div>
-            ) : (
-              <>
-                {activeTab === 'projects' && <ProjectManager />}
-                {activeTab === 'health' && <BuildHealthMonitor />}
-                {activeTab === 'settings' && <Settings />}
-              </>
-            )}
-          </div>
-        )}
-      </main>
+              <div>
+                <h3 className="font-semibold text-gray-900">Start Chat</h3>
+                <p className="text-xs text-gray-500">New conversation</p>
+              </div>
+            </Link>
 
-      {/* Footer */}
-      <footer className="bg-slate-900/30 backdrop-blur-sm border-t border-blue-500/10 py-6">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <p className="text-gray-400 text-sm">
-            Javari AI v1.2 • Phase 1.2 Complete • Built for CR AudioViz AI
-          </p>
+            <Link
+              href="/projects"
+              className="flex items-center gap-3 p-4 border border-gray-200 rounded-lg hover:border-purple-300 hover:shadow-md transition-all group"
+            >
+              <div className="p-2 bg-blue-50 rounded-lg text-blue-600 group-hover:bg-blue-100">
+                <Folder className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-900">Projects</h3>
+                <p className="text-xs text-gray-500">Manage projects</p>
+              </div>
+            </Link>
+
+            <Link
+              href="/health"
+              className="flex items-center gap-3 p-4 border border-gray-200 rounded-lg hover:border-purple-300 hover:shadow-md transition-all group"
+            >
+              <div className="p-2 bg-green-50 rounded-lg text-green-600 group-hover:bg-green-100">
+                <Activity className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-900">Health Monitor</h3>
+                <p className="text-xs text-gray-500">System health</p>
+              </div>
+            </Link>
+
+            <Link
+              href="/settings"
+              className="flex items-center gap-3 p-4 border border-gray-200 rounded-lg hover:border-purple-300 hover:shadow-md transition-all group"
+            >
+              <div className="p-2 bg-gray-100 rounded-lg text-gray-600 group-hover:bg-gray-200">
+                <GitBranch className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-900">Settings</h3>
+                <p className="text-xs text-gray-500">Configure Javari</p>
+              </div>
+            </Link>
+          </div>
         </div>
-      </footer>
+      </div>
     </div>
   );
 }
