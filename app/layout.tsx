@@ -5,6 +5,7 @@ import { UserProfileProvider } from '@/components/user-profile/user-profile-cont
 import { SplitScreenProvider } from '@/components/split-screen/split-screen-context'
 import { UserProfileButton } from '@/components/user-profile/UserProfileButton'
 import { CreditsBar } from '@/components/credits/CreditsBar'
+import { HeaderLogo } from '@/components/header/HeaderLogo'
 
 export const metadata: Metadata = {
   title: 'Javari AI - Autonomous, Self-Healing AI Assistant',
@@ -45,16 +46,7 @@ export default function RootLayout({
                 <div className="container flex h-14 items-center justify-between">
                   {/* Logo and Title */}
                   <div className="flex items-center gap-2">
-                    <img 
-                      src="/javari-logo.svg" 
-                      alt="Javari AI" 
-                      className="h-8 w-8"
-                      onError={(e) => {
-                        // Fallback if logo doesn't load
-                        e.currentTarget.style.display = 'none'
-                      }}
-                    />
-                    <span className="text-lg font-bold">Javari AI</span>
+                    <HeaderLogo />
                   </div>
 
                   {/* Credits Bar (right side of header) */}
