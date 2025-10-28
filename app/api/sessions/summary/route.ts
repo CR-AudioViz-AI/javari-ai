@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
 import type { ApiResponse } from '@/types/javari';
 
+// Mark route as dynamic to prevent static generation
+export const dynamic = 'force-dynamic';
+
 interface SessionSummaryData {
   session_id: string;
   conversation_id?: string;

@@ -3,6 +3,9 @@ import { createServerClient } from '@/lib/supabase';
 import OpenAI from 'openai';
 import type { ApiResponse } from '@/types/javari';
 
+// Mark route as dynamic
+export const dynamic = 'force-dynamic';
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });

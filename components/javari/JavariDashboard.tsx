@@ -32,6 +32,7 @@ import {
   BarChart3,
   Plus,
   History,
+  Activity,
 } from 'lucide-react';
 
 interface Message {
