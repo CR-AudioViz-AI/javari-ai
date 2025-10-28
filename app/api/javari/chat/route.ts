@@ -1,15 +1,16 @@
 /**
- * Javari AI Chat API Route - With Conversation Saving & Continuations
- * Using GPT-4 with automatic conversation persistence and parent linking
+ * Javari AI Chat API Route - WITH PROPER SYSTEM PROMPT IMPORT
+ * Now ACTUALLY uses the enhanced system prompt with Roy & Cindy context
  * 
  * @route /api/javari/chat
- * @version 1.4.0 - Now supports conversation continuations
- * @last-updated 2025-10-27 3:30 PM ET
+ * @version 2.0.0 - SOUL UPDATE: Actually imports enhanced system prompt
+ * @last-updated 2025-10-27
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
+import { JAVARI_SYSTEM_PROMPT } from '@/lib/javari-system-prompt'; // ✅ IMPORT THE REAL PROMPT!
 
 export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
@@ -36,7 +37,7 @@ interface ChatRequest {
   sessionId?: string;
   userId?: string;
   conversationId?: string;
-  parentId?: string; // NEW: For conversation continuations
+  parentId?: string; // For conversation continuations
 }
 
 /**
@@ -65,37 +66,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // System prompt for Javari
-    const systemPrompt = `You are Javari AI, an autonomous AI assistant for CR AudioViz AI developers.
+    // ✅ USE THE ENHANCED SYSTEM PROMPT WITH ROY & CINDY CONTEXT
+    // Add dynamic context to the base system prompt
+    const contextualSystemPrompt = `${JAVARI_SYSTEM_PROMPT}
 
-Your core abilities:
-- Help developers build, debug, and deploy applications
-- Provide code examples and solutions
-- Explain technical concepts clearly
-- Learn from interactions to improve over time
-- Access project context and build health data
-
-Your personality:
-- Professional but friendly
-- Direct and action-oriented
-- Fortune 50 quality standards
-- "Let's make it happen" attitude
-- Partner mindset: "Your success is my success"
-
-Always:
-- Provide complete, working code solutions
-- Be honest if you don't know something
-- Suggest better approaches when relevant
-- Focus on what actually works
-
-Current context:
-${projectId ? `Project ID: ${projectId}` : 'No project context'}
+## CURRENT CONVERSATION CONTEXT
+${projectId ? `Project ID: ${projectId}` : 'No specific project context'}
 ${sessionId ? `Session ID: ${sessionId}` : 'New session'}
-${conversationId ? `Conversation ID: ${conversationId}` : parentId ? 'Continuation of previous conversation' : 'New conversation'}`;
+${conversationId ? `Conversation ID: ${conversationId}` : parentId ? 'This is a continuation of a previous conversation' : 'This is a new conversation'}
+${userId ? `User ID: ${userId}` : 'User: demo-user'}
+
+Remember: You know Roy and Cindy Henderson. You understand the CR AudioViz AI mission. Respond as their partner, not a generic AI.`;
 
     // Build messages array for OpenAI
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-      { role: 'system', content: systemPrompt },
+      { role: 'system', content: contextualSystemPrompt },
       ...history.map((msg) => ({
         role: msg.role as 'user' | 'assistant',
         content: msg.content,
@@ -170,14 +155,14 @@ ${conversationId ? `Conversation ID: ${conversationId}` : parentId ? 'Continuati
                   .insert({
                     user_id: userId,
                     project_id: projectId,
-                    parent_id: parentId || null, // NEW: Link to parent
+                    parent_id: parentId || null,
                     title,
                     messages: updatedMessages,
                     message_count: updatedMessages.length,
                     model: 'gpt-4-turbo-preview',
                     status: 'active',
                     starred: false,
-                    continuation_depth: continuationDepth, // NEW: Track depth
+                    continuation_depth: continuationDepth,
                   })
                   .select()
                   .single();
