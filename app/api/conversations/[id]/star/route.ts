@@ -1,43 +1,22 @@
 /**
- * JAVARI AI - STAR CONVERSATION API
- * Toggle starred status for quick access
- * 
- * Endpoint:
- * - POST /api/conversations/[id]/star - Toggle starred status
- * 
- * @version 1.0.0
- * @date October 27, 2025 - 9:54 PM ET
+ * Star/Unstar Conversation API
+ * PATCH: Toggle starred status
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@supabase/supabase-js';
 
-// Mark route as dynamic
-export const dynamic = 'force-dynamic';
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
-/**
- * POST /api/conversations/[id]/star
- * Toggle starred status
- * 
- * Body (optional):
- * {
- *   starred?: boolean (if not provided, will toggle)
- * }
- */
-export async function POST(
+export async function PATCH(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const supabase = createClient();
     const { id } = params;
-    
-    let body: { starred?: boolean } = {};
-    try {
-      body = await request.json();
-    } catch {
-      // No body provided, we'll toggle
-    }
 
     // Get current starred status
     const { data: current, error: fetchError } = await supabase
@@ -46,51 +25,30 @@ export async function POST(
       .eq('id', id)
       .single();
 
-    if (fetchError) {
-      if (fetchError.code === 'PGRST116') {
-        return NextResponse.json(
-          { error: 'Conversation not found' },
-          { status: 404 }
-        );
-      }
-      console.error('Error fetching conversation:', fetchError);
-      return NextResponse.json(
-        { error: 'Failed to fetch conversation', details: fetchError.message },
-        { status: 500 }
-      );
-    }
+    if (fetchError) throw fetchError;
 
-    // Determine new starred status
-    const newStarred = body.starred !== undefined ? body.starred : !current.starred;
-
-    // Update starred status
-    const { data, error: updateError } = await supabase
+    // Toggle starred status
+    const { data, error } = await supabase
       .from('conversations')
       .update({
-        starred: newStarred,
+        starred: !current?.starred,
         updated_at: new Date().toISOString(),
       })
       .eq('id', id)
       .select()
       .single();
 
-    if (updateError) {
-      console.error('Error updating starred status:', updateError);
-      return NextResponse.json(
-        { error: 'Failed to update starred status', details: updateError.message },
-        { status: 500 }
-      );
-    }
+    if (error) throw error;
 
     return NextResponse.json({
       success: true,
-      data,
-      message: newStarred ? 'Conversation starred' : 'Conversation unstarred',
+      conversation: data,
+      starred: data.starred,
     });
   } catch (error: any) {
-    console.error('Star API error:', error);
+    console.error('Error toggling star:', error);
     return NextResponse.json(
-      { error: 'Internal server error', details: error.message },
+      { success: false, error: error.message },
       { status: 500 }
     );
   }
