@@ -8,6 +8,7 @@ import SubProjectsManager from '@/components/javari/SubProjectsManager';
 import { BuildHealthMonitor } from '@/components/javari/BuildHealthMonitor';
 import WorkLogViewer from '@/components/javari/WorkLogViewer';
 import ProjectAnalytics from '@/components/javari/ProjectAnalytics';
+import SessionSummary from '@/components/javari/SessionSummary';
 import { Settings } from '@/components/javari/Settings';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -237,6 +238,10 @@ export default function JavariDashboard() {
                 <BarChart3 className="w-4 h-4" />
                 Analytics
               </TabsTrigger>
+              <TabsTrigger value="summary" className="gap-2">
+                <Activity className="w-4 h-4" />
+                Summary
+              </TabsTrigger>
               <TabsTrigger value="settings" className="gap-2">
                 <SettingsIcon className="w-4 h-4" />
                 Settings
@@ -338,6 +343,16 @@ export default function JavariDashboard() {
             <TabsContent value="analytics" className="h-full m-0">
               <div className="h-full overflow-y-auto p-6">
                 <ProjectAnalytics projects={projects} />
+              </div>
+            </TabsContent>
+
+            {/* Session Summary Tab */}
+            <TabsContent value="summary" className="h-full m-0">
+              <div className="h-full overflow-y-auto p-6">
+                <SessionSummary 
+                  conversationId={selectedConversation?.id}
+                  projectId={selectedProject}
+                />
               </div>
             </TabsContent>
 
