@@ -1,32 +1,24 @@
 /**
- * JAVARI AI - INDIVIDUAL CONVERSATION API
- * Operations on specific conversations
- * 
- * Endpoints:
- * - GET    /api/conversations/[id] - Get conversation details
- * - PATCH  /api/conversations/[id] - Update conversation
- * - DELETE /api/conversations/[id] - Delete/archive conversation
- * 
- * @version 1.0.0
- * @date October 27, 2025 - 9:53 PM ET
+ * Individual Conversation API
+ * GET: Get conversation by ID
+ * PATCH: Update conversation
+ * DELETE: Delete/Archive conversation
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@supabase/supabase-js';
 
-// Mark route as dynamic
-export const dynamic = 'force-dynamic';
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
-/**
- * GET /api/conversations/[id]
- * Get a specific conversation by ID
- */
+// GET /api/conversations/[id] - Get single conversation
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const supabase = createClient();
     const { id } = params;
 
     const { data, error } = await supabase
@@ -35,167 +27,121 @@ export async function GET(
       .eq('id', id)
       .single();
 
-    if (error) {
-      if (error.code === 'PGRST116') {
-        return NextResponse.json(
-          { error: 'Conversation not found' },
-          { status: 404 }
-        );
-      }
-      console.error('Error fetching conversation:', error);
+    if (error) throw error;
+
+    if (!data) {
       return NextResponse.json(
-        { error: 'Failed to fetch conversation', details: error.message },
-        { status: 500 }
+        { success: false, error: 'Conversation not found' },
+        { status: 404 }
       );
     }
 
     return NextResponse.json({
       success: true,
-      data,
+      conversation: data,
     });
   } catch (error: any) {
-    console.error('Conversation API error:', error);
+    console.error('Error fetching conversation:', error);
     return NextResponse.json(
-      { error: 'Internal server error', details: error.message },
+      { success: false, error: error.message },
       { status: 500 }
     );
   }
 }
 
-/**
- * PATCH /api/conversations/[id]
- * Update a conversation
- * 
- * Body (all fields optional):
- * {
- *   title?: string
- *   summary?: string
- *   status?: 'active' | 'inactive' | 'archived'
- *   starred?: boolean
- *   project_id?: UUID
- *   subproject_id?: UUID
- *   model?: string
- *   tags?: string[]
- *   metadata?: object
- *   messages?: array (replace all messages)
- *   append_message?: object (add single message)
- * }
- */
+// PATCH /api/conversations/[id] - Update conversation
 export async function PATCH(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const supabase = createClient();
     const { id } = params;
     const body = await request.json();
+    const {
+      title,
+      summary,
+      messages,
+      starred,
+      status,
+      projectId,
+      subprojectId,
+      metadata,
+      totalTokens,
+      costUsd,
+    } = body;
 
-    // First, get current conversation
-    const { data: current, error: fetchError } = await supabase
-      .from('conversations')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (fetchError) {
-      if (fetchError.code === 'PGRST116') {
-        return NextResponse.json(
-          { error: 'Conversation not found' },
-          { status: 404 }
-        );
-      }
-      console.error('Error fetching conversation:', fetchError);
-      return NextResponse.json(
-        { error: 'Failed to fetch conversation', details: fetchError.message },
-        { status: 500 }
-      );
-    }
-
-    // Prepare update data
-    const updateData: any = {
+    // Build update object
+    const updates: any = {
       updated_at: new Date().toISOString(),
     };
 
-    // Update fields if provided
-    if (body.title !== undefined) updateData.title = body.title;
-    if (body.summary !== undefined) updateData.summary = body.summary;
-    if (body.status !== undefined) updateData.status = body.status;
-    if (body.starred !== undefined) updateData.starred = body.starred;
-    if (body.project_id !== undefined) updateData.project_id = body.project_id;
-    if (body.subproject_id !== undefined) updateData.subproject_id = body.subproject_id;
-    if (body.model !== undefined) updateData.model = body.model;
-    if (body.tags !== undefined) updateData.tags = body.tags;
-    if (body.metadata !== undefined) updateData.metadata = body.metadata;
-
-    // Handle messages
-    if (body.messages !== undefined) {
-      // Replace all messages
-      updateData.messages = body.messages;
-      updateData.message_count = Array.isArray(body.messages) ? body.messages.length : 0;
-      updateData.last_message_at = new Date().toISOString();
-    } else if (body.append_message) {
-      // Append single message
-      const currentMessages = current.messages || [];
-      updateData.messages = [...currentMessages, body.append_message];
-      updateData.message_count = updateData.messages.length;
-      updateData.last_message_at = new Date().toISOString();
+    if (title !== undefined) updates.title = title;
+    if (summary !== undefined) updates.summary = summary;
+    if (messages !== undefined) {
+      updates.messages = JSON.stringify(messages);
+      updates.message_count = messages.length;
+      updates.last_message_at = new Date().toISOString();
     }
-
-    // Handle archiving
-    if (body.status === 'archived' && !current.archived_at) {
-      updateData.archived_at = new Date().toISOString();
+    if (starred !== undefined) updates.starred = starred;
+    if (status !== undefined) {
+      updates.status = status;
+      if (status === 'archived') {
+        updates.archived_at = new Date().toISOString();
+      }
     }
+    if (projectId !== undefined) updates.project_id = projectId;
+    if (subprojectId !== undefined) updates.subproject_id = subprojectId;
+    if (metadata !== undefined) updates.metadata = JSON.stringify(metadata);
+    if (totalTokens !== undefined) updates.total_tokens = totalTokens;
+    if (costUsd !== undefined) updates.cost_usd = costUsd;
 
-    const { data, error: updateError } = await supabase
+    const { data, error } = await supabase
       .from('conversations')
-      .update(updateData)
+      .update(updates)
       .eq('id', id)
       .select()
       .single();
 
-    if (updateError) {
-      console.error('Error updating conversation:', updateError);
-      return NextResponse.json(
-        { error: 'Failed to update conversation', details: updateError.message },
-        { status: 500 }
-      );
-    }
+    if (error) throw error;
 
     return NextResponse.json({
       success: true,
-      data,
-      message: 'Conversation updated successfully',
+      conversation: data,
     });
   } catch (error: any) {
-    console.error('Conversation API error:', error);
+    console.error('Error updating conversation:', error);
     return NextResponse.json(
-      { error: 'Internal server error', details: error.message },
+      { success: false, error: error.message },
       { status: 500 }
     );
   }
 }
 
-/**
- * DELETE /api/conversations/[id]
- * Delete or archive a conversation
- * 
- * Query Parameters:
- * - soft: true (archive) | false (hard delete)
- * 
- * Default is soft delete (archive)
- */
+// DELETE /api/conversations/[id] - Archive conversation
 export async function DELETE(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const supabase = createClient();
     const { id } = params;
     const { searchParams } = new URL(request.url);
-    const softDelete = searchParams.get('soft') !== 'false'; // Default to soft delete
+    const hardDelete = searchParams.get('hard') === 'true';
 
-    if (softDelete) {
-      // Soft delete - archive the conversation
+    if (hardDelete) {
+      // Permanent deletion
+      const { error } = await supabase
+        .from('conversations')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+
+      return NextResponse.json({
+        success: true,
+        message: 'Conversation permanently deleted',
+      });
+    } else {
+      // Soft delete (archive)
       const { data, error } = await supabase
         .from('conversations')
         .update({
@@ -207,55 +153,18 @@ export async function DELETE(
         .select()
         .single();
 
-      if (error) {
-        if (error.code === 'PGRST116') {
-          return NextResponse.json(
-            { error: 'Conversation not found' },
-            { status: 404 }
-          );
-        }
-        console.error('Error archiving conversation:', error);
-        return NextResponse.json(
-          { error: 'Failed to archive conversation', details: error.message },
-          { status: 500 }
-        );
-      }
+      if (error) throw error;
 
       return NextResponse.json({
         success: true,
-        data,
-        message: 'Conversation archived successfully',
-      });
-    } else {
-      // Hard delete - permanently remove
-      const { error } = await supabase
-        .from('conversations')
-        .delete()
-        .eq('id', id);
-
-      if (error) {
-        if (error.code === 'PGRST116') {
-          return NextResponse.json(
-            { error: 'Conversation not found' },
-            { status: 404 }
-          );
-        }
-        console.error('Error deleting conversation:', error);
-        return NextResponse.json(
-          { error: 'Failed to delete conversation', details: error.message },
-          { status: 500 }
-        );
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: 'Conversation permanently deleted',
+        message: 'Conversation archived',
+        conversation: data,
       });
     }
   } catch (error: any) {
-    console.error('Conversation API error:', error);
+    console.error('Error deleting conversation:', error);
     return NextResponse.json(
-      { error: 'Internal server error', details: error.message },
+      { success: false, error: error.message },
       { status: 500 }
     );
   }
