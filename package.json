@@ -26,8 +26,7 @@
     "react-dom": "^18.3.1",
     "react-markdown": "^9.0.1",
     "react-syntax-highlighter": "^15.6.1",
-    "tailwind-merge": "^2.5.2",
-    "vm2": "^3.9.19"
+    "tailwind-merge": "^2.5.2"
   },
   "devDependencies": {
     "@types/node": "^20",
