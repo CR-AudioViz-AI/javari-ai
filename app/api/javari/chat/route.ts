@@ -1,29 +1,43 @@
 /**
- * Javari AI Chat API Route - WITH PROPER SYSTEM PROMPT IMPORT
- * Now ACTUALLY uses the enhanced system prompt with Roy & Cindy context
+ * Javari AI Enhanced Multi-Model Chat API Route
+ * Supports: OpenAI GPT-4, Claude Sonnet 4.5, Claude Opus 4
  * 
  * @route /api/javari/chat
- * @version 2.0.0 - SOUL UPDATE: Actually imports enhanced system prompt
- * @last-updated 2025-10-27
+ * @version 3.0.0 - MULTI-MODEL SUPPORT
+ * @last-updated 2025-10-28
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
-import { JAVARI_SYSTEM_PROMPT } from '@/lib/javari-system-prompt'; // ✅ IMPORT THE REAL PROMPT!
+import { JAVARI_SYSTEM_PROMPT } from '@/lib/javari-system-prompt';
 
 export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
-// Initialize OpenAI client
+// Initialize AI clients
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || '',
+});
+
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY || '',
 });
 
 // Initialize Supabase client
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Supported AI models
+export type AIModel = 
+  | 'gpt-4-turbo-preview' 
+  | 'gpt-4' 
+  | 'gpt-3.5-turbo'
+  | 'claude-sonnet-4-5-20250929'
+  | 'claude-opus-4-20250514'
+  | 'claude-sonnet-4-20250514';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -37,17 +51,173 @@ interface ChatRequest {
   sessionId?: string;
   userId?: string;
   conversationId?: string;
-  parentId?: string; // For conversation continuations
+  parentId?: string;
+  model?: AIModel; // Model selection
+  maxTokens?: number;
+  temperature?: number;
+}
+
+interface ModelCapabilities {
+  name: string;
+  provider: 'openai' | 'anthropic';
+  maxTokens: number;
+  supportsStreaming: boolean;
+  costPer1kTokens: { input: number; output: number };
+}
+
+// Model configuration
+const MODEL_CONFIG: Record<AIModel, ModelCapabilities> = {
+  'gpt-4-turbo-preview': {
+    name: 'GPT-4 Turbo',
+    provider: 'openai',
+    maxTokens: 128000,
+    supportsStreaming: true,
+    costPer1kTokens: { input: 0.01, output: 0.03 },
+  },
+  'gpt-4': {
+    name: 'GPT-4',
+    provider: 'openai',
+    maxTokens: 8192,
+    supportsStreaming: true,
+    costPer1kTokens: { input: 0.03, output: 0.06 },
+  },
+  'gpt-3.5-turbo': {
+    name: 'GPT-3.5 Turbo',
+    provider: 'openai',
+    maxTokens: 16384,
+    supportsStreaming: true,
+    costPer1kTokens: { input: 0.0015, output: 0.002 },
+  },
+  'claude-sonnet-4-5-20250929': {
+    name: 'Claude Sonnet 4.5',
+    provider: 'anthropic',
+    maxTokens: 200000,
+    supportsStreaming: true,
+    costPer1kTokens: { input: 0.003, output: 0.015 },
+  },
+  'claude-opus-4-20250514': {
+    name: 'Claude Opus 4',
+    provider: 'anthropic',
+    maxTokens: 200000,
+    supportsStreaming: true,
+    costPer1kTokens: { input: 0.015, output: 0.075 },
+  },
+  'claude-sonnet-4-20250514': {
+    name: 'Claude Sonnet 4',
+    provider: 'anthropic',
+    maxTokens: 200000,
+    supportsStreaming: true,
+    costPer1kTokens: { input: 0.003, output: 0.015 },
+  },
+};
+
+/**
+ * Stream response from OpenAI
+ */
+async function streamOpenAI(
+  messages: OpenAI.Chat.ChatCompletionMessageParam[],
+  model: AIModel,
+  maxTokens: number,
+  temperature: number,
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder
+): Promise<string> {
+  let fullResponse = '';
+
+  const response = await openai.chat.completions.create({
+    model: model,
+    messages: messages,
+    stream: true,
+    max_tokens: maxTokens,
+    temperature: temperature,
+  });
+
+  for await (const chunk of response) {
+    const content = chunk.choices[0]?.delta?.content || '';
+    if (content) {
+      fullResponse += content;
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ chunk: content })}\n\n`));
+    }
+  }
+
+  return fullResponse;
+}
+
+/**
+ * Stream response from Claude (Anthropic)
+ */
+async function streamClaude(
+  messages: ChatMessage[],
+  systemPrompt: string,
+  model: AIModel,
+  maxTokens: number,
+  temperature: number,
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder
+): Promise<string> {
+  let fullResponse = '';
+
+  // Convert messages to Claude format
+  const claudeMessages = messages.map(msg => ({
+    role: msg.role === 'assistant' ? 'assistant' : 'user',
+    content: msg.content,
+  }));
+
+  const response = await anthropic.messages.stream({
+    model: model,
+    max_tokens: maxTokens,
+    temperature: temperature,
+    system: systemPrompt,
+    messages: claudeMessages as any,
+  });
+
+  for await (const chunk of response) {
+    if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
+      const content = chunk.delta.text;
+      fullResponse += content;
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ chunk: content })}\n\n`));
+    }
+  }
+
+  return fullResponse;
+}
+
+/**
+ * Calculate estimated cost based on token usage
+ */
+function estimateCost(model: AIModel, inputTokens: number, outputTokens: number): number {
+  const config = MODEL_CONFIG[model];
+  const inputCost = (inputTokens / 1000) * config.costPer1kTokens.input;
+  const outputCost = (outputTokens / 1000) * config.costPer1kTokens.output;
+  return inputCost + outputCost;
+}
+
+/**
+ * Rough token estimation (4 chars ≈ 1 token)
+ */
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
 }
 
 /**
  * POST /api/javari/chat
- * Main chat endpoint with streaming support and conversation saving
+ * Multi-model chat endpoint with streaming support
  */
 export async function POST(request: NextRequest) {
   try {
     const body: ChatRequest = await request.json();
-    const { message, history = [], projectId, sessionId, userId, conversationId, parentId } = body;
+    const { 
+      message, 
+      history = [], 
+      projectId, 
+      sessionId, 
+      userId, 
+      conversationId, 
+      parentId,
+      model = 'gpt-4-turbo-preview', // Default model
+      maxTokens = 4096,
+      temperature = 0.7,
+    } = body;
 
     // Validate request
     if (!message || typeof message !== 'string' || !message.trim()) {
@@ -57,17 +227,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check API key
-    if (!process.env.OPENAI_API_KEY) {
-      console.error('OPENAI_API_KEY is not configured');
+    // Validate model
+    if (!MODEL_CONFIG[model]) {
       return NextResponse.json(
-        { error: 'AI service is not properly configured' },
+        { error: `Invalid model: ${model}. Supported models: ${Object.keys(MODEL_CONFIG).join(', ')}` },
+        { status: 400 }
+      );
+    }
+
+    const modelConfig = MODEL_CONFIG[model];
+
+    // Check API keys
+    if (modelConfig.provider === 'openai' && !process.env.OPENAI_API_KEY) {
+      return NextResponse.json(
+        { error: 'OpenAI API key is not configured' },
         { status: 500 }
       );
     }
 
-    // ✅ USE THE ENHANCED SYSTEM PROMPT WITH ROY & CINDY CONTEXT
-    // Add dynamic context to the base system prompt
+    if (modelConfig.provider === 'anthropic' && !process.env.ANTHROPIC_API_KEY) {
+      return NextResponse.json(
+        { error: 'Anthropic API key is not configured' },
+        { status: 500 }
+      );
+    }
+
+    // Build contextual system prompt
     const contextualSystemPrompt = `${JAVARI_SYSTEM_PROMPT}
 
 ## CURRENT CONVERSATION CONTEXT
@@ -75,44 +260,63 @@ ${projectId ? `Project ID: ${projectId}` : 'No specific project context'}
 ${sessionId ? `Session ID: ${sessionId}` : 'New session'}
 ${conversationId ? `Conversation ID: ${conversationId}` : parentId ? 'This is a continuation of a previous conversation' : 'This is a new conversation'}
 ${userId ? `User ID: ${userId}` : 'User: demo-user'}
+Model: ${modelConfig.name} (${model})
 
 Remember: You know Roy and Cindy Henderson. You understand the CR AudioViz AI mission. Respond as their partner, not a generic AI.`;
 
-    // Build messages array for OpenAI
-    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-      { role: 'system', content: contextualSystemPrompt },
-      ...history.map((msg) => ({
-        role: msg.role as 'user' | 'assistant',
-        content: msg.content,
-      })),
-      { role: 'user', content: message },
-    ];
-
     let fullResponse = '';
     let newConversationId = conversationId;
+    let inputTokens = 0;
+    let outputTokens = 0;
+
+    // Estimate input tokens
+    const historyText = history.map(m => m.content).join(' ');
+    inputTokens = estimateTokens(contextualSystemPrompt + historyText + message);
 
     // Create streaming response
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          // Create streaming request to OpenAI
-          const response = await openai.chat.completions.create({
-            model: 'gpt-4-turbo-preview',
-            messages: messages,
-            stream: true,
-            max_tokens: 4096,
-            temperature: 0.7,
-          });
+          // Route to appropriate AI provider
+          if (modelConfig.provider === 'openai') {
+            const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+              { role: 'system', content: contextualSystemPrompt },
+              ...history.map((msg) => ({
+                role: msg.role as 'user' | 'assistant',
+                content: msg.content,
+              })),
+              { role: 'user', content: message },
+            ];
 
-          // Stream the response chunks
-          for await (const chunk of response) {
-            const content = chunk.choices[0]?.delta?.content || '';
-            if (content) {
-              fullResponse += content;
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ chunk: content })}\n\n`));
-            }
+            fullResponse = await streamOpenAI(
+              messages,
+              model,
+              maxTokens,
+              temperature,
+              controller,
+              encoder
+            );
+          } else if (modelConfig.provider === 'anthropic') {
+            const messages: ChatMessage[] = [
+              ...history,
+              { role: 'user', content: message },
+            ];
+
+            fullResponse = await streamClaude(
+              messages,
+              contextualSystemPrompt,
+              model,
+              maxTokens,
+              temperature,
+              controller,
+              encoder
+            );
           }
+
+          // Estimate output tokens and cost
+          outputTokens = estimateTokens(fullResponse);
+          const estimatedCost = estimateCost(model, inputTokens, outputTokens);
 
           // Save to database after streaming completes
           if (userId) {
@@ -149,7 +353,7 @@ Remember: You know Roy and Cindy Henderson. You understand the CR AudioViz AI mi
                 }
 
                 // Create new conversation
-                const title = message.slice(0, 100); // First 100 chars as title
+                const title = message.slice(0, 100);
                 const { data } = await supabase
                   .from('conversations')
                   .insert({
@@ -159,10 +363,12 @@ Remember: You know Roy and Cindy Henderson. You understand the CR AudioViz AI mi
                     title,
                     messages: updatedMessages,
                     message_count: updatedMessages.length,
-                    model: 'gpt-4-turbo-preview',
+                    model: model,
                     status: 'active',
                     starred: false,
                     continuation_depth: continuationDepth,
+                    token_count: inputTokens + outputTokens,
+                    estimated_cost: estimatedCost,
                   })
                   .select()
                   .single();
@@ -171,18 +377,38 @@ Remember: You know Roy and Cindy Henderson. You understand the CR AudioViz AI mi
                   newConversationId = data.id;
                 }
               }
+
+              // Log usage for analytics
+              await supabase
+                .from('javari_usage_logs')
+                .insert({
+                  user_id: userId,
+                  conversation_id: newConversationId,
+                  model: model,
+                  input_tokens: inputTokens,
+                  output_tokens: outputTokens,
+                  estimated_cost: estimatedCost,
+                  provider: modelConfig.provider,
+                });
             } catch (dbError) {
               console.error('Error saving conversation:', dbError);
               // Don't fail the request if DB save fails
             }
           }
 
-          // Send completion signal with conversation ID
+          // Send completion signal with metadata
           controller.enqueue(
             encoder.encode(
               `data: ${JSON.stringify({ 
                 done: true, 
-                conversationId: newConversationId 
+                conversationId: newConversationId,
+                metadata: {
+                  model: model,
+                  provider: modelConfig.provider,
+                  inputTokens: inputTokens,
+                  outputTokens: outputTokens,
+                  estimatedCost: estimatedCost,
+                }
               })}\n\n`
             )
           );
@@ -217,4 +443,15 @@ Remember: You know Roy and Cindy Henderson. You understand the CR AudioViz AI mi
       { status: 500 }
     );
   }
+}
+
+/**
+ * GET /api/javari/chat
+ * Get available models and their capabilities
+ */
+export async function GET() {
+  return NextResponse.json({
+    models: MODEL_CONFIG,
+    defaultModel: 'gpt-4-turbo-preview',
+  });
 }
