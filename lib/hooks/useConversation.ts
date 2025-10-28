@@ -1,266 +1,278 @@
 /**
- * JAVARI AI - USE CONVERSATION HOOK
- * State management for conversations with auto-save
- * 
- * Features:
- * - Load conversation by ID
- * - Create new conversation
- * - Auto-save messages
- * - Update conversation metadata
- * - Handle continuation/child conversations
- * 
- * @version 1.0.0
- * @date October 27, 2025 - 9:58 PM ET
+ * useConversation Hook
+ * React hook for managing conversations (CRUD operations)
  */
 
-'use client';
+import { useState, useCallback } from 'react';
+import {
+  Conversation,
+  ConversationListResponse,
+  ConversationResponse,
+  ConversationSearchResponse,
+  CreateConversationInput,
+  UpdateConversationInput,
+} from '@/types/conversation';
 
-import { useState, useEffect, useCallback } from 'react';
-
-interface Message {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-  timestamp: string;
-  metadata?: Record<string, any>;
-}
-
-interface Conversation {
-  id: string;
-  numeric_id: number;
-  title: string;
-  summary?: string;
-  status: 'active' | 'inactive' | 'archived';
-  starred: boolean;
-  model: string;
-  message_count: number;
-  continuation_depth: number;
-  project_id?: string;
-  parent_id?: string;
-  messages: Message[];
-  created_at: string;
-  updated_at: string;
-  last_message_at?: string;
-}
-
-interface UseConversationReturn {
-  conversation: Conversation | null;
-  messages: Message[];
-  loading: boolean;
-  error: string | null;
-  createConversation: (data: CreateConversationData) => Promise<Conversation | null>;
-  loadConversation: (id: string) => Promise<void>;
-  addMessage: (message: Message) => Promise<void>;
-  updateConversation: (updates: Partial<Conversation>) => Promise<void>;
-  clearConversation: () => void;
-  generateTitle: (firstMessage: string) => string;
-}
-
-interface CreateConversationData {
-  user_id: string;
-  title?: string;
-  project_id?: string;
-  subproject_id?: string;
-  parent_id?: string;
-  model?: string;
-  initialMessage?: Message;
-}
-
-export function useConversation(conversationId?: string): UseConversationReturn {
-  const [conversation, setConversation] = useState<Conversation | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
+export function useConversation() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load conversation when ID changes
-  useEffect(() => {
-    if (conversationId) {
-      loadConversation(conversationId);
-    } else {
-      clearConversation();
-    }
-  }, [conversationId]);
-
-  /**
-   * Load an existing conversation
-   */
-  const loadConversation = useCallback(async (id: string) => {
-    try {
+  // List conversations
+  const listConversations = useCallback(
+    async (params?: {
+      userId?: string;
+      search?: string;
+      starred?: boolean;
+      projectId?: string;
+      status?: string;
+      limit?: number;
+      offset?: number;
+      sortBy?: string;
+      sortOrder?: 'asc' | 'desc';
+    }): Promise<ConversationListResponse | null> => {
       setLoading(true);
       setError(null);
 
-      const response = await fetch(`/api/conversations/${id}`);
-      const result = await response.json();
+      try {
+        const queryParams = new URLSearchParams();
+        if (params?.userId) queryParams.append('userId', params.userId);
+        if (params?.search) queryParams.append('search', params.search);
+        if (params?.starred !== undefined) queryParams.append('starred', String(params.starred));
+        if (params?.projectId) queryParams.append('projectId', params.projectId);
+        if (params?.status) queryParams.append('status', params.status);
+        if (params?.limit) queryParams.append('limit', String(params.limit));
+        if (params?.offset) queryParams.append('offset', String(params.offset));
+        if (params?.sortBy) queryParams.append('sortBy', params.sortBy);
+        if (params?.sortOrder) queryParams.append('sortOrder', params.sortOrder);
 
-      if (result.success && result.data) {
-        setConversation(result.data);
-        setMessages(result.data.messages || []);
-      } else {
-        setError(result.error || 'Failed to load conversation');
-      }
-    } catch (err: any) {
-      setError(err.message || 'Failed to load conversation');
-      console.error('Error loading conversation:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+        const response = await fetch(`/api/conversations?${queryParams}`);
+        const data: ConversationListResponse = await response.json();
 
-  /**
-   * Create a new conversation
-   */
-  const createConversation = useCallback(async (data: CreateConversationData): Promise<Conversation | null> => {
-    try {
-      setLoading(true);
-      setError(null);
+        if (!data.success) {
+          throw new Error(data.error || 'Failed to fetch conversations');
+        }
 
-      // Generate title from first message if not provided
-      const title = data.title || (
-        data.initialMessage 
-          ? generateTitle(data.initialMessage.content)
-          : 'New Conversation'
-      );
-
-      const conversationData = {
-        user_id: data.user_id,
-        title,
-        project_id: data.project_id,
-        subproject_id: data.subproject_id,
-        parent_id: data.parent_id,
-        model: data.model || 'gpt-4',
-        messages: data.initialMessage ? [data.initialMessage] : [],
-      };
-
-      const response = await fetch('/api/conversations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(conversationData),
-      });
-
-      const result = await response.json();
-
-      if (result.success && result.data) {
-        setConversation(result.data);
-        setMessages(result.data.messages || []);
-        return result.data;
-      } else {
-        setError(result.error || 'Failed to create conversation');
+        return data;
+      } catch (err: any) {
+        setError(err.message);
         return null;
+      } finally {
+        setLoading(false);
       }
-    } catch (err: any) {
-      setError(err.message || 'Failed to create conversation');
-      console.error('Error creating conversation:', err);
-      return null;
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    },
+    []
+  );
 
-  /**
-   * Add a message to the conversation
-   * Automatically saves to database
-   */
-  const addMessage = useCallback(async (message: Message) => {
-    if (!conversation) {
-      console.error('No active conversation');
-      return;
-    }
+  // Get single conversation
+  const getConversation = useCallback(
+    async (id: string): Promise<Conversation | null> => {
+      setLoading(true);
+      setError(null);
 
-    try {
-      // Optimistically update local state
-      const newMessages = [...messages, message];
-      setMessages(newMessages);
+      try {
+        const response = await fetch(`/api/conversations/${id}`);
+        const data: ConversationResponse = await response.json();
 
-      // Save to database
-      const response = await fetch(`/api/conversations/${conversation.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: newMessages,
-        }),
-      });
+        if (!data.success || !data.conversation) {
+          throw new Error(data.error || 'Conversation not found');
+        }
 
-      const result = await response.json();
-
-      if (result.success && result.data) {
-        setConversation(result.data);
-      } else {
-        console.error('Failed to save message:', result.error);
-        // Revert optimistic update
-        setMessages(messages);
+        return data.conversation;
+      } catch (err: any) {
+        setError(err.message);
+        return null;
+      } finally {
+        setLoading(false);
       }
-    } catch (err: any) {
-      console.error('Error saving message:', err);
-      // Revert optimistic update
-      setMessages(messages);
-    }
-  }, [conversation, messages]);
+    },
+    []
+  );
 
-  /**
-   * Update conversation metadata
-   */
-  const updateConversation = useCallback(async (updates: Partial<Conversation>) => {
-    if (!conversation) {
-      console.error('No active conversation');
-      return;
-    }
+  // Create conversation
+  const createConversation = useCallback(
+    async (input: CreateConversationInput): Promise<Conversation | null> => {
+      setLoading(true);
+      setError(null);
 
-    try {
-      const response = await fetch(`/api/conversations/${conversation.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates),
-      });
+      try {
+        const response = await fetch('/api/conversations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(input),
+        });
 
-      const result = await response.json();
+        const data: ConversationResponse = await response.json();
 
-      if (result.success && result.data) {
-        setConversation(result.data);
-      } else {
-        console.error('Failed to update conversation:', result.error);
+        if (!data.success || !data.conversation) {
+          throw new Error(data.error || 'Failed to create conversation');
+        }
+
+        return data.conversation;
+      } catch (err: any) {
+        setError(err.message);
+        return null;
+      } finally {
+        setLoading(false);
       }
-    } catch (err: any) {
-      console.error('Error updating conversation:', err);
-    }
-  }, [conversation]);
+    },
+    []
+  );
 
-  /**
-   * Clear current conversation
-   */
-  const clearConversation = useCallback(() => {
-    setConversation(null);
-    setMessages([]);
-    setError(null);
-  }, []);
+  // Update conversation
+  const updateConversation = useCallback(
+    async (id: string, updates: UpdateConversationInput): Promise<Conversation | null> => {
+      setLoading(true);
+      setError(null);
 
-  /**
-   * Generate a title from the first message
-   */
-  const generateTitle = useCallback((firstMessage: string): string => {
-    // Take first 60 characters and truncate at word boundary
-    let title = firstMessage.slice(0, 60).trim();
-    
-    if (firstMessage.length > 60) {
-      // Find last space to avoid cutting words
-      const lastSpace = title.lastIndexOf(' ');
-      if (lastSpace > 30) {
-        title = title.slice(0, lastSpace);
+      try {
+        const response = await fetch(`/api/conversations/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updates),
+        });
+
+        const data: ConversationResponse = await response.json();
+
+        if (!data.success || !data.conversation) {
+          throw new Error(data.error || 'Failed to update conversation');
+        }
+
+        return data.conversation;
+      } catch (err: any) {
+        setError(err.message);
+        return null;
+      } finally {
+        setLoading(false);
       }
-      title += '...';
-    }
-    
-    return title;
-  }, []);
+    },
+    []
+  );
+
+  // Delete/Archive conversation
+  const deleteConversation = useCallback(
+    async (id: string, hardDelete = false): Promise<boolean> => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const url = hardDelete 
+          ? `/api/conversations/${id}?hard=true`
+          : `/api/conversations/${id}`;
+
+        const response = await fetch(url, { method: 'DELETE' });
+        const data = await response.json();
+
+        if (!data.success) {
+          throw new Error(data.error || 'Failed to delete conversation');
+        }
+
+        return true;
+      } catch (err: any) {
+        setError(err.message);
+        return false;
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
+
+  // Toggle star
+  const toggleStar = useCallback(
+    async (id: string): Promise<boolean> => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const response = await fetch(`/api/conversations/${id}/star`, {
+          method: 'PATCH',
+        });
+
+        const data = await response.json();
+
+        if (!data.success) {
+          throw new Error(data.error || 'Failed to toggle star');
+        }
+
+        return data.starred;
+      } catch (err: any) {
+        setError(err.message);
+        return false;
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
+
+  // Search conversations
+  const searchConversations = useCallback(
+    async (query: string, userId?: string, limit?: number): Promise<ConversationSearchResponse | null> => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const queryParams = new URLSearchParams();
+        queryParams.append('q', query);
+        if (userId) queryParams.append('userId', userId);
+        if (limit) queryParams.append('limit', String(limit));
+
+        const response = await fetch(`/api/conversations/search?${queryParams}`);
+        const data: ConversationSearchResponse = await response.json();
+
+        if (!data.success) {
+          throw new Error(data.error || 'Search failed');
+        }
+
+        return data;
+      } catch (err: any) {
+        setError(err.message);
+        return null;
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
+
+  // Export conversation
+  const exportConversation = useCallback(
+    async (id: string, format: 'json' | 'markdown' = 'json'): Promise<void> => {
+      try {
+        const response = await fetch(`/api/conversations/${id}/export?format=${format}`);
+        
+        if (!response.ok) {
+          throw new Error('Export failed');
+        }
+
+        // Trigger download
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `conversation.${format === 'markdown' ? 'md' : 'json'}`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      } catch (err: any) {
+        setError(err.message);
+        throw err;
+      }
+    },
+    []
+  );
 
   return {
-    conversation,
-    messages,
     loading,
     error,
+    listConversations,
+    getConversation,
     createConversation,
-    loadConversation,
-    addMessage,
     updateConversation,
-    clearConversation,
-    generateTitle,
+    deleteConversation,
+    toggleStar,
+    searchConversations,
+    exportConversation,
   };
 }
