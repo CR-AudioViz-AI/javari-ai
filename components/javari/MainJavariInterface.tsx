@@ -280,34 +280,6 @@ export default function MainJavariInterface() {
 
   return (
     <div className="h-screen flex flex-col" style={{ backgroundColor: COLORS.javaribg }}>
-      {/* Credits Bar - Always Visible */}
-      <div 
-        className="h-12 flex items-center justify-between px-6 border-b"
-        style={{ 
-          backgroundColor: COLORS.navy,
-          borderColor: COLORS.cyan + '40'
-        }}
-      >
-        <div className="flex items-center gap-4">
-          <Sparkles className="w-5 h-5" style={{ color: COLORS.javariCyan }} />
-          <span className="text-white font-medium">
-            💎 Credits: {credits.current.toLocaleString()} / {credits.total.toLocaleString()}
-          </span>
-          <span className="text-gray-400">|</span>
-          <span className="text-white">Plan: {userPlan}</span>
-        </div>
-        <Button 
-          variant="outline" 
-          size="sm"
-          style={{ 
-            borderColor: COLORS.cyan,
-            color: COLORS.cyan 
-          }}
-        >
-          Learn More
-        </Button>
-      </div>
-
       {/* Main 3-Column Layout */}
       <div className="flex-1 flex overflow-hidden">
         {/* LEFT SIDEBAR */}
@@ -435,38 +407,62 @@ export default function MainJavariInterface() {
 
           {/* Chat Messages Area with Logo & Avatar */}
           <ScrollArea className="flex-1 p-6">
+            {/* Logo - Far Left Position */}
+            <div className="absolute left-4 top-6 z-20">
+              <Image
+                src="https://craudiovizai.com/logos/javari-logo.png"
+                alt="Javari AI"
+                width={40}
+                height={40}
+                className="rounded-lg"
+              />
+            </div>
+
             <div className="space-y-4 max-w-4xl mx-auto">
-              {/* Logo + Avatar Header (Top Left of Chat Area) */}
-              <div className="flex items-center gap-4 mb-8">
-                <Image
-                  src="/logos/javari-logo.png"
-                  alt="Javari AI"
-                  width={48}
-                  height={48}
-                  className="rounded-lg"
-                />
-                <div className="flex items-center gap-3">
+              {/* Video Conference Placeholder - Centered at Top */}
+              <div className="flex justify-center mb-6">
+                <div 
+                  className="w-full max-w-2xl h-64 rounded-lg border-2 flex items-center justify-center"
+                  style={{ 
+                    borderColor: COLORS.cyan + '60',
+                    backgroundColor: COLORS.navy + '80'
+                  }}
+                >
+                  <div className="text-center">
+                    <div className="text-6xl mb-3">🎥</div>
+                    <p className="text-white font-medium">Video Conference</p>
+                    <p className="text-gray-400 text-sm">Coming Soon</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Javari Avatar - Centered with Cyan Glow */}
+              <div className="flex flex-col items-center mb-8">
+                <div className="relative mb-4">
                   <Image
-                    src="/avatars/javari-default.png"
+                    src="https://craudiovizai.com/avatars/javari-avatar.png"
                     alt="Javari Avatar"
-                    width={64}
-                    height={64}
+                    width={96}
+                    height={96}
                     className="rounded-full"
                     style={{
                       border: `3px solid ${COLORS.javariCyan}`,
-                      boxShadow: `0 0 20px ${COLORS.javariCyan}80`,
+                      boxShadow: `0 0 30px ${COLORS.javariCyan}90, 0 0 60px ${COLORS.javariCyan}50`,
                     }}
                   />
-                  <div>
-                    <h2 className="text-white font-bold text-lg">Javari AI</h2>
-                    <p className="text-gray-400 text-sm">Autonomous Development Assistant</p>
-                    {selectedAI === 'auto' && (
-                      <p className="text-xs" style={{ color: COLORS.javariCyan }}>
-                        Auto-selecting: {aiProviders[recommendedAI]?.name}
-                      </p>
-                    )}
-                  </div>
+                  {/* Live Indicator */}
+                  <div 
+                    className="absolute bottom-1 right-1 w-5 h-5 rounded-full border-2 border-white animate-pulse"
+                    style={{ backgroundColor: '#00FF00' }}
+                  />
                 </div>
+                <p className="text-white text-lg font-semibold mb-1">Javari AI</p>
+                <p className="text-gray-400 text-sm mb-2">Joins every chat</p>
+                {selectedAI === 'auto' && (
+                  <p className="text-xs" style={{ color: COLORS.javariCyan }}>
+                    Auto-selecting: {aiProviders[recommendedAI]?.name}
+                  </p>
+                )}
               </div>
 
               {/* Messages */}
