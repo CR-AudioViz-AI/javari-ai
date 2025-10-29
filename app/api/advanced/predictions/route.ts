@@ -7,72 +7,42 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
-
-const CREDIT_COST = 25;
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { data, predictType, horizon, userId } = body;
-
-    if (!data || !predictType || !userId) {
-      return NextResponse.json(
-        { error: 'Missing required fields' },
-        { status: 400 }
-      );
+    const { historicalData, predictionType, timeframe, userId } = await req.json();
+    
+    if (!historicalData || !userId) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('credits')
-      .eq('user_id', userId)
-      .single();
-
-    if (!profile || profile.credits < CREDIT_COST) {
-      return NextResponse.json(
-        { error: 'Insufficient credits', required: CREDIT_COST },
-        { status: 402 }
-      );
+    const { data: user } = await supabase.from('users').select('credits').eq('id', userId).single();
+    if (!user || user.credits < 25) {
+      return NextResponse.json({ error: 'Insufficient credits', required: 25 }, { status: 402 });
     }
 
-    const prompt = `Generate ${predictType} predictions for the next ${horizon || '30 days'}:
-Data: ${JSON.stringify(data)}
-
-Provide predictions in JSON format with:
-- predictions: array of future values
-- confidence: confidence intervals
-- factors: key influencing factors`;
+    const prompt = `Analyze historical data and predict ${predictionType} for ${timeframe}:\n\n${JSON.stringify(historicalData, null, 2)}`;
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4',
       messages: [{ role: 'user', content: prompt }],
+      temperature: 0.5,
+      max_tokens: 2000
     });
 
-    const predictions = JSON.parse(completion.choices[0].message.content || '{}');
+    const prediction = completion.choices[0].message.content;
 
-    await supabase
-      .from('user_profiles')
-      .update({ credits: profile.credits - CREDIT_COST })
-      .eq('user_id', userId);
-
-    await supabase.from('api_usage_logs').insert({
+    await supabase.from('users').update({ credits: user.credits - 25 }).eq('id', userId);
+    await supabase.from('api_usage').insert({
       user_id: userId,
       endpoint: '/api/advanced/predictions',
-      credits_used: CREDIT_COST,
+      credits_used: 25,
+      response_data: { prediction }
     });
 
-    return NextResponse.json({
-      success: true,
-      predictions,
-      creditsUsed: CREDIT_COST,
-    });
+    return NextResponse.json({ success: true, prediction, creditsUsed: 25 });
   } catch (error: any) {
-    return NextResponse.json(
-      { error: 'Prediction failed', details: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Prediction failed', details: error.message }, { status: 500 });
   }
 }
