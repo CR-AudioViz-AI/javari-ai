@@ -7,11 +7,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
-
-const CREDIT_COST = 20;
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
 interface InsightRequest {
   data: any[];
@@ -24,71 +20,37 @@ export async function POST(req: NextRequest) {
   try {
     const body: InsightRequest = await req.json();
     const { data, analysisType, context, userId } = body;
-
+    
     if (!data || !analysisType || !userId) {
-      return NextResponse.json(
-        { error: 'Missing required fields: data, analysisType, userId' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    // Check credits
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('credits')
-      .eq('user_id', userId)
-      .single();
-
-    if (!profile || profile.credits < CREDIT_COST) {
-      return NextResponse.json(
-        { error: 'Insufficient credits', required: CREDIT_COST },
-        { status: 402 }
-      );
+    const { data: user } = await supabase.from('users').select('credits').eq('id', userId).single();
+    if (!user || user.credits < 20) {
+      return NextResponse.json({ error: 'Insufficient credits', required: 20 }, { status: 402 });
     }
 
-    // Generate AI insights
-    const prompt = `Analyze this data and provide ${analysisType}:
-${context ? `Context: ${context}\n` : ''}
-Data: ${JSON.stringify(data).substring(0, 3000)}
-
-Provide detailed insights in JSON format with:
-- summary: brief overview
-- insights: array of key findings
-- recommendations: actionable suggestions
-- confidence: confidence score 0-100`;
+    const prompt = `Analyze the following data and provide ${analysisType}:\n\n${JSON.stringify(data, null, 2)}\n\nContext: ${context || 'None'}`;
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4',
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.7,
+      max_tokens: 1500
     });
 
-    const insights = JSON.parse(completion.choices[0].message.content || '{}');
+    const insights = completion.choices[0].message.content;
 
-    // Deduct credits
-    await supabase
-      .from('user_profiles')
-      .update({ credits: profile.credits - CREDIT_COST })
-      .eq('user_id', userId);
-
-    // Log usage
-    await supabase.from('api_usage_logs').insert({
+    await supabase.from('users').update({ credits: user.credits - 20 }).eq('id', userId);
+    await supabase.from('api_usage').insert({
       user_id: userId,
       endpoint: '/api/advanced/ai-insights',
-      credits_used: CREDIT_COST,
-      metadata: { analysisType, dataPoints: data.length },
+      credits_used: 20,
+      response_data: { insights }
     });
 
-    return NextResponse.json({
-      success: true,
-      insights,
-      creditsUsed: CREDIT_COST,
-    });
+    return NextResponse.json({ success: true, insights, creditsUsed: 20 });
   } catch (error: any) {
-    console.error('AI Insights error:', error);
-    return NextResponse.json(
-      { error: 'Failed to generate insights', details: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Analysis failed', details: error.message }, { status: 500 });
   }
 }
