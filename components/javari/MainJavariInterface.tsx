@@ -278,9 +278,36 @@ export default function MainJavariInterface() {
     URL.revokeObjectURL(url);
   };
 
-  // Component JSX return
   return (
-    <div className="h-screen flex" style={{ backgroundColor: COLORS.javaribg }}>
+    <div className="h-screen flex flex-col" style={{ backgroundColor: COLORS.javaribg }}>
+      {/* Credits Bar - Always Visible */}
+      <div 
+        className="h-12 flex items-center justify-between px-6 border-b"
+        style={{ 
+          backgroundColor: COLORS.navy,
+          borderColor: COLORS.cyan + '40'
+        }}
+      >
+        <div className="flex items-center gap-4">
+          <Sparkles className="w-5 h-5" style={{ color: COLORS.javariCyan }} />
+          <span className="text-white font-medium">
+            💎 Credits: {credits.current.toLocaleString()} / {credits.total.toLocaleString()}
+          </span>
+          <span className="text-gray-400">|</span>
+          <span className="text-white">Plan: {userPlan}</span>
+        </div>
+        <Button 
+          variant="outline" 
+          size="sm"
+          style={{ 
+            borderColor: COLORS.cyan,
+            color: COLORS.cyan 
+          }}
+        >
+          Learn More
+        </Button>
+      </div>
+
       {/* Main 3-Column Layout */}
       <div className="flex-1 flex overflow-hidden">
         {/* LEFT SIDEBAR */}
@@ -406,84 +433,42 @@ export default function MainJavariInterface() {
             </Button>
           </div>
 
-          {/* Chat Messages Area with Logo & Video Conference */}
-          <ScrollArea className="flex-1">
-            <div className="space-y-4">
-              {/* Top Section: Logo (Far Left) + Video Conference (Centered) */}
-              <div className="relative w-full py-6 border-b" style={{ borderColor: COLORS.cyan + '40' }}>
-                {/* Logo - Far Left */}
-                <div className="absolute left-4 top-6">
+          {/* Chat Messages Area with Logo & Avatar */}
+          <ScrollArea className="flex-1 p-6">
+            <div className="space-y-4 max-w-4xl mx-auto">
+              {/* Logo + Avatar Header (Top Left of Chat Area) */}
+              <div className="flex items-center gap-4 mb-8">
+                <Image
+                  src="/logos/javari-logo.png"
+                  alt="Javari AI"
+                  width={48}
+                  height={48}
+                  className="rounded-lg"
+                />
+                <div className="flex items-center gap-3">
                   <Image
-                    src="https://craudiovizai.com/logos/javari-logo.png"
-                    alt="Javari AI"
-                    width={40}
-                    height={40}
-                    className="rounded-lg"
+                    src="/avatars/javari-default.png"
+                    alt="Javari Avatar"
+                    width={64}
+                    height={64}
+                    className="rounded-full"
+                    style={{
+                      border: `3px solid ${COLORS.javariCyan}`,
+                      boxShadow: `0 0 20px ${COLORS.javariCyan}80`,
+                    }}
                   />
-                </div>
-
-                {/* Video Conference - Centered */}
-                <div className="flex flex-col items-center justify-center gap-3 px-20">
-                  {/* Javari Avatar - Will be replaced with live video when she joins */}
-                  <div className="relative">
-                    <Image
-                      src="https://craudiovizai.com/avatars/javari-avatar.png"
-                      alt="Javari Avatar"
-                      width={96}
-                      height={96}
-                      className="rounded-full"
-                      style={{
-                        border: `3px solid ${COLORS.javariCyan}`,
-                        boxShadow: `0 0 30px ${COLORS.javariCyan}80`,
-                      }}
-                    />
-                    {/* Live indicator */}
-                    <div className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-green-500 border-4 border-gray-900 flex items-center justify-center">
-                      <div className="w-3 h-3 rounded-full bg-green-400 animate-pulse"></div>
-                    </div>
-                  </div>
-
-                  {/* Javari Info */}
-                  <div className="text-center">
-                    <h2 className="text-white font-bold text-xl">Javari AI</h2>
+                  <div>
+                    <h2 className="text-white font-bold text-lg">Javari AI</h2>
                     <p className="text-gray-400 text-sm">Autonomous Development Assistant</p>
                     {selectedAI === 'auto' && (
-                      <p className="text-xs mt-1" style={{ color: COLORS.javariCyan }}>
+                      <p className="text-xs" style={{ color: COLORS.javariCyan }}>
                         Auto-selecting: {aiProviders[recommendedAI]?.name}
                       </p>
                     )}
                   </div>
-
-                  {/* Speaking/Listening indicator */}
-                  {(isSpeaking || isListening) && (
-                    <div className="flex items-center gap-2">
-                      {isSpeaking && (
-                        <>
-                          <Volume2 className="w-4 h-4" style={{ color: COLORS.javariCyan }} />
-                          <span className="text-sm text-white">Javari is speaking...</span>
-                        </>
-                      )}
-                      {isListening && (
-                        <>
-                          <Mic className="w-4 h-4" style={{ color: COLORS.red }} />
-                          <span className="text-sm text-white">Listening...</span>
-                        </>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Note about live avatar */}
-                  <p className="text-xs text-gray-500 italic">
-                    Javari joins every chat • Live video coming soon
-                  </p>
                 </div>
               </div>
 
-              {/* Messages Container */}
-              <div className="px-6 max-w-4xl mx-auto">
-
-              {/* Messages Container */}
-              <div className="px-6 max-w-4xl mx-auto">
               {/* Messages */}
               {messages.length === 0 ? (
                 <div className="text-center py-12">
@@ -497,7 +482,7 @@ export default function MainJavariInterface() {
                 messages.map(message => (
                   <div
                     key={message.id}
-                    className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} mb-4`}
+                    className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
                   >
                     <div
                       className="max-w-[70%] p-4 rounded-lg"
@@ -522,7 +507,6 @@ export default function MainJavariInterface() {
                   </div>
                 ))
               )}
-              </div>
             </div>
           </ScrollArea>
 
