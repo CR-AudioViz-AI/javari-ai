@@ -7,90 +7,42 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
-
-const CREDIT_COST = 15;
-
-interface CodeReviewRequest {
-  code: string;
-  language: string;
-  reviewType?: 'security' | 'performance' | 'quality' | 'all';
-  userId: string;
-}
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
 export async function POST(req: NextRequest) {
   try {
-    const body: CodeReviewRequest = await req.json();
-    const { code, language, reviewType = 'all', userId } = body;
-
-    if (!code || !language || !userId) {
-      return NextResponse.json(
-        { error: 'Missing required fields: code, language, userId' },
-        { status: 400 }
-      );
+    const { code, language, userId } = await req.json();
+    
+    if (!code || !userId) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    // Check credits
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('credits')
-      .eq('user_id', userId)
-      .single();
-
-    if (!profile || profile.credits < CREDIT_COST) {
-      return NextResponse.json(
-        { error: 'Insufficient credits', required: CREDIT_COST },
-        { status: 402 }
-      );
+    const { data: user } = await supabase.from('users').select('credits').eq('id', userId).single();
+    if (!user || user.credits < 15) {
+      return NextResponse.json({ error: 'Insufficient credits', required: 15 }, { status: 402 });
     }
 
-    // Generate code review
-    const prompt = `Review this ${language} code for ${reviewType} issues:
-
-\`\`\`${language}
-${code}
-\`\`\`
-
-Provide detailed review in JSON format with:
-- overallScore: 0-100
-- issues: array of { severity: 'critical'|'warning'|'info', line: number, message: string, suggestion: string }
-- strengths: array of positive findings
-- recommendations: specific improvements`;
+    const prompt = `Review the following ${language || 'code'} for security vulnerabilities, performance issues, and best practices:\n\n\`\`\`\n${code}\n\`\`\``;
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4',
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.3,
+      max_tokens: 2000
     });
 
-    const review = JSON.parse(completion.choices[0].message.content || '{}');
+    const review = completion.choices[0].message.content;
 
-    // Deduct credits
-    await supabase
-      .from('user_profiles')
-      .update({ credits: profile.credits - CREDIT_COST })
-      .eq('user_id', userId);
-
-    // Log usage
-    await supabase.from('api_usage_logs').insert({
+    await supabase.from('users').update({ credits: user.credits - 15 }).eq('id', userId);
+    await supabase.from('api_usage').insert({
       user_id: userId,
       endpoint: '/api/advanced/code-review',
-      credits_used: CREDIT_COST,
-      metadata: { language, reviewType, codeLength: code.length },
+      credits_used: 15,
+      response_data: { review }
     });
 
-    return NextResponse.json({
-      success: true,
-      review,
-      creditsUsed: CREDIT_COST,
-    });
+    return NextResponse.json({ success: true, review, creditsUsed: 15 });
   } catch (error: any) {
-    console.error('Code Review error:', error);
-    return NextResponse.json(
-      { error: 'Failed to review code', details: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Review failed', details: error.message }, { status: 500 });
   }
 }
