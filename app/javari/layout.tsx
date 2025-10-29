@@ -1,4 +1,4 @@
-import './globals.css';
+import '../globals.css';
 import { Inter } from 'next/font/google';
 import { UserProfileProvider } from '@/components/user-profile/user-profile-context';
 import { SplitScreenProvider } from '@/components/split-screen/split-screen-context';
