@@ -7,98 +7,42 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
-
-const CREDIT_COST = 18;
-
-interface OptimizeRequest {
-  type: 'code' | 'query' | 'algorithm' | 'bundle';
-  content: string;
-  language?: string;
-  context?: string;
-  userId: string;
-  targetMetrics?: {
-    speedImprovement?: number;
-    memoryReduction?: number;
-  };
-}
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
 export async function POST(req: NextRequest) {
   try {
-    const body: OptimizeRequest = await req.json();
-    const { type, content, language, context, userId, targetMetrics } = body;
-
-    if (!type || !content || !userId) {
-      return NextResponse.json(
-        { error: 'Missing required fields: type, content, userId' },
-        { status: 400 }
-      );
+    const { type, content, language, targetMetrics, userId } = await req.json();
+    
+    if (!content || !userId) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    // Check credits
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('credits')
-      .eq('user_id', userId)
-      .single();
-
-    if (!profile || profile.credits < CREDIT_COST) {
-      return NextResponse.json(
-        { error: 'Insufficient credits', required: CREDIT_COST },
-        { status: 402 }
-      );
+    const { data: user } = await supabase.from('users').select('credits').eq('id', userId).single();
+    if (!user || user.credits < 18) {
+      return NextResponse.json({ error: 'Insufficient credits', required: 18 }, { status: 402 });
     }
 
-    // Generate optimization
-    const prompt = `Optimize this ${type}${language ? ` (${language})` : ''}:
-
-${context ? `Context: ${context}\n` : ''}
-${targetMetrics ? `Target: ${JSON.stringify(targetMetrics)}\n` : ''}
-
-\`\`\`
-${content}
-\`\`\`
-
-Provide optimization in JSON format with:
-- currentPerformance: { complexity: string, bottlenecks: string[] }
-- optimizedCode: string (the optimized version)
-- improvements: array of { area: string, impact: 'high'|'medium'|'low', before: string, after: string }
-- estimatedImpact: { speedImprovement: string, complexityImprovement: string }`;
+    const prompt = `Optimize the following ${type || 'code'}:\n\n\`\`\`${language || ''}\n${content}\n\`\`\`\n\nTarget: ${JSON.stringify(targetMetrics || {})}`;
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4',
       messages: [{ role: 'user', content: prompt }],
-      temperature: 0.3,
+      temperature: 0.2,
+      max_tokens: 2500
     });
 
-    const optimization = JSON.parse(completion.choices[0].message.content || '{}');
+    const optimization = completion.choices[0].message.content;
 
-    // Deduct credits
-    await supabase
-      .from('user_profiles')
-      .update({ credits: profile.credits - CREDIT_COST })
-      .eq('user_id', userId);
-
-    // Log usage
-    await supabase.from('api_usage_logs').insert({
+    await supabase.from('users').update({ credits: user.credits - 18 }).eq('id', userId);
+    await supabase.from('api_usage').insert({
       user_id: userId,
       endpoint: '/api/advanced/optimize',
-      credits_used: CREDIT_COST,
-      metadata: { type, contentLength: content.length },
+      credits_used: 18,
+      response_data: { optimization }
     });
 
-    return NextResponse.json({
-      success: true,
-      optimization,
-      creditsUsed: CREDIT_COST,
-    });
+    return NextResponse.json({ success: true, optimization, creditsUsed: 18 });
   } catch (error: any) {
-    console.error('Optimization error:', error);
-    return NextResponse.json(
-      { error: 'Failed to optimize', details: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Optimization failed', details: error.message }, { status: 500 });
   }
 }
