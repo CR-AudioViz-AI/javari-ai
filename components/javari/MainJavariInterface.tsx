@@ -278,6 +278,7 @@ export default function MainJavariInterface() {
     URL.revokeObjectURL(url);
   };
 
+  // Component JSX return
   return (
     <div className="h-screen flex" style={{ backgroundColor: COLORS.javaribg }}>
       {/* Main 3-Column Layout */}
