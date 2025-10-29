@@ -27,6 +27,9 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  Copy,
+  Check,
+  MoreVertical,
   Download,
   Printer,
   FileDown,
@@ -35,6 +38,8 @@ import {
   Volume2,
   VolumeX,
   Sparkles,
+  AlertCircle,
+  X,
 } from 'lucide-react';
 
 // Brand colors from Bible
@@ -52,6 +57,7 @@ interface Message {
   content: string;
   timestamp: string;
   provider?: string;
+  hasArtifacts?: boolean;
 }
 
 interface Conversation {
@@ -73,9 +79,27 @@ interface Project {
 interface Artifact {
   id: string;
   name: string;
-  type: 'code' | 'document' | 'image';
+  type: 'code' | 'document' | 'image' | 'data';
+  content: string;
   size: string;
-  url: string;
+  language?: string; // For code artifacts
+}
+
+interface AIProvider {
+  id: string;
+  name: string;
+  credits: number;
+  icon: string;
+  description: string;
+  bestFor: string[];
+}
+
+interface AISelectionModal {
+  show: boolean;
+  currentAI: string;
+  newAI: string;
+  currentCredits: number;
+  newCredits: number;
 }
 
 export default function MainJavariInterface() {
@@ -93,19 +117,108 @@ export default function MainJavariInterface() {
   const [language, setLanguage] = useState('English');
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [selectedAI, setSelectedAI] = useState<string>('gpt-4');
+  const [selectedAI, setSelectedAI] = useState<string>('auto');
+  const [recommendedAI, setRecommendedAI] = useState<string>('gpt-4');
+  const [aiSelectionModal, setAiSelectionModal] = useState<AISelectionModal>({
+    show: false,
+    currentAI: 'auto',
+    newAI: '',
+    currentCredits: 0,
+    newCredits: 0,
+  });
+  const [copiedArtifacts, setCopiedArtifacts] = useState<Record<string, boolean>>({});
 
-  // AI Providers
-  const aiProviders = [
-    { id: 'gpt-4', name: 'GPT-4', status: 'active', color: COLORS.cyan },
-    { id: 'claude', name: 'Claude', status: 'inactive', color: '#888' },
-    { id: 'gemini', name: 'Gemini', status: 'inactive', color: '#888' },
-    { id: 'mistral', name: 'Mistral', status: 'inactive', color: '#888' },
-  ];
+  // AI Providers with credit costs
+  const aiProviders: Record<string, AIProvider> = {
+    'gpt-4': { 
+      id: 'gpt-4', 
+      name: 'GPT-4', 
+      credits: 2, 
+      icon: '🤖',
+      description: 'Best for creative writing, complex reasoning',
+      bestFor: ['Writing', 'Analysis', 'General tasks']
+    },
+    'claude': { 
+      id: 'claude', 
+      name: 'Claude', 
+      credits: 3, 
+      icon: '🎯',
+      description: 'Best for code, analysis, long context',
+      bestFor: ['Coding', 'Research', 'Documentation']
+    },
+    'gemini': { 
+      id: 'gemini', 
+      name: 'Gemini', 
+      credits: 2, 
+      icon: '✨',
+      description: 'Best for multimodal tasks, fast responses',
+      bestFor: ['Images', 'Video', 'Speed']
+    },
+    'perplexity': { 
+      id: 'perplexity', 
+      name: 'Perplexity', 
+      credits: 1, 
+      icon: '🔍',
+      description: 'Best for research, current information',
+      bestFor: ['Research', 'News', 'Facts']
+    },
+  };
+
+  // Auto-detect best AI for query
+  const detectBestAI = (query: string): string => {
+    const lowerQuery = query.toLowerCase();
+    
+    if (lowerQuery.includes('code') || lowerQuery.includes('debug') || lowerQuery.includes('function')) {
+      return 'claude';
+    }
+    if (lowerQuery.includes('research') || lowerQuery.includes('search') || lowerQuery.includes('latest')) {
+      return 'perplexity';
+    }
+    if (lowerQuery.includes('image') || lowerQuery.includes('picture') || lowerQuery.includes('visual')) {
+      return 'gemini';
+    }
+    return 'gpt-4'; // Default
+  };
+
+  // Handle AI provider change with modal
+  const handleAIChange = (newAI: string) => {
+    if (newAI === selectedAI) return;
+
+    const current = selectedAI === 'auto' ? recommendedAI : selectedAI;
+    const currentCredits = aiProviders[current]?.credits || 0;
+    const newCredits = aiProviders[newAI]?.credits || 0;
+
+    // If switching from auto or costs are different, show modal
+    if (selectedAI === 'auto' || currentCredits !== newCredits) {
+      setAiSelectionModal({
+        show: true,
+        currentAI: current,
+        newAI: newAI,
+        currentCredits: currentCredits,
+        newCredits: newCredits,
+      });
+    } else {
+      setSelectedAI(newAI);
+    }
+  };
+
+  // Confirm AI change
+  const confirmAIChange = () => {
+    setSelectedAI(aiSelectionModal.newAI);
+    setAiSelectionModal({ ...aiSelectionModal, show: false });
+  };
 
   // Send message handler
   const handleSendMessage = async () => {
     if (!inputMessage.trim()) return;
+
+    // Auto-detect best AI if in auto mode
+    let aiToUse = selectedAI;
+    if (selectedAI === 'auto') {
+      const detected = detectBestAI(inputMessage);
+      setRecommendedAI(detected);
+      aiToUse = detected;
+    }
 
     const newMessage: Message = {
       id: Date.now().toString(),
@@ -118,17 +231,51 @@ export default function MainJavariInterface() {
     setInputMessage('');
 
     // TODO: Call API to get AI response
-    // For now, simulate response
+    // For now, simulate response with artifacts
     setTimeout(() => {
       const aiResponse: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: 'I\'m processing your request...',
+        content: `I'm processing your request using ${aiProviders[aiToUse].name}...`,
         timestamp: new Date().toISOString(),
-        provider: selectedAI,
+        provider: aiToUse,
+        hasArtifacts: Math.random() > 0.5, // Randomly add artifacts for demo
       };
       setMessages(prev => [...prev, aiResponse]);
+
+      // Simulate artifact creation
+      if (aiResponse.hasArtifacts) {
+        const newArtifact: Artifact = {
+          id: Date.now().toString(),
+          name: 'Example Component.tsx',
+          type: 'code',
+          content: `import React from 'react';\n\nexport const ExampleComponent = () => {\n  return (\n    <div className="p-4">\n      <h1>Hello World</h1>\n    </div>\n  );\n};`,
+          size: '1.2 KB',
+          language: 'typescript',
+        };
+        setArtifacts(prev => [...prev, newArtifact]);
+      }
     }, 1000);
+  };
+
+  // Copy artifact to clipboard
+  const copyArtifact = (artifactId: string, content: string) => {
+    navigator.clipboard.writeText(content);
+    setCopiedArtifacts({ ...copiedArtifacts, [artifactId]: true });
+    setTimeout(() => {
+      setCopiedArtifacts({ ...copiedArtifacts, [artifactId]: false });
+    }, 2000);
+  };
+
+  // Download artifact
+  const downloadArtifact = (artifact: Artifact, format: string) => {
+    const blob = new Blob([artifact.content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${artifact.name}.${format}`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -204,7 +351,6 @@ export default function MainJavariInterface() {
                   <span className="text-white font-medium">Starred</span>
                 </div>
                 <ScrollArea className="h-full">
-                  {/* Project list would go here */}
                   <div className="space-y-2">
                     <Card className="p-3 cursor-pointer hover:bg-gray-800" style={{ backgroundColor: COLORS.javaribg }}>
                       <div className="text-white text-sm font-medium">Project: CR AudioViz AI</div>
@@ -223,46 +369,47 @@ export default function MainJavariInterface() {
                   <Button 
                     variant="outline" 
                     className="w-full justify-start"
-                    style={{ borderColor: COLORS.cyan, color: 'white' }}
+                    style={{ borderColor: COLORS.cyan }}
                   >
-                    <div className="flex items-center gap-2">
-                      <div 
-                        className="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold"
-                        style={{ backgroundColor: COLORS.red }}
-                      >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold" style={{ backgroundColor: COLORS.red }}>
                         {userName.charAt(0)}
                       </div>
-                      <span>{userName}</span>
+                      <div className="text-left">
+                        <div className="text-white text-sm font-medium">{userName}</div>
+                        <div className="text-gray-400 text-xs">{userPlan} Plan</div>
+                      </div>
                     </div>
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent className="w-56" style={{ backgroundColor: COLORS.navy, borderColor: COLORS.cyan }}>
-                  <DropdownMenuItem style={{ color: 'white' }}>
+                <DropdownMenuContent align="start" className="w-56">
+                  <DropdownMenuItem>
                     <Globe className="w-4 h-4 mr-2" />
                     Language: {language}
                   </DropdownMenuItem>
-                  <DropdownMenuItem style={{ color: 'white' }}>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem>
                     <HelpCircle className="w-4 h-4 mr-2" />
-                    Get Help
+                    Help & Support
                   </DropdownMenuItem>
-                  <DropdownMenuItem style={{ color: 'white' }}>
+                  <DropdownMenuItem>
                     <CreditCard className="w-4 h-4 mr-2" />
-                    View Plans & Credits
+                    Manage Plan
                   </DropdownMenuItem>
-                  <DropdownMenuItem style={{ color: 'white' }}>
+                  <DropdownMenuItem>
                     <SettingsIcon className="w-4 h-4 mr-2" />
                     Settings
                   </DropdownMenuItem>
-                  <DropdownMenuItem style={{ color: 'white' }}>
+                  <DropdownMenuItem>
                     <FileText className="w-4 h-4 mr-2" />
-                    Assets & Documents
+                    Asset Library
                   </DropdownMenuItem>
-                  <DropdownMenuItem style={{ color: 'white' }}>
+                  <DropdownMenuItem>
                     <Shield className="w-4 h-4 mr-2" />
-                    Security & Keys
+                    Privacy & Security
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator style={{ backgroundColor: COLORS.cyan + '40' }} />
-                  <DropdownMenuItem style={{ color: COLORS.red }}>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem className="text-red-600">
                     <LogOut className="w-4 h-4 mr-2" />
                     Sign Out
                   </DropdownMenuItem>
@@ -273,7 +420,7 @@ export default function MainJavariInterface() {
         )}
 
         {/* CENTER COLUMN */}
-        <div className="flex-1 flex flex-col">
+        <div className="flex-1 flex flex-col relative">
           {/* Toggle buttons */}
           <div className="absolute left-0 top-1/2 -translate-y-1/2 z-10">
             <Button
@@ -286,88 +433,87 @@ export default function MainJavariInterface() {
             </Button>
           </div>
 
-          {/* Avatar Video Conference Area */}
-          <div className="h-64 border-b p-6" style={{ borderColor: COLORS.cyan + '40', backgroundColor: COLORS.navy }}>
-            <div className="h-full flex flex-col items-center justify-center">
-              {/* Javari Avatar */}
-              <Image
-                src="/avatars/javari-default.png"
-                alt="Javari AI"
-                width={128}
-                height={128}
-                className="rounded-full"
-                style={{
-                  border: `3px solid ${COLORS.javariCyan}`,
-                  boxShadow: `0 0 20px ${COLORS.javariCyan}`,
-                }}
-              />
-              
-              {/* Speaking indicator */}
-              {isSpeaking && (
-                <div className="flex items-center gap-2 text-white">
-                  <Volume2 className="w-4 h-4" style={{ color: COLORS.javariCyan }} />
-                  <span className="text-sm">Javari is speaking...</span>
-                </div>
-              )}
-
-              {/* AI Provider Chairs */}
-              <div className="flex gap-4 mt-6">
-                {aiProviders.map(provider => (
-                  <div key={provider.id} className="flex flex-col items-center">
-                    <div 
-                      className={`w-16 h-16 rounded-lg flex items-center justify-center text-white font-bold cursor-pointer transition-all ${
-                        provider.status === 'active' ? 'ring-2' : 'opacity-50'
-                      }`}
-                      style={{ 
-                        backgroundColor: COLORS.javaribg,
-                        borderColor: provider.color,
-                        border: `2px solid ${provider.color}`,
-                      }}
-                      onClick={() => setSelectedAI(provider.id)}
-                    >
-                      {provider.name.charAt(0)}
-                    </div>
-                    <span className="text-xs text-gray-400 mt-1">{provider.name}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Chat Messages Area */}
+          {/* Chat Messages Area with Logo & Avatar */}
           <ScrollArea className="flex-1 p-6">
             <div className="space-y-4 max-w-4xl mx-auto">
-              {messages.map(message => (
-                <div
-                  key={message.id}
-                  className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div
-                    className="max-w-[70%] p-4 rounded-lg"
+              {/* Logo + Avatar Header (Top Left of Chat Area) */}
+              <div className="flex items-center gap-4 mb-8">
+                <Image
+                  src="/logos/javari-logo.png"
+                  alt="Javari AI"
+                  width={48}
+                  height={48}
+                  className="rounded-lg"
+                />
+                <div className="flex items-center gap-3">
+                  <Image
+                    src="/avatars/javari-default.png"
+                    alt="Javari Avatar"
+                    width={64}
+                    height={64}
+                    className="rounded-full"
                     style={{
-                      backgroundColor: message.role === 'user' ? COLORS.cyan : COLORS.navy,
-                      color: 'white',
+                      border: `3px solid ${COLORS.javariCyan}`,
+                      boxShadow: `0 0 20px ${COLORS.javariCyan}80`,
                     }}
-                  >
-                    {message.role === 'assistant' && (
-                      <div className="flex items-center gap-2 mb-2">
-                        <Volume2 className="w-4 h-4" style={{ color: COLORS.javariCyan }} />
-                        <span className="text-xs opacity-75">Javari ({message.provider})</span>
-                      </div>
+                  />
+                  <div>
+                    <h2 className="text-white font-bold text-lg">Javari AI</h2>
+                    <p className="text-gray-400 text-sm">Autonomous Development Assistant</p>
+                    {selectedAI === 'auto' && (
+                      <p className="text-xs" style={{ color: COLORS.javariCyan }}>
+                        Auto-selecting: {aiProviders[recommendedAI]?.name}
+                      </p>
                     )}
-                    <p className="text-sm">{message.content}</p>
-                    <span className="text-xs opacity-50 mt-2 block">
-                      {new Date(message.timestamp).toLocaleTimeString()}
-                    </span>
                   </div>
                 </div>
-              ))}
+              </div>
+
+              {/* Messages */}
+              {messages.length === 0 ? (
+                <div className="text-center py-12">
+                  <div className="text-gray-400 mb-4">
+                    <Sparkles className="w-16 h-16 mx-auto mb-4" style={{ color: COLORS.javariCyan }} />
+                    <p className="text-lg font-medium text-white">Ready to assist you</p>
+                    <p className="text-sm">Ask me anything - I'll auto-select the best AI for your task</p>
+                  </div>
+                </div>
+              ) : (
+                messages.map(message => (
+                  <div
+                    key={message.id}
+                    className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div
+                      className="max-w-[70%] p-4 rounded-lg"
+                      style={{
+                        backgroundColor: message.role === 'user' ? COLORS.cyan : COLORS.navy,
+                        color: 'white',
+                      }}
+                    >
+                      {message.role === 'assistant' && (
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-xl">{aiProviders[message.provider || 'gpt-4']?.icon}</span>
+                          <span className="text-xs opacity-75">
+                            Javari via {aiProviders[message.provider || 'gpt-4']?.name}
+                          </span>
+                        </div>
+                      )}
+                      <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                      <span className="text-xs opacity-50 mt-2 block">
+                        {new Date(message.timestamp).toLocaleTimeString()}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </ScrollArea>
 
-          {/* Input Area */}
+          {/* Input Area with AI Selector Below */}
           <div className="p-4 border-t" style={{ borderColor: COLORS.cyan + '40', backgroundColor: COLORS.navy }}>
-            <div className="flex gap-2">
+            {/* Text Input */}
+            <div className="flex gap-2 mb-3">
               <Button
                 size="icon"
                 variant="outline"
@@ -400,10 +546,55 @@ export default function MainJavariInterface() {
                 Send
               </Button>
             </div>
+
+            {/* AI Model Selector - Compact & Centered */}
+            <div className="flex justify-center">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-400">AI Model:</span>
+                {/* Auto Button */}
+                <Button
+                  size="sm"
+                  variant={selectedAI === 'auto' ? 'default' : 'outline'}
+                  onClick={() => setSelectedAI('auto')}
+                  className="h-7 px-3 text-xs"
+                  style={selectedAI === 'auto' ? { 
+                    backgroundColor: COLORS.javariCyan,
+                    color: COLORS.navy,
+                    borderColor: COLORS.javariCyan 
+                  } : {
+                    borderColor: COLORS.cyan + '60',
+                    color: COLORS.cyan
+                  }}
+                >
+                  ✨ Auto
+                </Button>
+                
+                {/* AI Provider Buttons */}
+                {Object.values(aiProviders).map(provider => (
+                  <Button
+                    key={provider.id}
+                    size="sm"
+                    variant={selectedAI === provider.id ? 'default' : 'outline'}
+                    onClick={() => handleAIChange(provider.id)}
+                    className="h-7 px-3 text-xs"
+                    style={selectedAI === provider.id ? { 
+                      backgroundColor: COLORS.cyan,
+                      color: COLORS.navy,
+                      borderColor: COLORS.cyan 
+                    } : {
+                      borderColor: COLORS.cyan + '60',
+                      color: COLORS.cyan
+                    }}
+                  >
+                    {provider.icon} {provider.name}
+                  </Button>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* RIGHT SIDEBAR - Artifacts */}
+        {/* RIGHT SIDEBAR - Artifacts with Claude-Style Output */}
         {rightSidebarOpen && (
           <div 
             className="w-96 border-l flex flex-col"
@@ -413,11 +604,12 @@ export default function MainJavariInterface() {
             }}
           >
             <div className="p-4 border-b" style={{ borderColor: COLORS.cyan + '40' }}>
-              <h3 className="text-white font-medium">Artifacts</h3>
+              <h3 className="text-white font-medium">Generated Content</h3>
+              <p className="text-xs text-gray-400 mt-1">Files and artifacts from this conversation</p>
             </div>
 
             <ScrollArea className="flex-1 p-4">
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {artifacts.length === 0 ? (
                   <div className="text-center text-gray-400 py-8">
                     <FileText className="w-12 h-12 mx-auto mb-2 opacity-50" />
@@ -426,46 +618,114 @@ export default function MainJavariInterface() {
                   </div>
                 ) : (
                   artifacts.map(artifact => (
-                    <Card key={artifact.id} className="p-3" style={{ backgroundColor: COLORS.javaribg }}>
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <div className="text-white text-sm font-medium">{artifact.name}</div>
-                          <div className="text-gray-400 text-xs">{artifact.size}</div>
+                    <div 
+                      key={artifact.id}
+                      className="border rounded-lg overflow-hidden"
+                      style={{ 
+                        borderColor: COLORS.cyan + '40',
+                        backgroundColor: COLORS.javaribg 
+                      }}
+                    >
+                      {/* Artifact Header */}
+                      <div className="p-3 border-b" style={{ borderColor: COLORS.cyan + '40' }}>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <FileText className="w-4 h-4" style={{ color: COLORS.cyan }} />
+                            <span className="text-white text-sm font-medium">{artifact.name}</span>
+                          </div>
+                          <span className="text-xs text-gray-400">{artifact.size}</span>
                         </div>
-                        <FileText className="w-5 h-5" style={{ color: COLORS.cyan }} />
                       </div>
-                    </Card>
+
+                      {/* Artifact Content Preview */}
+                      <div className="p-3">
+                        <pre className="text-xs text-gray-300 overflow-x-auto">
+                          <code>{artifact.content.substring(0, 200)}...</code>
+                        </pre>
+                      </div>
+
+                      {/* Artifact Actions - Claude Style */}
+                      <div className="p-3 border-t flex items-center gap-2" style={{ borderColor: COLORS.cyan + '40' }}>
+                        {/* Primary Action: Copy */}
+                        <Button
+                          size="sm"
+                          onClick={() => copyArtifact(artifact.id, artifact.content)}
+                          className="flex-1"
+                          style={{
+                            backgroundColor: copiedArtifacts[artifact.id] ? COLORS.cyan : COLORS.cyan,
+                            color: COLORS.navy,
+                          }}
+                        >
+                          {copiedArtifacts[artifact.id] ? (
+                            <>
+                              <Check className="w-3 h-3 mr-2" />
+                              Copied!
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3 mr-2" />
+                              Copy
+                            </>
+                          )}
+                        </Button>
+
+                        {/* Secondary Actions: More Dropdown */}
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              style={{ borderColor: COLORS.cyan, color: COLORS.cyan }}
+                            >
+                              <MoreVertical className="w-3 h-3" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => downloadArtifact(artifact, artifact.type)}>
+                              <Download className="w-4 h-4 mr-2" />
+                              Download as .{artifact.type}
+                            </DropdownMenuItem>
+                            {artifact.type === 'code' && (
+                              <>
+                                <DropdownMenuItem onClick={() => downloadArtifact(artifact, 'ts')}>
+                                  <Download className="w-4 h-4 mr-2" />
+                                  Download as .ts
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => downloadArtifact(artifact, 'tsx')}>
+                                  <Download className="w-4 h-4 mr-2" />
+                                  Download as .tsx
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                            {artifact.type === 'document' && (
+                              <>
+                                <DropdownMenuItem onClick={() => downloadArtifact(artifact, 'md')}>
+                                  <Download className="w-4 h-4 mr-2" />
+                                  Download as .md
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => downloadArtifact(artifact, 'txt')}>
+                                  <Download className="w-4 h-4 mr-2" />
+                                  Download as .txt
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => downloadArtifact(artifact, 'pdf')}>
+                                  <Download className="w-4 h-4 mr-2" />
+                                  Download as .pdf
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => window.print()}>
+                              <Printer className="w-4 h-4 mr-2" />
+                              Print
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </div>
                   ))
                 )}
               </div>
             </ScrollArea>
-
-            <div className="p-4 border-t space-y-2" style={{ borderColor: COLORS.cyan + '40' }}>
-              <Button 
-                variant="outline" 
-                className="w-full"
-                style={{ borderColor: COLORS.cyan, color: COLORS.cyan }}
-              >
-                <Download className="w-4 h-4 mr-2" />
-                Download All
-              </Button>
-              <Button 
-                variant="outline" 
-                className="w-full"
-                style={{ borderColor: COLORS.cyan, color: COLORS.cyan }}
-              >
-                <Printer className="w-4 h-4 mr-2" />
-                Print
-              </Button>
-              <Button 
-                variant="outline" 
-                className="w-full"
-                style={{ borderColor: COLORS.cyan, color: COLORS.cyan }}
-              >
-                <FileDown className="w-4 h-4 mr-2" />
-                Export All
-              </Button>
-            </div>
           </div>
         )}
 
@@ -480,10 +740,110 @@ export default function MainJavariInterface() {
             {rightSidebarOpen ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
           </Button>
         </div>
-
-        {/* Prompt Hints Bar */}
-        <PromptHintsBar />
       </div>
+
+      {/* AI Selection Confirmation Modal */}
+      {aiSelectionModal.show && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div 
+            className="rounded-lg p-6 max-w-md w-full mx-4"
+            style={{ backgroundColor: COLORS.navy, border: `1px solid ${COLORS.cyan}40` }}
+          >
+            <div className="flex items-start justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-5 h-5" style={{ color: COLORS.javariCyan }} />
+                <h3 className="text-white font-medium text-lg">Switch AI Model?</h3>
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setAiSelectionModal({ ...aiSelectionModal, show: false })}
+              >
+                <X className="w-4 h-4 text-gray-400" />
+              </Button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="p-4 rounded-lg" style={{ backgroundColor: COLORS.javaribg }}>
+                <p className="text-white text-sm mb-3">
+                  {selectedAI === 'auto' ? 'Javari recommends' : 'Currently using'}:
+                </p>
+                <div className="flex items-center justify-between mb-4 p-3 rounded border" style={{ borderColor: COLORS.cyan + '40' }}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">{aiProviders[aiSelectionModal.currentAI]?.icon}</span>
+                    <div>
+                      <div className="text-white font-medium">{aiProviders[aiSelectionModal.currentAI]?.name}</div>
+                      <div className="text-xs text-gray-400">{aiProviders[aiSelectionModal.currentAI]?.description}</div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-white font-medium">{aiSelectionModal.currentCredits} credits</div>
+                    <div className="text-xs text-gray-400">per message</div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-center mb-4">
+                  <ChevronRight className="w-5 h-5 text-gray-400" />
+                </div>
+
+                <p className="text-white text-sm mb-3">Switching to:</p>
+                <div className="flex items-center justify-between p-3 rounded border" style={{ borderColor: COLORS.javariCyan }}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">{aiProviders[aiSelectionModal.newAI]?.icon}</span>
+                    <div>
+                      <div className="text-white font-medium">{aiProviders[aiSelectionModal.newAI]?.name}</div>
+                      <div className="text-xs text-gray-400">{aiProviders[aiSelectionModal.newAI]?.description}</div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-white font-medium">{aiSelectionModal.newCredits} credits</div>
+                    <div className="text-xs text-gray-400">per message</div>
+                  </div>
+                </div>
+              </div>
+
+              {aiSelectionModal.newCredits !== aiSelectionModal.currentCredits && (
+                <div 
+                  className="p-3 rounded-lg text-center"
+                  style={{ 
+                    backgroundColor: aiSelectionModal.newCredits > aiSelectionModal.currentCredits ? COLORS.red + '20' : COLORS.cyan + '20',
+                    border: `1px solid ${aiSelectionModal.newCredits > aiSelectionModal.currentCredits ? COLORS.red : COLORS.cyan}60`
+                  }}
+                >
+                  <p className="text-sm text-white">
+                    {aiSelectionModal.newCredits > aiSelectionModal.currentCredits ? (
+                      <>⚠️ This will use {aiSelectionModal.newCredits - aiSelectionModal.currentCredits} more credits per message</>
+                    ) : (
+                      <>✅ This will save {aiSelectionModal.currentCredits - aiSelectionModal.newCredits} credits per message</>
+                    )}
+                  </p>
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <Button
+                  className="flex-1"
+                  variant="outline"
+                  onClick={() => setAiSelectionModal({ ...aiSelectionModal, show: false })}
+                  style={{ borderColor: COLORS.cyan, color: COLORS.cyan }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  className="flex-1"
+                  onClick={confirmAIChange}
+                  style={{ backgroundColor: COLORS.red, color: 'white' }}
+                >
+                  Switch AI
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Prompt Hints Bar */}
+      <PromptHintsBar />
     </div>
   );
 }
