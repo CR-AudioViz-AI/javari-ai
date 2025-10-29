@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Image from 'next/image';
+import { PromptHintsBar } from '@/components/javari/PromptHintsBar';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -288,16 +290,17 @@ export default function MainJavariInterface() {
           <div className="h-64 border-b p-6" style={{ borderColor: COLORS.cyan + '40', backgroundColor: COLORS.navy }}>
             <div className="h-full flex flex-col items-center justify-center">
               {/* Javari Avatar */}
-              <div 
-                className="w-32 h-32 rounded-full flex items-center justify-center text-white text-4xl font-bold mb-4"
-                style={{ 
-                  backgroundColor: COLORS.javaribg,
+              <Image
+                src="/avatars/javari-default.png"
+                alt="Javari AI"
+                width={128}
+                height={128}
+                className="rounded-full"
+                style={{
                   border: `3px solid ${COLORS.javariCyan}`,
                   boxShadow: `0 0 20px ${COLORS.javariCyan}`,
                 }}
-              >
-                J
-              </div>
+              />
               
               {/* Speaking indicator */}
               {isSpeaking && (
@@ -477,6 +480,9 @@ export default function MainJavariInterface() {
             {rightSidebarOpen ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
           </Button>
         </div>
+
+        {/* Prompt Hints Bar */}
+        <PromptHintsBar />
       </div>
     </div>
   );
