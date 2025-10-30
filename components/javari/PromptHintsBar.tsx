@@ -128,7 +128,7 @@ export function PromptHintsBar() {
   useEffect(() => {
     const interval = setInterval(() => {
       setCurrentIndex((prev) => (prev + 1) % ALL_PROMPTS.length)
-    }, 6000) // Change every 6 seconds (more time to read detailed prompts)
+    }, 12000) // Change every 12 seconds (twice as long for comfortable reading)
 
     return () => clearInterval(interval)
   }, [])
