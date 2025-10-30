@@ -164,20 +164,61 @@ export default function MainJavariInterface() {
     },
   };
 
-  // Auto-detect best AI for query
+  // Enhanced AI detection with multi-factor analysis
   const detectBestAI = (query: string): string => {
-    const lowerQuery = query.toLowerCase();
-    
-    if (lowerQuery.includes('code') || lowerQuery.includes('debug') || lowerQuery.includes('function')) {
-      return 'claude';
+    const lowerQuery = query.toLowerCase()
+    const scores: Record<string, number> = {
+      'gpt-4': 0,
+      'claude': 0,
+      'gemini': 0,
+      'perplexity': 0
     }
-    if (lowerQuery.includes('research') || lowerQuery.includes('search') || lowerQuery.includes('latest')) {
-      return 'perplexity';
+
+    // Claude - Best for code and technical tasks
+    const claudeKeywords = ['code', 'function', 'class', 'algorithm', 'debug', 'refactor', 'typescript', 'javascript', 'python', 'react', 'api', 'database', 'sql', 'component', 'analyze', 'technical', 'architecture'];
+    const claudeMatches = claudeKeywords.filter(k => lowerQuery.includes(k)).length;
+    scores['claude'] = claudeMatches * 3;
+
+    // Perplexity - Best for research and current information
+    const perplexityKeywords = ['research', 'latest', 'current', 'news', 'recent', 'today', '2024', '2025', 'search', 'find', 'what is', 'who is', 'trend', 'market', 'statistics'];
+    const perplexityMatches = perplexityKeywords.filter(k => lowerQuery.includes(k)).length;
+    scores['perplexity'] = perplexityMatches * 3;
+
+    // Gemini - Best for multimodal and visual tasks
+    const geminiKeywords = ['image', 'picture', 'photo', 'visual', 'diagram', 'chart', 'graph', 'design', 'ui', 'mockup', 'video', 'audio'];
+    const geminiMatches = geminiKeywords.filter(k => lowerQuery.includes(k)).length;
+    scores['gemini'] = geminiMatches * 3;
+
+    // GPT-4 - Best for general tasks, writing, creative work
+    const gpt4Keywords = ['write', 'essay', 'article', 'blog', 'story', 'content', 'email', 'letter', 'explain', 'summarize', 'brainstorm', 'creative', 'strategy'];
+    const gpt4Matches = gpt4Keywords.filter(k => lowerQuery.includes(k)).length;
+    scores['gpt-4'] = gpt4Matches * 3;
+
+    // Additional heuristics
+    if (lowerQuery.length > 200 && /function|class|import|export|const|let/i.test(query)) {
+      scores['claude'] += 5;
     }
-    if (lowerQuery.includes('image') || lowerQuery.includes('picture') || lowerQuery.includes('visual')) {
-      return 'gemini';
+    if (/\b(today|now|current|latest|recent)\b/i.test(query)) {
+      scores['perplexity'] += 3;
     }
-    return 'gpt-4'; // Default
+    if (/```|`[\w\s]+`/.test(query)) {
+      scores['claude'] += 4;
+    }
+    if (/feel|imagine|beautiful|wonderful|amazing|creative/i.test(query)) {
+      scores['gpt-4'] += 2;
+    }
+
+    // Find provider with highest score
+    const bestProvider = Object.entries(scores).reduce((best, current) => {
+      return current[1] > best[1] ? current : best
+    }, ['gpt-4', 0])[0]
+
+    // If no clear winner (all scores low), default to GPT-4
+    if (scores[bestProvider] < 2) {
+      return 'gpt-4'
+    }
+
+    return bestProvider;
   };
 
   // Handle AI provider change with modal
@@ -208,7 +249,7 @@ export default function MainJavariInterface() {
     setAiSelectionModal({ ...aiSelectionModal, show: false });
   };
 
-  // Send message handler
+  // Send message handler with REAL OpenAI API
   const handleSendMessage = async () => {
     if (!inputMessage.trim()) return;
 
@@ -230,32 +271,124 @@ export default function MainJavariInterface() {
     setMessages([...messages, newMessage]);
     setInputMessage('');
 
-    // TODO: Call API to get AI response
-    // For now, simulate response with artifacts
-    setTimeout(() => {
-      const aiResponse: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: `I'm processing your request using ${aiProviders[aiToUse].name}...`,
-        timestamp: new Date().toISOString(),
-        provider: aiToUse,
-        hasArtifacts: Math.random() > 0.5, // Randomly add artifacts for demo
-      };
-      setMessages(prev => [...prev, aiResponse]);
+    // Create placeholder for AI response
+    const aiResponseId = (Date.now() + 1).toString();
+    const aiResponse: Message = {
+      id: aiResponseId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date().toISOString(),
+      provider: aiToUse,
+      hasArtifacts: false,
+    };
+    setMessages(prev => [...prev, aiResponse]);
 
-      // Simulate artifact creation
-      if (aiResponse.hasArtifacts) {
-        const newArtifact: Artifact = {
-          id: Date.now().toString(),
-          name: 'Example Component.tsx',
-          type: 'code',
-          content: `import React from 'react';\n\nexport const ExampleComponent = () => {\n  return (\n    <div className="p-4">\n      <h1>Hello World</h1>\n    </div>\n  );\n};`,
-          size: '1.2 KB',
-          language: 'typescript',
-        };
-        setArtifacts(prev => [...prev, newArtifact]);
+    try {
+      // Call REAL OpenAI API with streaming
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: [
+            ...messages.map(m => ({
+              role: m.role,
+              content: m.content
+            })),
+            { role: 'user', content: newMessage.content }
+          ],
+          aiProvider: aiToUse
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('API request failed');
       }
-    }, 1000);
+
+      // Handle streaming response
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let accumulatedContent = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value);
+          const lines = chunk.split('\n');
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              if (data === '[DONE]') break;
+
+              try {
+                const { text } = JSON.parse(data);
+                accumulatedContent += text;
+
+                // Update message with streaming content
+                setMessages(prev => 
+                  prev.map(m => 
+                    m.id === aiResponseId 
+                      ? { ...m, content: accumulatedContent }
+                      : m
+                  )
+                );
+              } catch (e) {
+                // Skip invalid JSON
+              }
+            }
+          }
+        }
+      }
+
+      // TODO: Parse content for artifacts (code blocks, documents, etc.)
+      // If code blocks found, create artifacts
+      const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
+      const codeBlocks = [...accumulatedContent.matchAll(codeBlockRegex)];
+      
+      if (codeBlocks.length > 0) {
+        codeBlocks.forEach((match, index) => {
+          const language = match[1] || 'text';
+          const code = match[2];
+          const newArtifact: Artifact = {
+            id: `${Date.now()}-${index}`,
+            name: `${language}_snippet_${index + 1}.${language}`,
+            type: 'code',
+            content: code,
+            size: `${(code.length / 1024).toFixed(1)} KB`,
+            language: language,
+          };
+          setArtifacts(prev => [...prev, newArtifact]);
+        });
+
+        // Update message to indicate artifacts were created
+        setMessages(prev => 
+          prev.map(m => 
+            m.id === aiResponseId 
+              ? { ...m, hasArtifacts: true }
+              : m
+          )
+        );
+      }
+
+    } catch (error) {
+      console.error('Error calling AI API:', error);
+      // Update message with error
+      setMessages(prev => 
+        prev.map(m => 
+          m.id === aiResponseId 
+            ? { 
+                ...m, 
+                content: 'Sorry, I encountered an error processing your request. Please try again.',
+                provider: aiToUse
+              }
+            : m
+        )
+      );
+    }
   };
 
   // Copy artifact to clipboard
