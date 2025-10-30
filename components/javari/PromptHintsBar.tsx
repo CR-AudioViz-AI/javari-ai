@@ -164,7 +164,7 @@ export function PromptHintsBar() {
           className="text-xs hover:text-cyan-300 transition-colors whitespace-nowrap underline flex-shrink-0"
           style={{ color: '#00D4FF' }}
         >
-          View All 100 Prompts →
+          View over 100 prompts →
         </a>
       </div>
     </div>
