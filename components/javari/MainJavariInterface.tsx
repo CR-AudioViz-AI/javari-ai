@@ -335,7 +335,7 @@ export default function MainJavariInterface() {
             </div>
 
             {/* User Profile Menu - Bottom Left */}
-            <div className="p-4 border-t" style={{ borderColor: COLORS.cyan + '40' }}>
+            <div className="p-4 pb-20 border-t" style={{ borderColor: COLORS.cyan + '40' }}>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button 
@@ -419,28 +419,11 @@ export default function MainJavariInterface() {
             </div>
 
             <div className="space-y-4 max-w-4xl mx-auto">
-              {/* Video Conference Placeholder - Centered at Top */}
-              <div className="flex justify-center mb-6">
-                <div 
-                  className="w-full max-w-2xl h-64 rounded-lg border-2 flex items-center justify-center"
-                  style={{ 
-                    borderColor: COLORS.cyan + '60',
-                    backgroundColor: COLORS.navy + '80'
-                  }}
-                >
-                  <div className="text-center">
-                    <div className="text-6xl mb-3">🎥</div>
-                    <p className="text-white font-medium">Video Conference</p>
-                    <p className="text-gray-400 text-sm">Coming Soon</p>
-                  </div>
-                </div>
-              </div>
-
               {/* Javari Avatar - Centered with Cyan Glow */}
               <div className="flex flex-col items-center mb-8">
                 <div className="relative mb-4">
                   <Image
-                    src="https://craudiovizai.com/public/avatars/javariaiavatar.png"
+                    src="/avatars/javariavatar.png"
                     alt="Javari Avatar"
                     width={96}
                     height={96}
