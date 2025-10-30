@@ -410,7 +410,7 @@ export default function MainJavariInterface() {
             {/* Logo - Far Left Position */}
             <div className="absolute left-4 top-6 z-20">
               <Image
-                src="https://craudiovizai.com/logos/javari-logo.png"
+                src="https://craudiovizai.com/public/javariai_halo_circuit_crown.png"
                 alt="Javari AI"
                 width={40}
                 height={40}
@@ -440,7 +440,7 @@ export default function MainJavariInterface() {
               <div className="flex flex-col items-center mb-8">
                 <div className="relative mb-4">
                   <Image
-                    src="https://craudiovizai.com/avatars/javari-avatar.png"
+                    src="https://craudiovizai.com/public/avatars/javariaiavatar.png"
                     alt="Javari Avatar"
                     width={96}
                     height={96}
