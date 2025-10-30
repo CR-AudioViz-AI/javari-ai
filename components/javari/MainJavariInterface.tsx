@@ -545,8 +545,8 @@ export default function MainJavariInterface() {
               <Image
                 src="/javariailogo.png"
                 alt="Javari AI"
-                width={40}
-                height={40}
+                width={160}
+                height={160}
                 className="rounded-lg"
               />
             </div>
@@ -660,16 +660,16 @@ export default function MainJavariInterface() {
               </Button>
             </div>
 
-            {/* AI Model Selector - Compact & Centered */}
-            <div className="flex justify-center">
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-white/70">AI Model:</span>
+            {/* AI Model Selector - Large & Prominent */}
+            <div className="flex justify-center mt-4">
+              <div className="flex items-center gap-3 bg-gray-900/50 rounded-lg p-3 border" style={{ borderColor: COLORS.cyan + '40' }}>
+                <span className="text-sm text-white font-medium">Select AI Model:</span>
                 {/* Auto Button */}
                 <Button
-                  size="sm"
+                  size="default"
                   variant={selectedAI === 'auto' ? 'default' : 'outline'}
                   onClick={() => setSelectedAI('auto')}
-                  className="h-7 px-3 text-xs"
+                  className="h-10 px-4 text-sm font-medium"
                   style={selectedAI === 'auto' ? { 
                     backgroundColor: COLORS.javariCyan,
                     color: COLORS.navy,
@@ -686,10 +686,10 @@ export default function MainJavariInterface() {
                 {Object.values(aiProviders).map(provider => (
                   <Button
                     key={provider.id}
-                    size="sm"
+                    size="default"
                     variant={selectedAI === provider.id ? 'default' : 'outline'}
                     onClick={() => handleAIChange(provider.id)}
-                    className="h-7 px-3 text-xs"
+                    className="h-10 px-4 text-sm font-medium"
                     style={selectedAI === provider.id ? { 
                       backgroundColor: COLORS.cyan,
                       color: COLORS.navy,
