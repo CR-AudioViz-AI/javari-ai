@@ -410,7 +410,7 @@ export default function MainJavariInterface() {
             {/* Logo - Far Left Position */}
             <div className="absolute left-4 top-6 z-20">
               <Image
-                src="https://craudiovizai.com/public/javariai_halo_circuit_crown.png"
+                src="/javariailogo.png"
                 alt="Javari AI"
                 width={40}
                 height={40}
