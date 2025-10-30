@@ -349,7 +349,7 @@ export default function MainJavariInterface() {
                       </div>
                       <div className="text-left">
                         <div className="text-white text-sm font-medium">{userName}</div>
-                        <div className="text-gray-400 text-xs">{userPlan} Plan</div>
+                        <div className="text-white/80 text-xs">{userPlan} Plan</div>
                       </div>
                     </div>
                   </Button>
@@ -427,10 +427,11 @@ export default function MainJavariInterface() {
                     alt="Javari Avatar"
                     width={96}
                     height={96}
-                    className="rounded-full"
+                    className="rounded-full object-cover"
                     style={{
                       border: `3px solid ${COLORS.javariCyan}`,
                       boxShadow: `0 0 30px ${COLORS.javariCyan}90, 0 0 60px ${COLORS.javariCyan}50`,
+                      objectPosition: '60% center'
                     }}
                   />
                   {/* Live Indicator */}
@@ -440,7 +441,7 @@ export default function MainJavariInterface() {
                   />
                 </div>
                 <p className="text-white text-lg font-semibold mb-1">Javari AI</p>
-                <p className="text-gray-400 text-sm mb-2">Joins every chat</p>
+                <p className="text-white/70 text-sm mb-2">Joins every chat</p>
                 {selectedAI === 'auto' && (
                   <p className="text-xs" style={{ color: COLORS.javariCyan }}>
                     Auto-selecting: {aiProviders[recommendedAI]?.name}
@@ -451,7 +452,7 @@ export default function MainJavariInterface() {
               {/* Messages */}
               {messages.length === 0 ? (
                 <div className="text-center py-12">
-                  <div className="text-gray-400 mb-4">
+                  <div className="text-white/70 mb-4">
                     <Sparkles className="w-16 h-16 mx-auto mb-4" style={{ color: COLORS.javariCyan }} />
                     <p className="text-lg font-medium text-white">Ready to assist you</p>
                     <p className="text-sm">Ask me anything - I'll auto-select the best AI for your task</p>
@@ -529,7 +530,7 @@ export default function MainJavariInterface() {
             {/* AI Model Selector - Compact & Centered */}
             <div className="flex justify-center">
               <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-400">AI Model:</span>
+                <span className="text-xs text-white/70">AI Model:</span>
                 {/* Auto Button */}
                 <Button
                   size="sm"
@@ -584,13 +585,13 @@ export default function MainJavariInterface() {
           >
             <div className="p-4 border-b" style={{ borderColor: COLORS.cyan + '40' }}>
               <h3 className="text-white font-medium">Generated Content</h3>
-              <p className="text-xs text-gray-400 mt-1">Files and artifacts from this conversation</p>
+              <p className="text-xs text-white/60 mt-1">Files and artifacts from this conversation</p>
             </div>
 
             <ScrollArea className="flex-1 p-4">
               <div className="space-y-4">
                 {artifacts.length === 0 ? (
-                  <div className="text-center text-gray-400 py-8">
+                  <div className="text-center text-white/60 py-8">
                     <FileText className="w-12 h-12 mx-auto mb-2 opacity-50" />
                     <p>No artifacts yet</p>
                     <p className="text-xs mt-1">Generated files will appear here</p>
@@ -612,7 +613,7 @@ export default function MainJavariInterface() {
                             <FileText className="w-4 h-4" style={{ color: COLORS.cyan }} />
                             <span className="text-white text-sm font-medium">{artifact.name}</span>
                           </div>
-                          <span className="text-xs text-gray-400">{artifact.size}</span>
+                          <span className="text-xs text-white/60">{artifact.size}</span>
                         </div>
                       </div>
 
@@ -738,7 +739,7 @@ export default function MainJavariInterface() {
                 variant="ghost"
                 onClick={() => setAiSelectionModal({ ...aiSelectionModal, show: false })}
               >
-                <X className="w-4 h-4 text-gray-400" />
+                <X className="w-4 h-4 text-white/70 hover:text-white" />
               </Button>
             </div>
 
@@ -752,17 +753,17 @@ export default function MainJavariInterface() {
                     <span className="text-2xl">{aiProviders[aiSelectionModal.currentAI]?.icon}</span>
                     <div>
                       <div className="text-white font-medium">{aiProviders[aiSelectionModal.currentAI]?.name}</div>
-                      <div className="text-xs text-gray-400">{aiProviders[aiSelectionModal.currentAI]?.description}</div>
+                      <div className="text-xs text-white/60">{aiProviders[aiSelectionModal.currentAI]?.description}</div>
                     </div>
                   </div>
                   <div className="text-right">
                     <div className="text-white font-medium">{aiSelectionModal.currentCredits} credits</div>
-                    <div className="text-xs text-gray-400">per message</div>
+                    <div className="text-xs text-white/60">per message</div>
                   </div>
                 </div>
 
                 <div className="flex items-center justify-center mb-4">
-                  <ChevronRight className="w-5 h-5 text-gray-400" />
+                  <ChevronRight className="w-5 h-5 text-white/50" />
                 </div>
 
                 <p className="text-white text-sm mb-3">Switching to:</p>
@@ -771,12 +772,12 @@ export default function MainJavariInterface() {
                     <span className="text-2xl">{aiProviders[aiSelectionModal.newAI]?.icon}</span>
                     <div>
                       <div className="text-white font-medium">{aiProviders[aiSelectionModal.newAI]?.name}</div>
-                      <div className="text-xs text-gray-400">{aiProviders[aiSelectionModal.newAI]?.description}</div>
+                      <div className="text-xs text-white/60">{aiProviders[aiSelectionModal.newAI]?.description}</div>
                     </div>
                   </div>
                   <div className="text-right">
                     <div className="text-white font-medium">{aiSelectionModal.newCredits} credits</div>
-                    <div className="text-xs text-gray-400">per message</div>
+                    <div className="text-xs text-white/60">per message</div>
                   </div>
                 </div>
               </div>
