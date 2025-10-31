@@ -624,7 +624,7 @@ export default function MainJavariInterface() {
           </ScrollArea>
 
           {/* Input Area with AI Selector Below */}
-          <div className="p-4 border-t" style={{ borderColor: COLORS.cyan + '40', backgroundColor: COLORS.navy }}>
+          <div className="p-4 pb-24 border-t" style={{ borderColor: COLORS.cyan + '40', backgroundColor: COLORS.navy }}>
             {/* Text Input */}
             <div className="flex gap-2 mb-3">
               <Button
