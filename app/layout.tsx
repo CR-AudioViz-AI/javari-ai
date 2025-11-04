@@ -9,6 +9,7 @@ import { SplitScreenProvider } from '@/components/split-screen/split-screen-cont
 import { UserProfileButton } from '@/components/user-profile/UserProfileButton'
 import { CreditsBar } from '@/components/credits/CreditsBar'
 import { HeaderLogo } from '@/components/header/HeaderLogo'
+import { EmbedAuthReceiver } from '@/components/EmbedAuthReceiver'
 
 export default function RootLayout({
   children,
@@ -25,6 +26,9 @@ export default function RootLayout({
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
       </head>
       <body className="min-h-screen bg-background font-sans antialiased">
+        {/* Embed Auth Receiver - handles auth when embedded in website */}
+        <EmbedAuthReceiver />
+        
         {/* Wrap everything in providers */}
         <UserProfileProvider>
           <SplitScreenProvider>
