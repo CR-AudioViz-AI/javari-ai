@@ -1,17 +1,1 @@
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "github": {
-    "autoAlias": false,
-    "silent": true
-  },
-  "crons": [
-    {
-      "path": "/api/cron/self-healing",
-      "schedule": "*/30 * * * *"
-    },
-    {
-      "path": "/api/cron/web-crawl",
-      "schedule": "0 6 * * *"
-    }
-  ]
-}
+{"$schema":"https://openapi.vercel.sh/vercel.json","github":{"autoAlias":false}}
