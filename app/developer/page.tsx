@@ -131,7 +131,7 @@ export default function DeveloperModePage() {
       });
 
       setDescription('');
-    } catch (error) {
+    } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
       setGenerations(prev =>
