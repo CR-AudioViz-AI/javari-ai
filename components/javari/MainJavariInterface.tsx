@@ -374,7 +374,7 @@ export default function MainJavariInterface() {
         );
       }
 
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error calling AI API:', error);
       // Update message with error
       setMessages(prev => 
