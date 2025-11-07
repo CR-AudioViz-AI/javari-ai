@@ -47,7 +47,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
         setProfile(data);
         setLanguageState(data.language || 'en');
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to load profile:', error);
     } finally {
       setIsLoading(false);
@@ -68,7 +68,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
       if (profile) {
         setProfile({ ...profile, language: lang });
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to update language:', error);
     }
   };
