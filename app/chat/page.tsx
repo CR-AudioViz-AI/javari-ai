@@ -74,7 +74,7 @@ export default function ChatPage() {
         const data = await response.json();
         setProviders(data.providers || providers);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to fetch provider status:', error);
     }
   };
@@ -203,7 +203,7 @@ export default function ChatPage() {
         title: 'Message sent',
         description: 'Response received successfully',
       });
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Chat error:', error);
       toast({
         title: 'Error',
@@ -237,7 +237,7 @@ export default function ChatPage() {
           model: messages.find((m) => m.id === messageId)?.model,
         }),
       });
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to save rating:', error);
     }
 
