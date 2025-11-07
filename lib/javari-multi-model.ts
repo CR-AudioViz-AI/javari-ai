@@ -9,6 +9,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { JAVARI_SYSTEM_PROMPT } from './javari-system-prompt';
 import { FUNCTION_SCHEMAS, FUNCTION_HANDLERS } from './javari-functions';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 export type AIModel = 
   | 'gpt-4-turbo'
@@ -332,7 +333,7 @@ export class JavariMultiModel {
             if (content) {
               yield content;
             }
-          } catch (e) {
+          } catch (e: unknown) {
             // Skip invalid JSON
           }
         }
