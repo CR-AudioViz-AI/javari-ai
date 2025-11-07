@@ -7,6 +7,7 @@
 
 import { NextResponse } from 'next/server';
 import { initializeAutonomousSystems } from '@/lib/autonomous';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 export const runtime = 'edge';
 export const maxDuration = 300; // 5 minutes
@@ -61,8 +62,8 @@ export async function GET(request: Request) {
       timestamp: new Date().toISOString(),
       stats
     });
-  } catch (error) {
-    console.error('❌ Web crawl cycle failed:', error);
+  } catch (error: unknown) {
+    logError(\'❌ Web crawl cycle failed:\', error);
     return NextResponse.json(
       {
         success: false,
