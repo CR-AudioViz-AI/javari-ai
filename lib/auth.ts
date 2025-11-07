@@ -8,6 +8,7 @@
 
 import { createClient } from '@/lib/supabase/client';
 import { User } from '@supabase/supabase-js';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 export interface AuthUser {
   id: string;
@@ -38,8 +39,8 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
       avatar_url: user.user_metadata?.avatar_url,
       is_authenticated: true
     };
-  } catch (error) {
-    console.error('Failed to get current user:', error);
+  } catch (error: unknown) {
+    logError(\'Failed to get current user:\', error);
     return null;
   }
 }
