@@ -91,7 +91,7 @@ export class AutonomousVercel {
         url: data.url,
         state: data.readyState
       };
-    } catch (error) {
+    } catch (error: unknown) {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
@@ -127,8 +127,8 @@ export class AutonomousVercel {
         buildingAt: data.buildingAt,
         ready: data.ready
       };
-    } catch (error) {
-      console.error('Error getting deployment status:', error);
+    } catch (error: unknown) {
+      logError(\'Error getting deployment status:\', error);
       return null;
     }
   }
@@ -222,8 +222,8 @@ export class AutonomousVercel {
           level: event.type === 'stderr' ? 'error' : 'info',
           message: event.payload?.text || event.text || ''
         }));
-    } catch (error) {
-      console.error('Error fetching build logs:', error);
+    } catch (error: unknown) {
+      logError(\'Error fetching build logs:\', error);
       return [];
     }
   }
@@ -245,7 +245,7 @@ export class AutonomousVercel {
       });
 
       return response.ok;
-    } catch (error) {
+    } catch (error: unknown) {
       return false;
     }
   }
@@ -282,8 +282,8 @@ export class AutonomousVercel {
         url: latest.url,
         created: latest.created
       };
-    } catch (error) {
-      console.error('Error getting latest deployment:', error);
+    } catch (error: unknown) {
+      logError(\'Error getting latest deployment:\', error);
       return null;
     }
   }
@@ -307,7 +307,7 @@ export class AutonomousVercel {
 
       const data = await response.json();
       return data.name || 'unknown-project';
-    } catch (error) {
+    } catch (error: unknown) {
       return 'unknown-project';
     }
   }
@@ -327,8 +327,8 @@ export class AutonomousVercel {
       });
 
       return response.ok;
-    } catch (error) {
-      console.error('Error canceling deployment:', error);
+    } catch (error: unknown) {
+      logError(\'Error canceling deployment:\', error);
       return false;
     }
   }
@@ -348,8 +348,8 @@ export class AutonomousVercel {
       });
 
       return response.ok;
-    } catch (error) {
-      console.error('Error promoting deployment:', error);
+    } catch (error: unknown) {
+      logError(\'Error promoting deployment:\', error);
       return false;
     }
   }
@@ -381,8 +381,8 @@ export class AutonomousVercel {
         url: d.url,
         created: d.created
       }));
-    } catch (error) {
-      console.error('Error listing deployments:', error);
+    } catch (error: unknown) {
+      logError(\'Error listing deployments:\', error);
       return [];
     }
   }
