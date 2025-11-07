@@ -9,6 +9,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
@@ -98,7 +99,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (error) {
-      console.error('Feedback submission error:', error);
+      logError(\'Feedback submission error:\', error);
       return NextResponse.json(
         { error: 'Failed to submit feedback' },
         { status: 500 }
@@ -128,8 +129,8 @@ export async function POST(request: NextRequest) {
       feedbackId: data.id,
       message: 'Thank you for your feedback! This helps Javari improve.',
     });
-  } catch (error) {
-    console.error('Feedback error:', error);
+  } catch (error: unknown) {
+    logError(\'Feedback error:\', error);
     return NextResponse.json(
       {
         error: 'Failed to process feedback',
@@ -194,8 +195,8 @@ export async function GET(request: NextRequest) {
       feedback: feedback || [],
       stats: stats,
     });
-  } catch (error) {
-    console.error('Get feedback error:', error);
+  } catch (error: unknown) {
+    logError(\'Get feedback error:\', error);
     return NextResponse.json(
       {
         error: 'Failed to fetch feedback',
@@ -253,8 +254,8 @@ export async function PATCH(request: NextRequest) {
       success: true,
       feedback: data,
     });
-  } catch (error) {
-    console.error('Update feedback error:', error);
+  } catch (error: unknown) {
+    logError(\'Update feedback error:\', error);
     return NextResponse.json(
       {
         error: 'Failed to update feedback',
@@ -336,8 +337,8 @@ export async function OPTIONS(request: NextRequest) {
         models: [...new Set(feedback.map(f => f.model_used))],
       },
     });
-  } catch (error) {
-    console.error('Get insights error:', error);
+  } catch (error: unknown) {
+    logError(\'Get insights error:\', error);
     return NextResponse.json(
       {
         error: 'Failed to fetch insights',
