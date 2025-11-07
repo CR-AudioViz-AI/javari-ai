@@ -68,7 +68,7 @@ export default function WorkLogsPage() {
         const data = await response.json();
         setLogs(data.work_logs || []);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error fetching work logs:', error);
     } finally {
       setLoading(false);
@@ -82,7 +82,7 @@ export default function WorkLogsPage() {
         const data = await response.json();
         setStats(data.stats);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error fetching stats:', error);
     }
   };
