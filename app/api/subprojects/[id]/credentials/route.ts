@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
 import type { ApiResponse, JavariSubProject } from '@/types/javari';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 // PATCH /api/subprojects/[id]/credentials - Update credential overrides
 export async function PATCH(
@@ -52,7 +53,7 @@ export async function PATCH(
       { success: true, data, message: 'Credentials updated successfully' },
       { status: 200 }
     );
-  } catch (error) {
+  } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json<ApiResponse<null>>(
       { success: false, error: message },
@@ -122,7 +123,7 @@ export async function GET(
       },
       { status: 200 }
     );
-  } catch (error) {
+  } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json<ApiResponse<null>>(
       { success: false, error: message },
@@ -165,7 +166,7 @@ export async function DELETE(
       { success: true, data, message: 'All credentials cleared successfully' },
       { status: 200 }
     );
-  } catch (error) {
+  } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json<ApiResponse<null>>(
       { success: false, error: message },
