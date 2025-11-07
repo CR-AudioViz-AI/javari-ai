@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
 import OpenAI from 'openai';
 import type { ApiResponse } from '@/types/javari';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 // Mark route as dynamic
 export const dynamic = 'force-dynamic';
@@ -207,8 +208,8 @@ Keep all items concise and specific. Return ONLY valid JSON, no additional text.
       data: aiInsights,
     });
 
-  } catch (error) {
-    console.error('Generate summary error:', error);
+  } catch (error: unknown) {
+    logError(\'Generate summary error:\', error);
     return NextResponse.json<ApiResponse<null>>({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
