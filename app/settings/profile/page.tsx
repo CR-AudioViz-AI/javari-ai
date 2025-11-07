@@ -42,7 +42,7 @@ export default function ProfileSettingsPage() {
         } else {
           setMessage({ type: 'error', text: 'Failed to load profile' })
         }
-      } catch (error) {
+      } catch (error: unknown) {
         console.error('Error loading profile:', error)
         setMessage({ type: 'error', text: 'An error occurred while loading your profile' })
       } finally {
@@ -75,7 +75,7 @@ export default function ProfileSettingsPage() {
         const error = await res.json()
         setMessage({ type: 'error', text: error.error || 'Failed to update profile' })
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error saving profile:', error)
       setMessage({ type: 'error', text: 'An error occurred while saving your profile' })
     } finally {
