@@ -67,7 +67,7 @@ export default function ReviewsPage() {
         const data = await response.json();
         setReviews(data.reviews || []);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error fetching reviews:', error);
     } finally {
       setLoading(false);
@@ -81,7 +81,7 @@ export default function ReviewsPage() {
         const data = await response.json();
         setStats(data.stats);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error fetching stats:', error);
     }
   };
