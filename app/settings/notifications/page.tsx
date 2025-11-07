@@ -26,7 +26,7 @@ export default function NotificationsPage() {
           marketing_emails: data.marketing_emails ?? false
         })
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to fetch:', error)
     } finally {
       setLoading(false)
@@ -48,7 +48,7 @@ export default function NotificationsPage() {
         const error = await res.json()
         setMessage({type: 'error', text: error.error || 'Failed to update'})
       }
-    } catch (error) {
+    } catch (error: unknown) {
       setMessage({type: 'error', text: 'An error occurred'})
     } finally {
       setSaving(false)
