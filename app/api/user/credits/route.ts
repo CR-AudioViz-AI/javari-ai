@@ -2,6 +2,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 export const runtime = 'edge'
 
@@ -108,8 +109,8 @@ export async function GET() {
         never_expires: subscription?.status === 'active' && planType !== 'free',
       }
     })
-  } catch (error) {
-    console.error('Error fetching credits:', error)
+  } catch (error: unknown) {
+    logError(\'Error fetching credits:\', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -212,8 +213,8 @@ export async function POST(request: Request) {
         deducted: amount,
       }
     })
-  } catch (error) {
-    console.error('Error deducting credits:', error)
+  } catch (error: unknown) {
+    logError(\'Error deducting credits:\', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
