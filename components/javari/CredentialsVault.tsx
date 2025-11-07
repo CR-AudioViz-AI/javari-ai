@@ -103,7 +103,7 @@ export function CredentialsVault({ projectId, subprojectId }: CredentialsVaultPr
       ];
       
       setCredentials(mockData);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to fetch credentials:', error);
     } finally {
       setLoading(false);
@@ -146,7 +146,7 @@ export function CredentialsVault({ projectId, subprojectId }: CredentialsVaultPr
         description: '',
         expires_at: ''
       });
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to save credential:', error);
     }
   };
@@ -157,7 +157,7 @@ export function CredentialsVault({ projectId, subprojectId }: CredentialsVaultPr
     try {
       // TODO: Implement actual API call
       setCredentials(prev => prev.filter(cred => cred.id !== id));
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to delete credential:', error);
     }
   };
@@ -171,7 +171,7 @@ export function CredentialsVault({ projectId, subprojectId }: CredentialsVaultPr
       await navigator.clipboard.writeText(value);
       setCopiedId(id);
       setTimeout(() => setCopiedId(null), 2000);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to copy:', error);
     }
   };
@@ -182,7 +182,7 @@ export function CredentialsVault({ projectId, subprojectId }: CredentialsVaultPr
       // TODO: Implement actual credential testing
       await new Promise(resolve => setTimeout(resolve, 1000));
       console.log('Testing credential:', id, type);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Credential test failed:', error);
     } finally {
       setTestingId(null);
