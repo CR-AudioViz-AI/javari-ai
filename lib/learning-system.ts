@@ -2,6 +2,7 @@
 // Autonomous knowledge acquisition from multiple sources
 
 import { createClient } from '@supabase/supabase-js';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -91,7 +92,7 @@ export async function ingestNews(): Promise<{ success: boolean; count: number }>
             totalIngested++;
           }
         }
-      } catch (error) {
+      } catch (error: unknown) {
         console.error(`Error ingesting from ${source.name}:`, error);
       }
     }
@@ -106,8 +107,8 @@ export async function ingestNews(): Promise<{ success: boolean; count: number }>
       });
 
     return { success: true, count: totalIngested };
-  } catch (error) {
-    console.error('Error in news ingestion:', error);
+  } catch (error: unknown) {
+    logError(\'Error in news ingestion:\', error);
     return { success: false, count: 0 };
   }
 }
@@ -161,8 +162,8 @@ export async function processDocument(
     }
 
     return { success: true, insights };
-  } catch (error) {
-    console.error('Error processing document:', error);
+  } catch (error: unknown) {
+    logError(\'Error processing document:\', error);
     return { success: false, insights: [] };
   }
 }
@@ -227,8 +228,8 @@ export async function monitorGitHub(repoUrl: string): Promise<{ success: boolean
     }
 
     return { success: true, learned };
-  } catch (error) {
-    console.error('Error monitoring GitHub:', error);
+  } catch (error: unknown) {
+    logError(\'Error monitoring GitHub:\', error);
     return { success: false, learned: 0 };
   }
 }
@@ -303,8 +304,8 @@ export async function learnFromConversation(
         relevance_score: 0.9,
       });
     }
-  } catch (error) {
-    console.error('Error learning from conversation:', error);
+  } catch (error: unknown) {
+    logError(\'Error learning from conversation:\', error);
   }
 }
 
@@ -325,8 +326,8 @@ export async function searchKnowledge(
 
     if (error) throw error;
     return data || [];
-  } catch (error) {
-    console.error('Error searching knowledge:', error);
+  } catch (error: unknown) {
+    logError(\'Error searching knowledge:\', error);
     return [];
   }
 }
@@ -351,8 +352,8 @@ export async function getConversationPatterns(
 
     if (error) throw error;
     return data || [];
-  } catch (error) {
-    console.error('Error getting patterns:', error);
+  } catch (error: unknown) {
+    logError(\'Error getting patterns:\', error);
     return [];
   }
 }
@@ -446,8 +447,8 @@ async function storeKnowledge(entry: LearningEntry): Promise<void> {
         metadata: entry.metadata,
         relevance_score: entry.relevance_score,
       });
-  } catch (error) {
-    console.error('Error storing knowledge:', error);
+  } catch (error: unknown) {
+    logError(\'Error storing knowledge:\', error);
   }
 }
 
