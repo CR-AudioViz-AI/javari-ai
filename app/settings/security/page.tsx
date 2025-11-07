@@ -37,7 +37,7 @@ export default function SecuritySettingsPage() {
           active_sessions: data.active_sessions || 1
         })
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to fetch settings:', error)
     } finally {
       setLoading(false)
@@ -64,7 +64,7 @@ export default function SecuritySettingsPage() {
         const error = await res.json()
         setMessage({ type: 'error', text: error.error || 'Failed to update settings' })
       }
-    } catch (error) {
+    } catch (error: unknown) {
       setMessage({ type: 'error', text: 'An error occurred while saving' })
     } finally {
       setSaving(false)
