@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 export const runtime = 'edge';
 
@@ -122,8 +123,8 @@ Format your summary as:
       conversationId
     });
 
-  } catch (error) {
-    console.error('Summary generation error:', error);
+  } catch (error: unknown) {
+    logError(\'Summary generation error:\', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
       {
@@ -172,8 +173,8 @@ export async function GET(request: NextRequest) {
       hasSummary: !!conversation.summary
     });
 
-  } catch (error) {
-    console.error('Get summary error:', error);
+  } catch (error: unknown) {
+    logError(\'Get summary error:\', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
