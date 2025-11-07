@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 // Initialize OpenAI client
 const openai = new OpenAI({
@@ -84,7 +85,7 @@ When appropriate:
           }
           controller.enqueue(encoder.encode('data: [DONE]\n\n'))
           controller.close()
-        } catch (error) {
+        } catch (error: unknown) {
           controller.error(error)
         }
       },
@@ -98,7 +99,7 @@ When appropriate:
       },
     })
   } catch (error: any) {
-    console.error('OpenAI API Error:', error)
+    logError(\'OpenAI API Error:\', error)
     return NextResponse.json(
       { error: error.message || 'Failed to process request' },
       { status: 500 }
