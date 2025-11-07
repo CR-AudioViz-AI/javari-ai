@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -51,8 +52,8 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error('Learning API error:', error);
+  } catch (error: unknown) {
+    logError(\'Learning API error:\', error);
     return NextResponse.json(
       {
         error: 'Failed to log learning event',
@@ -100,8 +101,8 @@ export async function GET(request: NextRequest) {
         successRate: successRate.toFixed(2),
       },
     });
-  } catch (error) {
-    console.error('Learning retrieval error:', error);
+  } catch (error: unknown) {
+    logError(\'Learning retrieval error:\', error);
     return NextResponse.json(
       {
         error: 'Failed to retrieve learning data',
