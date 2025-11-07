@@ -84,7 +84,7 @@ export default function SelfHealingDashboard() {
       setHistory(data.history || []);
       setStats(data.stats || stats);
       setLastUpdate(new Date());
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to load healing data:', error);
     } finally {
       setLoading(false);
@@ -102,7 +102,7 @@ export default function SelfHealingDashboard() {
       if (result.success) {
         await loadData();
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to trigger healing check:', error);
     } finally {
       setLoading(false);
