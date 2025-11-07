@@ -118,7 +118,7 @@ export default function AnalyticsPage() {
         // Use mock data
         loadMockData();
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to fetch analytics:', error);
       loadMockData();
     } finally {
