@@ -174,7 +174,7 @@ export function ChatInterface({
       if (!assistantContent) {
         throw new Error('No content received');
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to send message:', error);
       setMessages(prev =>
         prev.map(m =>
