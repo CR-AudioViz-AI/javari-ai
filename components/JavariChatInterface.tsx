@@ -52,7 +52,7 @@ export default function JavariChatInterface({ projectId, sessionId }: JavariChat
           setMessages(data.messages);
         }
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error loading chat history:', error);
     }
   };
@@ -143,7 +143,7 @@ export default function JavariChatInterface({ projectId, sessionId }: JavariChat
       setMessages((prev) => [...prev, assistantMessage]);
       setStreamingMessage('');
 
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error sending message:', error);
       setError('Failed to send message. Please try again.');
     } finally {
