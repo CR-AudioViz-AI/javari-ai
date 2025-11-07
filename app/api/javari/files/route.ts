@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import * as crypto from 'crypto';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -345,8 +346,8 @@ export async function POST(request: NextRequest) {
       duplicate: !!existingFile,
     });
     
-  } catch (error) {
-    console.error('File upload error:', error);
+  } catch (error: unknown) {
+    logError(\'File upload error:\', error);
     return NextResponse.json(
       {
         error: 'Failed to process file',
@@ -390,8 +391,8 @@ export async function GET(request: NextRequest) {
       count: data?.length || 0,
     });
     
-  } catch (error) {
-    console.error('File list error:', error);
+  } catch (error: unknown) {
+    logError(\'File list error:\', error);
     return NextResponse.json(
       {
         error: 'Failed to list files',
@@ -452,8 +453,8 @@ export async function DELETE(request: NextRequest) {
       message: 'File deleted successfully',
     });
     
-  } catch (error) {
-    console.error('File delete error:', error);
+  } catch (error: unknown) {
+    logError(\'File delete error:\', error);
     return NextResponse.json(
       {
         error: 'Failed to delete file',
