@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 import type { 
   JavariWorkLog, 
   CreateWorkLogInput, 
@@ -62,7 +63,7 @@ export async function GET(request: NextRequest) {
     const { data, error, count } = await query;
     
     if (error) {
-      console.error('Error fetching work logs:', error);
+      logError(\'Error fetching work logs:\', error);
       return NextResponse.json(
         { error: 'Failed to fetch work logs', details: error.message },
         { status: 500 }
@@ -76,8 +77,8 @@ export async function GET(request: NextRequest) {
       offset,
     });
     
-  } catch (error) {
-    console.error('Unexpected error fetching work logs:', error);
+  } catch (error: unknown) {
+    logError(\'Unexpected error fetching work logs:\', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -166,7 +167,7 @@ export async function POST(request: NextRequest) {
       .single();
     
     if (error) {
-      console.error('Error creating work log:', error);
+      logError(\'Error creating work log:\', error);
       return NextResponse.json(
         { error: 'Failed to create work log', details: error.message },
         { status: 500 }
@@ -178,8 +179,8 @@ export async function POST(request: NextRequest) {
     
     return NextResponse.json(workLog, { status: 201 });
     
-  } catch (error) {
-    console.error('Unexpected error creating work log:', error);
+  } catch (error: unknown) {
+    logError(\'Unexpected error creating work log:\', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -246,7 +247,7 @@ async function updateChatSessionMetrics(
         .eq('id', sessionId);
     }
     
-  } catch (error) {
-    console.error('Error updating chat session metrics:', error);
+  } catch (error: unknown) {
+    logError(\'Error updating chat session metrics:\', error);
   }
 }
