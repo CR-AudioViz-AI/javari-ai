@@ -12,6 +12,7 @@ import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
 import { JAVARI_SYSTEM_PROMPT } from '@/lib/javari-system-prompt';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
@@ -414,8 +415,8 @@ Remember: You know Roy and Cindy Henderson. You understand the CR AudioViz AI mi
           );
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
           controller.close();
-        } catch (error) {
-          console.error('Streaming error:', error);
+        } catch (error: unknown) {
+          logError(\'Streaming error:\', error);
           const errorMessage = error instanceof Error ? error.message : 'Unknown streaming error';
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify({ error: errorMessage })}\n\n`)
@@ -432,8 +433,8 @@ Remember: You know Roy and Cindy Henderson. You understand the CR AudioViz AI mi
         'Connection': 'keep-alive',
       },
     });
-  } catch (error) {
-    console.error('Javari chat error:', error);
+  } catch (error: unknown) {
+    logError(\'Javari chat error:\', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
       {
