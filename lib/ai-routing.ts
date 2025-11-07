@@ -201,7 +201,7 @@ export async function executeWithFallback<T>(
       const cost = estimatedTokens * config.costPerToken;
 
       return { result, provider, cost };
-    } catch (error) {
+    } catch (error: unknown) {
       console.error(`Provider ${provider} failed:`, error);
       lastError = error as Error;
       // Continue to next fallback
@@ -254,7 +254,7 @@ export async function* streamWithFallback(
       }
 
       return; // Success - don't try fallbacks
-    } catch (error) {
+    } catch (error: unknown) {
       console.error(`Streaming provider ${provider} failed:`, error);
       // Continue to next fallback
     }
