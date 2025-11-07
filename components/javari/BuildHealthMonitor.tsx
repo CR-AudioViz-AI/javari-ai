@@ -72,7 +72,7 @@ export function BuildHealthMonitor() {
         avgBuildTime: 0,
         autoFixSuccessRate: 0,
       });
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error loading build health:', error);
     } finally {
       setLoading(false);
