@@ -115,7 +115,7 @@ export default function JavariEmbed({
       };
 
       setMessages(prev => [...prev, assistantMessage]);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Chat error:', error);
       setMessages(prev => [...prev, {
         id: `error_${Date.now()}`,
@@ -143,7 +143,7 @@ export default function JavariEmbed({
           wasHelpful
         })
       });
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Feedback error:', error);
     }
   };
