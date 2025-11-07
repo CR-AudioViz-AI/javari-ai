@@ -64,7 +64,7 @@ export default function HealthPage() {
         const data = await response.json();
         setBuilds(data.builds || []);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error fetching builds:', error);
     } finally {
       setLoading(false);
@@ -78,7 +78,7 @@ export default function HealthPage() {
         const data = await response.json();
         setStats(data.stats);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error fetching stats:', error);
     }
   };
@@ -96,7 +96,7 @@ export default function HealthPage() {
         await fetchBuilds();
         await fetchStats();
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error triggering auto-fix:', error);
     } finally {
       setAutoHealing(false);
