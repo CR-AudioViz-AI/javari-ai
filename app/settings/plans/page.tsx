@@ -108,7 +108,7 @@ export default function PlansSettingsPage() {
           const data = await res.json()
           setCredits(data.credits)
         }
-      } catch (error) {
+      } catch (error: unknown) {
         console.error('Error loading credits:', error)
       } finally {
         setLoading(false)
