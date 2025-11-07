@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 /**
  * GET /api/dependencies - List dependencies with filters
@@ -39,8 +40,8 @@ export async function GET(request: NextRequest) {
       dependencies: data || [],
       total: count || 0,
     });
-  } catch (error) {
-    console.error('Error fetching dependencies:', error);
+  } catch (error: unknown) {
+    logError(\'Error fetching dependencies:\', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -120,8 +121,8 @@ export async function POST(request: NextRequest) {
       
       return NextResponse.json(data, { status: 201 });
     }
-  } catch (error) {
-    console.error('Error managing dependency:', error);
+  } catch (error: unknown) {
+    logError(\'Error managing dependency:\', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -155,8 +156,8 @@ export async function DELETE(request: NextRequest) {
     }
     
     return NextResponse.json({ message: 'Dependencies deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting dependencies:', error);
+  } catch (error: unknown) {
+    logError(\'Error deleting dependencies:\', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
