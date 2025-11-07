@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 export async function GET(request: NextRequest) {
   try {
@@ -83,8 +84,8 @@ export async function GET(request: NextRequest) {
       providerPerformance,
     });
 
-  } catch (error) {
-    console.error('Analytics error:', error);
+  } catch (error: unknown) {
+    logError(\'Analytics error:\', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
