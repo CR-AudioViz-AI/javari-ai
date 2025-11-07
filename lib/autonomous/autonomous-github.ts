@@ -69,7 +69,7 @@ export class AutonomousGitHub {
         content,
         sha: data.sha
       };
-    } catch (error) {
+    } catch (error: unknown) {
       console.error(`Error reading file ${path}:`, error);
       return null;
     }
@@ -132,7 +132,7 @@ export class AutonomousGitHub {
         message: `File ${existing ? 'updated' : 'created'}: ${path}`,
         url: data.content.html_url
       };
-    } catch (error) {
+    } catch (error: unknown) {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
@@ -262,7 +262,7 @@ export class AutonomousGitHub {
         message: `Created commit with ${files.length} file(s)`,
         url: `https://github.com/${this.config.org}/${this.config.repo}/commit/${newCommitData.sha}`
       };
-    } catch (error) {
+    } catch (error: unknown) {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
@@ -284,7 +284,7 @@ export class AutonomousGitHub {
       });
 
       return response.ok;
-    } catch (error) {
+    } catch (error: unknown) {
       return false;
     }
   }
@@ -332,7 +332,7 @@ export class AutonomousGitHub {
         message: `Rolled back to commit before ${sha}`,
         url: `https://github.com/${this.config.org}/${this.config.repo}/commit/${parentSha}`
       };
-    } catch (error) {
+    } catch (error: unknown) {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
@@ -366,7 +366,7 @@ export class AutonomousGitHub {
       }
       
       return [];
-    } catch (error) {
+    } catch (error: unknown) {
       console.error(`Error listing files in ${path}:`, error);
       return [];
     }
@@ -391,8 +391,8 @@ export class AutonomousGitHub {
       }
 
       return await response.json();
-    } catch (error) {
-      console.error('Error fetching commit history:', error);
+    } catch (error: unknown) {
+      logError(\'Error fetching commit history:\', error);
       return [];
     }
   }
