@@ -31,7 +31,7 @@ export function UserProfileMenu({ onClose }: UserProfileMenuProps) {
     try {
       await fetch('/api/auth/signout', { method: 'POST' });
       window.location.href = '/';
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Sign out failed:', error);
     }
   };
