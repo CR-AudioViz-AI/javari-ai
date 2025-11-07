@@ -42,8 +42,8 @@ export async function textToSpeech(
       audioUrl: data.audioUrl,
       duration: data.duration,
     };
-  } catch (error) {
-    console.error('TTS error:', error);
+  } catch (error: unknown) {
+    logError(\'TTS error:\', error);
     throw error;
   }
 }
@@ -68,8 +68,8 @@ export async function speechToText(
       text: data.text,
       confidence: data.confidence,
     };
-  } catch (error) {
-    console.error('STT error:', error);
+  } catch (error: unknown) {
+    logError(\'STT error:\', error);
     throw error;
   }
 }
@@ -99,7 +99,7 @@ export function startListening(
         try {
           const result = await speechToText(audioBlob);
           onTranscript(result.text);
-        } catch (error) {
+        } catch (error: unknown) {
           onError?.(error as Error);
         }
       };
