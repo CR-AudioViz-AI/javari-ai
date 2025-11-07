@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
 import type { JavariProject, CreateProjectRequest, UpdateProjectRequest, ApiResponse } from '@/types/javari';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 // GET /api/projects - List all projects
 // GET /api/projects?id=xxx - Get specific project
@@ -54,7 +55,7 @@ export async function GET(request: Request) {
       { success: true, data },
       { status: 200 }
     );
-  } catch (error) {
+  } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json<ApiResponse<null>>(
       { success: false, error: message },
@@ -106,7 +107,7 @@ export async function POST(request: Request) {
       { success: true, data, message: 'Project created successfully' },
       { status: 201 }
     );
-  } catch (error) {
+  } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json<ApiResponse<null>>(
       { success: false, error: message },
@@ -149,7 +150,7 @@ export async function PATCH(request: Request) {
       { success: true, data, message: 'Project updated successfully' },
       { status: 200 }
     );
-  } catch (error) {
+  } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json<ApiResponse<null>>(
       { success: false, error: message },
@@ -188,7 +189,7 @@ export async function DELETE(request: Request) {
       { success: true, message: 'Project deleted successfully' },
       { status: 200 }
     );
-  } catch (error) {
+  } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json<ApiResponse<null>>(
       { success: false, error: message },
