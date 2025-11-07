@@ -7,6 +7,7 @@
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 export async function GET(request: Request) {
   try {
@@ -73,8 +74,8 @@ export async function GET(request: Request) {
         }
       }
     });
-  } catch (error) {
-    console.error('Error fetching overview:', error);
+  } catch (error: unknown) {
+    logError(\'Error fetching overview:\', error);
     return NextResponse.json(
       { success: false, error: 'Failed to fetch overview' },
       { status: 500 }
