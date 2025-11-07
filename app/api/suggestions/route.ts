@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 export async function GET(request: NextRequest) {
   try {
@@ -34,8 +35,8 @@ export async function GET(request: NextRequest) {
     }
     
     return NextResponse.json({ suggestions: data || [] });
-  } catch (error) {
-    console.error('Error fetching suggestions:', error);
+  } catch (error: unknown) {
+    logError(\'Error fetching suggestions:\', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -80,8 +81,8 @@ export async function POST(request: NextRequest) {
     }
     
     return NextResponse.json(data, { status: 201 });
-  } catch (error) {
-    console.error('Error creating suggestion:', error);
+  } catch (error: unknown) {
+    logError(\'Error creating suggestion:\', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -116,8 +117,8 @@ export async function PATCH(request: NextRequest) {
     }
     
     return NextResponse.json(data);
-  } catch (error) {
-    console.error('Error updating suggestion:', error);
+  } catch (error: unknown) {
+    logError(\'Error updating suggestion:\', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
