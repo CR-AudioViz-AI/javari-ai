@@ -7,6 +7,7 @@
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 export async function GET(request: Request) {
   try {
@@ -58,8 +59,8 @@ export async function GET(request: Request) {
         successRate: attempted > 0 ? (successful / attempted) * 100 : 0
       }
     });
-  } catch (error) {
-    console.error('Error fetching healing history:', error);
+  } catch (error: unknown) {
+    logError(\'Error fetching healing history:\', error);
     return NextResponse.json(
       { success: false, error: 'Failed to fetch healing history' },
       { status: 500 }
