@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -116,8 +117,8 @@ Do not include markdown code blocks or any other text. Only valid JSON.`,
       code,
       explanation,
     });
-  } catch (error) {
-    console.error('Code generation error:', error);
+  } catch (error: unknown) {
+    logError(\'Code generation error:\', error);
 
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
