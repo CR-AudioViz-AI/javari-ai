@@ -93,7 +93,7 @@ export default function JavariOverview() {
         setStatus(data.status);
         setLastUpdate(new Date());
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to load status:', error);
     } finally {
       setLoading(false);
