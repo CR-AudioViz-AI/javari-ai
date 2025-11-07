@@ -107,7 +107,7 @@ export default function DashboardPage() {
         setCostData(generateMockCostData());
         setProviderStats(generateMockProviderStats());
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to fetch dashboard data:', error);
       // Use mock data on error
       setStats(generateMockStats());
