@@ -8,6 +8,7 @@
 import { NextResponse } from 'next/server';
 import { initializeAutonomousSystems } from '@/lib/autonomous';
 import { createClient } from '@/lib/supabase/server';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 export async function POST(request: Request) {
   try {
@@ -67,8 +68,8 @@ export async function POST(request: Request) {
         { status: 500 }
       );
     }
-  } catch (error) {
-    console.error('Error feeding knowledge:', error);
+  } catch (error: unknown) {
+    logError(\'Error feeding knowledge:\', error);
     return NextResponse.json(
       {
         success: false,
@@ -115,8 +116,8 @@ export async function GET(request: Request) {
       success: true,
       stats
     });
-  } catch (error) {
-    console.error('Error getting learning stats:', error);
+  } catch (error: unknown) {
+    logError(\'Error getting learning stats:\', error);
     return NextResponse.json(
       {
         success: false,
