@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 const VERCEL_TOKEN = process.env.VERCEL_TOKEN;
 const VERCEL_PROJECT_ID = process.env.VERCEL_PROJECT_ID || 'prj_zxjzE2qvMWFWqV0AspGvago6aPV5';
@@ -112,8 +113,8 @@ export async function POST(request: NextRequest) {
       deploymentUrl: `https://${deployData.url}`,
       status: deploymentStatus,
     });
-  } catch (error) {
-    console.error('Deployment error:', error);
+  } catch (error: unknown) {
+    logError(\'Deployment error:\', error);
 
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
@@ -172,8 +173,8 @@ export async function GET(request: NextRequest) {
       status: data.readyState,
       createdAt: data.createdAt,
     });
-  } catch (error) {
-    console.error('Status check error:', error);
+  } catch (error: unknown) {
+    logError(\'Status check error:\', error);
 
     return NextResponse.json(
       {
