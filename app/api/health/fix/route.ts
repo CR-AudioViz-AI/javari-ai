@@ -91,8 +91,8 @@ export async function POST(request: NextRequest) {
       next_steps: fixResult.next_steps,
     });
     
-  } catch (error) {
-    console.error('Unexpected error during auto-fix:', error);
+  } catch (error: unknown) {
+    logError(\'Unexpected error during auto-fix:\', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -188,7 +188,8 @@ async function attemptFix(record: any): Promise<{
     actions.push('Import/Export mismatch detected');
     next_steps.push('Check if module uses default export vs named export');
     next_steps.push('Update import statement accordingly');
-    next_steps.push('Example: import Module from "..." vs import { Module } from "..."');
+    next_steps.push('Example: import Module from "..." vs import { Module } from "..."
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';');
     
     return {
       success: false,
@@ -249,7 +250,7 @@ export async function GET(request: NextRequest) {
     const { data: records, error } = await query;
     
     if (error) {
-      console.error('Error fetching fix stats:', error);
+      logError(\'Error fetching fix stats:\', error);
       return NextResponse.json(
         { error: 'Failed to fetch fix statistics' },
         { status: 500 }
@@ -315,8 +316,8 @@ export async function GET(request: NextRequest) {
       average_fix_confidence: parseFloat(stats.average_fix_confidence.toFixed(2)),
     });
     
-  } catch (error) {
-    console.error('Unexpected error calculating fix stats:', error);
+  } catch (error: unknown) {
+    logError(\'Unexpected error calculating fix stats:\', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
