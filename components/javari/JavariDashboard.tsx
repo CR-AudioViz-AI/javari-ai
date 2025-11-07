@@ -93,7 +93,7 @@ export default function JavariDashboard() {
           setProjects(data.data || []);
         }
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error loading projects:', error);
     }
   };
