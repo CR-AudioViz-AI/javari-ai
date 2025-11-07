@@ -82,7 +82,7 @@ export function ChatHistory({
         const data = await response.json();
         setConversations(data.conversations || []);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error loading conversations:', error);
     } finally {
       setLoading(false);
@@ -100,7 +100,7 @@ export function ChatHistory({
       if (response.ok) {
         loadConversations();
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error toggling star:', error);
     }
   };
@@ -114,7 +114,7 @@ export function ChatHistory({
       if (response.ok) {
         loadConversations();
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error archiving conversation:', error);
     }
   };
@@ -132,7 +132,7 @@ export function ChatHistory({
       if (response.ok) {
         loadConversations();
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error deleting conversation:', error);
     }
   };
@@ -168,7 +168,7 @@ export function ChatHistory({
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error exporting conversation:', error);
       alert('Failed to export conversation');
     }
@@ -205,7 +205,7 @@ export function ChatHistory({
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error exporting all conversations:', error);
       alert('Failed to export conversations');
     }
