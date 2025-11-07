@@ -8,6 +8,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { initializeAutonomousSystems } from '@/lib/autonomous';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 export async function POST(request: Request) {
   try {
@@ -46,8 +47,8 @@ export async function POST(request: Request) {
       success: true,
       message: 'Healing check triggered'
     });
-  } catch (error) {
-    console.error('Error triggering healing check:', error);
+  } catch (error: unknown) {
+    logError(\'Error triggering healing check:\', error);
     return NextResponse.json(
       { success: false, error: 'Failed to trigger healing check' },
       { status: 500 }
