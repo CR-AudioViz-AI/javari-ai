@@ -9,6 +9,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { Mistral } from '@mistralai/mistralai';
 import { createClient } from '@supabase/supabase-js';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 // ================================================================
 // TYPES
@@ -128,7 +129,7 @@ export class ProviderManager {
       });
 
       return response;
-    } catch (error) {
+    } catch (error: unknown) {
       console.error(`Primary provider ${request.provider} failed:`, error);
 
       // Log failure
@@ -438,7 +439,7 @@ export class ProviderManager {
         p_latency_ms: data.latency,
       });
 
-      if (error) console.error('Error logging performance:', error);
+      if (error) logError(\'Error logging performance:\', error);
 
       // If failure, log to provider health
       if (!data.success) {
@@ -449,8 +450,8 @@ export class ProviderManager {
           checked_at: new Date().toISOString(),
         });
       }
-    } catch (error) {
-      console.error('Error in logPerformance:', error);
+    } catch (error: unknown) {
+      logError(\'Error in logPerformance:\', error);
     }
   }
 
@@ -470,8 +471,8 @@ export class ProviderManager {
         error_message: data.errorMessage,
         created_at: new Date().toISOString(),
       });
-    } catch (error) {
-      console.error('Error in logAutoHeal:', error);
+    } catch (error: unknown) {
+      logError(\'Error in logAutoHeal:\', error);
     }
   }
 
@@ -490,7 +491,7 @@ export class ProviderManager {
 
       await this.chatWithProvider(testRequest);
       return true;
-    } catch (error) {
+    } catch (error: unknown) {
       return false;
     }
   }
