@@ -7,6 +7,7 @@
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 export async function GET(request: Request) {
   try {
@@ -52,7 +53,7 @@ export async function GET(request: Request) {
     });
 
     if (error) {
-      console.error('Search error:', error);
+      logError(\'Search error:\', error);
       return NextResponse.json(
         { success: false, error: 'Search failed' },
         { status: 500 }
@@ -73,8 +74,8 @@ export async function GET(request: Request) {
         updatedAt: r.updated_at
       })) || []
     });
-  } catch (error) {
-    console.error('Error searching learnings:', error);
+  } catch (error: unknown) {
+    logError(\'Error searching learnings:\', error);
     return NextResponse.json(
       { success: false, error: 'Failed to search' },
       { status: 500 }
