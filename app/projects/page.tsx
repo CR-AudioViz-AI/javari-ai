@@ -107,7 +107,7 @@ export default function ProjectsPage() {
       } else {
         setProjects(generateMockProjects());
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to fetch projects:', error);
       setProjects(generateMockProjects());
     } finally {
@@ -194,7 +194,7 @@ export default function ProjectsPage() {
         setNewProject({ name: '', description: '', type: 'web', framework: 'nextjs' });
         fetchProjects();
       }
-    } catch (error) {
+    } catch (error: unknown) {
       toast({
         title: 'Error',
         description: 'Failed to create project',
@@ -216,7 +216,7 @@ export default function ProjectsPage() {
         });
         fetchProjects();
       }
-    } catch (error) {
+    } catch (error: unknown) {
       toast({
         title: 'Error',
         description: 'Failed to delete project',
