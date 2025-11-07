@@ -69,7 +69,7 @@ export default function SuggestionsPage() {
         const data = await response.json();
         setSuggestions(data.suggestions || []);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error fetching suggestions:', error);
     } finally {
       setLoading(false);
@@ -83,7 +83,7 @@ export default function SuggestionsPage() {
         const data = await response.json();
         setStats(data.stats);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error fetching stats:', error);
     }
   };
