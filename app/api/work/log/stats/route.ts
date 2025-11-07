@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
 import type { ApiResponse } from '@/types/javari';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 interface WorkLogStats {
   total_logs: number;
@@ -154,7 +155,7 @@ export async function GET(request: Request) {
       { success: true, data: stats },
       { status: 200 }
     );
-  } catch (error) {
+  } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json<ApiResponse<null>>(
       { success: false, error: message },
