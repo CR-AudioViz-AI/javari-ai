@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
 import type { ApiResponse } from '@/types/javari';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 // Mark route as dynamic to prevent static generation
 export const dynamic = 'force-dynamic';
@@ -212,8 +213,8 @@ export async function GET(request: Request) {
       data: sessions,
     });
 
-  } catch (error) {
-    console.error('Session summary error:', error);
+  } catch (error: unknown) {
+    logError(\'Session summary error:\', error);
     return NextResponse.json<ApiResponse<null>>({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
