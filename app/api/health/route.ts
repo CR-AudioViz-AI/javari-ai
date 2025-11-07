@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 /**
  * GET /api/health - List build health tracking records
@@ -43,7 +44,7 @@ export async function GET(request: NextRequest) {
     const { data, error, count } = await query;
     
     if (error) {
-      console.error('Error fetching health records:', error);
+      logError(\'Error fetching health records:\', error);
       return NextResponse.json(
         { error: 'Failed to fetch health records', details: error.message },
         { status: 500 }
@@ -57,8 +58,8 @@ export async function GET(request: NextRequest) {
       offset,
     });
     
-  } catch (error) {
-    console.error('Unexpected error fetching health records:', error);
+  } catch (error: unknown) {
+    logError(\'Unexpected error fetching health records:\', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -143,7 +144,7 @@ export async function POST(request: NextRequest) {
       .single();
     
     if (error) {
-      console.error('Error creating health record:', error);
+      logError(\'Error creating health record:\', error);
       return NextResponse.json(
         { error: 'Failed to create health record', details: error.message },
         { status: 500 }
@@ -158,8 +159,8 @@ export async function POST(request: NextRequest) {
     
     return NextResponse.json(record, { status: 201 });
     
-  } catch (error) {
-    console.error('Unexpected error creating health record:', error);
+  } catch (error: unknown) {
+    logError(\'Unexpected error creating health record:\', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
