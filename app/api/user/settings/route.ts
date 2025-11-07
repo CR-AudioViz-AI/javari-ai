@@ -2,6 +2,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 export const runtime = 'edge'
 
@@ -82,8 +83,8 @@ export async function GET() {
         updated_at: settings.updated_at,
       }
     })
-  } catch (error) {
-    console.error('Error fetching settings:', error)
+  } catch (error: unknown) {
+    logError(\'Error fetching settings:\', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -242,8 +243,8 @@ export async function PATCH(request: Request) {
         updated_at: updatedSettings.updated_at,
       }
     })
-  } catch (error) {
-    console.error('Error updating settings:', error)
+  } catch (error: unknown) {
+    logError(\'Error updating settings:\', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
