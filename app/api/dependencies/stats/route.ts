@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 export async function GET(request: NextRequest) {
   try {
@@ -39,8 +40,8 @@ export async function GET(request: NextRequest) {
     });
     
     return NextResponse.json(stats);
-  } catch (error) {
-    console.error('Error calculating dependency stats:', error);
+  } catch (error: unknown) {
+    logError(\'Error calculating dependency stats:\', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
