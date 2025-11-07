@@ -75,7 +75,7 @@ export function ProjectManager() {
         const data = await response.json();
         setProjects(data.projects || []);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error loading projects:', error);
     } finally {
       setLoading(false);
@@ -102,7 +102,7 @@ export function ProjectManager() {
         });
         loadProjects();
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error creating project:', error);
     }
   };
@@ -121,7 +121,7 @@ export function ProjectManager() {
           setEditingProject(null);
         }
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error updating project:', error);
     }
   };
