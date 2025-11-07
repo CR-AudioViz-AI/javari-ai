@@ -8,6 +8,7 @@
 
 import { AutonomousGitHub } from './autonomous-github';
 import { AutonomousVercel } from './autonomous-deploy';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 interface ErrorContext {
   type: 'build' | 'runtime' | 'api' | 'database';
@@ -142,8 +143,8 @@ Analyze the error and provide a detailed diagnosis in JSON format with the follo
         autoFixable: diagnosis.autoFixable !== false,
         estimatedComplexity: diagnosis.estimatedComplexity || 'complex'
       };
-    } catch (error) {
-      console.error('Error in diagnosis:', error);
+    } catch (error: unknown) {
+      logError(\'Error in diagnosis:\', error);
       return {
         confidence: 0,
         rootCause: 'Failed to diagnose',
@@ -318,7 +319,7 @@ Provide the complete fixed file content:`
         deploymentId: monitorResult.deploymentId,
         testResult: verified ? 'passed' : 'failed'
       };
-    } catch (error) {
+    } catch (error: unknown) {
       return {
         success: false,
         strategy: diagnosis.fixStrategy,
@@ -427,8 +428,8 @@ Provide the complete fixed file content:`
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(notification)
         });
-      } catch (error) {
-        console.error('Failed to send escalation notification:', error);
+      } catch (error: unknown) {
+        logError(\'Failed to send escalation notification:\', error);
       }
     }
 
@@ -462,8 +463,8 @@ Provide the complete fixed file content:`
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(notification)
         });
-      } catch (error) {
-        console.error('Failed to send success notification:', error);
+      } catch (error: unknown) {
+        logError(\'Failed to send success notification:\', error);
       }
     }
   }
@@ -492,8 +493,8 @@ Provide the complete fixed file content:`
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(notification)
         });
-      } catch (error) {
-        console.error('Failed to send failure notification:', error);
+      } catch (error: unknown) {
+        logError(\'Failed to send failure notification:\', error);
       }
     }
   }
