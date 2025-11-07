@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_REPO = 'CR-AudioViz-AI/javari-ai'; // Update if needed
@@ -100,8 +101,8 @@ export async function POST(request: NextRequest) {
       sha: commitData.commit.sha,
       message: sha ? 'File updated successfully' : 'File created successfully',
     });
-  } catch (error) {
-    console.error('GitHub commit error:', error);
+  } catch (error: unknown) {
+    logError(\'GitHub commit error:\', error);
 
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
