@@ -4,6 +4,7 @@
 import { searchKnowledge, learnFromConversation } from './learning-system';
 import { routeTask, executeWithFallback } from './ai-routing';
 import { createClient } from '@supabase/supabase-js';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -142,8 +143,8 @@ export async function monitorBuild(buildId: string, projectId: string): Promise<
         }
       }
     }
-  } catch (error) {
-    console.error('Error monitoring build:', error);
+  } catch (error: unknown) {
+    logError(\'Error monitoring build:\', error);
   }
 }
 
@@ -179,7 +180,7 @@ async function analyzeErrorWithAI(error: ErrorReport): Promise<{
       fix: result.result.content,
       confidence: 0.8,
     };
-  } catch (error) {
+  } catch (error: unknown) {
     return { fix: '', confidence: 0 };
   }
 }
@@ -190,7 +191,7 @@ async function applyFix(error: ErrorReport, fix: string): Promise<{ success: boo
     // This would integrate with GitHub API to make actual code changes
     console.log('Applying fix:', fix);
     return { success: true };
-  } catch (error) {
+  } catch (error: unknown) {
     return { success: false };
   }
 }
@@ -200,7 +201,7 @@ async function verifyFix(error: ErrorReport, fix: string): Promise<boolean> {
     // Trigger a new build and verify it succeeds
     console.log('Verifying fix...');
     return true;
-  } catch (error) {
+  } catch (error: unknown) {
     return false;
   }
 }
