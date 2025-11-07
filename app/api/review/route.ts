@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 export async function GET(request: NextRequest) {
   try {
@@ -31,8 +32,8 @@ export async function GET(request: NextRequest) {
     }
     
     return NextResponse.json({ reviews: data || [] });
-  } catch (error) {
-    console.error('Error fetching review queue:', error);
+  } catch (error: unknown) {
+    logError(\'Error fetching review queue:\', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -80,8 +81,8 @@ export async function POST(request: NextRequest) {
     }
     
     return NextResponse.json(data, { status: 201 });
-  } catch (error) {
-    console.error('Error creating review:', error);
+  } catch (error: unknown) {
+    logError(\'Error creating review:\', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
