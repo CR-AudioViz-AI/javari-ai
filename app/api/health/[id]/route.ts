@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 type RouteParams = {
   params: Promise<{ id: string }>;
@@ -31,8 +32,8 @@ export async function GET(
     
     return NextResponse.json(record);
     
-  } catch (error) {
-    console.error('Error fetching health record:', error);
+  } catch (error: unknown) {
+    logError(\'Error fetching health record:\', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -91,7 +92,7 @@ export async function PATCH(
       .single();
     
     if (error) {
-      console.error('Error updating health record:', error);
+      logError(\'Error updating health record:\', error);
       return NextResponse.json(
         { error: 'Failed to update health record', details: error.message },
         { status: 500 }
@@ -100,8 +101,8 @@ export async function PATCH(
     
     return NextResponse.json(updated);
     
-  } catch (error) {
-    console.error('Error updating health record:', error);
+  } catch (error: unknown) {
+    logError(\'Error updating health record:\', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -141,7 +142,7 @@ export async function DELETE(
       .eq('id', id);
     
     if (error) {
-      console.error('Error deleting health record:', error);
+      logError(\'Error deleting health record:\', error);
       return NextResponse.json(
         { error: 'Failed to delete health record', details: error.message },
         { status: 500 }
@@ -153,8 +154,8 @@ export async function DELETE(
       { status: 200 }
     );
     
-  } catch (error) {
-    console.error('Error deleting health record:', error);
+  } catch (error: unknown) {
+    logError(\'Error deleting health record:\', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
