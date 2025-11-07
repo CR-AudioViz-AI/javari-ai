@@ -118,7 +118,7 @@ export default function SettingsPage() {
         if (data.preferences) setPreferences(data.preferences);
         // Note: API keys should be loaded separately with proper security
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to load settings:', error);
     }
   };
@@ -148,7 +148,7 @@ export default function SettingsPage() {
           description: `Your ${section} settings have been updated successfully`,
         });
       }
-    } catch (error) {
+    } catch (error: unknown) {
       toast({
         title: 'Error',
         description: 'Failed to save settings',
