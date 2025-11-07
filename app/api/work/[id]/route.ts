@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
 import type { JavariWorkLog, UpdateWorkLogInput } from '@/lib/types/javari-types';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 type RouteParams = {
   params: Promise<{ id: string }>;
@@ -32,8 +33,8 @@ export async function GET(
     
     return NextResponse.json(workLog);
     
-  } catch (error) {
-    console.error('Error fetching work log:', error);
+  } catch (error: unknown) {
+    logError(\'Error fetching work log:\', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -95,7 +96,7 @@ export async function PATCH(
       .single();
     
     if (error) {
-      console.error('Error updating work log:', error);
+      logError(\'Error updating work log:\', error);
       return NextResponse.json(
         { error: 'Failed to update work log', details: error.message },
         { status: 500 }
@@ -114,8 +115,8 @@ export async function PATCH(
     
     return NextResponse.json(updated);
     
-  } catch (error) {
-    console.error('Error updating work log:', error);
+  } catch (error: unknown) {
+    logError(\'Error updating work log:\', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -155,7 +156,7 @@ export async function DELETE(
       .eq('id', id);
     
     if (error) {
-      console.error('Error deleting work log:', error);
+      logError(\'Error deleting work log:\', error);
       return NextResponse.json(
         { error: 'Failed to delete work log', details: error.message },
         { status: 500 }
@@ -170,8 +171,8 @@ export async function DELETE(
       { status: 200 }
     );
     
-  } catch (error) {
-    console.error('Error deleting work log:', error);
+  } catch (error: unknown) {
+    logError(\'Error deleting work log:\', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -225,7 +226,7 @@ async function recalculateChatSessionMetrics(
       .update(metrics)
       .eq('id', sessionId);
     
-  } catch (error) {
-    console.error('Error recalculating metrics:', error);
+  } catch (error: unknown) {
+    logError(\'Error recalculating metrics:\', error);
   }
 }
