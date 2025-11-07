@@ -71,8 +71,8 @@ export class ContinuousLearningSystem {
 
       await this.storeLearning(learning as Learning);
       return true;
-    } catch (error) {
-      console.error('Error ingesting from dashboard:', error);
+    } catch (error: unknown) {
+      logError(\'Error ingesting from dashboard:\', error);
       return false;
     }
   }
@@ -128,8 +128,8 @@ export class ContinuousLearningSystem {
         // Store anti-pattern for future reference
         await this.storeAntiPattern(antiPattern);
       }
-    } catch (error) {
-      console.error('Error learning from conversation:', error);
+    } catch (error: unknown) {
+      logError(\'Error learning from conversation:\', error);
     }
   }
 
@@ -170,8 +170,8 @@ export class ContinuousLearningSystem {
           reason: codeResult.errorMessage || 'Code generation failed'
         });
       }
-    } catch (error) {
-      console.error('Error learning from code generation:', error);
+    } catch (error: unknown) {
+      logError(\'Error learning from code generation:\', error);
     }
   }
 
@@ -213,7 +213,7 @@ export class ContinuousLearningSystem {
 
       await this.storeLearning(learning as Learning);
       console.log(`✅ Stored learning from ${target.url}`);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error(`Error crawling ${target.url}:`, error);
     }
   }
@@ -264,8 +264,8 @@ export class ContinuousLearningSystem {
         const scoreB = b.confidenceScore * (1 + Math.log(1 + b.usageCount));
         return scoreB - scoreA;
       });
-    } catch (error) {
-      console.error('Error querying learnings:', error);
+    } catch (error: unknown) {
+      logError(\'Error querying learnings:\', error);
       return [];
     }
   }
@@ -293,8 +293,8 @@ export class ContinuousLearningSystem {
 
       const data = await response.json();
       return data.data[0].embedding;
-    } catch (error) {
-      console.error('Error generating embedding:', error);
+    } catch (error: unknown) {
+      logError(\'Error generating embedding:\', error);
       return [];
     }
   }
@@ -329,8 +329,8 @@ export class ContinuousLearningSystem {
       if (!response.ok) {
         throw new Error(`Failed to store learning: ${response.statusText}`);
       }
-    } catch (error) {
-      console.error('Error storing learning:', error);
+    } catch (error: unknown) {
+      logError(\'Error storing learning:\', error);
       throw error;
     }
   }
@@ -361,8 +361,8 @@ export class ContinuousLearningSystem {
       if (!response.ok) {
         throw new Error(`Failed to update learning: ${response.statusText}`);
       }
-    } catch (error) {
-      console.error('Error updating learning:', error);
+    } catch (error: unknown) {
+      logError(\'Error updating learning:\', error);
       throw error;
     }
   }
@@ -416,8 +416,8 @@ export class ContinuousLearningSystem {
         createdAt: new Date(row.created_at),
         updatedAt: new Date(row.updated_at)
       }));
-    } catch (error) {
-      console.error('Error finding similar learnings:', error);
+    } catch (error: unknown) {
+      logError(\'Error finding similar learnings:\', error);
       return [];
     }
   }
@@ -477,8 +477,8 @@ export class ContinuousLearningSystem {
 
       const data = await response.json();
       return JSON.parse(data.choices[0].message.content);
-    } catch (error) {
-      console.error('Error summarizing content:', error);
+    } catch (error: unknown) {
+      logError(\'Error summarizing content:\', error);
       return {
         title: 'Summary unavailable',
         content: content.slice(0, 500)
@@ -532,8 +532,8 @@ export class ContinuousLearningSystem {
         avgSuccessRate,
         topLearnings
       };
-    } catch (error) {
-      console.error('Error getting statistics:', error);
+    } catch (error: unknown) {
+      logError(\'Error getting statistics:\', error);
       return {
         total: 0,
         bySource: {},
