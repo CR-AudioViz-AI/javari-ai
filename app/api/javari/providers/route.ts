@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getProviderManager } from '@/lib/provider-manager';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 export async function GET(request: NextRequest) {
   try {
@@ -46,8 +47,8 @@ export async function GET(request: NextRequest) {
       performance,
     });
 
-  } catch (error) {
-    console.error('Provider status error:', error);
+  } catch (error: unknown) {
+    logError(\'Provider status error:\', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
