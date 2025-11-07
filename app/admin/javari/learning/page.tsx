@@ -100,7 +100,7 @@ export default function LearningDashboard() {
       if (data.success) {
         setStats(data.stats);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to load learning stats:', error);
     } finally {
       setLoading(false);
@@ -118,7 +118,7 @@ export default function LearningDashboard() {
       if (data.success) {
         setSearchResults(data.results);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Search failed:', error);
     } finally {
       setLoading(false);
@@ -143,7 +143,7 @@ export default function LearningDashboard() {
         setShowFeedForm(false);
         await loadStats();
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to feed knowledge:', error);
     } finally {
       setLoading(false);
