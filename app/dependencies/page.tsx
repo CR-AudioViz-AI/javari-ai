@@ -61,7 +61,7 @@ export default function DependenciesPage() {
         const data = await response.json();
         setDependencies(data.dependencies || []);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error fetching dependencies:', error);
     } finally {
       setLoading(false);
@@ -75,7 +75,7 @@ export default function DependenciesPage() {
         const data = await response.json();
         setStats(data.stats);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error fetching stats:', error);
     }
   };
