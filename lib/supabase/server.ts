@@ -6,6 +6,7 @@
 
 import { createServerClient as createSupabaseServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 export function createClient() {
   const cookieStore = cookies();
@@ -21,14 +22,14 @@ export function createClient() {
         set(name: string, value: string, options: any) {
           try {
             cookieStore.set({ name, value, ...options });
-          } catch (error) {
+          } catch (error: unknown) {
             // Handle cookie setting errors in Server Components
           }
         },
         remove(name: string, options: any) {
           try {
             cookieStore.set({ name, value: '', ...options });
-          } catch (error) {
+          } catch (error: unknown) {
             // Handle cookie removal errors in Server Components
           }
         },
