@@ -9,6 +9,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
 export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
@@ -97,13 +98,13 @@ export async function POST(request: NextRequest) {
       });
 
     if (error) {
-      console.error('Telemetry logging error:', error);
+      logError(\'Telemetry logging error:\', error);
       // Don't fail the request if telemetry fails
     }
 
     return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error('Telemetry error:', error);
+  } catch (error: unknown) {
+    logError(\'Telemetry error:\', error);
     // Return success even on error to not disrupt user experience
     return NextResponse.json({ success: true });
   }
@@ -184,8 +185,8 @@ export async function GET(request: NextRequest) {
         userActivity: userActivity,
       },
     });
-  } catch (error) {
-    console.error('Analytics error:', error);
+  } catch (error: unknown) {
+    logError(\'Analytics error:\', error);
     return NextResponse.json(
       {
         error: 'Failed to fetch analytics',
