@@ -104,7 +104,7 @@ async function testConnector(
 
     const result = await response.json();
     return result;
-  } catch (error) {
+  } catch (error: unknown) {
     return {
       success: false,
       message: `Test failed: ${error}`,
@@ -186,7 +186,7 @@ export async function autoConfigureStack(
       // Guide user through setup
       console.log(`Setting up ${connectorId}...`);
       configured.push(connectorId);
-    } catch (error) {
+    } catch (error: unknown) {
       failed.push(connectorId);
     }
   }
