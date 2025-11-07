@@ -67,7 +67,7 @@ export function EmbedAuthReceiver() {
           // Refresh the page or router to apply new auth state
           router.refresh();
 
-        } catch (error) {
+        } catch (error: unknown) {
           console.error('Error setting auth from embed:', error);
         }
       }
