@@ -1,3 +1,4 @@
+import { getErrorMessage, logError } from '@/lib/utils/error-utils';
 /**
  * Conversations API - List and Create
  * GET: List conversations with search, filter, sort
@@ -61,10 +62,10 @@ export async function GET(request: NextRequest) {
       limit,
       offset,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error fetching conversations:', error);
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: getErrorMessage(error) },
       { status: 500 }
     );
   }
@@ -131,10 +132,10 @@ export async function POST(request: NextRequest) {
       success: true,
       conversation: data,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error creating conversation:', error);
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: getErrorMessage(error) },
       { status: 500 }
     );
   }
