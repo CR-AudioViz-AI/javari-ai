@@ -98,10 +98,10 @@ When appropriate:
         'Connection': 'keep-alive',
       },
     })
-  } catch (error: any) {
-    logError(\'OpenAI API Error:\', error)
+  } catch (error: unknown) {
+    logError('OpenAI API Error:', error)
     return NextResponse.json(
-      { error: error.message || 'Failed to process request' },
+      { error: getErrorMessage(error) },
       { status: 500 }
     )
   }
