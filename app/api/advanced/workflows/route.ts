@@ -1,3 +1,4 @@
+import { getErrorMessage, logError } from '@/lib/utils/error-utils';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -18,8 +19,8 @@ export async function GET(req: NextRequest) {
     const { data: workflows } = await supabase.from('workflows').select('*').eq('user_id', userId);
 
     return NextResponse.json({ success: true, workflows });
-  } catch (error: any) {
-    return NextResponse.json({ error: 'Fetch failed', details: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: 'Fetch failed', details: getErrorMessage(error) }, { status: 500 });
   }
 }
 
@@ -48,7 +49,7 @@ export async function POST(req: NextRequest) {
     await supabase.from('users').update({ credits: user.credits - 15 }).eq('id', userId);
 
     return NextResponse.json({ success: true, workflow, creditsUsed: 15 });
-  } catch (error: any) {
-    return NextResponse.json({ error: 'Workflow creation failed', details: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: 'Workflow creation failed', details: getErrorMessage(error) }, { status: 500 });
   }
 }
