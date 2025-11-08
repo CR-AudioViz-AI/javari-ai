@@ -1,10 +1,7 @@
-/**
- * Conversation Export API
- * GET: Export conversation as JSON or Markdown
- */
-
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { safeAsync, handleError } from '@/lib/error-handler';
+import { isDefined, safeGet } from '@/lib/typescript-helpers';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -15,87 +12,44 @@ export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  try {
-    const { id } = params;
-    const { searchParams } = new URL(request.url);
-    const format = searchParams.get('format') || 'json'; // json or markdown
-
-    // Fetch conversation
-    const { data: conversation, error } = await supabase
-      .from('conversations')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (error) throw error;
-
-    if (!conversation) {
-      return NextResponse.json(
-        { success: false, error: 'Conversation not found' },
-        { status: 404 }
-      );
-    }
-
-    // Parse messages
-    const messages = typeof conversation.messages === 'string' 
-      ? JSON.parse(conversation.messages) 
-      : conversation.messages;
-
-    if (format === 'markdown') {
-      // Export as Markdown
-      let markdown = `# ${conversation.title}\n\n`;
-      markdown += `**Created:** ${new Date(conversation.created_at).toLocaleString()}\n`;
-      markdown += `**Updated:** ${new Date(conversation.updated_at).toLocaleString()}\n`;
-      markdown += `**Messages:** ${conversation.message_count}\n`;
-      markdown += `**Model:** ${conversation.model}\n\n`;
-
-      if (conversation.summary) {
-        markdown += `## Summary\n${conversation.summary}\n\n`;
+  return await safeAsync(
+    async () => {
+      const { id } = params;
+      
+      if (!isDefined(id)) {
+        return NextResponse.json({ error: 'ID required' }, { status: 400 });
       }
 
-      markdown += `## Conversation\n\n`;
+      const { data, error } = await supabase
+        .from('conversations')
+        .select('*')
+        .eq('id', id)
+        .single();
 
-      messages.forEach((msg: any) => {
-        const role = msg.role === 'user' ? '**You**' : '**Javari**';
-        markdown += `### ${role}\n${msg.content}\n\n---\n\n`;
-      });
+      if (error || !isDefined(data)) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
 
-      return new NextResponse(markdown, {
-        headers: {
-          'Content-Type': 'text/markdown',
-          'Content-Disposition': `attachment; filename="conversation-${conversation.numeric_id}.md"`,
-        },
-      });
-    } else {
-      // Export as JSON
       const exportData = {
-        id: conversation.id,
-        numeric_id: conversation.numeric_id,
-        title: conversation.title,
-        summary: conversation.summary,
-        messages,
-        model: conversation.model,
-        message_count: conversation.message_count,
-        total_tokens: conversation.total_tokens,
-        cost_usd: conversation.cost_usd,
-        continuation_depth: conversation.continuation_depth,
-        starred: conversation.starred,
-        created_at: conversation.created_at,
-        updated_at: conversation.updated_at,
-        metadata: conversation.metadata,
+        id: data.id,
+        title: safeGet(data, 'title', ''),
+        created_at: safeGet(data, 'created_at', ''),
+        messages: safeGet(data, 'messages', []),
+        model: safeGet(data, 'model', ''),
+        total_tokens: safeGet(data, 'total_tokens', 0),
+        cost_usd: safeGet(data, 'cost_usd', 0)
       };
 
-      return NextResponse.json(exportData, {
+      const filename = `conversation-${id}-${new Date().toISOString().split('T')[0]}.json`;
+
+      return new NextResponse(JSON.stringify(exportData, null, 2), {
         headers: {
-          'Content-Disposition': `attachment; filename="conversation-${conversation.numeric_id}.json"`,
-        },
+          'Content-Type': 'application/json',
+          'Content-Disposition': `attachment; filename="${filename}"`
+        }
       });
-    }
-  } catch (error: any) {
-    console.error('Error exporting conversation:', error);
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
-  }
+    },
+    { file: 'conversations/[id]/export/route.ts', function: 'GET' },
+    NextResponse.json({ error: 'Export failed' }, { status: 500 })
+  ) || NextResponse.json({ error: 'Unexpected error' }, { status: 500 });
 }
