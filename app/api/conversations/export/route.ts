@@ -1,3 +1,4 @@
+import { getErrorMessage, logError } from '@/lib/utils/error-utils';
 /**
  * JAVARI AI - CONVERSATION EXPORT API
  * Export conversations in CSV or JSON format
@@ -70,7 +71,7 @@ export async function GET(request: NextRequest) {
     if (error) {
       console.error('Error exporting conversations:', error);
       return NextResponse.json(
-        { error: 'Export failed', details: error.message },
+        { error: 'Export failed', details: getErrorMessage(error) },
         { status: 500 }
       );
     }
@@ -109,10 +110,10 @@ export async function GET(request: NextRequest) {
         },
       });
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Export API error:', error);
     return NextResponse.json(
-      { error: 'Internal server error', details: error.message },
+      { error: 'Internal server error', details: getErrorMessage(error) },
       { status: 500 }
     );
   }
