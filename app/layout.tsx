@@ -2,7 +2,6 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
-import type { Metadata } from 'next'
 import './globals.css'
 import { UserProfileProvider } from '@/components/user-profile/user-profile-context'
 import { SplitScreenProvider } from '@/components/split-screen/split-screen-context'
