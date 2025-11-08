@@ -1,3 +1,4 @@
+import { getErrorMessage, logError } from '@/lib/utils/error-utils';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -62,7 +63,7 @@ export async function POST(req: NextRequest) {
     await supabase.from('users').update({ credits: user.credits - 10 }).eq('id', userId);
 
     return NextResponse.json({ success: true, result, creditsUsed: 10 });
-  } catch (error: any) {
-    return NextResponse.json({ error: 'A/B test failed', details: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: 'A/B test failed', details: getErrorMessage(error) }, { status: 500 });
   }
 }
