@@ -111,7 +111,7 @@ export async function GET(request: NextRequest) {
 
     if (error) {
       return NextResponse.json(
-        { success: false, error: error.message },
+        { success: false, error: getErrorMessage(error) },
         { status: 500 }
       );
     }
@@ -129,9 +129,9 @@ export async function GET(request: NextRequest) {
       { success: true, data: maskedData },
       { status: 200 }
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: getErrorMessage(error) },
       { status: 500 }
     );
   }
@@ -189,7 +189,7 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       return NextResponse.json(
-        { success: false, error: error.message },
+        { success: false, error: getErrorMessage(error) },
         { status: 500 }
       );
     }
@@ -207,9 +207,9 @@ export async function POST(request: NextRequest) {
       { success: true, data: response },
       { status: 201 }
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: getErrorMessage(error) },
       { status: 500 }
     );
   }
