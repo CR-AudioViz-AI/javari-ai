@@ -1,10 +1,7 @@
-/**
- * Star/Unstar Conversation API
- * PATCH: Toggle starred status
- */
-
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { safeAsync, handleError } from '@/lib/error-handler';
+import { isDefined } from '@/lib/typescript-helpers';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -15,41 +12,54 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  try {
-    const { id } = params;
+  return await safeAsync(
+    async () => {
+      const { id } = params;
+      
+      if (!isDefined(id)) {
+        return NextResponse.json(
+          { success: false, error: 'ID required' },
+          { status: 400 }
+        );
+      }
 
-    // Get current starred status
-    const { data: current, error: fetchError } = await supabase
-      .from('conversations')
-      .select('starred')
-      .eq('id', id)
-      .single();
+      const { data, error } = await supabase
+        .from('conversations')
+        .select('starred')
+        .eq('id', id)
+        .single();
 
-    if (fetchError) throw fetchError;
+      if (error || !isDefined(data)) {
+        return NextResponse.json(
+          { success: false, error: 'Conversation not found' },
+          { status: 404 }
+        );
+      }
 
-    // Toggle starred status
-    const { data, error } = await supabase
-      .from('conversations')
-      .update({
-        starred: !current?.starred,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', id)
-      .select()
-      .single();
+      const newStarred = !data.starred;
 
-    if (error) throw error;
+      const { error: updateError } = await supabase
+        .from('conversations')
+        .update({ starred: newStarred })
+        .eq('id', id);
 
-    return NextResponse.json({
-      success: true,
-      conversation: data,
-      starred: data.starred,
-    });
-  } catch (error: any) {
-    console.error('Error toggling star:', error);
-    return NextResponse.json(
-      { success: false, error: error.message },
+      if (updateError) {
+        handleError(updateError, { file: 'conversations/[id]/star/route.ts', function: 'PATCH' });
+        throw updateError;
+      }
+
+      return NextResponse.json({
+        success: true,
+        starred: newStarred,
+      });
+    },
+    { file: 'conversations/[id]/star/route.ts', function: 'PATCH' },
+    NextResponse.json(
+      { success: false, error: 'Failed to toggle star' },
       { status: 500 }
-    );
-  }
+    )
+  ) || NextResponse.json(
+    { success: false, error: 'Unexpected error' },
+    { status: 500 }
+  );
 }
