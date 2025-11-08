@@ -1,3 +1,4 @@
+import { getErrorMessage, logError } from '@/lib/utils/error-utils';
 /**
  * Conversation Search API
  * GET: Full-text search across conversations
@@ -47,10 +48,10 @@ export async function GET(request: NextRequest) {
       results: data || [],
       count: data?.length || 0,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error searching conversations:', error);
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: getErrorMessage(error) },
       { status: 500 }
     );
   }
