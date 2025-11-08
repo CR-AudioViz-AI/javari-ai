@@ -1,3 +1,4 @@
+import { getErrorMessage, logError } from '@/lib/utils/error-utils';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
@@ -42,7 +43,7 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({ success: true, optimization, creditsUsed: 18 });
-  } catch (error: any) {
-    return NextResponse.json({ error: 'Optimization failed', details: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: 'Optimization failed', details: getErrorMessage(error) }, { status: 500 });
   }
 }
