@@ -1,3 +1,4 @@
+import { getErrorMessage, logError } from '@/lib/utils/error-utils';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -22,8 +23,8 @@ export async function GET(req: NextRequest) {
     const { data: experiments } = await query;
 
     return NextResponse.json({ success: true, experiments });
-  } catch (error: any) {
-    return NextResponse.json({ error: 'Fetch failed', details: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: 'Fetch failed', details: getErrorMessage(error) }, { status: 500 });
   }
 }
 
@@ -52,7 +53,7 @@ export async function POST(req: NextRequest) {
     await supabase.from('users').update({ credits: user.credits - 12 }).eq('id', userId);
 
     return NextResponse.json({ success: true, experiment, creditsUsed: 12 });
-  } catch (error: any) {
-    return NextResponse.json({ error: 'Create failed', details: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: 'Create failed', details: getErrorMessage(error) }, { status: 500 });
   }
 }
