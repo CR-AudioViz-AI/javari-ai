@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
+import { safeAsync, handleError } from '@/lib/error-handler';
+import { isDefined, toString, safeGet } from '@/lib/typescript-helpers';
 
 // Initialize OpenAI client
 const openai = new OpenAI({
@@ -14,32 +16,49 @@ interface ChatMessage {
   content: string
 }
 
+interface ChatRequestBody {
+  messages?: ChatMessage[];
+  aiProvider?: string;
+}
+
 export async function POST(req: NextRequest) {
-  try {
-    const { messages, aiProvider = 'gpt-4' } = await req.json()
+  return await safeAsync(
+    async () => {
+      // Parse and validate request body
+      const body = await req.json() as ChatRequestBody;
+      const messages = body.messages;
+      const aiProvider = toString(body.aiProvider, 'gpt-4');
 
-    // Validate OpenAI API key
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json(
-        { error: 'OpenAI API key not configured' },
-        { status: 500 }
-      )
-    }
+      // Validate messages array
+      if (!isDefined(messages) || !Array.isArray(messages) || messages.length === 0) {
+        return NextResponse.json(
+          { error: 'Messages array is required' },
+          { status: 400 }
+        );
+      }
 
-    // Map AI provider to OpenAI model
-    const modelMap: Record<string, string> = {
-      'gpt-4': 'gpt-4-turbo-preview',
-      'claude': 'gpt-4-turbo-preview', // We'll use GPT-4 for now, can add Claude API later
-      'gemini': 'gpt-4-turbo-preview', // Can add Gemini API later
-      'perplexity': 'gpt-4-turbo-preview', // Can add Perplexity API later
-    }
+      // Validate OpenAI API key
+      if (!process.env.OPENAI_API_KEY) {
+        return NextResponse.json(
+          { error: 'OpenAI API key not configured' },
+          { status: 500 }
+        )
+      }
 
-    const model = modelMap[aiProvider] || 'gpt-4-turbo-preview'
+      // Map AI provider to OpenAI model
+      const modelMap: Record<string, string> = {
+        'gpt-4': 'gpt-4-turbo-preview',
+        'claude': 'gpt-4-turbo-preview', // We'll use GPT-4 for now, can add Claude API later
+        'gemini': 'gpt-4-turbo-preview', // Can add Gemini API later
+        'perplexity': 'gpt-4-turbo-preview', // Can add Perplexity API later
+      }
 
-    // Add system message for Javari AI personality
-    const systemMessage: ChatMessage = {
-      role: 'system',
-      content: `You are Javari AI, an intelligent assistant that provides helpful, accurate, and professional responses. 
+      const model = modelMap[aiProvider] || 'gpt-4-turbo-preview'
+
+      // Add system message for Javari AI personality
+      const systemMessage: ChatMessage = {
+        role: 'system',
+        content: `You are Javari AI, an intelligent assistant that provides helpful, accurate, and professional responses. 
       
 Your capabilities:
 - Code generation and debugging
@@ -59,50 +78,54 @@ When appropriate:
 - Generate artifacts (code, documents, data files)
 - Suggest follow-up actions
 - Ask clarifying questions`
-    }
+      }
 
-    const fullMessages = [systemMessage, ...messages]
+      const fullMessages = [systemMessage, ...messages]
 
-    // Create streaming response
-    const stream = await openai.chat.completions.create({
-      model,
-      messages: fullMessages,
-      stream: true,
-      temperature: 0.7,
-      max_tokens: 2000,
-    })
+      // Create streaming response
+      const stream = await openai.chat.completions.create({
+        model,
+        messages: fullMessages,
+        stream: true,
+        temperature: 0.7,
+        max_tokens: 2000,
+      })
 
-    // Create readable stream for client
-    const encoder = new TextEncoder()
-    const readable = new ReadableStream({
-      async start(controller) {
-        try {
-          for await (const chunk of stream) {
-            const text = chunk.choices[0]?.delta?.content || ''
-            if (text) {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text })}\n\n`))
+      // Create readable stream for client
+      const encoder = new TextEncoder()
+      const readable = new ReadableStream({
+        async start(controller) {
+          try {
+            for await (const chunk of stream) {
+              const text = safeGet(chunk, 'choices.0.delta.content', '');
+              if (text && typeof text === 'string') {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text })}\n\n`))
+              }
             }
+            controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+            controller.close()
+          } catch (error: unknown) {
+            handleError(error, { file: 'chat/route.ts', function: 'stream' });
+            controller.error(error)
           }
-          controller.enqueue(encoder.encode('data: [DONE]\n\n'))
-          controller.close()
-        } catch (error: unknown) {
-          controller.error(error)
-        }
-      },
-    })
+        },
+      })
 
-    return new Response(readable, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      },
-    })
-  } catch (error: unknown) {
-    logError('OpenAI API Error:', error)
-    return NextResponse.json(
-      { error: getErrorMessage(error) },
+      return new Response(readable, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        },
+      })
+    },
+    { file: 'chat/route.ts', function: 'POST' },
+    NextResponse.json(
+      { error: 'Internal server error' },
       { status: 500 }
     )
-  }
+  ) || NextResponse.json(
+    { error: 'Unexpected error' },
+    { status: 500 }
+  );
 }
