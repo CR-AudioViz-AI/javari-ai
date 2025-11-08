@@ -1,3 +1,4 @@
+import { getErrorMessage, logError } from '@/lib/utils/error-utils';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
@@ -50,7 +51,7 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({ success: true, insights, creditsUsed: 20 });
-  } catch (error: any) {
-    return NextResponse.json({ error: 'Analysis failed', details: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: 'Analysis failed', details: getErrorMessage(error) }, { status: 500 });
   }
 }
