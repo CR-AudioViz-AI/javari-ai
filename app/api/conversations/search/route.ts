@@ -1,4 +1,7 @@
 import { getErrorMessage, logError } from '@/lib/utils/error-utils';
+import { safeAsync, handleError } from '@/lib/error-handler';
+import { isDefined, toString, toNumber, isArray } from '@/lib/typescript-helpers';
+
 /**
  * Conversation Search API
  * GET: Full-text search across conversations
@@ -13,46 +16,55 @@ const supabase = createClient(
 );
 
 export async function GET(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url);
-    
-    const userId = searchParams.get('userId') || 'default-user';
-    const query = searchParams.get('q');
-    const limit = parseInt(searchParams.get('limit') || '20');
+  return await safeAsync(
+    async () => {
+      const { searchParams } = new URL(request.url);
+      
+      const userId = toString(searchParams.get('userId'), 'default-user');
+      const query = searchParams.get('q');
+      const limit = toNumber(searchParams.get('limit'), 20);
 
-    if (!query || query.length < 2) {
-      return NextResponse.json(
-        { success: false, error: 'Search query must be at least 2 characters' },
-        { status: 400 }
-      );
-    }
+      if (!isDefined(query) || query.length < 2) {
+        return NextResponse.json(
+          { success: false, error: 'Search query must be at least 2 characters' },
+          { status: 400 }
+        );
+      }
 
-    // Search in title, summary, and messages content
-    const { data, error } = await supabase
-      .from('conversations')
-      .select('id, numeric_id, title, summary, message_count, starred, created_at, updated_at, continuation_depth')
-      .eq('user_id', userId)
-      .eq('status', 'active')
-      .or(`title.ilike.%${query}%,summary.ilike.%${query}%`)
-      .order('updated_at', { ascending: false })
-      .limit(limit);
+      // Search in title, summary, and messages content
+      const { data, error } = await supabase
+        .from('conversations')
+        .select('id, numeric_id, title, summary, message_count, starred, created_at, updated_at, continuation_depth')
+        .eq('user_id', userId)
+        .eq('status', 'active')
+        .or(`title.ilike.%${query}%,summary.ilike.%${query}%)
+        .order('updated_at', { ascending: false })
+        .limit(limit);
 
-    if (error) throw error;
+      if (error) {
+        handleError(error, { file: 'conversations/search/route.ts', function: 'GET' });
+        throw error;
+      }
 
-    // For more advanced search (including message content), we'd need to parse messages JSONB
-    // This is a basic implementation focusing on title and summary
+      // For more advanced search (including message content), we'd need to parse messages JSONB
+      // This is a basic implementation focusing on title and summary
 
-    return NextResponse.json({
-      success: true,
-      query,
-      results: data || [],
-      count: data?.length || 0,
-    });
-  } catch (error: unknown) {
-    console.error('Error searching conversations:', error);
-    return NextResponse.json(
-      { success: false, error: getErrorMessage(error) },
+      const results = isArray(data) ? data : [];
+
+      return NextResponse.json({
+        success: true,
+        query,
+        results,
+        count: results.length,
+      });
+    },
+    { file: 'conversations/search/route.ts', function: 'GET' },
+    NextResponse.json(
+      { success: false, error: 'Failed to search conversations' },
       { status: 500 }
-    );
-  }
+    )
+  ) || NextResponse.json(
+    { success: false, error: 'Unexpected error' },
+    { status: 500 }
+  );
 }
