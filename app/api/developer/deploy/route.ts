@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
       status: deploymentStatus,
     });
   } catch (error: unknown) {
-    logError(\'Deployment error:\', error);
+    logError('Deployment error:\', error);
 
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
@@ -174,7 +174,7 @@ export async function GET(request: NextRequest) {
       createdAt: data.createdAt,
     });
   } catch (error: unknown) {
-    logError(\'Status check error:\', error);
+    logError('Status check error:\', error);
 
     return NextResponse.json(
       {
