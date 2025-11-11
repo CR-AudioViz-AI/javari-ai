@@ -245,7 +245,7 @@ export async function getDecryptedValue(credentialId: string, userId: string): P
 
     return decrypted;
   } catch (error: unknown) {
-    logError('Decryption error:\', error);
+    logError('Decryption error:', error);
     return null;
   }
 }
