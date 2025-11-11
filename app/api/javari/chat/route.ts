@@ -416,7 +416,7 @@ Remember: You know Roy and Cindy Henderson. You understand the CR AudioViz AI mi
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
           controller.close();
         } catch (error: unknown) {
-          logError(\'Streaming error:\', error);
+          logError('Streaming error:\', error);
           const errorMessage = error instanceof Error ? error.message : 'Unknown streaming error';
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify({ error: errorMessage })}\n\n`)
@@ -434,7 +434,7 @@ Remember: You know Roy and Cindy Henderson. You understand the CR AudioViz AI mi
       },
     });
   } catch (error: unknown) {
-    logError(\'Javari chat error:\', error);
+    logError('Javari chat error:\', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
       {
