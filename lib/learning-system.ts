@@ -108,7 +108,7 @@ export async function ingestNews(): Promise<{ success: boolean; count: number }>
 
     return { success: true, count: totalIngested };
   } catch (error: unknown) {
-    logError(\'Error in news ingestion:\', error);
+    logError('Error in news ingestion:\', error);
     return { success: false, count: 0 };
   }
 }
@@ -163,7 +163,7 @@ export async function processDocument(
 
     return { success: true, insights };
   } catch (error: unknown) {
-    logError(\'Error processing document:\', error);
+    logError('Error processing document:\', error);
     return { success: false, insights: [] };
   }
 }
@@ -229,7 +229,7 @@ export async function monitorGitHub(repoUrl: string): Promise<{ success: boolean
 
     return { success: true, learned };
   } catch (error: unknown) {
-    logError(\'Error monitoring GitHub:\', error);
+    logError('Error monitoring GitHub:\', error);
     return { success: false, learned: 0 };
   }
 }
@@ -305,7 +305,7 @@ export async function learnFromConversation(
       });
     }
   } catch (error: unknown) {
-    logError(\'Error learning from conversation:\', error);
+    logError('Error learning from conversation:\', error);
   }
 }
 
@@ -327,7 +327,7 @@ export async function searchKnowledge(
     if (error) throw error;
     return data || [];
   } catch (error: unknown) {
-    logError(\'Error searching knowledge:\', error);
+    logError('Error searching knowledge:\', error);
     return [];
   }
 }
@@ -353,7 +353,7 @@ export async function getConversationPatterns(
     if (error) throw error;
     return data || [];
   } catch (error: unknown) {
-    logError(\'Error getting patterns:\', error);
+    logError('Error getting patterns:\', error);
     return [];
   }
 }
@@ -448,7 +448,7 @@ async function storeKnowledge(entry: LearningEntry): Promise<void> {
         relevance_score: entry.relevance_score,
       });
   } catch (error: unknown) {
-    logError(\'Error storing knowledge:\', error);
+    logError('Error storing knowledge:\', error);
   }
 }
 
