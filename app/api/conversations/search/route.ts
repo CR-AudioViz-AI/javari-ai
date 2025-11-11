@@ -59,12 +59,5 @@ export async function GET(request: NextRequest) {
       });
     },
     { file: 'conversations/search/route.ts', function: 'GET' },
-    NextResponse.json(
-      { success: false, error: 'Failed to search conversations' },
-      { status: 500 }
-    )
-  ) || NextResponse.json(
-    { success: false, error: 'Unexpected error' },
-    { status: 500 }
   );
 }
