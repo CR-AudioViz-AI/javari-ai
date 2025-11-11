@@ -87,7 +87,7 @@ export async function GET(request: NextRequest) {
     const { data, error, count } = await query;
 
     if (error) {
-      logError('Error fetching conversations:\', error);
+      logError('Error fetching conversations:', error);
       return NextResponse.json(
         { error: 'Failed to fetch conversations' },
         { status: 500 }
@@ -101,7 +101,7 @@ export async function GET(request: NextRequest) {
       offset,
     });
   } catch (error: unknown) {
-    logError('Conversations GET error:\', error);
+    logError('Conversations GET error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -167,7 +167,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (error) {
-      logError('Error creating conversation:\', error);
+      logError('Error creating conversation:', error);
       return NextResponse.json(
         { error: 'Failed to create conversation' },
         { status: 500 }
@@ -176,7 +176,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ conversation: data });
   } catch (error: unknown) {
-    logError('Conversations POST error:\', error);
+    logError('Conversations POST error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -223,7 +223,7 @@ export async function PATCH(request: NextRequest) {
       .single();
 
     if (error) {
-      logError('Error updating conversation:\', error);
+      logError('Error updating conversation:', error);
       return NextResponse.json(
         { error: 'Failed to update conversation' },
         { status: 500 }
@@ -232,7 +232,7 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({ conversation: data });
   } catch (error: unknown) {
-    logError('Conversations PATCH error:\', error);
+    logError('Conversations PATCH error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -265,7 +265,7 @@ export async function DELETE(request: NextRequest) {
         .eq('id', conversationId);
 
       if (error) {
-        logError('Error archiving conversation:\', error);
+        logError('Error archiving conversation:', error);
         return NextResponse.json(
           { error: 'Failed to archive conversation' },
           { status: 500 }
@@ -281,7 +281,7 @@ export async function DELETE(request: NextRequest) {
         .eq('id', conversationId);
 
       if (error) {
-        logError('Error deleting conversation:\', error);
+        logError('Error deleting conversation:', error);
         return NextResponse.json(
           { error: 'Failed to delete conversation' },
           { status: 500 }
@@ -291,7 +291,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ success: true, deleted: true });
     }
   } catch (error: unknown) {
-    logError('Conversations DELETE error:\', error);
+    logError('Conversations DELETE error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
