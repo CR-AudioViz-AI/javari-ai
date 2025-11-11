@@ -43,7 +43,7 @@ export async function textToSpeech(
       duration: data.duration,
     };
   } catch (error: unknown) {
-    logError(\'TTS error:\', error);
+    logError('TTS error:\', error);
     throw error;
   }
 }
@@ -69,7 +69,7 @@ export async function speechToText(
       confidence: data.confidence,
     };
   } catch (error: unknown) {
-    logError(\'STT error:\', error);
+    logError('STT error:\', error);
     throw error;
   }
 }
