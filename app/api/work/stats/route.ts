@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
     const { data: workLogs, error } = await query;
     
     if (error) {
-      logError('Error fetching work logs for stats:\', error);
+      logError('Error fetching work logs for stats:', error);
       return NextResponse.json(
         { error: 'Failed to fetch work log statistics', details: error.message },
         { status: 500 }
@@ -176,7 +176,7 @@ export async function GET(request: NextRequest) {
     });
     
   } catch (error: unknown) {
-    logError('Unexpected error calculating work log stats:\', error);
+    logError('Unexpected error calculating work log stats:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
