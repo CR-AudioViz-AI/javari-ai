@@ -347,7 +347,7 @@ export async function POST(request: NextRequest) {
     });
     
   } catch (error: unknown) {
-    logError(\'File upload error:\', error);
+    logError('File upload error:\', error);
     return NextResponse.json(
       {
         error: 'Failed to process file',
@@ -392,7 +392,7 @@ export async function GET(request: NextRequest) {
     });
     
   } catch (error: unknown) {
-    logError(\'File list error:\', error);
+    logError('File list error:\', error);
     return NextResponse.json(
       {
         error: 'Failed to list files',
@@ -454,7 +454,7 @@ export async function DELETE(request: NextRequest) {
     });
     
   } catch (error: unknown) {
-    logError(\'File delete error:\', error);
+    logError('File delete error:\', error);
     return NextResponse.json(
       {
         error: 'Failed to delete file',
