@@ -392,7 +392,7 @@ export class AutonomousGitHub {
 
       return await response.json();
     } catch (error: unknown) {
-      logError('Error fetching commit history:\', error);
+      logError('Error fetching commit history:', error);
       return [];
     }
   }
