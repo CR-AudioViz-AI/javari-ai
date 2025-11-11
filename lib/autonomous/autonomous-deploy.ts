@@ -128,7 +128,7 @@ export class AutonomousVercel {
         ready: data.ready
       };
     } catch (error: unknown) {
-      logError(\'Error getting deployment status:\', error);
+      logError('Error getting deployment status:\', error);
       return null;
     }
   }
@@ -223,7 +223,7 @@ export class AutonomousVercel {
           message: event.payload?.text || event.text || ''
         }));
     } catch (error: unknown) {
-      logError(\'Error fetching build logs:\', error);
+      logError('Error fetching build logs:\', error);
       return [];
     }
   }
@@ -283,7 +283,7 @@ export class AutonomousVercel {
         created: latest.created
       };
     } catch (error: unknown) {
-      logError(\'Error getting latest deployment:\', error);
+      logError('Error getting latest deployment:\', error);
       return null;
     }
   }
@@ -328,7 +328,7 @@ export class AutonomousVercel {
 
       return response.ok;
     } catch (error: unknown) {
-      logError(\'Error canceling deployment:\', error);
+      logError('Error canceling deployment:\', error);
       return false;
     }
   }
@@ -349,7 +349,7 @@ export class AutonomousVercel {
 
       return response.ok;
     } catch (error: unknown) {
-      logError(\'Error promoting deployment:\', error);
+      logError('Error promoting deployment:\', error);
       return false;
     }
   }
@@ -382,7 +382,7 @@ export class AutonomousVercel {
         created: d.created
       }));
     } catch (error: unknown) {
-      logError(\'Error listing deployments:\', error);
+      logError('Error listing deployments:\', error);
       return [];
     }
   }
