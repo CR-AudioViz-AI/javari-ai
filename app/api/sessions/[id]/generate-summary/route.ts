@@ -209,7 +209,7 @@ Keep all items concise and specific. Return ONLY valid JSON, no additional text.
     });
 
   } catch (error: unknown) {
-    logError(\'Generate summary error:\', error);
+    logError('Generate summary error:\', error);
     return NextResponse.json<ApiResponse<null>>({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
