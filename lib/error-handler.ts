@@ -6,6 +6,8 @@
  * @version 1.0.0
  * @quality Fortune 50 Production Standard
  */
+import React from 'react';
+
 
 // ============================================================================
 // TYPE DEFINITIONS
