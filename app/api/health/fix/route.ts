@@ -188,8 +188,8 @@ async function attemptFix(record: any): Promise<{
     actions.push('Import/Export mismatch detected');
     next_steps.push('Check if module uses default export vs named export');
     next_steps.push('Update import statement accordingly');
-    next_steps.push('Example: import Module from "..." vs import { Module } from "..."
-import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';');
+    next_steps.push('Example: import Module from "..." vs import { Module } from "..."');
+
     
     return {
       success: false,
