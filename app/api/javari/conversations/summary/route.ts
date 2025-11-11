@@ -124,7 +124,7 @@ Format your summary as:
     });
 
   } catch (error: unknown) {
-    logError(\'Summary generation error:\', error);
+    logError('Summary generation error:\', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
       {
@@ -174,7 +174,7 @@ export async function GET(request: NextRequest) {
     });
 
   } catch (error: unknown) {
-    logError(\'Get summary error:\', error);
+    logError('Get summary error:\', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
