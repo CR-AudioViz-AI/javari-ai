@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
       total: count || 0,
     });
   } catch (error: unknown) {
-    logError(\'Error fetching dependencies:\', error);
+    logError('Error fetching dependencies:\', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -122,7 +122,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(data, { status: 201 });
     }
   } catch (error: unknown) {
-    logError(\'Error managing dependency:\', error);
+    logError('Error managing dependency:\', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -157,7 +157,7 @@ export async function DELETE(request: NextRequest) {
     
     return NextResponse.json({ message: 'Dependencies deleted successfully' });
   } catch (error: unknown) {
-    logError(\'Error deleting dependencies:\', error);
+    logError('Error deleting dependencies:\', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
