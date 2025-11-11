@@ -439,7 +439,7 @@ export class ProviderManager {
         p_latency_ms: data.latency,
       });
 
-      if (error) logError('Error logging performance:\', error);
+      if (error) logError('Error logging performance:', error);
 
       // If failure, log to provider health
       if (!data.success) {
@@ -451,7 +451,7 @@ export class ProviderManager {
         });
       }
     } catch (error: unknown) {
-      logError('Error in logPerformance:\', error);
+      logError('Error in logPerformance:', error);
     }
   }
 
@@ -472,7 +472,7 @@ export class ProviderManager {
         created_at: new Date().toISOString(),
       });
     } catch (error: unknown) {
-      logError('Error in logAutoHeal:\', error);
+      logError('Error in logAutoHeal:', error);
     }
   }
 
