@@ -84,7 +84,7 @@ export async function GET() {
       }
     })
   } catch (error: unknown) {
-    logError(\'Error fetching settings:\', error)
+    logError('Error fetching settings:\', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -244,7 +244,7 @@ export async function PATCH(request: Request) {
       }
     })
   } catch (error: unknown) {
-    logError(\'Error updating settings:\', error)
+    logError('Error updating settings:\', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
