@@ -80,7 +80,7 @@ export async function GET(request: NextRequest) {
     const { data, error, count } = await query;
 
     if (error) {
-      logError('Error fetching projects:\', error);
+      logError('Error fetching projects:', error);
       return NextResponse.json(
         { error: 'Failed to fetch projects' },
         { status: 500 }
@@ -92,7 +92,7 @@ export async function GET(request: NextRequest) {
       total: count,
     });
   } catch (error: unknown) {
-    logError('Projects GET error:\', error);
+    logError('Projects GET error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -145,7 +145,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (error) {
-      logError('Error creating project:\', error);
+      logError('Error creating project:', error);
       return NextResponse.json(
         { error: 'Failed to create project' },
         { status: 500 }
@@ -154,7 +154,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ project: data });
   } catch (error: unknown) {
-    logError('Projects POST error:\', error);
+    logError('Projects POST error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -192,7 +192,7 @@ export async function PATCH(request: NextRequest) {
       .single();
 
     if (error) {
-      logError('Error updating project:\', error);
+      logError('Error updating project:', error);
       return NextResponse.json(
         { error: 'Failed to update project' },
         { status: 500 }
@@ -201,7 +201,7 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({ project: data });
   } catch (error: unknown) {
-    logError('Projects PATCH error:\', error);
+    logError('Projects PATCH error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -238,7 +238,7 @@ export async function DELETE(request: NextRequest) {
         .eq('id', projectId);
 
       if (error) {
-        logError('Error archiving project:\', error);
+        logError('Error archiving project:', error);
         return NextResponse.json(
           { error: 'Failed to archive project' },
           { status: 500 }
@@ -254,7 +254,7 @@ export async function DELETE(request: NextRequest) {
         .eq('id', projectId);
 
       if (error) {
-        logError('Error deleting project:\', error);
+        logError('Error deleting project:', error);
         return NextResponse.json(
           { error: 'Failed to delete project' },
           { status: 500 }
@@ -264,7 +264,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ success: true, deleted: true });
     }
   } catch (error: unknown) {
-    logError('Projects DELETE error:\', error);
+    logError('Projects DELETE error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
