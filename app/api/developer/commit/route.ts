@@ -102,7 +102,7 @@ export async function POST(request: NextRequest) {
       message: sha ? 'File updated successfully' : 'File created successfully',
     });
   } catch (error: unknown) {
-    logError(\'GitHub commit error:\', error);
+    logError('GitHub commit error:\', error);
 
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
