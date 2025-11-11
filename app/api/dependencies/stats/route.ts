@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
     
     return NextResponse.json(stats);
   } catch (error: unknown) {
-    logError('Error calculating dependency stats:\', error);
+    logError('Error calculating dependency stats:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
