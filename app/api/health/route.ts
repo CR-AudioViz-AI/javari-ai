@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
     const { data, error, count } = await query;
     
     if (error) {
-      logError('Error fetching health records:\', error);
+      logError('Error fetching health records:', error);
       return NextResponse.json(
         { error: 'Failed to fetch health records', details: error.message },
         { status: 500 }
@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
     });
     
   } catch (error: unknown) {
-    logError('Unexpected error fetching health records:\', error);
+    logError('Unexpected error fetching health records:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -144,7 +144,7 @@ export async function POST(request: NextRequest) {
       .single();
     
     if (error) {
-      logError('Error creating health record:\', error);
+      logError('Error creating health record:', error);
       return NextResponse.json(
         { error: 'Failed to create health record', details: error.message },
         { status: 500 }
@@ -160,7 +160,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(record, { status: 201 });
     
   } catch (error: unknown) {
-    logError('Unexpected error creating health record:\', error);
+    logError('Unexpected error creating health record:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
