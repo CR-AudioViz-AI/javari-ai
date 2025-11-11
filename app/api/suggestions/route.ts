@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
     
     return NextResponse.json({ suggestions: data || [] });
   } catch (error: unknown) {
-    logError('Error fetching suggestions:\', error);
+    logError('Error fetching suggestions:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
     
     return NextResponse.json(data, { status: 201 });
   } catch (error: unknown) {
-    logError('Error creating suggestion:\', error);
+    logError('Error creating suggestion:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -118,7 +118,7 @@ export async function PATCH(request: NextRequest) {
     
     return NextResponse.json(data);
   } catch (error: unknown) {
-    logError('Error updating suggestion:\', error);
+    logError('Error updating suggestion:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
