@@ -40,7 +40,7 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
       is_authenticated: true
     };
   } catch (error: unknown) {
-    logError('Failed to get current user:\', error);
+    logError('Failed to get current user:', error);
     return null;
   }
 }
