@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
     });
     
   } catch (error: unknown) {
-    logError('Unexpected error during auto-fix:\', error);
+    logError('Unexpected error during auto-fix:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -250,7 +250,7 @@ export async function GET(request: NextRequest) {
     const { data: records, error } = await query;
     
     if (error) {
-      logError('Error fetching fix stats:\', error);
+      logError('Error fetching fix stats:', error);
       return NextResponse.json(
         { error: 'Failed to fetch fix statistics' },
         { status: 500 }
@@ -317,7 +317,7 @@ export async function GET(request: NextRequest) {
     });
     
   } catch (error: unknown) {
-    logError('Unexpected error calculating fix stats:\', error);
+    logError('Unexpected error calculating fix stats:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
