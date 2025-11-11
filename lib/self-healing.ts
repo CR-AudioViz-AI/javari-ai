@@ -144,7 +144,7 @@ export async function monitorBuild(buildId: string, projectId: string): Promise<
       }
     }
   } catch (error: unknown) {
-    logError(\'Error monitoring build:\', error);
+    logError('Error monitoring build:\', error);
   }
 }
 
