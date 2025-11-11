@@ -34,7 +34,7 @@ export async function GET(
     return NextResponse.json(workLog);
     
   } catch (error: unknown) {
-    logError(\'Error fetching work log:\', error);
+    logError('Error fetching work log:\', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -96,7 +96,7 @@ export async function PATCH(
       .single();
     
     if (error) {
-      logError(\'Error updating work log:\', error);
+      logError('Error updating work log:\', error);
       return NextResponse.json(
         { error: 'Failed to update work log', details: error.message },
         { status: 500 }
@@ -116,7 +116,7 @@ export async function PATCH(
     return NextResponse.json(updated);
     
   } catch (error: unknown) {
-    logError(\'Error updating work log:\', error);
+    logError('Error updating work log:\', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -156,7 +156,7 @@ export async function DELETE(
       .eq('id', id);
     
     if (error) {
-      logError(\'Error deleting work log:\', error);
+      logError('Error deleting work log:\', error);
       return NextResponse.json(
         { error: 'Failed to delete work log', details: error.message },
         { status: 500 }
@@ -172,7 +172,7 @@ export async function DELETE(
     );
     
   } catch (error: unknown) {
-    logError(\'Error deleting work log:\', error);
+    logError('Error deleting work log:\', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -227,6 +227,6 @@ async function recalculateChatSessionMetrics(
       .eq('id', sessionId);
     
   } catch (error: unknown) {
-    logError(\'Error recalculating metrics:\', error);
+    logError('Error recalculating metrics:\', error);
   }
 }
