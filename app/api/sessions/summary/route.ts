@@ -214,7 +214,7 @@ export async function GET(request: Request) {
     });
 
   } catch (error: unknown) {
-    logError(\'Session summary error:\', error);
+    logError('Session summary error:\', error);
     return NextResponse.json<ApiResponse<null>>({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
