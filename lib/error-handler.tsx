@@ -354,7 +354,6 @@ export interface ErrorBoundaryState {
 }
 
 // Note: This is a class component as Error Boundaries require class components
-import React from 'react';
 
 export class JavariErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
