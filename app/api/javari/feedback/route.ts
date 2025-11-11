@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (error) {
-      logError(\'Feedback submission error:\', error);
+      logError('Feedback submission error:\', error);
       return NextResponse.json(
         { error: 'Failed to submit feedback' },
         { status: 500 }
@@ -130,7 +130,7 @@ export async function POST(request: NextRequest) {
       message: 'Thank you for your feedback! This helps Javari improve.',
     });
   } catch (error: unknown) {
-    logError(\'Feedback error:\', error);
+    logError('Feedback error:\', error);
     return NextResponse.json(
       {
         error: 'Failed to process feedback',
@@ -196,7 +196,7 @@ export async function GET(request: NextRequest) {
       stats: stats,
     });
   } catch (error: unknown) {
-    logError(\'Get feedback error:\', error);
+    logError('Get feedback error:\', error);
     return NextResponse.json(
       {
         error: 'Failed to fetch feedback',
@@ -255,7 +255,7 @@ export async function PATCH(request: NextRequest) {
       feedback: data,
     });
   } catch (error: unknown) {
-    logError(\'Update feedback error:\', error);
+    logError('Update feedback error:\', error);
     return NextResponse.json(
       {
         error: 'Failed to update feedback',
@@ -338,7 +338,7 @@ export async function OPTIONS(request: NextRequest) {
       },
     });
   } catch (error: unknown) {
-    logError(\'Get insights error:\', error);
+    logError('Get insights error:\', error);
     return NextResponse.json(
       {
         error: 'Failed to fetch insights',
