@@ -115,7 +115,7 @@ Respond in JSON format:
       confidence: analysis.confidence,
     };
   } catch (error: unknown) {
-    logError(\'Auto-fix analysis error:\', error);
+    logError('Auto-fix analysis error:\', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Analysis failed',
@@ -226,7 +226,7 @@ export async function POST(request: NextRequest) {
       timeToResolve: timeToResolve,
     });
   } catch (error: unknown) {
-    logError(\'Auto-heal error:\', error);
+    logError('Auto-heal error:\', error);
     return NextResponse.json(
       {
         error: 'Failed to create auto-healing incident',
@@ -288,7 +288,7 @@ export async function GET(request: NextRequest) {
       stats: stats,
     });
   } catch (error: unknown) {
-    logError(\'Get incidents error:\', error);
+    logError('Get incidents error:\', error);
     return NextResponse.json(
       {
         error: 'Failed to fetch incidents',
@@ -362,7 +362,7 @@ export async function PATCH(request: NextRequest) {
       incident: data,
     });
   } catch (error: unknown) {
-    logError(\'Update incident error:\', error);
+    logError('Update incident error:\', error);
     return NextResponse.json(
       {
         error: 'Failed to update incident',
