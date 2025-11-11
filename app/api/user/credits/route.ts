@@ -110,7 +110,7 @@ export async function GET() {
       }
     })
   } catch (error: unknown) {
-    logError('Error fetching credits:\', error)
+    logError('Error fetching credits:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -214,7 +214,7 @@ export async function POST(request: Request) {
       }
     })
   } catch (error: unknown) {
-    logError('Error deducting credits:\', error)
+    logError('Error deducting credits:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
