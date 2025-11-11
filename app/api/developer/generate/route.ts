@@ -118,7 +118,7 @@ Do not include markdown code blocks or any other text. Only valid JSON.`,
       explanation,
     });
   } catch (error: unknown) {
-    logError(\'Code generation error:\', error);
+    logError('Code generation error:\', error);
 
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
