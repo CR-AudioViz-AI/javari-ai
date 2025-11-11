@@ -53,7 +53,7 @@ export async function GET() {
       }
     })
   } catch (error: unknown) {
-    logError('Error fetching profile:\', error)
+    logError('Error fetching profile:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -156,7 +156,7 @@ export async function PATCH(request: Request) {
       }
     })
   } catch (error: unknown) {
-    logError('Error updating profile:\', error)
+    logError('Error updating profile:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
