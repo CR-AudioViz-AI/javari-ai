@@ -98,13 +98,13 @@ export async function POST(request: NextRequest) {
       });
 
     if (error) {
-      logError(\'Telemetry logging error:\', error);
+      logError('Telemetry logging error:\', error);
       // Don't fail the request if telemetry fails
     }
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
-    logError(\'Telemetry error:\', error);
+    logError('Telemetry error:\', error);
     // Return success even on error to not disrupt user experience
     return NextResponse.json({ success: true });
   }
@@ -186,7 +186,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error: unknown) {
-    logError(\'Analytics error:\', error);
+    logError('Analytics error:\', error);
     return NextResponse.json(
       {
         error: 'Failed to fetch analytics',
