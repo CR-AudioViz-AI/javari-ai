@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
     });
 
   } catch (error: unknown) {
-    logError(\'Provider status error:\', error);
+    logError('Provider status error:\', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
