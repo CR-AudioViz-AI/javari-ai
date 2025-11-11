@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
-    logError('Learning API error:\', error);
+    logError('Learning API error:', error);
     return NextResponse.json(
       {
         error: 'Failed to log learning event',
@@ -102,7 +102,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error: unknown) {
-    logError('Learning retrieval error:\', error);
+    logError('Learning retrieval error:', error);
     return NextResponse.json(
       {
         error: 'Failed to retrieve learning data',
