@@ -33,7 +33,7 @@ export async function GET(
     return NextResponse.json(record);
     
   } catch (error: unknown) {
-    logError('Error fetching health record:\', error);
+    logError('Error fetching health record:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -92,7 +92,7 @@ export async function PATCH(
       .single();
     
     if (error) {
-      logError('Error updating health record:\', error);
+      logError('Error updating health record:', error);
       return NextResponse.json(
         { error: 'Failed to update health record', details: error.message },
         { status: 500 }
@@ -102,7 +102,7 @@ export async function PATCH(
     return NextResponse.json(updated);
     
   } catch (error: unknown) {
-    logError('Error updating health record:\', error);
+    logError('Error updating health record:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -142,7 +142,7 @@ export async function DELETE(
       .eq('id', id);
     
     if (error) {
-      logError('Error deleting health record:\', error);
+      logError('Error deleting health record:', error);
       return NextResponse.json(
         { error: 'Failed to delete health record', details: error.message },
         { status: 500 }
@@ -155,7 +155,7 @@ export async function DELETE(
     );
     
   } catch (error: unknown) {
-    logError('Error deleting health record:\', error);
+    logError('Error deleting health record:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
