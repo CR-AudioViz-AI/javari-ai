@@ -213,9 +213,13 @@ export function ChatInterface({
               <User size={18} className="text-white" />
             </div>
           ) : (
-            <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center">
-              <Bot size={18} className="text-white" />
-            </div>
+            <Image 
+              src="/avatars/javariavatar.png"
+              alt="Javari AI"
+              width={32}
+              height={32}
+              className="w-8 h-8 rounded-full"
+            />
           )}
         </div>
 
