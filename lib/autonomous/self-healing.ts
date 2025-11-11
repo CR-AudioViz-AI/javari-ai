@@ -144,7 +144,7 @@ Analyze the error and provide a detailed diagnosis in JSON format with the follo
         estimatedComplexity: diagnosis.estimatedComplexity || 'complex'
       };
     } catch (error: unknown) {
-      logError(\'Error in diagnosis:\', error);
+      logError('Error in diagnosis:\', error);
       return {
         confidence: 0,
         rootCause: 'Failed to diagnose',
@@ -429,7 +429,7 @@ Provide the complete fixed file content:`
           body: JSON.stringify(notification)
         });
       } catch (error: unknown) {
-        logError(\'Failed to send escalation notification:\', error);
+        logError('Failed to send escalation notification:\', error);
       }
     }
 
@@ -464,7 +464,7 @@ Provide the complete fixed file content:`
           body: JSON.stringify(notification)
         });
       } catch (error: unknown) {
-        logError(\'Failed to send success notification:\', error);
+        logError('Failed to send success notification:\', error);
       }
     }
   }
@@ -494,7 +494,7 @@ Provide the complete fixed file content:`
           body: JSON.stringify(notification)
         });
       } catch (error: unknown) {
-        logError(\'Failed to send failure notification:\', error);
+        logError('Failed to send failure notification:\', error);
       }
     }
   }
