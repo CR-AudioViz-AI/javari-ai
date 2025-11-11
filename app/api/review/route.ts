@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
     
     return NextResponse.json({ reviews: data || [] });
   } catch (error: unknown) {
-    logError('Error fetching review queue:\', error);
+    logError('Error fetching review queue:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
     
     return NextResponse.json(data, { status: 201 });
   } catch (error: unknown) {
-    logError('Error creating review:\', error);
+    logError('Error creating review:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
