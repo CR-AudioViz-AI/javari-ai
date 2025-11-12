@@ -1,464 +1,379 @@
-/**
- * Javari AI - Learning Dashboard
- * Monitor learning progress, sources, and knowledge base growth
- * 
- * Created: November 4, 2025 - 7:35 PM EST
- * Part of Phase 3: Admin Dashboard Integration
- */
+// ============================================================
+// JAVARI LEARNING DASHBOARD - Admin Component
+// ============================================================
+// Real-time monitoring of Javari's learning progress
+// Created: November 11, 2025 - 3:15 PM EST
+// Location: /app/admin/javari/learning/page.tsx
+// ============================================================
 
 'use client';
 
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 import { 
   Brain, 
-  BookOpen, 
-  TrendingUp, 
-  MessageSquare,
-  Code,
-  Globe,
-  Search,
-  Plus,
-  CheckCircle2,
+  FileText, 
+  CheckCircle, 
+  Clock, 
+  AlertCircle, 
+  TrendingUp,
+  RefreshCw,
+  Play,
   BarChart3
 } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line } from 'recharts';
-
-interface Learning {
-  id: string;
-  questionPattern: string;
-  answer: string;
-  confidenceScore: number;
-  usageCount: number;
-  successRate: number;
-  source: string;
-  createdAt: string;
-  updatedAt: string;
-}
 
 interface LearningStats {
-  total: number;
-  bySource: Record<string, number>;
-  avgConfidence: number;
-  avgSuccessRate: number;
-  topLearnings: Learning[];
+  total_docs: number;
+  docs_learned: number;
+  docs_pending: number;
+  ai_learning_docs: number;
+  owner_docs: number;
+  technical_docs: number;
+  business_docs: number;
+  avg_confidence_score: number;
+  total_usage_count: number;
+  last_doc_used: string;
+  queue_pending: number;
+  queue_processing: number;
+  queue_failed: number;
+  learned_last_24h: number;
+  learned_last_7d: number;
+  stats_generated_at: string;
 }
 
-const SOURCE_LABELS = {
-  admin_dashboard: 'Admin Dashboard',
-  conversation: 'Conversations',
-  code_generation: 'Code Generation',
-  web_crawl: 'Web Crawls'
-};
-
-const SOURCE_ICONS = {
-  admin_dashboard: BookOpen,
-  conversation: MessageSquare,
-  code_generation: Code,
-  web_crawl: Globe
-};
-
-const SOURCE_COLORS = {
-  admin_dashboard: '#8b5cf6',
-  conversation: '#3b82f6',
-  code_generation: '#10b981',
-  web_crawl: '#f59e0b'
-};
-
-export default function LearningDashboard() {
-  const [stats, setStats] = useState<LearningStats>({
-    total: 0,
-    bySource: {},
-    avgConfidence: 0,
-    avgSuccessRate: 0,
-    topLearnings: []
-  });
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<Learning[]>([]);
+export default function JavariLearningDashboard() {
+  const [stats, setStats] = useState<LearningStats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showFeedForm, setShowFeedForm] = useState(false);
-  const [feedForm, setFeedForm] = useState({
-    topic: '',
-    content: '',
-    importance: 'medium' as 'low' | 'medium' | 'high'
-  });
+  const [error, setError] = useState<string | null>(null);
+  const [isLearning, setIsLearning] = useState(false);
+  const [learningResult, setLearningResult] = useState<any>(null);
 
+  // Fetch learning statistics
+  const fetchStats = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const response = await fetch('/api/javari/learn-from-docs', {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${process.env.NEXT_PUBLIC_JAVARI_API_KEY}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+      }
+
+      const data = await response.json();
+      setStats(data.stats);
+    } catch (err: any) {
+      console.error('Error fetching stats:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Trigger learning manually
+  const triggerLearning = async (mode: 'immediate' | 'batch', category?: string) => {
+    try {
+      setIsLearning(true);
+      setError(null);
+      setLearningResult(null);
+
+      const response = await fetch('/api/javari/learn-from-docs', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${process.env.NEXT_PUBLIC_JAVARI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          mode,
+          category,
+          max_docs: 10,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+      }
+
+      const result = await response.json();
+      setLearningResult(result);
+      
+      // Refresh stats after learning
+      await fetchStats();
+    } catch (err: any) {
+      console.error('Error triggering learning:', err);
+      setError(err.message);
+    } finally {
+      setIsLearning(false);
+    }
+  };
+
+  // Auto-refresh every 30 seconds
   useEffect(() => {
-    loadStats();
+    fetchStats();
+    const interval = setInterval(fetchStats, 30000);
+    return () => clearInterval(interval);
   }, []);
 
-  async function loadStats() {
-    try {
-      const response = await fetch('/api/admin/javari/feed');
-      const data = await response.json();
-      
-      if (data.success) {
-        setStats(data.stats);
-      }
-    } catch (error: unknown) {
-      console.error('Failed to load learning stats:', error);
-    } finally {
-      setLoading(false);
-    }
+  if (loading && !stats) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-600" />
+          <p className="text-gray-600">Loading Javari learning statistics...</p>
+        </div>
+      </div>
+    );
   }
 
-  async function handleSearch() {
-    if (!searchQuery.trim()) return;
-    
-    try {
-      setLoading(true);
-      const response = await fetch(`/api/admin/javari/learning/search?q=${encodeURIComponent(searchQuery)}`);
-      const data = await response.json();
-      
-      if (data.success) {
-        setSearchResults(data.results);
-      }
-    } catch (error: unknown) {
-      console.error('Search failed:', error);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleFeedKnowledge() {
-    if (!feedForm.topic.trim() || !feedForm.content.trim()) return;
-    
-    try {
-      setLoading(true);
-      const response = await fetch('/api/admin/javari/feed', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(feedForm)
-      });
-      
-      const data = await response.json();
-      
-      if (data.success) {
-        setFeedForm({ topic: '', content: '', importance: 'medium' });
-        setShowFeedForm(false);
-        await loadStats();
-      }
-    } catch (error: unknown) {
-      console.error('Failed to feed knowledge:', error);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // Prepare data for charts
-  const sourceData = Object.entries(stats.bySource).map(([source, count]) => ({
-    source: SOURCE_LABELS[source as keyof typeof SOURCE_LABELS] || source,
-    count,
-    color: SOURCE_COLORS[source as keyof typeof SOURCE_COLORS]
-  }));
-
-  const growthData = [
-    // Mock data - in real app, fetch historical data
-    { date: 'Week 1', count: stats.total * 0.2 },
-    { date: 'Week 2', count: stats.total * 0.4 },
-    { date: 'Week 3', count: stats.total * 0.7 },
-    { date: 'Week 4', count: stats.total }
-  ];
-
-  return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
-              <Brain className="w-8 h-8 text-purple-600" />
-              Javari Learning Dashboard
-            </h1>
-            <p className="text-gray-600 mt-1">
-              Monitor continuous learning and knowledge base growth
-            </p>
-          </div>
-          <Button onClick={() => setShowFeedForm(!showFeedForm)}>
-            <Plus className="w-4 h-4 mr-2" />
-            Feed Knowledge
-          </Button>
-        </div>
-
-        {/* Feed Knowledge Form */}
-        {showFeedForm && (
-          <Card className="border-purple-200 bg-purple-50">
-            <CardHeader>
-              <CardTitle>Feed Knowledge to Javari</CardTitle>
-              <CardDescription>
-                Manually add strategic knowledge, decisions, or insights
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <Label htmlFor="topic">Topic</Label>
-                <Input
-                  id="topic"
-                  placeholder="e.g., Roy's coding preferences"
-                  value={feedForm.topic}
-                  onChange={(e) => setFeedForm({ ...feedForm, topic: e.target.value })}
-                />
-              </div>
-              
-              <div>
-                <Label htmlFor="content">Knowledge Content</Label>
-                <Textarea
-                  id="content"
-                  placeholder="e.g., Roy prefers TypeScript over JavaScript for all new projects. Always use strict mode."
-                  rows={4}
-                  value={feedForm.content}
-                  onChange={(e) => setFeedForm({ ...feedForm, content: e.target.value })}
-                />
-              </div>
-
-              <div>
-                <Label>Importance Level</Label>
-                <div className="flex gap-2 mt-2">
-                  {(['low', 'medium', 'high'] as const).map((level) => (
-                    <Button
-                      key={level}
-                      variant={feedForm.importance === level ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => setFeedForm({ ...feedForm, importance: level })}
-                    >
-                      {level.charAt(0).toUpperCase() + level.slice(1)}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex gap-2">
-                <Button onClick={handleFeedKnowledge} disabled={loading}>
-                  <CheckCircle2 className="w-4 h-4 mr-2" />
-                  Save Knowledge
-                </Button>
-                <Button variant="outline" onClick={() => setShowFeedForm(false)}>
-                  Cancel
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Stats Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-gray-600">
-                Total Learnings
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-purple-600">{stats.total}</div>
-              <p className="text-xs text-gray-500 mt-1">Knowledge base entries</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-gray-600">
-                Avg Confidence
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-blue-600">
-                {(stats.avgConfidence * 100).toFixed(1)}%
-              </div>
-              <p className="text-xs text-gray-500 mt-1">Knowledge reliability</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-gray-600">
-                Success Rate
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-green-600">
-                {(stats.avgSuccessRate * 100).toFixed(1)}%
-              </div>
-              <p className="text-xs text-gray-500 mt-1">When applied</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-gray-600">
-                Data Sources
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-orange-600">
-                {Object.keys(stats.bySource).length}
-              </div>
-              <p className="text-xs text-gray-500 mt-1">Active sources</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Charts */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Learning Sources Distribution */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Learning Sources</CardTitle>
-              <CardDescription>Breakdown by data source</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={sourceData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="source" />
-                  <YAxis />
-                  <Tooltip />
-                  <Bar dataKey="count" fill="#8b5cf6">
-                    {sourceData.map((entry, index) => (
-                      <cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-
-          {/* Knowledge Growth */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Knowledge Growth</CardTitle>
-              <CardDescription>Total learnings over time</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={growthData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis />
-                  <Tooltip />
-                  <Line 
-                    type="monotone" 
-                    dataKey="count" 
-                    stroke="#8b5cf6" 
-                    strokeWidth={2}
-                    name="Learnings"
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Knowledge Search */}
-        <Card>
+  if (error && !stats) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <Card className="w-full max-w-md">
           <CardHeader>
-            <CardTitle>Search Knowledge Base</CardTitle>
-            <CardDescription>
-              Semantic search using AI embeddings
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex gap-2">
-              <div className="flex-1">
-                <Input
-                  placeholder="Ask Javari a question..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                />
-              </div>
-              <Button onClick={handleSearch} disabled={loading}>
-                <Search className="w-4 h-4 mr-2" />
-                Search
-              </Button>
-            </div>
-
-            {searchResults.length > 0 && (
-              <div className="space-y-3">
-                <p className="text-sm text-gray-600 font-medium">
-                  Found {searchResults.length} relevant learnings:
-                </p>
-                {searchResults.map((result) => {
-                  const SourceIcon = SOURCE_ICONS[result.source as keyof typeof SOURCE_ICONS];
-                  return (
-                    <div key={result.id} className="border border-gray-200 rounded-lg p-4">
-                      <div className="flex items-center gap-2 mb-2">
-                        {SourceIcon && <SourceIcon className="w-4 h-4" />}
-                        <Badge variant="outline">
-                          {SOURCE_LABELS[result.source as keyof typeof SOURCE_LABELS]}
-                        </Badge>
-                        <Badge variant="outline">
-                          {(result.confidenceScore * 100).toFixed(0)}% confidence
-                        </Badge>
-                        <span className="text-xs text-gray-500">
-                          Used {result.usageCount} times
-                        </span>
-                      </div>
-                      <p className="text-sm font-medium text-gray-900 mb-1">
-                        {result.questionPattern}
-                      </p>
-                      <p className="text-sm text-gray-600">
-                        {result.answer}
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Top Learnings */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Most Used Knowledge</CardTitle>
-            <CardDescription>Top 10 most frequently accessed learnings</CardDescription>
+            <CardTitle className="text-red-600 flex items-center gap-2">
+              <AlertCircle className="h-5 w-5" />
+              Error Loading Statistics
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            {stats.topLearnings.length === 0 ? (
-              <div className="text-center py-12">
-                <Brain className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                <p className="text-lg font-medium text-gray-900">No Learnings Yet</p>
-                <p className="text-sm text-gray-500 mt-1">
-                  Start feeding knowledge or let Javari learn from conversations
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {stats.topLearnings.map((learning, idx) => {
-                  const SourceIcon = SOURCE_ICONS[learning.source as keyof typeof SOURCE_ICONS];
-                  return (
-                    <div key={learning.id} className="border border-gray-200 rounded-lg p-3">
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <span className="text-lg font-bold text-gray-400">#{idx + 1}</span>
-                          {SourceIcon && <SourceIcon className="w-4 h-4" />}
-                          <Badge variant="outline">
-                            {SOURCE_LABELS[learning.source as keyof typeof SOURCE_LABELS]}
-                          </Badge>
-                        </div>
-                        <div className="text-right text-sm text-gray-500">
-                          <div>{learning.usageCount} uses</div>
-                          <div>{(learning.successRate * 100).toFixed(0)}% success</div>
-                        </div>
-                      </div>
-                      <p className="text-sm font-medium text-gray-900 mb-1">
-                        {learning.questionPattern}
-                      </p>
-                      <p className="text-sm text-gray-600 line-clamp-2">
-                        {learning.answer}
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            <p className="text-gray-600 mb-4">{error}</p>
+            <Button onClick={fetchStats} variant="outline" className="w-full">
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Retry
+            </Button>
           </CardContent>
         </Card>
+      </div>
+    );
+  }
+
+  const completionPercentage = stats
+    ? Math.round((stats.docs_learned / stats.total_docs) * 100)
+    : 0;
+
+  return (
+    <div className="container mx-auto p-6 space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold flex items-center gap-3">
+            <Brain className="h-8 w-8 text-purple-600" />
+            Javari Learning Dashboard
+          </h1>
+          <p className="text-gray-600 mt-1">
+            Real-time monitoring of Javari's knowledge acquisition
+          </p>
+        </div>
+        <Button onClick={fetchStats} variant="outline" disabled={loading}>
+          <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+          Refresh
+        </Button>
+      </div>
+
+      {/* Overall Progress */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Overall Learning Progress</CardTitle>
+          <CardDescription>
+            {stats?.docs_learned} of {stats?.total_docs} documents learned
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <div>
+              <div className="flex justify-between mb-2">
+                <span className="text-sm font-medium">Completion</span>
+                <span className="text-sm font-medium">{completionPercentage}%</span>
+              </div>
+              <Progress value={completionPercentage} className="h-3" />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-green-50 p-4 rounded-lg">
+                <div className="flex items-center gap-2 text-green-700 mb-1">
+                  <CheckCircle className="h-5 w-5" />
+                  <span className="font-medium">Learned</span>
+                </div>
+                <p className="text-2xl font-bold text-green-900">{stats?.docs_learned}</p>
+                <p className="text-sm text-green-600">Avg confidence: {(stats?.avg_confidence_score ?? 0).toFixed(2)}</p>
+              </div>
+
+              <div className="bg-yellow-50 p-4 rounded-lg">
+                <div className="flex items-center gap-2 text-yellow-700 mb-1">
+                  <Clock className="h-5 w-5" />
+                  <span className="font-medium">Pending</span>
+                </div>
+                <p className="text-2xl font-bold text-yellow-900">{stats?.docs_pending}</p>
+                <p className="text-sm text-yellow-600">Waiting to be learned</p>
+              </div>
+
+              <div className="bg-blue-50 p-4 rounded-lg">
+                <div className="flex items-center gap-2 text-blue-700 mb-1">
+                  <TrendingUp className="h-5 w-5" />
+                  <span className="font-medium">Usage</span>
+                </div>
+                <p className="text-2xl font-bold text-blue-900">{stats?.total_usage_count}</p>
+                <p className="text-sm text-blue-600">Times docs were used</p>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* By Category */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Learning by Category</CardTitle>
+            <CardDescription>Documents learned per category</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Badge variant="default">AI Learning</Badge>
+                </div>
+                <span className="font-bold">{stats?.ai_learning_docs}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary">Owner</Badge>
+                </div>
+                <span className="font-bold">{stats?.owner_docs}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline">Technical</Badge>
+                </div>
+                <span className="font-bold">{stats?.technical_docs}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline">Business</Badge>
+                </div>
+                <span className="font-bold">{stats?.business_docs}</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Processing Queue</CardTitle>
+            <CardDescription>Documents waiting to be processed</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between p-3 bg-yellow-50 rounded-lg">
+                <span className="font-medium text-yellow-900">Pending</span>
+                <span className="text-2xl font-bold text-yellow-900">{stats?.queue_pending}</span>
+              </div>
+              <div className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
+                <span className="font-medium text-blue-900">Processing</span>
+                <span className="text-2xl font-bold text-blue-900">{stats?.queue_processing}</span>
+              </div>
+              <div className="flex items-center justify-between p-3 bg-red-50 rounded-lg">
+                <span className="font-medium text-red-900">Failed</span>
+                <span className="text-2xl font-bold text-red-900">{stats?.queue_failed}</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Recent Activity */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent Learning Activity</CardTitle>
+          <CardDescription>Documents learned in recent time periods</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-gradient-to-r from-purple-50 to-blue-50 p-4 rounded-lg">
+              <div className="flex items-center gap-2 text-purple-700 mb-2">
+                <BarChart3 className="h-5 w-5" />
+                <span className="font-medium">Last 24 Hours</span>
+              </div>
+              <p className="text-3xl font-bold text-purple-900">{stats?.learned_last_24h}</p>
+              <p className="text-sm text-purple-600">documents learned</p>
+            </div>
+
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-lg">
+              <div className="flex items-center gap-2 text-blue-700 mb-2">
+                <BarChart3 className="h-5 w-5" />
+                <span className="font-medium">Last 7 Days</span>
+              </div>
+              <p className="text-3xl font-bold text-blue-900">{stats?.learned_last_7d}</p>
+              <p className="text-sm text-blue-600">documents learned</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Manual Learning Triggers */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Manual Learning Controls</CardTitle>
+          <CardDescription>Trigger learning processes manually</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Button
+              onClick={() => triggerLearning('immediate')}
+              disabled={isLearning}
+              className="w-full"
+            >
+              <Play className="h-4 w-4 mr-2" />
+              Process Queue
+            </Button>
+
+            <Button
+              onClick={() => triggerLearning('batch', 'ai-learning')}
+              disabled={isLearning}
+              variant="outline"
+              className="w-full"
+            >
+              <FileText className="h-4 w-4 mr-2" />
+              Learn AI Docs
+            </Button>
+
+            <Button
+              onClick={() => triggerLearning('batch', 'owner')}
+              disabled={isLearning}
+              variant="outline"
+              className="w-full"
+            >
+              <FileText className="h-4 w-4 mr-2" />
+              Learn Owner Docs
+            </Button>
+          </div>
+
+          {learningResult && (
+            <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+              <h4 className="font-semibold mb-2">Last Learning Result:</h4>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div>✅ Processed: {learningResult.docs_processed}</div>
+                <div>❌ Failed: {learningResult.docs_failed}</div>
+                <div>⏳ Queue Pending: {learningResult.queue_status.pending}</div>
+                <div>🔄 Queue Processing: {learningResult.queue_status.processing}</div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Footer Info */}
+      <div className="text-center text-sm text-gray-500">
+        <p>Last updated: {stats ? new Date(stats.stats_generated_at).toLocaleString() : 'Never'}</p>
+        <p className="mt-1">Statistics refresh automatically every 30 seconds</p>
       </div>
     </div>
   );
