@@ -391,6 +391,41 @@ export default function MainJavariInterface() {
     }
   };
 
+  // Handle New Chat - Clear current chat and allow rename
+  const handleNewChat = () => {
+    // Clear messages
+    setMessages([]);
+    // Create new conversation
+    const newConversation: Conversation = {
+      id: Date.now().toString(),
+      title: 'New Chat',
+      starred: false,
+      messages: [],
+      updated_at: new Date().toISOString(),
+    };
+    setCurrentConversation(newConversation);
+    // Focus on input (optional - could add ref)
+    console.log('New chat created:', newConversation.id);
+  };
+
+  // Handle All Chats - Show list of all user's chats
+  const handleAllChats = () => {
+    // TODO: Implement chat list modal/sidebar
+    // For now, log the action
+    console.log('All Chats clicked - showing chat history');
+    // Future: Open modal with all conversations from database
+    alert('All Chats feature coming soon! This will show your complete chat history.');
+  };
+
+  // Handle Projects - Allow project management and chat organization
+  const handleProjects = () => {
+    // TODO: Implement projects modal/sidebar
+    // For now, log the action
+    console.log('Projects clicked - opening project manager');
+    // Future: Open modal to create/manage projects, tag chats to projects
+    alert('Projects feature coming soon! This will let you organize chats by project.');
+  };
+
   // Copy artifact to clipboard
   const copyArtifact = (artifactId: string, content: string) => {
     navigator.clipboard.writeText(content);
@@ -428,6 +463,7 @@ export default function MainJavariInterface() {
             <div className="p-4 border-b" style={{ borderColor: COLORS.cyan + '40' }}>
               <Button 
                 className="w-full mb-2"
+                onClick={handleNewChat}
                 style={{ 
                   backgroundColor: COLORS.red,
                   color: 'white'
@@ -437,11 +473,21 @@ export default function MainJavariInterface() {
                 New Chat
               </Button>
               <div className="grid grid-cols-2 gap-2">
-                <Button variant="outline" size="sm" style={{ borderColor: COLORS.cyan, color: COLORS.cyan }}>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={handleAllChats}
+                  style={{ borderColor: COLORS.cyan, color: COLORS.cyan }}
+                >
                   <MessageSquare className="w-4 h-4 mr-2" />
                   All Chats
                 </Button>
-                <Button variant="outline" size="sm" style={{ borderColor: COLORS.cyan, color: COLORS.cyan }}>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={handleProjects}
+                  style={{ borderColor: COLORS.cyan, color: COLORS.cyan }}
+                >
                   <FolderKanban className="w-4 h-4 mr-2" />
                   Projects
                 </Button>
@@ -538,49 +584,52 @@ export default function MainJavariInterface() {
             </Button>
           </div>
 
-          {/* Chat Messages Area with Logo & Avatar */}
-          <ScrollArea className="flex-1 p-6">
-            {/* Logo - Far Left Position */}
-            <div className="absolute left-4 top-6 z-20">
-              <Image
-                src="/javariailogo.png"
-                alt="Javari AI"
-                width={160}
-                height={160}
-                className="rounded-lg"
-              />
-            </div>
+          {/* Logo - Fixed Position (Non-Scrolling) */}
+          <div className="fixed left-4 top-24 z-20">
+            <Image
+              src="/javariailogo.png"
+              alt="Javari AI"
+              width={160}
+              height={160}
+              className="rounded-lg"
+            />
+          </div>
 
-            <div className="space-y-4 max-w-4xl mx-auto">
-              {/* Javari Avatar - Centered with Cyan Glow */}
-              <div className="flex flex-col items-center mb-8">
-                <div className="relative mb-4">
-                  <Image
-                    src="/avatars/javariavatar.png"
-                    alt="Javari Avatar"
-                    width={96}
-                    height={96}
-                    className="rounded-full object-cover"
-                    style={{
-                      border: `3px solid ${COLORS.javariCyan}`,
-                      boxShadow: `0 0 30px ${COLORS.javariCyan}90, 0 0 60px ${COLORS.javariCyan}50`,
-                      objectPosition: '60% center'
-                    }}
-                  />
-                  {/* Live Indicator */}
-                  <div 
-                    className="absolute bottom-1 right-1 w-5 h-5 rounded-full border-2 border-white animate-pulse"
-                    style={{ backgroundColor: '#00FF00' }}
-                  />
-                </div>
-                <p className="text-white text-lg font-semibold mb-1">Javari AI</p>
-                <p className="text-white/70 text-sm mb-2">Joins every chat</p>
-                {selectedAI === 'auto' && (
-                  <p className="text-xs" style={{ color: COLORS.javariCyan }}>
-                    Auto-selecting: {aiProviders[recommendedAI]?.name}
-                  </p>
-                )}
+          {/* Javari Avatar - Fixed Position (Non-Scrolling) */}
+          <div className="fixed left-1/2 -translate-x-1/2 top-20 z-20">
+            <div className="flex flex-col items-center">
+              <div className="relative mb-4">
+                <Image
+                  src="/avatars/javariavatar.png"
+                  alt="Javari Avatar"
+                  width={96}
+                  height={96}
+                  className="rounded-full object-cover"
+                  style={{
+                    border: `3px solid ${COLORS.javariCyan}`,
+                    boxShadow: `0 0 30px ${COLORS.javariCyan}90, 0 0 60px ${COLORS.javariCyan}50`,
+                    objectPosition: '60% center'
+                  }}
+                />
+                {/* Live Indicator */}
+                <div 
+                  className="absolute bottom-1 right-1 w-5 h-5 rounded-full border-2 border-white animate-pulse"
+                  style={{ backgroundColor: '#00FF00' }}
+                />
               </div>
+              <p className="text-white text-lg font-semibold mb-1">Javari AI</p>
+              <p className="text-white/70 text-sm mb-2">Joins every chat</p>
+              {selectedAI === 'auto' && (
+                <p className="text-xs" style={{ color: COLORS.javariCyan }}>
+                  Auto-selecting: {aiProviders[recommendedAI]?.name}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Chat Messages Area */}
+          <ScrollArea className="flex-1 p-6">
+            <div className="space-y-4 max-w-4xl mx-auto ml-[220px] pt-48">{/* Added left margin and top padding to clear fixed elements */}
 
               {/* Messages */}
               {messages.length === 0 ? (
@@ -614,7 +663,14 @@ export default function MainJavariInterface() {
                       )}
                       <p className="text-sm whitespace-pre-wrap">{message.content}</p>
                       <span className="text-xs opacity-50 mt-2 block">
-                        {new Date(message.timestamp).toLocaleTimeString()}
+                        {new Date(message.timestamp).toLocaleString('en-US', { 
+                          month: 'short', 
+                          day: 'numeric', 
+                          year: 'numeric',
+                          hour: 'numeric', 
+                          minute: '2-digit',
+                          hour12: true 
+                        })}
                       </span>
                     </div>
                   </div>
