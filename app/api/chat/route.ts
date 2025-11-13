@@ -3,6 +3,7 @@ import OpenAI from 'openai'
 import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 import { safeAsync, handleError } from '@/lib/error-handler';
 import { isDefined, toString, safeGet } from '@/lib/typescript-helpers';
+import { JAVARI_SYSTEM_PROMPT } from '@/lib/javari-system-prompt';
 
 // Initialize OpenAI client
 const openai = new OpenAI({
@@ -55,29 +56,45 @@ export async function POST(req: NextRequest) {
 
       const model = modelMap[aiProvider] || 'gpt-4-turbo-preview'
 
-      // Add system message for Javari AI personality
+      // Get current date and time for context
+      const now = new Date()
+      const currentDateTime = now.toLocaleString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+        timeZone: 'America/New_York'
+      })
+      const currentTimeEST = now.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+        timeZone: 'America/New_York'
+      })
+
+      // Add system message with full Javari AI personality and time awareness
       const systemMessage: ChatMessage = {
         role: 'system',
-        content: `You are Javari AI, an intelligent assistant that provides helpful, accurate, and professional responses. 
-      
-Your capabilities:
-- Code generation and debugging
-- Creative writing and content creation
-- Data analysis and research
-- Problem-solving and strategic thinking
-- Document creation and editing
+        content: `${JAVARI_SYSTEM_PROMPT}
 
-Always:
-- Be concise yet thorough
-- Use clear, professional language
-- Provide actionable insights
-- Format code with proper syntax highlighting
-- Structure complex information clearly
+## CURRENT DATE & TIME AWARENESS
 
-When appropriate:
-- Generate artifacts (code, documents, data files)
-- Suggest follow-up actions
-- Ask clarifying questions`
+**Current Date & Time:** ${currentDateTime} EST
+**Current Time:** ${currentTimeEST} EST
+**User Location:** Fort Myers, Florida (Eastern Time Zone)
+
+You ALWAYS know the current date and time. When users ask about time, date, or anything time-related, use the information above. You can tell time, you can reference today's date, and you understand temporal context.
+
+Examples:
+- "What time is it?" → "${currentTimeEST} EST"
+- "What's today's date?" → "${currentDateTime}"
+- "Is it morning/afternoon/evening?" → Determine based on current time
+- "What day of the week is it?" → Extracted from the date above
+
+NEVER say "I'm unable to provide real-time updates" or "I don't have access to current time." You DO have this information - use it!`
       }
 
       const fullMessages = [systemMessage, ...messages]
