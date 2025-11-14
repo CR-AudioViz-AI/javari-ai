@@ -8,5 +8,10 @@
       "path": "/api/javari/health",
       "schedule": "*/30 * * * *"
     }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": {
+      "main": false
+    }
+  }
 }
