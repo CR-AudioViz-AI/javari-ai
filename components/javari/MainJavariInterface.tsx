@@ -491,7 +491,7 @@ export default function MainJavariInterface() {
                 <Plus className="w-4 h-4 mr-2" />
                 New Chat
               </Button>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 <Button 
                   variant="outline" 
                   size="sm" 
@@ -509,6 +509,15 @@ export default function MainJavariInterface() {
                 >
                   <FolderKanban className="w-4 h-4 mr-2" />
                   Projects
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => console.log('Artifacts clicked')}
+                  style={{ borderColor: COLORS.cyan, color: COLORS.cyan }}
+                >
+                  <FileDown className="w-4 h-4 mr-2" />
+                  Artifacts
                 </Button>
               </div>
             </div>
@@ -657,10 +666,10 @@ export default function MainJavariInterface() {
             </div>
           </ScrollArea>
 
-          {/* Input Area with AI Selector Below */}
-          <div className="p-4 pb-24 border-t" style={{ borderColor: COLORS.cyan + '40', backgroundColor: COLORS.navy }}>
-            {/* Text Input */}
-            <div className="flex gap-2 mb-3">
+          {/* Input Area - Reorganized */}
+          <div className="border-t" style={{ borderColor: COLORS.cyan + '40', backgroundColor: COLORS.navy }}>
+            {/* Text Input - Moved up */}
+            <div className="p-4 flex gap-2">
               <Button
                 size="icon"
                 variant="outline"
@@ -694,42 +703,42 @@ export default function MainJavariInterface() {
               </Button>
             </div>
 
-            {/* AI Model Selector - Large & Prominent */}
-            <div className="flex justify-center mt-4">
-              <div className="flex items-center gap-3 bg-gray-900/50 rounded-lg p-3 border" style={{ borderColor: COLORS.cyan + '40' }}>
-                <span className="text-sm text-white font-medium">Select AI Model:</span>
+            {/* AI Model Selector - Compact at bottom */}
+            <div className="px-4 pb-4 border-t pt-2" style={{ borderColor: COLORS.cyan + '20' }}>
+              <div className="flex items-center justify-center gap-2">
+                <span className="text-xs text-white/70">AI:</span>
                 {/* Auto Button */}
                 <Button
-                  size="default"
+                  size="sm"
                   variant={selectedAI === 'auto' ? 'default' : 'outline'}
                   onClick={() => setSelectedAI('auto')}
-                  className="h-10 px-4 text-sm font-medium"
+                  className="h-7 px-2 text-xs"
                   style={selectedAI === 'auto' ? { 
                     backgroundColor: COLORS.javariCyan,
                     color: COLORS.navy,
                     borderColor: COLORS.javariCyan 
                   } : {
-                    borderColor: COLORS.cyan + '60',
+                    borderColor: COLORS.cyan + '40',
                     color: COLORS.cyan
                   }}
                 >
                   ✨ Auto
                 </Button>
                 
-                {/* AI Provider Buttons */}
+                {/* AI Provider Buttons - Compact */}
                 {Object.values(aiProviders).map(provider => (
                   <Button
                     key={provider.id}
-                    size="default"
+                    size="sm"
                     variant={selectedAI === provider.id ? 'default' : 'outline'}
                     onClick={() => handleAIChange(provider.id)}
-                    className="h-10 px-4 text-sm font-medium"
+                    className="h-7 px-2 text-xs"
                     style={selectedAI === provider.id ? { 
                       backgroundColor: COLORS.cyan,
                       color: COLORS.navy,
                       borderColor: COLORS.cyan 
                     } : {
-                      borderColor: COLORS.cyan + '60',
+                      borderColor: COLORS.cyan + '40',
                       color: COLORS.cyan
                     }}
                   >
@@ -779,21 +788,10 @@ export default function MainJavariInterface() {
               )}
             </div>
 
-            {/* Javari AI Status - Always Visible */}
-            <div className="p-4 border-b" style={{ borderColor: COLORS.cyan + '40', backgroundColor: COLORS.javaribg }}>
-              <div className="flex items-center gap-2 mb-3">
-                <div 
-                  className="w-2 h-2 rounded-full animate-pulse"
-                  style={{ backgroundColor: '#00FF00' }}
-                />
-                <p className="text-white/90 text-sm font-semibold">Javari AI Joins Every Chat</p>
-              </div>
-              <p className="text-xs text-white/60">Your AI partner across all conversations</p>
-            </div>
-
+            {/* Artifacts Header */}
             <div className="p-4 border-b" style={{ borderColor: COLORS.cyan + '40' }}>
-              <h3 className="text-white font-medium">Generated Content</h3>
-              <p className="text-xs text-white/60 mt-1">Files and artifacts from this conversation</p>
+              <h3 className="text-white font-medium">Artifacts</h3>
+              <p className="text-xs text-white/60 mt-1">Auto-documented project files</p>
             </div>
 
             <ScrollArea className="flex-1 p-4">
