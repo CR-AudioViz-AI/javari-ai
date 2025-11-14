@@ -6,6 +6,7 @@ import { PromptHintsBar } from '@/components/javari/PromptHintsBar';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -82,7 +83,7 @@ interface Artifact {
   type: 'code' | 'document' | 'image' | 'data';
   content: string;
   size: string;
-  language?: string; // For code artifacts
+  language?: string;
 }
 
 interface AIProvider {
@@ -107,6 +108,7 @@ export default function MainJavariInterface() {
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [projects, setProjects] = useState<Project[]>([]);
@@ -127,9 +129,13 @@ export default function MainJavariInterface() {
     newCredits: 0,
   });
   const [copiedArtifacts, setCopiedArtifacts] = useState<Record<string, boolean>>({});
+  const [showAllChatsModal, setShowAllChatsModal] = useState(false);
+  const [isJavariSpeaking, setIsJavariSpeaking] = useState(false);
   
-  // Ref for auto-scrolling messages
+  // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<any>(null);
+  const synthesisRef = useRef<SpeechSynthesisUtterance | null>(null);
 
   // AI Providers with credit costs
   const aiProviders: Record<string, AIProvider> = {
@@ -167,7 +173,7 @@ export default function MainJavariInterface() {
     },
   };
 
-  // Enhanced AI detection with multi-factor analysis
+  // Enhanced AI detection
   const detectBestAI = (query: string): string => {
     const lowerQuery = query.toLowerCase()
     const scores: Record<string, number> = {
@@ -177,572 +183,557 @@ export default function MainJavariInterface() {
       'perplexity': 0
     }
 
-    // Claude - Best for code and technical tasks
     const claudeKeywords = ['code', 'function', 'class', 'algorithm', 'debug', 'refactor', 'typescript', 'javascript', 'python', 'react', 'api', 'database', 'sql', 'component', 'analyze', 'technical', 'architecture'];
     const claudeMatches = claudeKeywords.filter(k => lowerQuery.includes(k)).length;
     scores['claude'] = claudeMatches * 3;
 
-    // Perplexity - Best for research and current information
     const perplexityKeywords = ['research', 'latest', 'current', 'news', 'recent', 'today', '2024', '2025', 'search', 'find', 'what is', 'who is', 'trend', 'market', 'statistics'];
     const perplexityMatches = perplexityKeywords.filter(k => lowerQuery.includes(k)).length;
     scores['perplexity'] = perplexityMatches * 3;
 
-    // Gemini - Best for multimodal and visual tasks
     const geminiKeywords = ['image', 'picture', 'photo', 'visual', 'diagram', 'chart', 'graph', 'design', 'ui', 'mockup', 'video', 'audio'];
     const geminiMatches = geminiKeywords.filter(k => lowerQuery.includes(k)).length;
     scores['gemini'] = geminiMatches * 3;
 
-    // GPT-4 - Best for general tasks, writing, creative work
     const gpt4Keywords = ['write', 'essay', 'article', 'blog', 'story', 'content', 'email', 'letter', 'explain', 'summarize', 'brainstorm', 'creative', 'strategy'];
     const gpt4Matches = gpt4Keywords.filter(k => lowerQuery.includes(k)).length;
     scores['gpt-4'] = gpt4Matches * 3;
 
-    // Additional heuristics
     if (lowerQuery.length > 200 && /function|class|import|export|const|let/i.test(query)) {
       scores['claude'] += 5;
     }
-    if (/\b(today|now|current|latest|recent)\b/i.test(query)) {
+
+    if (/\d{4}|today|now|current|latest/i.test(query)) {
       scores['perplexity'] += 3;
     }
-    if (/```|`[\w\s]+`/.test(query)) {
-      scores['claude'] += 4;
-    }
-    if (/feel|imagine|beautiful|wonderful|amazing|creative/i.test(query)) {
-      scores['gpt-4'] += 2;
+
+    if (/create|generate|design|make.*look/i.test(query)) {
+      scores['gemini'] += 2;
     }
 
-    // Find provider with highest score
-    const bestProvider = Object.entries(scores).reduce((best, current) => {
-      return current[1] > best[1] ? current : best
-    }, ['gpt-4', 0])[0]
+    const maxScore = Math.max(...Object.values(scores));
+    if (maxScore === 0) return 'gpt-4';
 
-    // If no clear winner (all scores low), default to GPT-4
-    if (scores[bestProvider] < 2) {
-      return 'gpt-4'
-    }
+    const topAIs = Object.entries(scores)
+      .filter(([_, score]) => score === maxScore)
+      .map(([ai, _]) => ai);
 
-    return bestProvider;
+    return topAIs.length === 1 ? topAIs[0] : topAIs[0];
   };
 
-  // Auto-scroll to bottom when messages change
+  // Voice functionality
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    if (typeof window !== 'undefined') {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        recognitionRef.current = new SpeechRecognition();
+        recognitionRef.current.continuous = true;
+        recognitionRef.current.interimResults = true;
 
-  // Handle AI provider change with modal
-  const handleAIChange = (newAI: string) => {
-    if (newAI === selectedAI) return;
+        recognitionRef.current.onresult = (event: any) => {
+          let interimTranscript = '';
+          let finalTranscript = '';
 
-    const current = selectedAI === 'auto' ? recommendedAI : selectedAI;
-    const currentCredits = aiProviders[current]?.credits || 0;
-    const newCredits = aiProviders[newAI]?.credits || 0;
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              finalTranscript += transcript + ' ';
+            } else {
+              interimTranscript += transcript;
+            }
+          }
 
-    // If switching from auto or costs are different, show modal
-    if (selectedAI === 'auto' || currentCredits !== newCredits) {
-      setAiSelectionModal({
-        show: true,
-        currentAI: current,
-        newAI: newAI,
-        currentCredits: currentCredits,
-        newCredits: newCredits,
-      });
+          setInputMessage((prev) => {
+            const cleanPrev = prev.replace(/\[.*?\]$/, '').trim();
+            if (finalTranscript) {
+              return cleanPrev + ' ' + finalTranscript;
+            } else if (interimTranscript) {
+              return cleanPrev + ' [' + interimTranscript + ']';
+            }
+            return cleanPrev;
+          });
+        };
+
+        recognitionRef.current.onerror = (event: any) => {
+          console.error('Speech recognition error:', event.error);
+          setIsListening(false);
+        };
+
+        recognitionRef.current.onend = () => {
+          if (isListening) {
+            recognitionRef.current?.start();
+          }
+        };
+      }
+    }
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+    };
+  }, [isListening]);
+
+  const toggleVoiceInput = () => {
+    if (!recognitionRef.current) {
+      alert('Speech recognition is not supported in your browser. Please use Chrome, Edge, or Safari.');
+      return;
+    }
+
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
     } else {
-      setSelectedAI(newAI);
+      recognitionRef.current.start();
+      setIsListening(true);
     }
   };
 
-  // Confirm AI change
+  const speakText = (text: string) => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+      utterance.volume = 1.0;
+
+      const voices = window.speechSynthesis.getVoices();
+      const femaleVoice = voices.find(voice => 
+        voice.name.includes('Female') || 
+        voice.name.includes('Samantha') ||
+        voice.name.includes('Victoria')
+      );
+      if (femaleVoice) {
+        utterance.voice = femaleVoice;
+      }
+
+      utterance.onstart = () => {
+        setIsJavariSpeaking(true);
+        setIsSpeaking(true);
+      };
+
+      utterance.onend = () => {
+        setIsJavariSpeaking(false);
+        setIsSpeaking(false);
+      };
+
+      synthesisRef.current = utterance;
+      window.speechSynthesis.speak(utterance);
+    }
+  };
+
+  const stopSpeaking = () => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      setIsJavariSpeaking(false);
+      setIsSpeaking(false);
+    }
+  };
+
+  // Chat management functions
+  const createNewChat = () => {
+    const newChat: Conversation = {
+      id: `chat_${Date.now()}`,
+      title: 'New Chat',
+      starred: true,
+      messages: [],
+      updated_at: new Date().toISOString(),
+    };
+    setConversations([newChat, ...conversations]);
+    setCurrentConversation(newChat);
+    setMessages([]);
+    setArtifacts([]);
+  };
+
+  const switchConversation = (conversation: Conversation) => {
+    setCurrentConversation(conversation);
+    setMessages(conversation.messages);
+    setArtifacts([]);
+  };
+
+  const toggleStar = (conversationId: string) => {
+    setConversations(conversations.map(conv => 
+      conv.id === conversationId 
+        ? { ...conv, starred: !conv.starred }
+        : conv
+    ));
+  };
+
+  const deleteConversation = (conversationId: string) => {
+    setConversations(conversations.filter(conv => conv.id !== conversationId));
+    if (currentConversation?.id === conversationId) {
+      setCurrentConversation(null);
+      setMessages([]);
+    }
+  };
+
+  const handleAIChange = (aiId: string) => {
+    if (aiId === selectedAI) return;
+
+    const currentAI = selectedAI === 'auto' ? recommendedAI : selectedAI;
+    const currentProvider = aiProviders[currentAI];
+    const newProvider = aiProviders[aiId];
+
+    if (aiId === 'auto') {
+      setSelectedAI('auto');
+      return;
+    }
+
+    setAiSelectionModal({
+      show: true,
+      currentAI: currentAI,
+      newAI: aiId,
+      currentCredits: currentProvider?.credits || 0,
+      newCredits: newProvider?.credits || 0,
+    });
+  };
+
   const confirmAIChange = () => {
     setSelectedAI(aiSelectionModal.newAI);
     setAiSelectionModal({ ...aiSelectionModal, show: false });
   };
 
-  // Send message handler with REAL OpenAI API
   const handleSendMessage = async () => {
     if (!inputMessage.trim()) return;
 
-    // Auto-detect best AI if in auto mode
-    let aiToUse = selectedAI;
-    if (selectedAI === 'auto') {
-      const detected = detectBestAI(inputMessage);
-      setRecommendedAI(detected);
-      aiToUse = detected;
-    }
-
-    const newMessage: Message = {
-      id: Date.now().toString(),
+    const userMessage: Message = {
+      id: `msg_${Date.now()}`,
       role: 'user',
-      content: inputMessage,
+      content: inputMessage.trim(),
       timestamp: new Date().toISOString(),
     };
 
-    setMessages([...messages, newMessage]);
+    const activeAI = selectedAI === 'auto' ? detectBestAI(inputMessage) : selectedAI;
+    setRecommendedAI(activeAI);
+
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
     setInputMessage('');
 
-    // Create placeholder for AI response
-    const aiResponseId = (Date.now() + 1).toString();
-    const aiResponse: Message = {
-      id: aiResponseId,
-      role: 'assistant',
-      content: '',
-      timestamp: new Date().toISOString(),
-      provider: aiToUse,
-      hasArtifacts: false,
-    };
-    setMessages(prev => [...prev, aiResponse]);
-
-    try {
-      // Call REAL OpenAI API with streaming
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messages: [
-            ...messages.map(m => ({
-              role: m.role,
-              content: m.content
-            })),
-            { role: 'user', content: newMessage.content }
-          ],
-          aiProvider: aiToUse
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('API request failed');
-      }
-
-      // Handle streaming response
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      let accumulatedContent = '';
-
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          const chunk = decoder.decode(value);
-          const lines = chunk.split('\n');
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6);
-              if (data === '[DONE]') break;
-
-              try {
-                const { text } = JSON.parse(data);
-                accumulatedContent += text;
-
-                // Update message with streaming content
-                setMessages(prev => 
-                  prev.map(m => 
-                    m.id === aiResponseId 
-                      ? { ...m, content: accumulatedContent }
-                      : m
-                  )
-                );
-              } catch (e) {
-                // Skip invalid JSON
-              }
-            }
-          }
-        }
-      }
-
-      // TODO: Parse content for artifacts (code blocks, documents, etc.)
-      // If code blocks found, create artifacts
-      const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
-      const codeBlocks = [...accumulatedContent.matchAll(codeBlockRegex)];
-      
-      if (codeBlocks.length > 0) {
-        codeBlocks.forEach((match, index) => {
-          const language = match[1] || 'text';
-          const code = match[2];
-          const newArtifact: Artifact = {
-            id: `${Date.now()}-${index}`,
-            name: `${language}_snippet_${index + 1}.${language}`,
-            type: 'code',
-            content: code,
-            size: `${(code.length / 1024).toFixed(1)} KB`,
-            language: language,
-          };
-          setArtifacts(prev => [...prev, newArtifact]);
-        });
-
-        // Update message to indicate artifacts were created
-        setMessages(prev => 
-          prev.map(m => 
-            m.id === aiResponseId 
-              ? { ...m, hasArtifacts: true }
-              : m
-          )
-        );
-      }
-
-    } catch (error: unknown) {
-      console.error('Error calling AI API:', error);
-      // Update message with error
-      setMessages(prev => 
-        prev.map(m => 
-          m.id === aiResponseId 
-            ? { 
-                ...m, 
-                content: 'Sorry, I encountered an error processing your request. Please try again.',
-                provider: aiToUse
-              }
-            : m
-        )
-      );
+    if (currentConversation) {
+      const updatedConv = {
+        ...currentConversation,
+        messages: updatedMessages,
+        title: currentConversation.messages.length === 0 
+          ? inputMessage.slice(0, 50) 
+          : currentConversation.title,
+        updated_at: new Date().toISOString(),
+      };
+      setCurrentConversation(updatedConv);
+      setConversations(conversations.map(conv => 
+        conv.id === updatedConv.id ? updatedConv : conv
+      ));
     }
-  };
 
-  // Handle New Chat - Clear current chat and allow rename
-  const handleNewChat = () => {
-    // Clear messages
-    setMessages([]);
-    // Create new conversation
-    const newConversation: Conversation = {
-      id: Date.now().toString(),
-      title: 'New Chat',
-      starred: false,
-      messages: [],
-      updated_at: new Date().toISOString(),
-    };
-    setCurrentConversation(newConversation);
-    // Focus on input (optional - could add ref)
-    console.log('New chat created:', newConversation.id);
-  };
-
-  // Handle All Chats - Show list of all user's chats
-  const handleAllChats = () => {
-    // TODO: Implement chat list modal/sidebar
-    // For now, log the action
-    console.log('All Chats clicked - showing chat history');
-    // Future: Open modal with all conversations from database
-    alert('All Chats feature coming soon! This will show your complete chat history.');
-  };
-
-  // Handle Projects - Allow project management and chat organization
-  const handleProjects = () => {
-    // TODO: Implement projects modal/sidebar
-    // For now, log the action
-    console.log('Projects clicked - opening project manager');
-    // Future: Open modal to create/manage projects, tag chats to projects
-    alert('Projects feature coming soon! This will let you organize chats by project.');
-  };
-
-  // Copy artifact to clipboard
-  const copyArtifact = (artifactId: string, content: string) => {
-    navigator.clipboard.writeText(content);
-    setCopiedArtifacts({ ...copiedArtifacts, [artifactId]: true });
     setTimeout(() => {
-      setCopiedArtifacts({ ...copiedArtifacts, [artifactId]: false });
+      const assistantMessage: Message = {
+        id: `msg_${Date.now()}_assistant`,
+        role: 'assistant',
+        content: `This is a simulated response from ${aiProviders[activeAI].name}. In production, this would connect to the actual AI API.`,
+        timestamp: new Date().toISOString(),
+        provider: activeAI,
+      };
+
+      const finalMessages = [...updatedMessages, assistantMessage];
+      setMessages(finalMessages);
+
+      if (isSpeaking) {
+        speakText(assistantMessage.content);
+      }
+
+      if (currentConversation) {
+        const finalConv = {
+          ...currentConversation,
+          messages: finalMessages,
+          updated_at: new Date().toISOString(),
+        };
+        setCurrentConversation(finalConv);
+        setConversations(conversations.map(conv => 
+          conv.id === finalConv.id ? finalConv : conv
+        ));
+      }
+    }, 1000);
+  };
+
+  const copyArtifact = (id: string, content: string) => {
+    navigator.clipboard.writeText(content);
+    setCopiedArtifacts({ ...copiedArtifacts, [id]: true });
+    setTimeout(() => {
+      setCopiedArtifacts({ ...copiedArtifacts, [id]: false });
     }, 2000);
   };
 
-  // Download artifact
-  const downloadArtifact = (artifact: Artifact, format: string) => {
+  const downloadArtifact = (artifact: Artifact, extension: string) => {
     const blob = new Blob([artifact.content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${artifact.name}.${format}`;
+    a.download = `${artifact.name}.${extension}`;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
 
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const starredConversations = conversations.filter(conv => conv.starred);
+  const unstarredConversations = conversations.filter(conv => !conv.starred);
+
   return (
-    <div className="h-screen flex flex-col" style={{ backgroundColor: COLORS.javaribg }}>
-      {/* Main 3-Column Layout */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* LEFT SIDEBAR */}
-        {leftSidebarOpen && (
-          <div 
-            className="w-80 border-r flex flex-col"
-            style={{ 
-              backgroundColor: COLORS.navy,
-              borderColor: COLORS.cyan + '40'
-            }}
-          >
-            {/* Logo - Top of Sidebar */}
-            <div className="p-4 flex justify-center border-b" style={{ borderColor: COLORS.cyan + '40' }}>
-              <Image
-                src="/javariailogo.png"
-                alt="Javari AI"
-                width={80}
-                height={80}
-                className="rounded-lg"
-              />
-            </div>
-
-            {/* Quick Actions */}
-            <div className="p-4 border-b" style={{ borderColor: COLORS.cyan + '40' }}>
-              <Button 
-                className="w-full mb-2"
-                onClick={handleNewChat}
-                style={{ 
-                  backgroundColor: COLORS.red,
-                  color: 'white'
-                }}
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                New Chat
-              </Button>
-              <div className="grid grid-cols-3 gap-2">
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={handleAllChats}
-                  style={{ borderColor: COLORS.cyan, color: COLORS.cyan }}
-                >
-                  <MessageSquare className="w-4 h-4 mr-2" />
-                  All Chats
-                </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={handleProjects}
-                  style={{ borderColor: COLORS.cyan, color: COLORS.cyan }}
-                >
-                  <FolderKanban className="w-4 h-4 mr-2" />
-                  Projects
-                </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => console.log('Artifacts clicked')}
-                  style={{ borderColor: COLORS.cyan, color: COLORS.cyan }}
-                >
-                  <FileDown className="w-4 h-4 mr-2" />
-                  Artifacts
-                </Button>
-              </div>
-            </div>
-
-            {/* Starred Conversations */}
-            <div className="flex-1 overflow-hidden">
-              <div className="p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <Star className="w-4 h-4" style={{ color: COLORS.javariCyan }} fill={COLORS.javariCyan} />
-                  <span className="text-white font-medium">Starred</span>
-                </div>
-                <ScrollArea className="h-full">
-                  <div className="space-y-2">
-                    <Card className="p-3 cursor-pointer hover:bg-gray-800" style={{ backgroundColor: COLORS.javaribg }}>
-                      <div className="text-white text-sm font-medium">Project: CR AudioViz AI</div>
-                      <div className="text-gray-400 text-xs mt-1">- Chat: Deploy fixes</div>
-                      <div className="text-gray-400 text-xs">- Chat: Database optimization</div>
-                    </Card>
-                  </div>
-                </ScrollArea>
-              </div>
-            </div>
-
-            {/* User Profile Menu - Bottom Left */}
-            <div className="p-4 pb-20 border-t" style={{ borderColor: COLORS.cyan + '40' }}>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button 
-                    variant="outline" 
-                    className="w-full justify-start"
-                    style={{ borderColor: COLORS.cyan }}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold" style={{ backgroundColor: COLORS.red }}>
-                        {userName.charAt(0)}
-                      </div>
-                      <div className="text-left">
-                        <div className="text-white text-sm font-medium">{userName}</div>
-                        <div className="text-white/80 text-xs">{userPlan} Plan</div>
-                      </div>
-                    </div>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-56">
-                  <DropdownMenuItem>
-                    <Globe className="w-4 h-4 mr-2" />
-                    Language: {language}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem>
-                    <HelpCircle className="w-4 h-4 mr-2" />
-                    Help & Support
-                  </DropdownMenuItem>
-                  <DropdownMenuItem>
-                    <CreditCard className="w-4 h-4 mr-2" />
-                    Manage Plan
-                  </DropdownMenuItem>
-                  <DropdownMenuItem>
-                    <SettingsIcon className="w-4 h-4 mr-2" />
-                    Settings
-                  </DropdownMenuItem>
-                  <DropdownMenuItem>
-                    <FileText className="w-4 h-4 mr-2" />
-                    Asset Library
-                  </DropdownMenuItem>
-                  <DropdownMenuItem>
-                    <Shield className="w-4 h-4 mr-2" />
-                    Privacy & Security
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem className="text-red-600">
-                    <LogOut className="w-4 h-4 mr-2" />
-                    Sign Out
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </div>
-        )}
-
-        {/* CENTER COLUMN */}
-        <div className="flex-1 flex flex-col relative">
-          {/* Toggle buttons */}
-          <div className="absolute left-0 top-1/2 -translate-y-1/2 z-10">
+    <div className="h-screen flex" style={{ backgroundColor: COLORS.javaribg }}>
+      {/* Left Sidebar */}
+      {leftSidebarOpen && (
+        <div className="w-80 border-r flex flex-col" style={{ borderColor: COLORS.cyan + '40' }}>
+          <div className="p-4 border-b" style={{ borderColor: COLORS.cyan + '40' }}>
             <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
-              style={{ borderColor: COLORS.cyan }}
+              onClick={createNewChat}
+              className="w-full"
+              style={{ backgroundColor: COLORS.red, color: 'white' }}
             >
-              {leftSidebarOpen ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+              <Plus className="w-4 h-4 mr-2" />
+              New Chat
             </Button>
           </div>
 
-          {/* Chat Messages Area */}
-          <ScrollArea className="flex-1 p-6">
-            <div className="space-y-4 max-w-4xl mx-auto ml-[220px] pt-6">{/* Adjusted padding after moving avatar to right sidebar */}
-
-              {/* Messages */}
-              {messages.length === 0 ? (
-                <div className="text-center py-12">
-                  <div className="text-white/70 mb-4">
-                    <Sparkles className="w-16 h-16 mx-auto mb-4" style={{ color: COLORS.javariCyan }} />
-                    <p className="text-lg font-medium text-white">Ready to assist you</p>
-                    <p className="text-sm">Ask me anything - I'll auto-select the best AI for your task</p>
+          <ScrollArea className="flex-1">
+            <div className="p-4 space-y-4">
+              {/* Starred Conversations */}
+              {starredConversations.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 px-2 mb-2">
+                    <Star className="w-4 h-4" style={{ color: COLORS.javariCyan }} fill={COLORS.javariCyan} />
+                    <span className="text-sm font-medium text-white/70">Starred Chats</span>
                   </div>
-                </div>
-              ) : (
-                messages.map(message => (
-                  <div
-                    key={message.id}
-                    className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                  >
+                  {starredConversations.map((conv) => (
                     <div
-                      className="max-w-[70%] p-4 rounded-lg"
+                      key={conv.id}
+                      className="group p-3 rounded-lg cursor-pointer transition-colors hover:bg-white/5"
                       style={{
-                        backgroundColor: message.role === 'user' ? COLORS.cyan : COLORS.navy,
-                        color: 'white',
+                        backgroundColor: currentConversation?.id === conv.id ? COLORS.cyan + '20' : 'transparent',
+                        border: currentConversation?.id === conv.id ? `1px solid ${COLORS.cyan}` : '1px solid transparent',
                       }}
                     >
-                      {message.role === 'assistant' && (
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="text-xl">{aiProviders[message.provider || 'gpt-4']?.icon}</span>
-                          <span className="text-xs opacity-75">
-                            Javari via {aiProviders[message.provider || 'gpt-4']?.name}
-                          </span>
+                      <div className="flex items-center justify-between">
+                        <div 
+                          className="flex items-center gap-2 flex-1 min-w-0"
+                          onClick={() => switchConversation(conv)}
+                        >
+                          <MessageSquare className="w-4 h-4 flex-shrink-0" style={{ color: COLORS.cyan }} />
+                          <span className="text-white text-sm truncate">{conv.title}</span>
                         </div>
-                      )}
-                      <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                      <span className="text-xs opacity-50 mt-2 block">
-                        {new Date(message.timestamp).toLocaleString('en-US', { 
-                          month: 'short', 
-                          day: 'numeric', 
-                          year: 'numeric',
-                          hour: 'numeric', 
-                          minute: '2-digit',
-                          hour12: true 
-                        })}
-                      </span>
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleStar(conv.id);
+                            }}
+                            className="h-7 w-7 p-0"
+                          >
+                            <Star className="w-3 h-3" style={{ color: COLORS.javariCyan }} fill={COLORS.javariCyan} />
+                          </Button>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  ))}
+                </div>
               )}
-              {/* Auto-scroll anchor */}
-              <div ref={messagesEndRef} />
+
+              {/* All Chats Button */}
+              <div className="pt-2">
+                <Button
+                  variant="outline"
+                  className="w-full justify-start"
+                  style={{ borderColor: COLORS.cyan + '40', color: 'white' }}
+                  onClick={() => setShowAllChatsModal(true)}
+                >
+                  <FolderKanban className="w-4 h-4 mr-2" style={{ color: COLORS.cyan }} />
+                  All Chats ({unstarredConversations.length})
+                </Button>
+              </div>
+
+              {/* Projects Section */}
+              <div className="space-y-2 pt-4">
+                <div className="text-sm font-medium text-white/50 px-2">PROJECTS</div>
+                {projects.length === 0 ? (
+                  <div className="text-xs text-white/40 px-2 py-4 text-center">
+                    No projects yet
+                  </div>
+                ) : (
+                  projects.map((project) => (
+                    <div key={project.id} className="space-y-1">
+                      <div className="flex items-center gap-2 px-2 py-2 rounded hover:bg-white/5 cursor-pointer">
+                        <FolderKanban className="w-4 h-4" style={{ color: COLORS.cyan }} />
+                        <span className="text-sm text-white">{project.name}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </ScrollArea>
 
-          {/* Input Area - Reorganized */}
-          <div className="border-t" style={{ borderColor: COLORS.cyan + '40', backgroundColor: COLORS.navy }}>
-            {/* Text Input - Moved up */}
-            <div className="p-4 flex gap-2">
-              <Button
-                size="icon"
-                variant="outline"
-                style={{ borderColor: COLORS.cyan }}
-                onClick={() => setIsListening(!isListening)}
-              >
-                {isListening ? (
-                  <Mic className="w-4 h-4" style={{ color: COLORS.red }} />
-                ) : (
-                  <MicOff className="w-4 h-4" style={{ color: COLORS.cyan }} />
-                )}
-              </Button>
-              <input
-                type="text"
-                value={inputMessage}
-                onChange={(e) => setInputMessage(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                placeholder="Type your message..."
-                className="flex-1 px-4 py-2 rounded-lg border focus:outline-none focus:ring-2"
-                style={{
-                  backgroundColor: COLORS.javaribg,
-                  borderColor: COLORS.cyan,
-                  color: 'white',
-                }}
-              />
-              <Button
-                onClick={handleSendMessage}
-                style={{ backgroundColor: COLORS.red, color: 'white' }}
-              >
-                Send
-              </Button>
-            </div>
+          {/* Bottom Navigation */}
+          <div className="p-4 border-t space-y-2" style={{ borderColor: COLORS.cyan + '40' }}>
+            <Button variant="ghost" className="w-full justify-start text-white/70">
+              <Globe className="w-4 h-4 mr-2" />
+              Explore Apps
+            </Button>
+            <Button variant="ghost" className="w-full justify-start text-white/70">
+              <HelpCircle className="w-4 h-4 mr-2" />
+              Help & Support
+            </Button>
+            <Button variant="ghost" className="w-full justify-start text-white/70">
+              <CreditCard className="w-4 h-4 mr-2" />
+              Credits: {credits.current.toLocaleString()}/{credits.total.toLocaleString()}
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="w-full justify-start text-white/70">
+                  <SettingsIcon className="w-4 h-4 mr-2" />
+                  Settings
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56">
+                <DropdownMenuItem>
+                  <FileText className="w-4 h-4 mr-2" />
+                  Terms of Service
+                </DropdownMenuItem>
+                <DropdownMenuItem>
+                  <Shield className="w-4 h-4 mr-2" />
+                  Privacy Policy
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem>
+                  <LogOut className="w-4 h-4 mr-2" />
+                  Sign Out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+      )}
 
-            {/* AI Model Selector - Compact at bottom */}
-            <div className="px-4 pb-4 border-t pt-2" style={{ borderColor: COLORS.cyan + '20' }}>
-              <div className="flex items-center justify-center gap-2">
-                <span className="text-xs text-white/70">AI:</span>
-                {/* Auto Button */}
+      {/* Left sidebar toggle */}
+      <div className="absolute left-0 top-1/2 -translate-y-1/2 z-10">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
+          style={{ borderColor: COLORS.cyan }}
+        >
+          {leftSidebarOpen ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+        </Button>
+      </div>
+
+      {/* Center Panel - Chat Area */}
+      <div className="flex-1 flex flex-col relative">
+        {/* Messages Area */}
+        <ScrollArea className="flex-1 p-6">
+          {messages.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-center px-4">
+              <Image
+                src="/javari-avatar.png"
+                alt="Javari AI"
+                width={120}
+                height={120}
+                className="mb-6 rounded-full"
+              />
+              <h2 className="text-2xl font-bold text-white mb-2">
+                Welcome to Javari AI
+              </h2>
+              <p className="text-white/60 max-w-md">
+                Start a conversation to experience intelligent AI assistance
+              </p>
+            </div>
+          ) : (
+            <div className="max-w-4xl mx-auto space-y-6">
+              {messages.map((message) => (
+                <div key={message.id} className={`flex gap-4 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  {message.role === 'assistant' && (
+                    <div className="flex-shrink-0">
+                      <Image
+                        src="/javari-avatar.png"
+                        alt="Javari AI"
+                        width={36}
+                        height={36}
+                        className="rounded-full"
+                      />
+                    </div>
+                  )}
+                  <div
+                    className="rounded-lg p-4 max-w-[80%]"
+                    style={{
+                      backgroundColor: message.role === 'user' ? COLORS.navy : COLORS.cyan + '10',
+                      border: `1px solid ${message.role === 'user' ? COLORS.cyan : COLORS.cyan + '40'}`,
+                    }}
+                  >
+                    {message.provider && (
+                      <div className="flex items-center gap-2 mb-2 text-xs text-white/60">
+                        <span>{aiProviders[message.provider]?.icon}</span>
+                        <span>{aiProviders[message.provider]?.name}</span>
+                      </div>
+                    )}
+                    <p className="text-white whitespace-pre-wrap">{message.content}</p>
+                  </div>
+                  {message.role === 'user' && (
+                    <div className="flex-shrink-0">
+                      <div 
+                        className="w-9 h-9 rounded-full flex items-center justify-center text-white font-medium"
+                        style={{ backgroundColor: COLORS.red }}
+                      >
+                        {userName.charAt(0)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+        </ScrollArea>
+
+        {/* AI Model Selector - Bottom of Center Column */}
+        <div className="border-t px-6 py-3" style={{ borderColor: COLORS.cyan + '40' }}>
+          <div className="max-w-4xl mx-auto">
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-white/70 flex-shrink-0">Select AI Model:</span>
+              <div className="flex-1 flex items-center gap-2 overflow-x-auto">
                 <Button
                   size="sm"
                   variant={selectedAI === 'auto' ? 'default' : 'outline'}
                   onClick={() => setSelectedAI('auto')}
-                  className="h-7 px-2 text-xs"
-                  style={selectedAI === 'auto' ? { 
-                    backgroundColor: COLORS.javariCyan,
-                    color: COLORS.navy,
-                    borderColor: COLORS.javariCyan 
-                  } : {
-                    borderColor: COLORS.cyan + '40',
-                    color: COLORS.cyan
+                  style={{
+                    backgroundColor: selectedAI === 'auto' ? COLORS.javariCyan : 'transparent',
+                    borderColor: COLORS.javariCyan,
+                    color: selectedAI === 'auto' ? COLORS.navy : COLORS.javariCyan,
                   }}
+                  className="flex-shrink-0"
                 >
-                  ✨ Auto
+                  <Sparkles className="w-3 h-3 mr-1" />
+                  Auto ({aiProviders[recommendedAI]?.icon})
                 </Button>
-                
-                {/* AI Provider Buttons - Compact */}
-                {Object.values(aiProviders).map(provider => (
+                {Object.values(aiProviders).map((provider) => (
                   <Button
                     key={provider.id}
                     size="sm"
                     variant={selectedAI === provider.id ? 'default' : 'outline'}
                     onClick={() => handleAIChange(provider.id)}
-                    className="h-7 px-2 text-xs"
-                    style={selectedAI === provider.id ? { 
-                      backgroundColor: COLORS.cyan,
-                      color: COLORS.navy,
-                      borderColor: COLORS.cyan 
-                    } : {
-                      borderColor: COLORS.cyan + '40',
-                      color: COLORS.cyan
+                    style={{
+                      backgroundColor: selectedAI === provider.id ? COLORS.cyan : 'transparent',
+                      borderColor: COLORS.cyan,
+                      color: selectedAI === provider.id ? COLORS.navy : 'white',
                     }}
+                    className="flex-shrink-0"
                   >
-                    {provider.icon} {provider.name}
+                    <span className="mr-1">{provider.icon}</span>
+                    {provider.name}
+                    <span className="ml-1 text-xs opacity-70">({provider.credits}cr)</span>
                   </Button>
                 ))}
               </div>
@@ -750,89 +741,154 @@ export default function MainJavariInterface() {
           </div>
         </div>
 
-        {/* RIGHT SIDEBAR - Artifacts with Claude-Style Output */}
-        {rightSidebarOpen && (
-          <div 
-            className="w-96 border-l flex flex-col sticky top-0 h-screen overflow-y-auto"
-            style={{ 
-              backgroundColor: COLORS.navy,
-              borderColor: COLORS.cyan + '40'
-            }}
-          >
-            {/* Javari Avatar - Top of Right Panel */}
-            <div className="p-6 border-b flex flex-col items-center" style={{ borderColor: COLORS.cyan + '40', backgroundColor: COLORS.javaribg }}>
-              <div className="relative mb-4">
-                <Image
-                  src="/avatars/javariavatar.png"
-                  alt="Javari Avatar"
-                  width={96}
-                  height={96}
-                  className="rounded-full object-cover"
-                  style={{
-                    border: `3px solid ${COLORS.javariCyan}`,
-                    boxShadow: `0 0 30px ${COLORS.javariCyan}90, 0 0 60px ${COLORS.javariCyan}50`,
-                    objectPosition: '60% center'
+        {/* Message Input - Bottom of Center Column */}
+        <div className="border-t p-6" style={{ borderColor: COLORS.cyan + '40' }}>
+          <div className="max-w-4xl mx-auto">
+            <div className="flex items-end gap-3">
+              <div className="flex-1">
+                <textarea
+                  value={inputMessage}
+                  onChange={(e) => setInputMessage(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendMessage();
+                    }
                   }}
-                />
-                {/* Live Indicator */}
-                <div 
-                  className="absolute bottom-1 right-1 w-5 h-5 rounded-full border-2 border-white animate-pulse"
-                  style={{ backgroundColor: '#00FF00' }}
+                  placeholder="Type your message..."
+                  className="w-full px-4 py-3 rounded-lg resize-none focus:outline-none focus:ring-2"
+                  style={{
+                    backgroundColor: COLORS.navy,
+                    color: 'white',
+                    border: `1px solid ${COLORS.cyan}40`,
+                    minHeight: '56px',
+                    maxHeight: '200px',
+                  }}
+                  rows={1}
                 />
               </div>
-              <p className="text-white text-lg font-semibold mb-1">Javari AI</p>
-              {selectedAI === 'auto' && (
-                <p className="text-xs" style={{ color: COLORS.javariCyan }}>
-                  Auto-selecting: {aiProviders[recommendedAI]?.name}
-                </p>
-              )}
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={toggleVoiceInput}
+                  style={{
+                    backgroundColor: isListening ? COLORS.red : 'transparent',
+                    borderColor: isListening ? COLORS.red : COLORS.cyan,
+                    color: isListening ? 'white' : COLORS.cyan,
+                  }}
+                >
+                  {isListening ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={isSpeaking ? stopSpeaking : () => setIsSpeaking(!isSpeaking)}
+                  style={{
+                    backgroundColor: isSpeaking ? COLORS.cyan : 'transparent',
+                    borderColor: COLORS.cyan,
+                    color: isSpeaking ? COLORS.navy : COLORS.cyan,
+                  }}
+                >
+                  {isSpeaking ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                </Button>
+                <Button
+                  onClick={handleSendMessage}
+                  disabled={!inputMessage.trim()}
+                  style={{ backgroundColor: COLORS.red, color: 'white' }}
+                >
+                  Send
+                </Button>
+              </div>
             </div>
+            {isListening && (
+              <div className="mt-2 text-xs" style={{ color: COLORS.javariCyan }}>
+                🎤 Listening... Speak now
+              </div>
+            )}
+            {isJavariSpeaking && (
+              <div className="mt-2 text-xs" style={{ color: COLORS.javariCyan }}>
+                🔊 Javari is speaking...
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
-            {/* Artifacts Header */}
+      {/* Right Sidebar - Artifacts & Avatar */}
+      {rightSidebarOpen && (
+        <div className="w-80 border-l flex flex-col" style={{ borderColor: COLORS.cyan + '40' }}>
+          {/* Avatar Section - Top of Right Panel */}
+          <div className="p-6 border-b" style={{ borderColor: COLORS.cyan + '40' }}>
+            <div className="flex flex-col items-center text-center">
+              <Image
+                src="/javari-avatar.png"
+                alt="Javari AI"
+                width={80}
+                height={80}
+                className="rounded-full mb-3"
+              />
+              <h3 className="text-white font-medium text-lg">Javari AI</h3>
+            </div>
+          </div>
+
+          {/* Artifacts Section */}
+          <div className="flex-1 flex flex-col overflow-hidden">
             <div className="p-4 border-b" style={{ borderColor: COLORS.cyan + '40' }}>
-              <h3 className="text-white font-medium">Artifacts</h3>
-              <p className="text-xs text-white/60 mt-1">Auto-documented project files</p>
+              <h3 className="text-white font-medium flex items-center gap-2">
+                <FileDown className="w-4 h-4" />
+                Artifacts
+              </h3>
             </div>
 
-            <ScrollArea className="flex-1 p-4">
-              <div className="space-y-4">
+            <ScrollArea className="flex-1">
+              <div className="p-4">
                 {artifacts.length === 0 ? (
-                  <div className="text-center text-white/60 py-8">
-                    <FileText className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                    <p>No artifacts yet</p>
+                  <div className="text-center py-8 text-white/40">
+                    <FileDown className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                    <p className="text-sm">No artifacts yet</p>
                     <p className="text-xs mt-1">Generated files will appear here</p>
                   </div>
                 ) : (
-                  artifacts.map(artifact => (
-                    <div 
+                  artifacts.map((artifact) => (
+                    <div
                       key={artifact.id}
-                      className="border rounded-lg overflow-hidden"
-                      style={{ 
-                        borderColor: COLORS.cyan + '40',
-                        backgroundColor: COLORS.javaribg 
-                      }}
+                      className="mb-4 rounded-lg overflow-hidden"
+                      style={{ border: `1px solid ${COLORS.cyan}40` }}
                     >
                       {/* Artifact Header */}
-                      <div className="p-3 border-b" style={{ borderColor: COLORS.cyan + '40' }}>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <FileText className="w-4 h-4" style={{ color: COLORS.cyan }} />
-                            <span className="text-white text-sm font-medium">{artifact.name}</span>
-                          </div>
+                      <div className="p-3" style={{ backgroundColor: COLORS.navy }}>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-white font-medium text-sm">{artifact.name}</span>
                           <span className="text-xs text-white/60">{artifact.size}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="text-xs px-2 py-1 rounded"
+                            style={{ backgroundColor: COLORS.cyan + '20', color: COLORS.cyan }}
+                          >
+                            {artifact.type}
+                          </span>
+                          {artifact.language && (
+                            <span
+                              className="text-xs px-2 py-1 rounded"
+                              style={{ backgroundColor: COLORS.javariCyan + '20', color: COLORS.javariCyan }}
+                            >
+                              {artifact.language}
+                            </span>
+                          )}
                         </div>
                       </div>
 
-                      {/* Artifact Content Preview */}
-                      <div className="p-3">
-                        <pre className="text-xs text-gray-300 overflow-x-auto">
-                          <code>{artifact.content.substring(0, 200)}...</code>
+                      {/* Artifact Preview */}
+                      <div className="p-3 max-h-48 overflow-y-auto" style={{ backgroundColor: COLORS.javaribg }}>
+                        <pre className="text-xs text-white/80 whitespace-pre-wrap font-mono">
+                          {artifact.content}
                         </pre>
                       </div>
 
-                      {/* Artifact Actions - Claude Style */}
+                      {/* Artifact Actions */}
                       <div className="p-3 border-t flex items-center gap-2" style={{ borderColor: COLORS.cyan + '40' }}>
-                        {/* Primary Action: Copy */}
                         <Button
                           size="sm"
                           onClick={() => copyArtifact(artifact.id, artifact.content)}
@@ -855,7 +911,6 @@ export default function MainJavariInterface() {
                           )}
                         </Button>
 
-                        {/* Secondary Actions: More Dropdown */}
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button
@@ -871,34 +926,6 @@ export default function MainJavariInterface() {
                               <Download className="w-4 h-4 mr-2" />
                               Download as .{artifact.type}
                             </DropdownMenuItem>
-                            {artifact.type === 'code' && (
-                              <>
-                                <DropdownMenuItem onClick={() => downloadArtifact(artifact, 'ts')}>
-                                  <Download className="w-4 h-4 mr-2" />
-                                  Download as .ts
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => downloadArtifact(artifact, 'tsx')}>
-                                  <Download className="w-4 h-4 mr-2" />
-                                  Download as .tsx
-                                </DropdownMenuItem>
-                              </>
-                            )}
-                            {artifact.type === 'document' && (
-                              <>
-                                <DropdownMenuItem onClick={() => downloadArtifact(artifact, 'md')}>
-                                  <Download className="w-4 h-4 mr-2" />
-                                  Download as .md
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => downloadArtifact(artifact, 'txt')}>
-                                  <Download className="w-4 h-4 mr-2" />
-                                  Download as .txt
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => downloadArtifact(artifact, 'pdf')}>
-                                  <Download className="w-4 h-4 mr-2" />
-                                  Download as .pdf
-                                </DropdownMenuItem>
-                              </>
-                            )}
                             <DropdownMenuSeparator />
                             <DropdownMenuItem onClick={() => window.print()}>
                               <Printer className="w-4 h-4 mr-2" />
@@ -913,20 +940,93 @@ export default function MainJavariInterface() {
               </div>
             </ScrollArea>
           </div>
-        )}
-
-        {/* Right sidebar toggle */}
-        <div className="absolute right-0 top-1/2 -translate-y-1/2 z-10">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setRightSidebarOpen(!rightSidebarOpen)}
-            style={{ borderColor: COLORS.cyan }}
-          >
-            {rightSidebarOpen ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
-          </Button>
         </div>
+      )}
+
+      {/* Right sidebar toggle */}
+      <div className="absolute right-0 top-1/2 -translate-y-1/2 z-10">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => setRightSidebarOpen(!rightSidebarOpen)}
+          style={{ borderColor: COLORS.cyan }}
+        >
+          {rightSidebarOpen ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+        </Button>
       </div>
+
+      {/* All Chats Modal */}
+      <Dialog open={showAllChatsModal} onOpenChange={setShowAllChatsModal}>
+        <DialogContent 
+          className="max-w-2xl max-h-[80vh]"
+          style={{ backgroundColor: COLORS.navy, border: `1px solid ${COLORS.cyan}40` }}
+        >
+          <DialogHeader>
+            <DialogTitle className="text-white text-xl">All Chats</DialogTitle>
+          </DialogHeader>
+          <ScrollArea className="max-h-[60vh]">
+            <div className="space-y-2 pr-4">
+              {unstarredConversations.length === 0 ? (
+                <div className="text-center py-8 text-white/40">
+                  <MessageSquare className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                  <p className="text-sm">No unstarred chats</p>
+                </div>
+              ) : (
+                unstarredConversations.map((conv) => (
+                  <div
+                    key={conv.id}
+                    className="group p-4 rounded-lg transition-colors hover:bg-white/5"
+                    style={{ border: `1px solid ${COLORS.cyan}40` }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div 
+                        className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
+                        onClick={() => {
+                          switchConversation(conv);
+                          setShowAllChatsModal(false);
+                        }}
+                      >
+                        <MessageSquare className="w-5 h-5 flex-shrink-0" style={{ color: COLORS.cyan }} />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-white font-medium truncate">{conv.title}</div>
+                          <div className="text-xs text-white/60">
+                            {conv.messages.length} messages · {new Date(conv.updated_at).toLocaleDateString()}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleStar(conv.id);
+                          }}
+                          style={{ borderColor: COLORS.javariCyan, color: COLORS.javariCyan }}
+                        >
+                          <Star className="w-4 h-4 mr-1" />
+                          Star
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteConversation(conv.id);
+                          }}
+                          style={{ borderColor: COLORS.red, color: COLORS.red }}
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
 
       {/* AI Selection Confirmation Modal */}
       {aiSelectionModal.show && (
