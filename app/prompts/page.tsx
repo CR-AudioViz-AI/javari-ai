@@ -62,19 +62,21 @@ export default function PromptsPage() {
   
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-purple-50 pb-32">
+      {/* Sticky Back Button */}
+      <div className="fixed top-4 left-4 z-50">
+        <Link 
+          href="/javari"
+          className="inline-flex items-center gap-2 px-4 py-2 bg-white/90 hover:bg-white backdrop-blur-lg rounded-lg transition-colors shadow-lg border border-gray-200"
+        >
+          <ArrowLeftIcon className="w-5 h-5 text-gray-700" />
+          <span className="font-medium text-gray-700">Back to Javari AI</span>
+        </Link>
+      </div>
+
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white">
         <div className="max-w-7xl mx-auto px-4 py-16">
-          {/* Back Button */}
-          <Link 
-            href="/javari"
-            className="inline-flex items-center gap-2 mb-6 px-4 py-2 bg-white/10 hover:bg-white/20 backdrop-blur rounded-lg transition-colors"
-          >
-            <ArrowLeftIcon className="w-5 h-5" />
-            <span className="font-medium">Back to Javari AI</span>
-          </Link>
-
-          <div className="flex items-center gap-3 mb-4">
+          <div className="flex items-center gap-3 mb-4 mt-12">
             <BookOpenIcon className="w-10 h-10" />
             <h1 className="text-4xl font-bold">Javari AI Prompt Library</h1>
           </div>
