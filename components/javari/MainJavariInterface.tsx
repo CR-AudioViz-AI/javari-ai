@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { PromptHintsBar } from '@/components/javari/PromptHintsBar';
 import { Button } from '@/components/ui/button';
@@ -127,6 +127,9 @@ export default function MainJavariInterface() {
     newCredits: 0,
   });
   const [copiedArtifacts, setCopiedArtifacts] = useState<Record<string, boolean>>({});
+  
+  // Ref for auto-scrolling messages
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // AI Providers with credit costs
   const aiProviders: Record<string, AIProvider> = {
@@ -220,6 +223,11 @@ export default function MainJavariInterface() {
 
     return bestProvider;
   };
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   // Handle AI provider change with modal
   const handleAIChange = (newAI: string) => {
@@ -459,6 +467,17 @@ export default function MainJavariInterface() {
               borderColor: COLORS.cyan + '40'
             }}
           >
+            {/* Logo - Top of Sidebar */}
+            <div className="p-4 flex justify-center border-b" style={{ borderColor: COLORS.cyan + '40' }}>
+              <Image
+                src="/javariailogo.png"
+                alt="Javari AI"
+                width={80}
+                height={80}
+                className="rounded-lg"
+              />
+            </div>
+
             {/* Quick Actions */}
             <div className="p-4 border-b" style={{ borderColor: COLORS.cyan + '40' }}>
               <Button 
@@ -584,17 +603,6 @@ export default function MainJavariInterface() {
             </Button>
           </div>
 
-          {/* Logo - Fixed Position (Non-Scrolling) */}
-          <div className="fixed left-4 top-24 z-20">
-            <Image
-              src="/javariailogo.png"
-              alt="Javari AI"
-              width={160}
-              height={160}
-              className="rounded-lg"
-            />
-          </div>
-
           {/* Javari Avatar - Fixed Position (Non-Scrolling) */}
           <div className="fixed left-1/2 -translate-x-1/2 top-20 z-20">
             <div className="flex flex-col items-center">
@@ -618,7 +626,6 @@ export default function MainJavariInterface() {
                 />
               </div>
               <p className="text-white text-lg font-semibold mb-1">Javari AI</p>
-              <p className="text-white/70 text-sm mb-2">Joins every chat</p>
               {selectedAI === 'auto' && (
                 <p className="text-xs" style={{ color: COLORS.javariCyan }}>
                   Auto-selecting: {aiProviders[recommendedAI]?.name}
@@ -676,6 +683,8 @@ export default function MainJavariInterface() {
                   </div>
                 ))
               )}
+              {/* Auto-scroll anchor */}
+              <div ref={messagesEndRef} />
             </div>
           </ScrollArea>
 
@@ -766,12 +775,24 @@ export default function MainJavariInterface() {
         {/* RIGHT SIDEBAR - Artifacts with Claude-Style Output */}
         {rightSidebarOpen && (
           <div 
-            className="w-96 border-l flex flex-col"
+            className="w-96 border-l flex flex-col sticky top-0 h-screen overflow-y-auto"
             style={{ 
               backgroundColor: COLORS.navy,
               borderColor: COLORS.cyan + '40'
             }}
           >
+            {/* Javari AI Status - Always Visible */}
+            <div className="p-4 border-b" style={{ borderColor: COLORS.cyan + '40', backgroundColor: COLORS.javaribg }}>
+              <div className="flex items-center gap-2 mb-3">
+                <div 
+                  className="w-2 h-2 rounded-full animate-pulse"
+                  style={{ backgroundColor: '#00FF00' }}
+                />
+                <p className="text-white/90 text-sm font-semibold">Javari AI Joins Every Chat</p>
+              </div>
+              <p className="text-xs text-white/60">Your AI partner across all conversations</p>
+            </div>
+
             <div className="p-4 border-b" style={{ borderColor: COLORS.cyan + '40' }}>
               <h3 className="text-white font-medium">Generated Content</h3>
               <p className="text-xs text-white/60 mt-1">Files and artifacts from this conversation</p>
