@@ -1,20 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
-import { cookies } from 'next/headers'
+import { createClient } from '@supabase/supabase-js'
+
+// Initialize Supabase client
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies })
-
-    // Verify authentication
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      )
-    }
-
     const body = await request.json()
     const { title, content, category = 'ai-learning', metadata = {} } = body
 
@@ -34,7 +27,6 @@ export async function POST(request: NextRequest) {
         category,
         metadata: {
           ...metadata,
-          uploaded_by: user.id,
           uploaded_at: new Date().toISOString(),
           source: 'api_upload'
         }
@@ -51,7 +43,6 @@ export async function POST(request: NextRequest) {
     }
 
     // Database trigger automatically adds to javari_document_queue
-    // Return success response
     return NextResponse.json({
       success: true,
       message: 'Document uploaded successfully and queued for learning',
@@ -73,9 +64,6 @@ export async function POST(request: NextRequest) {
 // GET endpoint to check learning status
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies })
-
-    // Get document ID from query params
     const searchParams = request.nextUrl.searchParams
     const docId = searchParams.get('id')
 
@@ -86,7 +74,6 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Check if document has been learned
     const { data: doc, error } = await supabase
       .from('documentation_system_docs')
       .select('id, title, learned_by_javari, javari_confidence_score, created_at')
@@ -100,7 +87,6 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Check queue status
     const { data: queueItem } = await supabase
       .from('javari_document_queue')
       .select('status, priority, processed_at')
