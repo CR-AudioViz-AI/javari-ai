@@ -1,1 +1,12 @@
-{"$schema":"https://openapi.vercel.sh/vercel.json","github":{"autoAlias":false}}
+{
+  "crons": [
+    {
+      "path": "/api/javari/learn-from-docs",
+      "schedule": "0 */4 * * *"
+    },
+    {
+      "path": "/api/javari/health",
+      "schedule": "*/30 * * * *"
+    }
+  ]
+}
