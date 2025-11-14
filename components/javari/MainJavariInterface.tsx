@@ -603,40 +603,9 @@ export default function MainJavariInterface() {
             </Button>
           </div>
 
-          {/* Javari Avatar - Fixed Position (Non-Scrolling) */}
-          <div className="fixed left-1/2 -translate-x-1/2 top-20 z-20">
-            <div className="flex flex-col items-center">
-              <div className="relative mb-4">
-                <Image
-                  src="/avatars/javariavatar.png"
-                  alt="Javari Avatar"
-                  width={96}
-                  height={96}
-                  className="rounded-full object-cover"
-                  style={{
-                    border: `3px solid ${COLORS.javariCyan}`,
-                    boxShadow: `0 0 30px ${COLORS.javariCyan}90, 0 0 60px ${COLORS.javariCyan}50`,
-                    objectPosition: '60% center'
-                  }}
-                />
-                {/* Live Indicator */}
-                <div 
-                  className="absolute bottom-1 right-1 w-5 h-5 rounded-full border-2 border-white animate-pulse"
-                  style={{ backgroundColor: '#00FF00' }}
-                />
-              </div>
-              <p className="text-white text-lg font-semibold mb-1">Javari AI</p>
-              {selectedAI === 'auto' && (
-                <p className="text-xs" style={{ color: COLORS.javariCyan }}>
-                  Auto-selecting: {aiProviders[recommendedAI]?.name}
-                </p>
-              )}
-            </div>
-          </div>
-
           {/* Chat Messages Area */}
           <ScrollArea className="flex-1 p-6">
-            <div className="space-y-4 max-w-4xl mx-auto ml-[220px] pt-48">{/* Added left margin and top padding to clear fixed elements */}
+            <div className="space-y-4 max-w-4xl mx-auto ml-[220px] pt-6">{/* Adjusted padding after moving avatar to right sidebar */}
 
               {/* Messages */}
               {messages.length === 0 ? (
@@ -781,6 +750,35 @@ export default function MainJavariInterface() {
               borderColor: COLORS.cyan + '40'
             }}
           >
+            {/* Javari Avatar - Top of Right Panel */}
+            <div className="p-6 border-b flex flex-col items-center" style={{ borderColor: COLORS.cyan + '40', backgroundColor: COLORS.javaribg }}>
+              <div className="relative mb-4">
+                <Image
+                  src="/avatars/javariavatar.png"
+                  alt="Javari Avatar"
+                  width={96}
+                  height={96}
+                  className="rounded-full object-cover"
+                  style={{
+                    border: `3px solid ${COLORS.javariCyan}`,
+                    boxShadow: `0 0 30px ${COLORS.javariCyan}90, 0 0 60px ${COLORS.javariCyan}50`,
+                    objectPosition: '60% center'
+                  }}
+                />
+                {/* Live Indicator */}
+                <div 
+                  className="absolute bottom-1 right-1 w-5 h-5 rounded-full border-2 border-white animate-pulse"
+                  style={{ backgroundColor: '#00FF00' }}
+                />
+              </div>
+              <p className="text-white text-lg font-semibold mb-1">Javari AI</p>
+              {selectedAI === 'auto' && (
+                <p className="text-xs" style={{ color: COLORS.javariCyan }}>
+                  Auto-selecting: {aiProviders[recommendedAI]?.name}
+                </p>
+              )}
+            </div>
+
             {/* Javari AI Status - Always Visible */}
             <div className="p-4 border-b" style={{ borderColor: COLORS.cyan + '40', backgroundColor: COLORS.javaribg }}>
               <div className="flex items-center gap-2 mb-3">
