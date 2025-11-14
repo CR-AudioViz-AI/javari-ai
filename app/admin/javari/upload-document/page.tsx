@@ -7,7 +7,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Upload, FileText, CheckCircle, AlertCircle } from 'lucide-react'
+import { Upload, FileText, CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 
 export default function UploadDocumentPage() {
   const [title, setTitle] = useState('')
@@ -17,6 +18,7 @@ export default function UploadDocumentPage() {
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState(false)
   const [error, setError] = useState('')
+  const supabase = createClientComponentClient()
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0]
@@ -24,7 +26,7 @@ export default function UploadDocumentPage() {
 
     setFile(selectedFile)
     setTitle(selectedFile.name.replace(/\.[^/.]+$/, ''))
-
+    
     // Read file content
     const reader = new FileReader()
     reader.onload = (event) => {
@@ -34,188 +36,183 @@ export default function UploadDocumentPage() {
     reader.readAsText(selectedFile)
   }
 
-  const handleSubmit = async () => {
-    if (!title || !content) {
-      setError('Title and content are required')
-      return
-    }
-
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
     setLoading(true)
     setError('')
     setSuccess(false)
 
     try {
-      const response = await fetch('/api/javari/upload-document', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+      // Insert into documentation_system_docs table
+      const { data, error: insertError } = await supabase
+        .from('documentation_system_docs')
+        .insert({
           title,
           content,
           category,
-          tags: ['manual-upload', 'admin'],
-        }),
-      })
+          file_path: file ? `uploads/${file.name}` : null,
+          metadata: {
+            uploaded_via: 'admin',
+            file_size: file?.size || content.length,
+            upload_timestamp: new Date().toISOString()
+          }
+        })
+        .select()
+        .single()
 
-      const result = await response.json()
+      if (insertError) throw insertError
 
-      if (result.success) {
-        setSuccess(true)
-        setTitle('')
-        setContent('')
-        setFile(null)
-        
-        // Reset after 3 seconds
-        setTimeout(() => {
-          setSuccess(false)
-        }, 3000)
-      } else {
-        setError(result.error || 'Failed to upload document')
-      }
-    } catch (err) {
-      setError('Error uploading document: ' + (err as Error).message)
+      // Database trigger will automatically add to javari_document_queue
+      setSuccess(true)
+      setTitle('')
+      setContent('')
+      setFile(null)
+      setCategory('ai-learning')
+
+      // Show success for 3 seconds
+      setTimeout(() => setSuccess(false), 3000)
+    } catch (err: any) {
+      setError(err.message || 'Failed to upload document')
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div className="container mx-auto p-6 max-w-4xl">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold">Upload Document for Javari</h1>
-        <p className="text-gray-600 mt-2">
-          Upload documents for Javari to learn from. Documents are automatically queued for processing.
-        </p>
-      </div>
-
-      <div className="grid gap-6">
-        {/* File Upload Card */}
+    <div className="container mx-auto py-8 px-4">
+      <div className="max-w-3xl mx-auto">
         <Card>
           <CardHeader>
-            <CardTitle>Upload File</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <Upload className="w-6 h-6" />
+              Upload Document for Javari Learning
+            </CardTitle>
             <CardDescription>
-              Upload a text file (.txt, .md, .json) for Javari to learn
+              Upload documents that Javari should learn from. She'll automatically process and integrate this knowledge.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
-              <Input
-                type="file"
-                accept=".txt,.md,.json,.csv"
-                onChange={handleFileUpload}
-                className="hidden"
-                id="file-upload"
-              />
-              <label
-                htmlFor="file-upload"
-                className="cursor-pointer flex flex-col items-center"
-              >
-                <Upload className="h-12 w-12 text-gray-400 mb-4" />
-                <span className="text-sm text-gray-600">
-                  Click to upload or drag and drop
-                </span>
-                <span className="text-xs text-gray-500 mt-1">
-                  TXT, MD, JSON, CSV up to 10MB
-                </span>
-              </label>
-              {file && (
-                <div className="mt-4 flex items-center justify-center text-sm text-green-600">
-                  <FileText className="h-4 w-4 mr-2" />
-                  {file.name}
+            <form onSubmit={handleSubmit} className="space-y-6">
+              {/* File Upload */}
+              <div className="space-y-2">
+                <Label htmlFor="file">Upload File (Optional)</Label>
+                <Input
+                  id="file"
+                  type="file"
+                  accept=".txt,.md,.pdf,.doc,.docx"
+                  onChange={handleFileUpload}
+                  disabled={loading}
+                />
+                {file && (
+                  <p className="text-sm text-muted-foreground flex items-center gap-2">
+                    <FileText className="w-4 h-4" />
+                    {file.name} ({Math.round(file.size / 1024)}KB)
+                  </p>
+                )}
+              </div>
+
+              {/* Title */}
+              <div className="space-y-2">
+                <Label htmlFor="title">Document Title *</Label>
+                <Input
+                  id="title"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="e.g., Javari AI Capabilities Guide"
+                  required
+                  disabled={loading}
+                />
+              </div>
+
+              {/* Category */}
+              <div className="space-y-2">
+                <Label htmlFor="category">Category</Label>
+                <Select value={category} onValueChange={setCategory} disabled={loading}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ai-learning">AI Learning (Highest Priority)</SelectItem>
+                    <SelectItem value="platform-docs">Platform Documentation</SelectItem>
+                    <SelectItem value="api-reference">API Reference</SelectItem>
+                    <SelectItem value="user-guides">User Guides</SelectItem>
+                    <SelectItem value="technical-specs">Technical Specifications</SelectItem>
+                    <SelectItem value="business-docs">Business Documents</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Content */}
+              <div className="space-y-2">
+                <Label htmlFor="content">Document Content *</Label>
+                <Textarea
+                  id="content"
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  placeholder="Paste document content here or upload a file above..."
+                  rows={12}
+                  required
+                  disabled={loading}
+                  className="font-mono text-sm"
+                />
+                <p className="text-sm text-muted-foreground">
+                  {content.length.toLocaleString()} characters
+                </p>
+              </div>
+
+              {/* Status Messages */}
+              {success && (
+                <div className="flex items-center gap-2 p-4 bg-green-50 border border-green-200 rounded-md text-green-800">
+                  <CheckCircle className="w-5 h-5" />
+                  <div>
+                    <p className="font-semibold">Document uploaded successfully!</p>
+                    <p className="text-sm">Javari will learn from this within 4 hours.</p>
+                  </div>
                 </div>
               )}
+
+              {error && (
+                <div className="flex items-center gap-2 p-4 bg-red-50 border border-red-200 rounded-md text-red-800">
+                  <AlertCircle className="w-5 h-5" />
+                  <div>
+                    <p className="font-semibold">Upload failed</p>
+                    <p className="text-sm">{error}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Submit Button */}
+              <Button
+                type="submit"
+                disabled={loading || !title || !content}
+                className="w-full"
+                size="lg"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Uploading...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-4 h-4 mr-2" />
+                    Upload for Javari to Learn
+                  </>
+                )}
+              </Button>
+            </form>
+
+            {/* Info Section */}
+            <div className="mt-8 p-4 bg-blue-50 border border-blue-200 rounded-md">
+              <h3 className="font-semibold text-blue-900 mb-2">How It Works</h3>
+              <ul className="text-sm text-blue-800 space-y-1">
+                <li>• Documents are queued automatically for learning</li>
+                <li>• Javari processes documents every 4 hours via cron job</li>
+                <li>• AI-learning category gets highest priority</li>
+                <li>• Embeddings are generated for semantic search</li>
+                <li>• Javari's knowledge updates continuously</li>
+              </ul>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Manual Entry Card */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Document Details</CardTitle>
-            <CardDescription>
-              Or paste content directly below
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <Label htmlFor="title">Document Title *</Label>
-              <Input
-                id="title"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g., Platform Feature Specification"
-                className="mt-1"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="category">Category *</Label>
-              <Select value={category} onValueChange={setCategory}>
-                <SelectTrigger className="mt-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ai-learning">AI Learning (Highest Priority)</SelectItem>
-                  <SelectItem value="technical">Technical Documentation</SelectItem>
-                  <SelectItem value="business">Business Information</SelectItem>
-                  <SelectItem value="product">Product Specifications</SelectItem>
-                  <SelectItem value="support">Support Documentation</SelectItem>
-                  <SelectItem value="customer">Customer Help</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <Label htmlFor="content">Content *</Label>
-              <Textarea
-                id="content"
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                placeholder="Paste document content here..."
-                className="mt-1 min-h-[300px] font-mono text-sm"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                {content.length.toLocaleString()} characters
-              </p>
-            </div>
-
-            {error && (
-              <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">
-                <AlertCircle className="h-4 w-4" />
-                {error}
-              </div>
-            )}
-
-            {success && (
-              <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg text-green-800 text-sm">
-                <CheckCircle className="h-4 w-4" />
-                Document uploaded successfully! Javari will learn it within 4 hours.
-              </div>
-            )}
-
-            <Button
-              onClick={handleSubmit}
-              disabled={loading || !title || !content}
-              className="w-full"
-            >
-              {loading ? 'Uploading...' : 'Upload & Queue for Learning'}
-            </Button>
-          </CardContent>
-        </Card>
-
-        {/* Info Card */}
-        <Card className="bg-blue-50 border-blue-200">
-          <CardHeader>
-            <CardTitle className="text-sm">How it Works</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-gray-700 space-y-2">
-            <p>1. Upload your document using the form above</p>
-            <p>2. Document is automatically saved to the database</p>
-            <p>3. Database trigger queues it for Javari's learning</p>
-            <p>4. Cron job processes queue every 4 hours</p>
-            <p>5. Javari generates embeddings and learns the content</p>
-            <p>6. Knowledge is available for questions within 4 hours</p>
           </CardContent>
         </Card>
       </div>
