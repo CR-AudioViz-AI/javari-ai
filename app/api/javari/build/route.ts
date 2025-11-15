@@ -13,7 +13,7 @@ import { BuilderOrchestrator, type BuildTask, type TaskType } from '@/lib/orches
 import { CodeGeneratorTool, GitHubTool, VercelDeployTool } from '@/lib/orchestrator/tools';
 import { createClient } from '@/lib/supabase/server';
 
-export const runtime = 'edge';
+// Runtime: nodejs (required for GitHub/Vercel tools)
 export const maxDuration = 300; // 5 minutes for complex builds
 
 // ============================================================================
