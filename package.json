@@ -30,7 +30,10 @@
     "react-dom": "^18.3.1",
     "react-markdown": "^9.0.1",
     "tailwind-merge": "^2.5.5",
-    "tailwindcss-animate": "^1.0.7"
+    "tailwindcss-animate": "^1.0.7",
+    "recharts": "^2.13.3",
+    "@supabase/auth-helpers-nextjs": "^0.10.0",
+    "@radix-ui/react-progress": "^1.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
