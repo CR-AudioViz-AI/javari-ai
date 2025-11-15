@@ -401,22 +401,104 @@ export default function MainJavariInterface() {
       ));
     }
 
-    // Simulate Javari's response
-    setTimeout(() => {
-      const assistantMessage: Message = {
-        id: `msg_${Date.now()}_assistant`,
-        role: 'assistant',
-        content: `This is a simulated response from ${aiProviders[activeAI].name}. In production, this connects to the actual AI API.`,
-        timestamp: new Date().toISOString(),
-        provider: activeAI,
-      };
+    // Map UI AI provider to actual model
+    const modelMap: Record<string, string> = {
+      'gpt-4': 'gpt-4-turbo-preview',
+      'claude': 'claude-sonnet-4-5-20250929',
+      'gemini': 'gpt-4-turbo-preview', // Fallback to GPT-4 for now
+      'perplexity': 'gpt-4-turbo-preview', // Fallback to GPT-4 for now
+    };
 
-      const finalMessages = [...updatedMessages, assistantMessage];
+    const modelToUse = modelMap[activeAI] || 'gpt-4-turbo-preview';
+
+    // Create placeholder for assistant message
+    const assistantMessageId = `msg_${Date.now()}_assistant`;
+    const assistantPlaceholder: Message = {
+      id: assistantMessageId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date().toISOString(),
+      provider: activeAI,
+    };
+
+    const messagesWithPlaceholder = [...updatedMessages, assistantPlaceholder];
+    setMessages(messagesWithPlaceholder);
+
+    try {
+      // Call REAL AI API with streaming
+      const response = await fetch('/api/javari/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: cleanMessage,
+          model: modelToUse,
+          history: updatedMessages.slice(-10).map(m => ({ // Send last 10 messages for context
+            role: m.role,
+            content: m.content,
+          })),
+          maxTokens: 2000,
+          temperature: 0.7,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      // Handle streaming response
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let accumulatedContent = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value);
+          const lines = chunk.split('\n');
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              if (data === '[DONE]') continue;
+
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed.content) {
+                  accumulatedContent += parsed.content;
+                  
+                  // Update message in real-time
+                  setMessages(prev => 
+                    prev.map(msg => 
+                      msg.id === assistantMessageId 
+                        ? { ...msg, content: accumulatedContent }
+                        : msg
+                    )
+                  );
+                }
+              } catch (e) {
+                // Skip invalid JSON
+              }
+            }
+          }
+        }
+      }
+
+      // Final update with complete response
+      const finalMessages = messagesWithPlaceholder.map(msg => 
+        msg.id === assistantMessageId 
+          ? { ...msg, content: accumulatedContent || 'I apologize, but I encountered an error processing your request.' }
+          : msg
+      );
+
       setMessages(finalMessages);
 
       // Speak if voice is enabled
-      if (isSpeaking) {
-        speakText(assistantMessage.content);
+      if (isSpeaking && accumulatedContent) {
+        speakText(accumulatedContent);
       }
 
       // Update conversation with Javari's response
@@ -431,7 +513,33 @@ export default function MainJavariInterface() {
           conv.id === finalConv.id ? finalConv : conv
         ));
       }
-    }, 1000);
+    } catch (error) {
+      console.error('Chat API error:', error);
+      
+      // Show error message
+      const errorMessage: Message = {
+        id: assistantMessageId,
+        role: 'assistant',
+        content: 'I apologize, but I encountered an error. Please try again or check your API configuration.',
+        timestamp: new Date().toISOString(),
+        provider: activeAI,
+      };
+
+      const errorMessages = [...updatedMessages, errorMessage];
+      setMessages(errorMessages);
+
+      if (currentConversation) {
+        const errorConv = {
+          ...currentConversation,
+          messages: errorMessages,
+          updated_at: new Date().toISOString(),
+        };
+        setCurrentConversation(errorConv);
+        setConversations(conversations.map(conv => 
+          conv.id === errorConv.id ? errorConv : conv
+        ));
+      }
+    }
   };
 
   const copyArtifact = (artifactId: string, content: string) => {
