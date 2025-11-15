@@ -14,6 +14,7 @@ import { CodeGeneratorTool, GitHubTool, VercelDeployTool } from '@/lib/orchestra
 import { createClient } from '@/lib/supabase/server';
 
 // Runtime: nodejs (required for GitHub/Vercel tools)
+export const runtime = "nodejs";
 export const maxDuration = 300; // 5 minutes for complex builds
 
 // ============================================================================
