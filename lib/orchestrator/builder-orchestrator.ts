@@ -7,6 +7,7 @@
  * @author CR AudioViz AI, LLC
  */
 
+import { logError, formatApiError } from "@/lib/utils/error-handler";
 import { createClient } from '@/lib/supabase/client';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
@@ -320,7 +321,7 @@ export class BuilderOrchestrator {
         warnings: validation.warnings
       };
       
-    } catch (error) {
+    } catch (error: unknown) {
       const executionTime = Date.now() - startTime;
       
       return {
@@ -576,7 +577,7 @@ Return a JSON object with this structure:
         //   created_at: new Date().toISOString()
         // });
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to log learning data:', error);
     }
   }
