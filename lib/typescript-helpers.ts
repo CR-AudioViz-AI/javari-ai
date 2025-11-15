@@ -1,3 +1,5 @@
+import { logError, formatApiError } from "@/lib/utils/error-handler";
+
 /**
  * Javari AI - TypeScript Fix Helpers
  * Common utilities for fixing TypeScript errors
@@ -184,7 +186,7 @@ export async function asyncTry<T>(
 ): Promise<T | undefined> {
   try {
     return await fn();
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Async error:', error);
     return defaultValue;
   }
@@ -203,7 +205,7 @@ export async function asyncRetry<T>(
   for (let i = 0; i < maxRetries; i++) {
     try {
       return await fn();
-    } catch (error) {
+    } catch (error: unknown) {
       lastError = error;
       if (i < maxRetries - 1) {
         const delay = baseDelay * Math.pow(2, i);
@@ -298,7 +300,7 @@ export function safeSetState<T>(
 ): void {
   try {
     setState(value);
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('State update error:', error);
   }
 }
@@ -332,7 +334,7 @@ export async function safeFetch<T = unknown>(
 
     const data = await response.json();
     return { data: data as T };
-  } catch (error) {
+  } catch (error: unknown) {
     return {
       error: isError(error) ? error.message : 'Network error occurred'
     };
