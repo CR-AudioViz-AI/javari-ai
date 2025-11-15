@@ -33,7 +33,11 @@
     "tailwindcss-animate": "^1.0.7",
     "recharts": "^2.13.3",
     "@supabase/auth-helpers-nextjs": "^0.10.0",
-    "@radix-ui/react-progress": "^1.1.0"
+    "@radix-ui/react-progress": "^1.1.0",
+    "@radix-ui/react-scroll-area": "^1.2.2",
+    "@radix-ui/react-slider": "^1.2.1",
+    "@radix-ui/react-switch": "^1.1.1",
+    "@octokit/rest": "^21.0.2"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
