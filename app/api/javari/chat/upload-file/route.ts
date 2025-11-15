@@ -1,3 +1,4 @@
+import { logError, formatApiError } from "@/lib/utils/error-handler";
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
@@ -75,7 +76,7 @@ export async function POST(req: NextRequest) {
       message: `Document "${title}" uploaded and queued for learning`,
       response: `✅ I've received your document "${title}" (${text.length.toLocaleString()} characters). I've added it to my learning queue and will study it within the next 4 hours. Once processed, I'll have full knowledge of its contents and can answer questions about it!`,
     })
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error in chat file upload:', error)
     return NextResponse.json(
       { success: false, error: 'Internal server error' },
