@@ -6,6 +6,7 @@
  * @version 1.0.0
  * @quality Fortune 50 Production Standard
  */
+import { logError, formatApiError } from "@/lib/utils/error-handler";
 import React from 'react';
 
 
@@ -142,7 +143,7 @@ export class JavariErrorHandler {
   ): Promise<T | undefined> {
     try {
       return await fn();
-    } catch (error) {
+    } catch (error: unknown) {
       this.handle(error, context);
       return fallback;
     }
@@ -158,7 +159,7 @@ export class JavariErrorHandler {
   ): T | undefined {
     try {
       return fn();
-    } catch (error) {
+    } catch (error: unknown) {
       this.handle(error, context);
       return fallback;
     }
@@ -174,7 +175,7 @@ export class JavariErrorHandler {
   ): T {
     try {
       return fn();
-    } catch (error) {
+    } catch (error: unknown) {
       this.handle(error, context);
       return errorHandler(error);
     }
