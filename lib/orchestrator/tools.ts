@@ -7,6 +7,7 @@
  * @author CR AudioViz AI, LLC
  */
 
+import { logError, formatApiError } from "@/lib/utils/error-handler";
 import { Octokit } from '@octokit/rest';
 
 // ============================================================================
@@ -263,7 +264,7 @@ export class GitHubTool {
         repoUrl: response.data.html_url,
         cloneUrl: response.data.clone_url
       };
-    } catch (error) {
+    } catch (error: unknown) {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to create repository'
@@ -341,7 +342,7 @@ export class GitHubTool {
         filesUploaded: files.length
       };
       
-    } catch (error) {
+    } catch (error: unknown) {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to upload files'
@@ -406,7 +407,7 @@ export class VercelDeployTool {
           error: data.error?.message || 'Deployment failed'
         };
       }
-    } catch (error) {
+    } catch (error: unknown) {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Deployment failed'
@@ -433,7 +434,7 @@ export class VercelDeployTool {
         status: data.readyState,
         url: data.url
       };
-    } catch (error) {
+    } catch (error: unknown) {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to get status'
@@ -473,7 +474,7 @@ export class KnowledgeCrawler {
           crawledAt: new Date().toISOString()
         }
       };
-    } catch (error) {
+    } catch (error: unknown) {
       return {
         success: false
       };
