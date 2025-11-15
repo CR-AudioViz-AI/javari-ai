@@ -7,6 +7,7 @@
  * @author CR AudioViz AI, LLC
  */
 
+import { logError, formatApiError } from "@/lib/utils/error-handler";
 import { createClient } from '@/lib/supabase/client';
 import OpenAI from 'openai';
 
@@ -69,7 +70,7 @@ export class ContinuousLearningSystem {
           await this.learnFromError(event);
           break;
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to process learning event:', error);
     }
   }
@@ -163,7 +164,7 @@ export class ContinuousLearningSystem {
         topic: extracted.topic,
         keywords: extracted.keywords || []
       };
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to extract knowledge:', error);
       return null;
     }
@@ -221,7 +222,7 @@ export class ContinuousLearningSystem {
             input: knowledge.content
           });
           embedding = embeddingResponse.data[0]?.embedding;
-        } catch (error) {
+        } catch (error: unknown) {
           console.error('Failed to generate embedding:', error);
         }
       }
@@ -239,7 +240,7 @@ export class ContinuousLearningSystem {
         embedding: embedding,
         quality_score: 0.5
       });
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to store knowledge:', error);
     }
   }
@@ -268,7 +269,7 @@ export class ContinuousLearningSystem {
           success_rate: this.supabase.rpc('update_success_rate', { rating })
         })
         .in('keywords', keywords);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to update quality scores:', error);
     }
   }
@@ -318,7 +319,7 @@ export class ContinuousLearningSystem {
       if (error) throw error;
 
       return data || [];
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to query knowledge:', error);
       return [];
     }
@@ -354,7 +355,7 @@ export class ContinuousLearningSystem {
         byTopic,
         avgQuality: data?.length ? totalQuality / data.length : 0
       };
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to get statistics:', error);
       return {
         totalKnowledge: 0,
