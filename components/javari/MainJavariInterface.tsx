@@ -742,12 +742,12 @@ export default function MainJavariInterface() {
 
           {/* Chat Messages Area - Fills remaining space */}
           <ScrollArea className="flex-1 p-6" style={{ paddingBottom: '200px' }}>
-            <div className="space-y-4 max-w-4xl mx-auto ml-[220px] pt-6">
+            <div className="space-y-4 max-w-4xl mx-auto pt-6">
               {messages.length === 0 ? (
                 <div className="text-center py-12">
                   <div className="text-white/70 mb-4">
                     <Sparkles className="w-16 h-16 mx-auto mb-4" style={{ color: COLORS.javariCyan }} />
-                    <p className="text-lg font-medium text-white">Ready to assist you</p>
+                    <p className="text-2xl font-bold text-white mb-2">Javari is learning and ready to build</p>
                     <p className="text-sm">Ask me anything - I'll auto-select the best AI for your task</p>
                   </div>
                 </div>
@@ -1130,3 +1130,4 @@ export default function MainJavariInterface() {
     </div>
   );
 }
+
