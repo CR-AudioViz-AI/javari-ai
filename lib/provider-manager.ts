@@ -1,7 +1,7 @@
 /**
- * JAVARI AI - MULTI-PROVIDER MANAGER
- * Handles OpenAI, Claude, Gemini, and Mistral with automatic fallback
- * Created: Tuesday, October 28, 2025 - 1:25 PM EST
+ * JAVARI AI - MULTI-PROVIDER MANAGER WITH STREAMING
+ * Enhanced with streaming support for all providers
+ * Updated: November 19, 2025 - 4:01 PM EST
  */
 
 import OpenAI from 'openai';
@@ -9,7 +9,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { Mistral } from '@mistralai/mistralai';
 import { createClient } from '@supabase/supabase-js';
-import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
+import { getErrorMessage, logError } from '@/lib/utils/error-utils';
 
 // ================================================================
 // TYPES
@@ -43,6 +43,11 @@ export interface ChatResponse {
   cost: number;
   latency: number;
   wasFailover?: boolean;
+}
+
+export interface StreamChunk {
+  text: string;
+  done: boolean;
 }
 
 export interface ProviderConfig {
@@ -94,9 +99,10 @@ export class ProviderManager {
       });
     }
 
-    // Gemini (Google)
-    if (process.env.GOOGLE_API_KEY) {
-      this.gemini = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+    // Gemini (Google) - check both env var names
+    const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+    if (geminiKey) {
+      this.gemini = new GoogleGenerativeAI(geminiKey);
     }
 
     // Mistral
@@ -108,7 +114,7 @@ export class ProviderManager {
   }
 
   // ================================================================
-  // MAIN CHAT FUNCTION
+  // MAIN CHAT FUNCTION WITH STREAMING
   // ================================================================
 
   async chat(request: ChatRequest): Promise<ChatResponse> {
@@ -148,56 +154,184 @@ export class ProviderManager {
       if (fallbackProvider) {
         console.log(`Falling back to ${fallbackProvider}`);
         
-        const fallbackRequest = {
-          ...request,
-          provider: fallbackProvider,
-          model: await this.getDefaultModel(fallbackProvider),
-        };
-
-        try {
-          const response = await this.chatWithProvider(fallbackRequest);
-          
-          // Log success with failover flag
-          await this.logPerformance({
-            provider: fallbackProvider,
-            model: fallbackRequest.model,
-            success: true,
-            tokens: response.tokens.total,
-            cost: response.cost,
-            latency: response.latency,
-          });
-
-          // Log auto-heal action
-          await this.logAutoHeal({
-            triggerType: 'provider_failure',
-            triggerReason: `${request.provider} failed, auto-switched to ${fallbackProvider}`,
-            actionTaken: `Fallback to ${fallbackProvider} successful`,
-            wasSuccessful: true,
-          });
-
-          return { ...response, wasFailover: true };
-        } catch (fallbackError) {
-          console.error(`Fallback to ${fallbackProvider} also failed:`, fallbackError);
-          
-          // Log auto-heal failure
-          await this.logAutoHeal({
-            triggerType: 'provider_failure',
-            triggerReason: `Both ${request.provider} and ${fallbackProvider} failed`,
-            actionTaken: `Attempted fallback to ${fallbackProvider}`,
-            wasSuccessful: false,
-            errorMessage: fallbackError instanceof Error ? fallbackError.message : 'Unknown error',
-          });
-
-          throw new Error(`All providers failed. Last error: ${fallbackError}`);
-        }
+        const fallbackRequest = { ...request, provider: fallbackProvider };
+        const response = await this.chatWithProvider(fallbackRequest);
+        response.wasFailover = true;
+        
+        return response;
       }
 
       throw error;
     }
   }
 
+  /**
+   * Stream chat responses (returns async generator)
+   */
+  async *chatStream(request: ChatRequest): AsyncGenerator<StreamChunk, void, unknown> {
+    const startTime = Date.now();
+    let totalTokens = 0;
+    let outputText = '';
+
+    try {
+      // Route to appropriate streaming function
+      const stream = this.getStreamForProvider(request);
+
+      for await (const chunk of stream) {
+        outputText += chunk.text;
+        totalTokens++;
+        yield chunk;
+      }
+
+      // Log success after stream completes
+      const latency = Date.now() - startTime;
+      await this.logPerformance({
+        provider: request.provider,
+        model: request.model,
+        success: true,
+        tokens: totalTokens,
+        cost: this.estimateCost(request.provider, request.model, totalTokens),
+        latency,
+      });
+
+    } catch (error: unknown) {
+      console.error(`Streaming failed for ${request.provider}:`, error);
+      
+      // Log failure
+      await this.logPerformance({
+        provider: request.provider,
+        model: request.model,
+        success: false,
+        tokens: 0,
+        cost: 0,
+        latency: Date.now() - startTime,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+
+      throw error;
+    }
+  }
+
   // ================================================================
-  // PROVIDER-SPECIFIC CHAT IMPLEMENTATIONS
+  // PROVIDER-SPECIFIC STREAMING
+  // ================================================================
+
+  private async *getStreamForProvider(request: ChatRequest): AsyncGenerator<StreamChunk, void, unknown> {
+    switch (request.provider) {
+      case 'openai':
+        yield* this.streamOpenAI(request);
+        break;
+      case 'claude':
+        yield* this.streamClaude(request);
+        break;
+      case 'gemini':
+        yield* this.streamGemini(request);
+        break;
+      case 'mistral':
+        yield* this.streamMistral(request);
+        break;
+      default:
+        throw new Error(`Unknown provider: ${request.provider}`);
+    }
+  }
+
+  private async *streamOpenAI(request: ChatRequest): AsyncGenerator<StreamChunk, void, unknown> {
+    if (!this.openai) throw new Error('OpenAI not initialized');
+
+    const stream = await this.openai.chat.completions.create({
+      model: request.model,
+      messages: request.messages,
+      temperature: request.temperature ?? 0.7,
+      max_tokens: request.maxTokens ?? 4000,
+      stream: true,
+    });
+
+    for await (const chunk of stream) {
+      const text = chunk.choices[0]?.delta?.content || '';
+      if (text) {
+        yield { text, done: false };
+      }
+    }
+    
+    yield { text: '', done: true };
+  }
+
+  private async *streamClaude(request: ChatRequest): AsyncGenerator<StreamChunk, void, unknown> {
+    if (!this.claude) throw new Error('Claude not initialized');
+
+    // Convert messages to Claude format
+    const systemMessage = request.messages.find(m => m.role === 'system');
+    const conversationMessages = request.messages.filter(m => m.role !== 'system');
+
+    const stream = await this.claude.messages.create({
+      model: request.model,
+      max_tokens: request.maxTokens ?? 4000,
+      temperature: request.temperature ?? 0.7,
+      system: systemMessage?.content,
+      messages: conversationMessages.map(m => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+      })),
+      stream: true,
+    });
+
+    for await (const chunk of stream) {
+      if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
+        yield { text: chunk.delta.text, done: false };
+      }
+    }
+    
+    yield { text: '', done: true };
+  }
+
+  private async *streamGemini(request: ChatRequest): AsyncGenerator<StreamChunk, void, unknown> {
+    if (!this.gemini) throw new Error('Gemini not initialized');
+
+    const model = this.gemini.getGenerativeModel({ model: request.model });
+
+    // Convert messages to Gemini format
+    const history = request.messages.slice(0, -1).map(m => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }],
+    }));
+
+    const chat = model.startChat({ history });
+    const lastMessage = request.messages[request.messages.length - 1];
+    
+    const result = await chat.sendMessageStream(lastMessage.content);
+
+    for await (const chunk of result.stream) {
+      const text = chunk.text();
+      if (text) {
+        yield { text, done: false };
+      }
+    }
+    
+    yield { text: '', done: true };
+  }
+
+  private async *streamMistral(request: ChatRequest): AsyncGenerator<StreamChunk, void, unknown> {
+    if (!this.mistral) throw new Error('Mistral not initialized');
+
+    const stream = await this.mistral.chat.stream({
+      model: request.model,
+      messages: request.messages,
+      temperature: request.temperature ?? 0.7,
+      maxTokens: request.maxTokens ?? 4000,
+    });
+
+    for await (const chunk of stream) {
+      const text = chunk.data?.choices?.[0]?.delta?.content || '';
+      if (text) {
+        yield { text, done: false };
+      }
+    }
+    
+    yield { text: '', done: true };
+  }
+
+  // ================================================================
+  // NON-STREAMING PROVIDER IMPLEMENTATIONS
   // ================================================================
 
   private async chatWithProvider(request: ChatRequest): Promise<ChatResponse> {
@@ -247,7 +381,6 @@ export class ProviderManager {
   private async chatWithClaude(request: ChatRequest, startTime: number): Promise<ChatResponse> {
     if (!this.claude) throw new Error('Claude not initialized');
 
-    // Convert messages to Claude format (no system role in messages)
     const systemMessage = request.messages.find(m => m.role === 'system');
     const conversationMessages = request.messages.filter(m => m.role !== 'system');
 
@@ -284,7 +417,6 @@ export class ProviderManager {
 
     const model = this.gemini.getGenerativeModel({ model: request.model });
 
-    // Convert messages to Gemini format
     const history = request.messages.slice(0, -1).map(m => ({
       role: m.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: m.content }],
@@ -297,7 +429,6 @@ export class ProviderManager {
 
     const latency = Date.now() - startTime;
     
-    // Estimate tokens (Gemini doesn't provide exact counts)
     const inputTokens = Math.ceil(request.messages.reduce((sum, m) => sum + m.content.length, 0) / 4);
     const outputTokens = Math.ceil(response.text().length / 4);
 
@@ -349,78 +480,42 @@ export class ProviderManager {
   // ================================================================
 
   private calculateCost(provider: ProviderName, model: string, inputTokens: number, outputTokens: number): number {
-    // Cost per 1K tokens
-    const pricing: Record<string, { input: number; output: number }> = {
-      // OpenAI
-      'gpt-4-turbo-preview': { input: 0.01, output: 0.03 },
-      'gpt-4': { input: 0.03, output: 0.06 },
-      'gpt-3.5-turbo': { input: 0.0005, output: 0.0015 },
-      
-      // Claude
-      'claude-3-5-sonnet-20241022': { input: 0.003, output: 0.015 },
-      'claude-3-opus-20240229': { input: 0.015, output: 0.075 },
-      'claude-3-haiku-20240307': { input: 0.00025, output: 0.00125 },
-      
-      // Gemini
-      'gemini-pro': { input: 0.0005, output: 0.0015 },
-      'gemini-pro-vision': { input: 0.00025, output: 0.0005 },
-      
-      // Mistral
-      'mistral-large-latest': { input: 0.004, output: 0.012 },
-      'mistral-medium-latest': { input: 0.0027, output: 0.0081 },
-      'mistral-small-latest': { input: 0.0002, output: 0.0006 },
+    const pricing: Record<ProviderName, { input: number; output: number }> = {
+      openai: { input: 0.03 / 1000, output: 0.06 / 1000 },
+      claude: { input: 0.003 / 1000, output: 0.015 / 1000 },
+      gemini: { input: 0.00035 / 1000, output: 0.00105 / 1000 },
+      mistral: { input: 0.001 / 1000, output: 0.003 / 1000 },
     };
 
-    const modelPricing = pricing[model] || { input: 0.001, output: 0.002 };
-    return (inputTokens / 1000) * modelPricing.input + (outputTokens / 1000) * modelPricing.output;
+    const rates = pricing[provider];
+    return (inputTokens * rates.input) + (outputTokens * rates.output);
+  }
+
+  private estimateCost(provider: ProviderName, model: string, totalTokens: number): number {
+    return this.calculateCost(provider, model, totalTokens / 2, totalTokens / 2);
   }
 
   // ================================================================
-  // HELPER FUNCTIONS
+  // FALLBACK PROVIDER
   // ================================================================
 
   private async getFallbackProvider(failedProvider: ProviderName): Promise<ProviderName | null> {
-    const { data } = await this.supabase
-      .from('javari_providers')
-      .select('name, priority, is_enabled')
-      .eq('is_enabled', true)
-      .neq('name', failedProvider)
-      .order('priority', { ascending: false })
-      .limit(1)
-      .single();
-
-    return data?.name as ProviderName || null;
-  }
-
-  private async getDefaultModel(provider: ProviderName): Promise<string> {
-    const { data } = await this.supabase
-      .from('javari_provider_models')
-      .select('model_name')
-      .eq('provider', provider)
-      .eq('is_enabled', true)
-      .order('context_window', { ascending: false })
-      .limit(1)
-      .single();
-
-    return data?.model_name || this.getHardcodedDefaultModel(provider);
-  }
-
-  private getHardcodedDefaultModel(provider: ProviderName): string {
-    const defaults: Record<ProviderName, string> = {
-      openai: 'gpt-4-turbo-preview',
-      claude: 'claude-3-5-sonnet-20241022',
-      gemini: 'gemini-pro',
-      mistral: 'mistral-large-latest',
+    const fallbacks: Record<ProviderName, ProviderName> = {
+      openai: 'claude',
+      claude: 'gemini',
+      gemini: 'mistral',
+      mistral: 'openai',
     };
-    return defaults[provider];
+
+    return fallbacks[failedProvider] || null;
   }
 
   // ================================================================
-  // LOGGING
+  // PERFORMANCE LOGGING
   // ================================================================
 
-  private async logPerformance(data: {
-    provider: string;
+  private async logPerformance(log: {
+    provider: ProviderName;
     model: string;
     success: boolean;
     tokens: number;
@@ -429,94 +524,18 @@ export class ProviderManager {
     error?: string;
   }) {
     try {
-      // Update provider performance stats
-      const { error } = await this.supabase.rpc('update_provider_performance', {
-        p_provider: data.provider,
-        p_model: data.model,
-        p_success: data.success,
-        p_tokens: data.tokens,
-        p_cost: data.cost,
-        p_latency_ms: data.latency,
-      });
-
-      if (error) logError('Error logging performance:', error);
-
-      // If failure, log to provider health
-      if (!data.success) {
-        await this.supabase.from('javari_provider_health').insert({
-          provider: data.provider,
-          status: 'down',
-          error_message: data.error,
-          checked_at: new Date().toISOString(),
-        });
-      }
-    } catch (error: unknown) {
-      logError('Error in logPerformance:', error);
-    }
-  }
-
-  private async logAutoHeal(data: {
-    triggerType: string;
-    triggerReason: string;
-    actionTaken: string;
-    wasSuccessful: boolean;
-    errorMessage?: string;
-  }) {
-    try {
-      await this.supabase.from('javari_auto_heal_actions').insert({
-        trigger_type: data.triggerType,
-        trigger_reason: data.triggerReason,
-        action_taken: data.actionTaken,
-        was_successful: data.wasSuccessful,
-        error_message: data.errorMessage,
+      await this.supabase.from('ai_performance').insert({
+        provider: log.provider,
+        model: log.model,
+        success: log.success,
+        tokens: log.tokens,
+        cost: log.cost,
+        latency: log.latency,
+        error: log.error,
         created_at: new Date().toISOString(),
       });
-    } catch (error: unknown) {
-      logError('Error in logAutoHeal:', error);
+    } catch (error) {
+      console.error('Failed to log performance:', error);
     }
   }
-
-  // ================================================================
-  // PROVIDER STATUS
-  // ================================================================
-
-  async checkProviderHealth(provider: ProviderName): Promise<boolean> {
-    try {
-      const testRequest: ChatRequest = {
-        provider,
-        model: await this.getDefaultModel(provider),
-        messages: [{ role: 'user', content: 'test' }],
-        maxTokens: 10,
-      };
-
-      await this.chatWithProvider(testRequest);
-      return true;
-    } catch (error: unknown) {
-      return false;
-    }
-  }
-
-  async getAllProviderStatus(): Promise<Record<ProviderName, boolean>> {
-    const providers: ProviderName[] = ['openai', 'claude', 'gemini', 'mistral'];
-    const statuses: Record<ProviderName, boolean> = {} as any;
-
-    for (const provider of providers) {
-      statuses[provider] = await this.checkProviderHealth(provider);
-    }
-
-    return statuses;
-  }
-}
-
-// ================================================================
-// SINGLETON EXPORT
-// ================================================================
-
-let providerManagerInstance: ProviderManager | null = null;
-
-export function getProviderManager(): ProviderManager {
-  if (!providerManagerInstance) {
-    providerManagerInstance = new ProviderManager();
-  }
-  return providerManagerInstance;
 }
