@@ -20,6 +20,7 @@ export async function POST(request: NextRequest) {
       vercelToken: process.env.VERCEL_TOKEN!,
       vercelTeamId: process.env.VERCEL_TEAM_ID!,
       vercelProjectId: process.env.VERCEL_PROJECT_ID!,
+      vercelRepoId: 1083842623, // Javari repo ID
       openaiKey: process.env.OPENAI_API_KEY!,
       claudeKey: process.env.ANTHROPIC_API_KEY!,
     });
@@ -58,3 +59,4 @@ export async function GET(request: NextRequest) {
     ],
   });
 }
+
