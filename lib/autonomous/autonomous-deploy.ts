@@ -3,6 +3,7 @@
  * Enables Javari to trigger, monitor, and manage deployments autonomously
  * 
  * Created: November 4, 2025 - 6:40 PM EST
+ * Updated: November 21, 2025 - 4:56 PM EST - FIXED repoId issue
  * Part of Phase 2: Autonomous & Self-Healing Build
  */
 
@@ -10,6 +11,7 @@ interface VercelConfig {
   token: string;
   teamId: string;
   projectId: string;
+  repoId: number; // ADDED: Required for proper Vercel deployments
 }
 
 interface DeploymentStatus {
@@ -47,6 +49,7 @@ export class AutonomousVercel {
 
   /**
    * Trigger a new deployment
+   * FIXED: Now includes repoId in gitSource
    */
   async triggerDeployment(
     gitRef: string = 'main',
@@ -59,7 +62,8 @@ export class AutonomousVercel {
         name: await this.getProjectName(),
         gitSource: {
           type: 'github',
-          ref: gitRef
+          ref: gitRef,
+          repoId: this.config.repoId // FIXED: Added repoId
         },
         project: this.config.projectId,
         target: 'production',
@@ -100,6 +104,45 @@ export class AutonomousVercel {
   }
 
   /**
+   * Wait for deployment to complete (simplified version of monitorDeployment)
+   */
+  async waitForDeployment(
+    deploymentId: string,
+    timeoutMs: number = 300000 // 5 minutes
+  ): Promise<DeploymentStatus> {
+    const startTime = Date.now();
+    const pollInterval = 5000; // 5 seconds
+
+    while (Date.now() - startTime < timeoutMs) {
+      const status = await this.getDeploymentStatus(deploymentId);
+      
+      if (!status) {
+        throw new Error('Failed to get deployment status');
+      }
+
+      // Check if deployment is complete
+      if (status.readyState === 'READY') {
+        return status;
+      }
+
+      // Check if deployment failed
+      if (status.readyState === 'ERROR' || status.state === 'ERROR') {
+        throw new Error(`Deployment failed with state: ${status.readyState || status.state}`);
+      }
+
+      // Check if deployment was canceled
+      if (status.readyState === 'CANCELED' || status.state === 'CANCELED') {
+        throw new Error('Deployment was canceled');
+      }
+
+      // Wait before next poll
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+    }
+
+    throw new Error('Deployment monitoring timed out');
+  }
+
+  /**
    * Get deployment status
    */
   async getDeploymentStatus(deploymentId: string): Promise<DeploymentStatus | null> {
@@ -128,7 +171,7 @@ export class AutonomousVercel {
         ready: data.ready
       };
     } catch (error: unknown) {
-      logError('Error getting deployment status:', error);
+      console.error('Error getting deployment status:', error);
       return null;
     }
   }
@@ -223,7 +266,7 @@ export class AutonomousVercel {
           message: event.payload?.text || event.text || ''
         }));
     } catch (error: unknown) {
-      logError('Error fetching build logs:', error);
+      console.error('Error fetching build logs:', error);
       return [];
     }
   }
@@ -283,7 +326,7 @@ export class AutonomousVercel {
         created: latest.created
       };
     } catch (error: unknown) {
-      logError('Error getting latest deployment:', error);
+      console.error('Error getting latest deployment:', error);
       return null;
     }
   }
@@ -328,7 +371,7 @@ export class AutonomousVercel {
 
       return response.ok;
     } catch (error: unknown) {
-      logError('Error canceling deployment:', error);
+      console.error('Error canceling deployment:', error);
       return false;
     }
   }
@@ -349,7 +392,7 @@ export class AutonomousVercel {
 
       return response.ok;
     } catch (error: unknown) {
-      logError('Error promoting deployment:', error);
+      console.error('Error promoting deployment:', error);
       return false;
     }
   }
@@ -382,7 +425,7 @@ export class AutonomousVercel {
         created: d.created
       }));
     } catch (error: unknown) {
-      logError('Error listing deployments:', error);
+      console.error('Error listing deployments:', error);
       return [];
     }
   }
@@ -391,4 +434,9 @@ export class AutonomousVercel {
 // Export singleton instance for Javari
 export function createVercelClient(config: VercelConfig): AutonomousVercel {
   return new AutonomousVercel(config);
+}
+
+// Helper function for logging (can be replaced with proper logger)
+function logError(message: string, error: unknown) {
+  console.error(message, error instanceof Error ? error.message : error);
 }
