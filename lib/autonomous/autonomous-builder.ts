@@ -6,8 +6,8 @@
  * Purpose: Full autonomous application building
  */
 
-import { AutonomousGitHub } from '../lib/autonomous/autonomous-github';
-import { AutonomousVercel } from '../lib/autonomous/autonomous-deploy';
+import { AutonomousGitHub } from './autonomous-github';
+import { AutonomousVercel } from './autonomous-deploy';
 
 interface BuildTask {
   id: string;
@@ -21,7 +21,7 @@ interface BuildTask {
 interface BuildPlan {
   task: BuildTask;
   steps: BuildStep[];
-  estimatedDuration: number; // minutes
+  estimatedDuration: number;
   dependencies: string[];
   files: FileOperation[];
 }
@@ -30,7 +30,7 @@ interface BuildStep {
   order: number;
   description: string;
   action: 'create' | 'modify' | 'delete' | 'test';
-  target: string; // file path or test name
+  target: string;
   content?: string;
 }
 
@@ -49,7 +49,7 @@ interface BuildResult {
   deploymentUrl?: string;
   testsPassed?: boolean;
   error?: string;
-  duration: number; // seconds
+  duration: number;
 }
 
 export class AutonomousBuilder {
@@ -84,14 +84,10 @@ export class AutonomousBuilder {
     this.claudeKey = config.claudeKey;
   }
 
-  /**
-   * Main autonomous building loop
-   */
   async build(task: BuildTask): Promise<BuildResult> {
     const startTime = Date.now();
 
     try {
-      // STEP 1: Create build plan using AI
       console.log(`[Javari] Creating build plan for task: ${task.description}`);
       const plan = await this.createBuildPlan(task);
 
@@ -105,7 +101,6 @@ export class AutonomousBuilder {
         };
       }
 
-      // STEP 2: Execute build plan (create/modify files)
       console.log(`[Javari] Executing build plan with ${plan.steps.length} steps`);
       const filesChanged: string[] = [];
 
@@ -127,11 +122,9 @@ export class AutonomousBuilder {
         }
       }
 
-      // STEP 3: Test (basic validation)
       console.log(`[Javari] Running validation tests`);
       const testsPassed = await this.runTests(filesChanged);
 
-      // STEP 4: Deploy to Vercel
       console.log(`[Javari] Triggering deployment`);
       const deployment = await this.vercel.triggerDeployment('main', false);
 
@@ -146,10 +139,9 @@ export class AutonomousBuilder {
         };
       }
 
-      // STEP 5: Monitor deployment
       if (deployment.deploymentId) {
         console.log(`[Javari] Monitoring deployment: ${deployment.deploymentId}`);
-        const deploymentStatus = await this.vercel.waitForDeployment(deployment.deploymentId, 300000); // 5 min timeout
+        const deploymentStatus = await this.vercel.waitForDeployment(deployment.deploymentId, 300000);
 
         if (deploymentStatus.state !== 'READY') {
           return {
@@ -167,7 +159,7 @@ export class AutonomousBuilder {
         success: true,
         taskId: task.id,
         filesChanged,
-        commitSha: 'latest', // Would be actual SHA from GitHub
+        commitSha: 'latest',
         deploymentUrl: deployment.url,
         testsPassed,
         duration: (Date.now() - startTime) / 1000,
@@ -184,9 +176,6 @@ export class AutonomousBuilder {
     }
   }
 
-  /**
-   * Create build plan using Claude
-   */
   private async createBuildPlan(task: BuildTask): Promise<BuildPlan | null> {
     try {
       const prompt = `You are Javari AI, an autonomous development assistant. 
@@ -245,7 +234,6 @@ Return as JSON with this structure:
       const data = await response.json();
       const content = data.content[0].text;
 
-      // Extract JSON from response
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         console.error('No JSON found in Claude response');
@@ -273,17 +261,8 @@ Return as JSON with this structure:
     }
   }
 
-  /**
-   * Run validation tests
-   */
   private async runTests(filesChanged: string[]): Promise<boolean> {
-    // Basic validation:
-    // 1. Check TypeScript syntax
-    // 2. Check for common errors
-    // 3. Verify file structure
-
     for (const file of filesChanged) {
-      // Read file content
       const fileData = await this.github.readFile(file);
       
       if (!fileData) {
@@ -291,12 +270,9 @@ Return as JSON with this structure:
         return false;
       }
 
-      // Basic syntax checks
       if (file.endsWith('.tsx') || file.endsWith('.ts')) {
-        // Check for obvious syntax errors
         const content = fileData.content;
         
-        // Check for unclosed brackets/braces
         const openBraces = (content.match(/\{/g) || []).length;
         const closeBraces = (content.match(/\}/g) || []).length;
         
@@ -311,5 +287,4 @@ Return as JSON with this structure:
   }
 }
 
-// Export for API use
 export default AutonomousBuilder;
