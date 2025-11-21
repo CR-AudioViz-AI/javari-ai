@@ -65,6 +65,7 @@ export class AutonomousBuilder {
     vercelToken: string;
     vercelTeamId: string;
     vercelProjectId: string;
+    vercelRepoId: number;
     openaiKey: string;
     claudeKey: string;
   }) {
@@ -78,6 +79,7 @@ export class AutonomousBuilder {
       token: config.vercelToken,
       teamId: config.vercelTeamId,
       projectId: config.vercelProjectId,
+      repoId: config.vercelRepoId,
     });
 
     this.openaiKey = config.openaiKey;
@@ -288,3 +290,4 @@ Return as JSON with this structure:
 }
 
 export default AutonomousBuilder;
+
