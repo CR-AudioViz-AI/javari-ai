@@ -1,276 +1,60 @@
-/**
- * Javari AI Builder API Endpoint
- * POST /api/javari/build
- * 
- * Enables users to request Javari to build applications, tools, features, etc.
- * 
- * @version 1.0.0
- * @created 2025-11-14
- */
-
 import { NextRequest, NextResponse } from 'next/server';
-import { BuilderOrchestrator, type BuildTask, type TaskType } from '@/lib/orchestrator/builder-orchestrator';
-import { CodeGeneratorTool, GitHubTool, VercelDeployTool } from '@/lib/orchestrator/tools';
-import { createClient } from '@/lib/supabase/server';
-
-// Runtime: nodejs (required for GitHub/Vercel tools)
-export const runtime = "nodejs";
-export const maxDuration = 300; // 5 minutes for complex builds
-
-// ============================================================================
-// REQUEST VALIDATION
-// ============================================================================
-
-interface BuildRequest {
-  taskType: TaskType;
-  description: string;
-  requirements?: string[];
-  deploy?: boolean;
-  createRepo?: boolean;
-  projectName?: string;
-  quality?: 'fast' | 'balanced' | 'premium';
-}
-
-function validateRequest(body: any): { valid: boolean; error?: string; data?: BuildRequest } {
-  if (!body.taskType) {
-    return { valid: false, error: 'taskType is required' };
-  }
-  
-  if (!body.description) {
-    return { valid: false, error: 'description is required' };
-  }
-  
-  return {
-    valid: true,
-    data: {
-      taskType: body.taskType,
-      description: body.description,
-      requirements: body.requirements || [],
-      deploy: body.deploy || false,
-      createRepo: body.createRepo || false,
-      projectName: body.projectName,
-      quality: body.quality || 'balanced'
-    }
-  };
-}
-
-// ============================================================================
-// MAIN HANDLER
-// ============================================================================
+import AutonomousBuilder from '@/lib/autonomous/autonomous-builder';
 
 export async function POST(request: NextRequest) {
-  const startTime = Date.now();
-  
   try {
-    // 1. Parse and validate request
-    const body = await request.json();
-    const validation = validateRequest(body);
-    
-    if (!validation.valid) {
+    const { task } = await request.json();
+
+    if (!task || !task.description || !task.type) {
       return NextResponse.json(
-        { error: validation.error },
+        { error: 'Missing required fields: task.description, task.type' },
         { status: 400 }
       );
     }
-    
-    const buildRequest = validation.data!;
-    
-    // 2. Get user from session
-    const supabase = createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-    
-    // 3. Check user credits
-    const { data: profile } = await supabase
-      .from('users')
-      .select('credits')
-      .eq('id', user.id)
-      .single();
-    
-    if (!profile || profile.credits < 50) {
-      return NextResponse.json(
-        { error: 'Insufficient credits. Building requires 50 credits.' },
-        { status: 402 }
-      );
-    }
-    
-    // 4. Initialize orchestrator
-    const orchestrator = new BuilderOrchestrator({
-      openaiApiKey: process.env.OPENAI_API_KEY,
-      anthropicApiKey: process.env.ANTHROPIC_API_KEY,
-      geminiApiKey: process.env.GEMINI_API_KEY,
-      perplexityApiKey: process.env.PERPLEXITY_API_KEY,
-      economyMode: buildRequest.quality === 'fast',
-      maxCostPerTask: buildRequest.quality === 'premium' ? 1.0 : 0.25,
-      enableLearning: true
+
+    // Initialize autonomous builder
+    const builder = new AutonomousBuilder({
+      githubToken: process.env.GITHUB_TOKEN!,
+      githubOrg: 'CR-AudioViz-AI',
+      githubRepo: task.repo || 'crav-javari',
+      vercelToken: process.env.VERCEL_TOKEN!,
+      vercelTeamId: process.env.VERCEL_TEAM_ID!,
+      vercelProjectId: process.env.VERCEL_PROJECT_ID!,
+      openaiKey: process.env.OPENAI_API_KEY!,
+      claudeKey: process.env.ANTHROPIC_API_KEY!,
     });
-    
-    // 5. Create build task
-    const task: BuildTask = {
-      id: crypto.randomUUID(),
-      type: buildRequest.taskType,
-      description: buildRequest.description,
-      requirements: buildRequest.requirements || [],
-      constraints: {
-        quality: buildRequest.quality
-      }
-    };
-    
-    // 6. Execute build
-    const result = await orchestrator.executeBuild(task, user.id);
-    
-    if (!result.success) {
-      return NextResponse.json(
-        { error: 'Build failed', details: result.errors },
-        { status: 500 }
-      );
-    }
-    
-    // 7. Handle repository creation if requested
-    let repoUrl: string | undefined;
-    if (buildRequest.createRepo && result.output.files && result.output.files.length > 0) {
-      const githubTool = new GitHubTool(
-        process.env.GITHUB_TOKEN || '',
-        'CR-AudioViz-AI',
-        buildRequest.projectName || `javari-${task.id.slice(0, 8)}`
-      );
-      
-      const repoResult = await githubTool.createRepository(
-        buildRequest.projectName || `javari-${task.id.slice(0, 8)}`,
-        `Built by Javari AI: ${buildRequest.description}`,
-        false
-      );
-      
-      if (repoResult.success) {
-        const uploadResult = await githubTool.uploadFiles(
-          result.output.files,
-          'Initial commit - Generated by Javari AI'
-        );
-        
-        if (uploadResult.success) {
-          repoUrl = repoResult.repoUrl;
-        }
-      }
-    }
-    
-    // 8. Handle deployment if requested
-    let deploymentUrl: string | undefined;
-    if (buildRequest.deploy && repoUrl) {
-      const vercelTool = new VercelDeployTool(
-        process.env.VERCEL_TOKEN || '',
-        process.env.VERCEL_TEAM_ID || ''
-      );
-      
-      const deployResult = await vercelTool.deploy({
-        name: buildRequest.projectName || `javari-${task.id.slice(0, 8)}`,
-        gitRepo: `CR-AudioViz-AI/${buildRequest.projectName || `javari-${task.id.slice(0, 8)}`}`,
-        framework: 'nextjs'
-      });
-      
-      if (deployResult.success) {
-        deploymentUrl = deployResult.deploymentUrl;
-      }
-    }
-    
-    // 9. Deduct credits
-    await supabase
-      .from('users')
-      .update({ credits: profile.credits - 50 })
-      .eq('id', user.id);
-    
-    // 10. Log the build
-    await supabase.from('javari_builds').insert({
-      user_id: user.id,
-      task_id: task.id,
-      task_type: task.type,
+
+    // Execute autonomous build
+    const result = await builder.build({
+      id: task.id || `task-${Date.now()}`,
       description: task.description,
-      success: true,
-      ai_provider: result.metadata.aiProvider,
-      ai_model: result.metadata.model,
-      tokens_used: result.metadata.tokensUsed,
-      cost_usd: result.metadata.costUSD,
-      execution_time_ms: result.metadata.executionTimeMs,
-      files_generated: result.output.files?.length || 0,
-      repo_url: repoUrl,
-      deployment_url: deploymentUrl,
-      created_at: new Date().toISOString()
+      type: task.type,
+      priority: task.priority || 'medium',
+      requirements: task.requirements,
+      context: task.context,
     });
-    
-    // 11. Return success response
-    const executionTime = Date.now() - startTime;
-    
-    return NextResponse.json({
-      success: true,
-      taskId: task.id,
-      output: {
-        files: result.output.files,
-        documentation: result.output.documentation,
-        repoUrl,
-        deploymentUrl,
-        nextSteps: result.output.nextSteps
-      },
-      metadata: {
-        ...result.metadata,
-        totalExecutionTimeMs: executionTime,
-        creditsUsed: 50
-      }
-    });
-    
-  } catch (error) {
-    console.error('Build API error:', error);
-    
+
+    return NextResponse.json(result);
+
+  } catch (error: any) {
     return NextResponse.json(
-      {
-        error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      },
+      { error: error.message, success: false },
       { status: 500 }
     );
   }
 }
 
-// ============================================================================
-// GET HANDLER - Get build history
-// ============================================================================
-
 export async function GET(request: NextRequest) {
-  try {
-    const supabase = createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-    
-    const { data: builds, error } = await supabase
-      .from('javari_builds')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(50);
-    
-    if (error) {
-      return NextResponse.json(
-        { error: 'Failed to fetch builds' },
-        { status: 500 }
-      );
-    }
-    
-    return NextResponse.json({ builds });
-    
-  } catch (error) {
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
-  }
+  return NextResponse.json({
+    status: 'ready',
+    message: 'Javari Autonomous Builder is operational',
+    capabilities: [
+      'Task interpretation',
+      'Build planning',
+      'Code generation',
+      'GitHub commits',
+      'Vercel deployment',
+      'Self-validation',
+    ],
+  });
 }
