@@ -1,225 +1,206 @@
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// KILL SWITCH API ENDPOINT
-// Roy-only endpoint to activate/deactivate emergency kill switch
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+/**
+ * HENDERSON OVERRIDE PROTOCOL - Kill Switch API
+ * 
+ * Critical Safety System - Roy-Only Access
+ * Phrase: "HENDERSON OVERRIDE PROTOCOL"
+ * 
+ * This API endpoint allows Roy to activate/deactivate the platform kill switch.
+ * When active, all non-Roy requests are blocked at the middleware level.
+ */
 
-import { NextRequest, NextResponse } from 'next/server'
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
-import { cookies } from 'next/headers'
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
 
-const KILL_SWITCH_PHRASE = 'HENDERSON OVERRIDE PROTOCOL'
-const ROY_EMAIL = 'royhenderson@craudiovizai.com'
+const KILL_SWITCH_PHRASE = 'HENDERSON OVERRIDE PROTOCOL';
+const ROY_EMAIL = 'royhenderson@craudiovizai.com';
 
-// POST /api/admin/kill-switch
+interface KillSwitchRequest {
+  action: 'activate' | 'deactivate' | 'status';
+  phrase?: string;
+  reason?: string;
+}
+
 export async function POST(request: NextRequest) {
-  const supabase = createRouteHandlerClient({ cookies })
-
   try {
-    // 1. Authenticate user
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    const supabase = await createClient();
+    
+    // Verify Roy's authentication
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
     
     if (authError || !user) {
       return NextResponse.json(
-        { error: 'Unauthorized' },
+        { error: 'Authentication required' },
         { status: 401 }
-      )
+      );
     }
-
-    // 2. Verify this is Roy
+    
+    // CRITICAL: Only Roy can use this endpoint
     if (user.email !== ROY_EMAIL) {
       // Log unauthorized attempt
-      await supabase.from('roy_auth_log').insert({
-        action: 'kill_switch_unauthorized_attempt',
-        auth_method: 'session',
-        success: false,
-        failure_reason: `Non-Roy user attempted kill switch: ${user.email}`,
-      })
-
+      await supabase.from('kill_switch_log').insert({
+        action: 'unauthorized_attempt',
+        user_id: user.id,
+        user_email: user.email,
+        ip_address: request.headers.get('x-forwarded-for') || 'unknown',
+        reason: 'Non-Roy user attempted kill switch access'
+      });
+      
       return NextResponse.json(
-        { error: 'Access denied - Roy only' },
+        { error: 'Unauthorized. This endpoint is Roy-only.' },
         { status: 403 }
-      )
+      );
     }
-
-    // 3. Parse request
-    const body = await request.json()
-    const { action, phrase, reason } = body
-
-    // 4. Validate kill switch phrase for activation
-    if (action === 'activate' && phrase !== KILL_SWITCH_PHRASE) {
-      await supabase.from('roy_auth_log').insert({
-        action: 'kill_switch_activate',
-        auth_method: 'phrase',
-        success: false,
-        failure_reason: 'Incorrect kill switch phrase',
-      })
-
-      return NextResponse.json(
-        { error: 'Invalid kill switch phrase' },
-        { status: 400 }
-      )
-    }
-
-    // 5. Get current kill switch state
-    const { data: currentState } = await supabase
-      .from('kill_switch_state')
-      .select('*')
-      .single()
-
-    // 6. Execute action
-    if (action === 'activate') {
-      if (currentState?.is_active) {
-        return NextResponse.json({
-          message: 'Kill switch already active',
-          state: currentState,
-        })
-      }
-
-      // ACTIVATE KILL SWITCH
-      const { data: newState, error: updateError } = await supabase
-        .from('kill_switch_state')
-        .update({
-          is_active: true,
-          activated_at: new Date().toISOString(),
-          activated_by: user.id,
-          reason: reason || 'Emergency activation',
-          kill_phrase_used: phrase,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', currentState!.id)
-        .select()
-        .single()
-
-      if (updateError) throw updateError
-
-      // Log successful activation
-      await supabase.from('roy_auth_log').insert({
-        action: 'kill_switch_activate',
-        auth_method: 'phrase',
-        success: true,
-      })
-
-      console.log('🚨 KILL SWITCH ACTIVATED 🚨')
-      console.log('Reason:', reason)
-      console.log('All non-Roy requests will be blocked')
-
-      return NextResponse.json({
-        success: true,
-        message: 'Kill switch activated - platform protected',
-        state: newState,
-        info: {
-          activated_at: newState.activated_at,
-          reason: newState.reason,
-          status: 'All non-Roy requests are now blocked',
-        },
-      })
-
-    } else if (action === 'deactivate') {
-      if (!currentState?.is_active) {
-        return NextResponse.json({
-          message: 'Kill switch already inactive',
-          state: currentState,
-        })
-      }
-
-      // DEACTIVATE KILL SWITCH
-      const { data: newState, error: updateError } = await supabase
-        .from('kill_switch_state')
-        .update({
-          is_active: false,
-          reactivated_at: new Date().toISOString(),
-          reactivated_by: user.id,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', currentState!.id)
-        .select()
-        .single()
-
-      if (updateError) throw updateError
-
-      // Log successful deactivation
-      await supabase.from('roy_auth_log').insert({
-        action: 'kill_switch_deactivate',
-        auth_method: 'session',
-        success: true,
-      })
-
-      console.log('✅ KILL SWITCH DEACTIVATED')
-      console.log('Platform restored to normal operation')
-
-      return NextResponse.json({
-        success: true,
-        message: 'Kill switch deactivated - platform restored',
-        state: newState,
-        info: {
-          was_active_for: calculateDowntime(currentState.activated_at!, new Date().toISOString()),
-          reactivated_at: newState.reactivated_at,
-          status: 'Normal operations resumed',
-        },
-      })
-
-    } else {
-      return NextResponse.json(
-        { error: 'Invalid action. Use "activate" or "deactivate"' },
-        { status: 400 }
-      )
-    }
-
-  } catch (error) {
-    console.error('Kill switch API error:', error)
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
-  }
-}
-
-// GET /api/admin/kill-switch - Check status
-export async function GET(request: NextRequest) {
-  const supabase = createRouteHandlerClient({ cookies })
-
-  try {
-    // Authenticate
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
     
-    if (authError || !user || user.email !== ROY_EMAIL) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      )
+    // Parse request body
+    const body: KillSwitchRequest = await request.json();
+    const { action, phrase, reason } = body;
+    
+    // Handle status check (doesn't require phrase)
+    if (action === 'status') {
+      const { data: settings } = await supabase
+        .from('javari_settings')
+        .select('*')
+        .single();
+        
+      const { data: logs } = await supabase
+        .from('kill_switch_log')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(10);
+        
+      return NextResponse.json({
+        status: settings?.kill_switch_active ? 'active' : 'inactive',
+        last_activated: settings?.kill_switch_activated_at,
+        last_activated_by: settings?.kill_switch_activated_by,
+        activation_reason: settings?.kill_switch_reason,
+        recent_logs: logs
+      });
     }
-
-    // Get current state
-    const { data: state, error } = await supabase
-      .from('kill_switch_state')
-      .select('*')
-      .single()
-
-    if (error) throw error
-
-    return NextResponse.json({
-      is_active: state.is_active,
-      activated_at: state.activated_at,
-      reason: state.reason,
-      reactivated_at: state.reactivated_at,
-    })
-
+    
+    // For activate/deactivate, verify the Henderson Override Protocol phrase
+    if (action === 'activate') {
+      if (phrase !== KILL_SWITCH_PHRASE) {
+        await supabase.from('kill_switch_log').insert({
+          action: 'invalid_phrase',
+          user_id: user.id,
+          user_email: user.email,
+          ip_address: request.headers.get('x-forwarded-for') || 'unknown',
+          reason: 'Invalid kill switch phrase provided'
+        });
+        
+        return NextResponse.json(
+          { error: 'Invalid kill switch phrase' },
+          { status: 400 }
+        );
+      }
+      
+      if (!reason || reason.trim().length === 0) {
+        return NextResponse.json(
+          { error: 'Activation reason is required' },
+          { status: 400 }
+        );
+      }
+      
+      // ACTIVATE KILL SWITCH
+      const { data: result, error: activateError } = await supabase
+        .rpc('activate_kill_switch', {
+          p_reason: reason,
+          p_activated_by: user.email
+        });
+        
+      if (activateError) {
+        console.error('Kill switch activation error:', activateError);
+        return NextResponse.json(
+          { error: 'Failed to activate kill switch' },
+          { status: 500 }
+        );
+      }
+      
+      // Log the activation
+      await supabase.from('kill_switch_log').insert({
+        action: 'activated',
+        user_id: user.id,
+        user_email: user.email,
+        ip_address: request.headers.get('x-forwarded-for') || 'unknown',
+        reason: reason
+      });
+      
+      return NextResponse.json({
+        success: true,
+        message: 'Henderson Override Protocol ACTIVATED',
+        status: 'active',
+        reason: reason,
+        activated_by: user.email,
+        activated_at: new Date().toISOString()
+      });
+    }
+    
+    if (action === 'deactivate') {
+      // DEACTIVATE KILL SWITCH
+      const { data: result, error: deactivateError } = await supabase
+        .rpc('deactivate_kill_switch');
+        
+      if (deactivateError) {
+        console.error('Kill switch deactivation error:', deactivateError);
+        return NextResponse.json(
+          { error: 'Failed to deactivate kill switch' },
+          { status: 500 }
+        );
+      }
+      
+      // Log the deactivation
+      await supabase.from('kill_switch_log').insert({
+        action: 'deactivated',
+        user_id: user.id,
+        user_email: user.email,
+        ip_address: request.headers.get('x-forwarded-for') || 'unknown',
+        reason: reason || 'Platform restored to normal operation'
+      });
+      
+      return NextResponse.json({
+        success: true,
+        message: 'Henderson Override Protocol DEACTIVATED',
+        status: 'inactive',
+        deactivated_by: user.email,
+        deactivated_at: new Date().toISOString()
+      });
+    }
+    
+    return NextResponse.json(
+      { error: 'Invalid action. Use: activate, deactivate, or status' },
+      { status: 400 }
+    );
+    
   } catch (error) {
-    console.error('Kill switch status check error:', error)
+    console.error('Kill switch endpoint error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
-    )
+    );
   }
 }
 
-function calculateDowntime(start: string, end: string): string {
-  const diff = new Date(end).getTime() - new Date(start).getTime()
-  const minutes = Math.floor(diff / 60000)
-  const hours = Math.floor(minutes / 60)
-  
-  if (hours > 0) {
-    return `${hours}h ${minutes % 60}m`
+// GET endpoint for status checks (doesn't require phrase)
+export async function GET() {
+  try {
+    const supabase = await createClient();
+    
+    const { data: settings } = await supabase
+      .from('javari_settings')
+      .select('kill_switch_active, kill_switch_activated_at, kill_switch_activated_by, kill_switch_reason')
+      .single();
+      
+    return NextResponse.json({
+      status: settings?.kill_switch_active ? 'active' : 'inactive',
+      last_activated: settings?.kill_switch_activated_at,
+      last_activated_by: settings?.kill_switch_activated_by,
+      activation_reason: settings?.kill_switch_reason
+    });
+  } catch (error) {
+    console.error('Status check error:', error);
+    return NextResponse.json(
+      { error: 'Failed to check kill switch status' },
+      { status: 500 }
+    );
   }
-  return `${minutes}m`
 }
