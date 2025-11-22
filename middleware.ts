@@ -1,16 +1,23 @@
 /**
- * JAVARI AI - KILL COMMAND ENFORCEMENT MIDDLEWARE
- * Blocks all operations when kill command is active
+ * HENDERSON OVERRIDE PROTOCOL + KILL COMMAND ENFORCEMENT MIDDLEWARE
  * 
- * @version 1.0.0
- * @date November 21, 2025 - 11:30 PM EST
+ * Integrated middleware that handles:
+ * 1. Henderson Override Protocol (kill_switch_active in javari_settings)
+ * 2. Legacy Kill Command (system_locked in javari_settings)
+ * 3. Roy-only access during lockdown
+ * 
+ * @version 2.0.0 - Henderson Override Protocol Integration
+ * @date November 22, 2025 - 3:50 PM EST
  */
 
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
-// Routes that should be blocked when kill command is active
+const ROY_EMAIL = 'royhenderson@craudiovizai.com';
+const ROY_USER_ID = process.env.ROY_USER_ID || 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
+
+// Routes that should be blocked when kill switch is active
 const PROTECTED_ROUTES = [
   '/api/javari/chat',
   '/api/javari/auto-heal',
@@ -27,14 +34,34 @@ const PROTECTED_ROUTES = [
 
 // Routes that should ALWAYS work (Roy-only admin routes)
 const ADMIN_ROUTES = [
+  '/api/admin/kill-switch',
   '/api/admin/kill-command',
   '/api/admin/security'
 ];
 
 /**
- * Check if kill command is currently active
+ * Check Henderson Override Protocol status (primary kill switch)
  */
-async function isKillCommandActive(): Promise<boolean> {
+async function isHendersonProtocolActive(): Promise<boolean> {
+  try {
+    const supabase = createClient();
+    const { data } = await supabase
+      .from('javari_settings')
+      .select('kill_switch_active')
+      .single();
+    
+    return data?.kill_switch_active === true;
+  } catch (error) {
+    console.error('Failed to check Henderson Override Protocol status:', error);
+    // Fail open to avoid blocking legitimate traffic if database is down
+    return false;
+  }
+}
+
+/**
+ * Check legacy kill command status (backward compatibility)
+ */
+async function isLegacyKillCommandActive(): Promise<boolean> {
   try {
     const supabase = createClient();
     const { data } = await supabase
@@ -45,40 +72,60 @@ async function isKillCommandActive(): Promise<boolean> {
     
     return data?.value === 'true';
   } catch (error) {
-    console.error('Failed to check kill command status:', error);
-    // Fail open for now to avoid blocking legitimate traffic if database is down
+    console.error('Failed to check legacy kill command status:', error);
     return false;
   }
 }
 
 /**
- * Check if user is Roy (owner)
+ * Check if user is Roy (owner) - checks both email and user ID
  */
-async function isOwner(userId: string): Promise<boolean> {
-  const ROY_USER_ID = process.env.ROY_USER_ID || 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
-  return userId === ROY_USER_ID;
-}
-
-/**
- * Get current user ID from request
- */
-async function getCurrentUserId(request: NextRequest): Promise<string | null> {
+async function isRoy(request: NextRequest): Promise<boolean> {
   try {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    return user?.id || null;
+    
+    if (!user) return false;
+    
+    // Check both email (primary) and user ID (legacy support)
+    return user.email === ROY_EMAIL || user.id === ROY_USER_ID;
   } catch (error) {
-    return null;
+    console.error('Failed to check Roy status:', error);
+    return false;
   }
 }
 
 /**
- * Middleware function to enforce kill command
+ * Log blocked request attempt
+ */
+async function logBlockedRequest(
+  request: NextRequest,
+  reason: string,
+  userId?: string,
+  userEmail?: string
+) {
+  try {
+    const supabase = createClient();
+    await supabase.from('kill_switch_log').insert({
+      action: 'request_blocked',
+      user_id: userId || null,
+      user_email: userEmail || 'anonymous',
+      ip_address: request.headers.get('x-forwarded-for') || 'unknown',
+      reason: reason,
+      url: request.url
+    });
+  } catch (error) {
+    console.error('Failed to log blocked request:', error);
+  }
+}
+
+/**
+ * Middleware function to enforce kill switches
  */
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Allow admin routes to always pass through
+  // Always allow admin routes (Roy needs access to control the kill switch)
   if (ADMIN_ROUTES.some(route => pathname.startsWith(route))) {
     return NextResponse.next();
   }
@@ -91,36 +138,63 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Check if kill command is active
-  const killCommandActive = await isKillCommandActive();
+  // Check both kill switches
+  const hendersonActive = await isHendersonProtocolActive();
+  const legacyActive = await isLegacyKillCommandActive();
   
-  if (!killCommandActive) {
-    // Kill command not active, allow through
+  if (!hendersonActive && !legacyActive) {
+    // Neither kill switch is active, allow through
     return NextResponse.next();
   }
 
-  // Kill command IS active - check if user is Roy
-  const userId = await getCurrentUserId(request);
+  // Kill switch IS active - check if user is Roy
+  const userIsRoy = await isRoy(request);
   
-  if (userId && await isOwner(userId)) {
-    // Roy can still access even when kill command is active
+  if (userIsRoy) {
+    // Roy can still access even when kill switches are active
     return NextResponse.next();
   }
 
-  // Block the request - kill command is active and user is not Roy
+  // Get user info for logging
+  let userId: string | undefined;
+  let userEmail: string | undefined;
+  try {
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    userId = user?.id;
+    userEmail = user?.email;
+  } catch (error) {
+    // Continue without user info
+  }
+
+  // Determine which protocol is active for the message
+  const protocol = hendersonActive ? 'HENDERSON_OVERRIDE_PROTOCOL' : 'KILL_COMMAND';
+  const message = hendersonActive 
+    ? 'Platform is currently in protected mode. The Henderson Override Protocol is active.'
+    : 'All Javari operations are currently frozen. System is in emergency lockdown mode.';
+
+  // Log the blocked attempt
+  await logBlockedRequest(
+    request, 
+    `${protocol} active - non-Roy request blocked`,
+    userId,
+    userEmail
+  );
+
+  // Block the request
   return NextResponse.json(
     {
       error: 'SYSTEM_LOCKED',
-      message: 'All Javari operations are currently frozen. System is in emergency lockdown mode.',
-      code: 'KILL_COMMAND_ACTIVE',
+      message: message,
+      code: protocol,
       timestamp: new Date().toISOString()
     },
     { 
       status: 503,
       headers: {
         'X-System-Status': 'LOCKED',
-        'X-Kill-Command': 'ACTIVE',
-        'Retry-After': '300' // Suggest retry in 5 minutes
+        'X-Protocol-Active': protocol,
+        'Retry-After': '3600' // Suggest retry in 1 hour
       }
     }
   );
