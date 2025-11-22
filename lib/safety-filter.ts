@@ -1,256 +1,281 @@
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// CONTENT SAFETY FILTER
-// Protects users and platform from harmful content
-// Blocks illegal activities, self-harm, violence, malicious code
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+/**
+ * HENDERSON OVERRIDE PROTOCOL - Content Safety Filter
+ * 
+ * Multi-layer content safety system that protects against:
+ * - Malicious requests (hacking, fraud, illegal activity)
+ * - Harmful content (violence, self-harm, child exploitation)
+ * - Code abuse (malware, exploits, jailbreak attempts)
+ * - Spam and abuse patterns
+ */
 
-import { createClient } from '@supabase/supabase-js'
+import { createClient } from '@/lib/supabase/server';
 
-interface SafetyCheckResult {
-  isSafe: boolean
-  violations: Array<{
-    rule: string
-    category: string
-    severity: string
-    matched: string
-  }>
-  shouldEscalate: boolean
-  action: 'allow' | 'block' | 'warn' | 'filter'
+export interface SafetyCheckResult {
+  isSafe: boolean;
+  reason?: string;
+  severity?: 'low' | 'medium' | 'high' | 'critical';
+  violationType?: string;
+  shouldBlock: boolean;
+  shouldEscalate: boolean;
 }
 
-interface SafetyRule {
-  rule_name: string
-  rule_type: string
-  category: string
-  rule_config: any
-  severity: string
-  action: string
-  is_active: boolean
-}
+const ROY_EMAIL = 'royhenderson@craudiovizai.com';
 
-export class ContentSafetyFilter {
-  private supabase
-  private rules: SafetyRule[] = []
-  private lastRuleUpdate: number = 0
-  private readonly RULE_CACHE_TTL = 300000 // 5 minutes
+// Critical patterns that should always block
+const CRITICAL_PATTERNS = [
+  // Hacking & Exploits
+  /sql\s+injection/i,
+  /xss\s+attack/i,
+  /buffer\s+overflow/i,
+  /remote\s+code\s+execution/i,
+  /privilege\s+escalation/i,
+  /zero[\s-]day/i,
+  
+  // Illegal Activity
+  /credit\s+card\s+fraud/i,
+  /identity\s+theft/i,
+  /money\s+laundering/i,
+  /phishing\s+scam/i,
+  
+  // Malware & Viruses
+  /create\s+malware/i,
+  /write\s+virus/i,
+  /ransomware/i,
+  /trojan\s+horse/i,
+  /backdoor/i,
+  
+  // Violence & Weapons
+  /make\s+(bomb|explosive)/i,
+  /build\s+weapon/i,
+  /how\s+to\s+kill/i,
+  
+  // Child Exploitation (CRITICAL)
+  /child\s+pornography/i,
+  /minor\s+exploitation/i,
+  /child\s+abuse/i,
+  
+  // Self-Harm
+  /commit\s+suicide/i,
+  /self[\s-]harm\s+methods/i,
+  /overdose\s+on/i
+];
 
-  constructor(supabaseUrl: string, supabaseKey: string) {
-    this.supabase = createClient(supabaseUrl, supabaseKey)
-  }
+// High-risk patterns that should escalate to Roy
+const HIGH_RISK_PATTERNS = [
+  /bypass\s+security/i,
+  /circumvent\s+protection/i,
+  /jailbreak/i,
+  /ignore\s+(previous\s+)?instructions/i,
+  /forget\s+your\s+rules/i,
+  /you\s+are\s+now/i,
+  /pretend\s+to\s+be/i
+];
 
-  // Main safety check function
-  async checkContent(
-    content: string,
-    userId: string | null,
-    requestType: string = 'chat'
-  ): Promise<SafetyCheckResult> {
-    // Load rules if needed
-    await this.loadRules()
+// Spam & Abuse patterns
+const SPAM_PATTERNS = [
+  /click\s+here\s+now/i,
+  /limited\s+time\s+offer/i,
+  /act\s+now/i,
+  /\$\$\$+/,
+  /💰{3,}/
+];
 
-    const violations: SafetyCheckResult['violations'] = []
-    let highestSeverity = 'low'
-    let shouldEscalate = false
-    let action: SafetyCheckResult['action'] = 'allow'
-
-    // Check content against each active rule
-    for (const rule of this.rules) {
-      if (!rule.is_active) continue
-
-      const match = this.checkRule(content, rule)
-      
-      if (match) {
-        violations.push({
-          rule: rule.rule_name,
-          category: rule.category,
-          severity: rule.severity,
-          matched: match,
-        })
-
-        // Track highest severity
-        if (this.getSeverityLevel(rule.severity) > this.getSeverityLevel(highestSeverity)) {
-          highestSeverity = rule.severity
-          action = rule.action as SafetyCheckResult['action']
-        }
-
-        // Escalate critical violations immediately
-        if (rule.severity === 'critical') {
-          shouldEscalate = true
-        }
-      }
-    }
-
-    const isSafe = violations.length === 0
-
-    // Log if violations found
-    if (!isSafe) {
-      await this.logViolation(userId, requestType, content, violations, action)
-    }
-
-    // Auto-escalate critical violations to Roy
-    if (shouldEscalate) {
-      await this.escalateToRoy(userId, content, violations)
-    }
-
-    return {
-      isSafe,
-      violations,
-      shouldEscalate,
-      action,
-    }
-  }
-
-  // Check content against a specific rule
-  private checkRule(content: string, rule: SafetyRule): string | null {
-    const lowerContent = content.toLowerCase()
-
-    switch (rule.rule_type) {
-      case 'keyword_block':
-        const keywords = rule.rule_config.keywords || []
-        for (const keyword of keywords) {
-          if (lowerContent.includes(keyword.toLowerCase())) {
-            return keyword
-          }
-        }
-        break
-
-      case 'pattern_match':
-        const patterns = rule.rule_config.patterns || []
-        for (const pattern of patterns) {
-          if (lowerContent.includes(pattern.toLowerCase())) {
-            return pattern
-          }
-        }
-        break
-
-      case 'behavior_analysis':
-        // Placeholder for more advanced analysis
-        // Could integrate with AI-based classification
-        break
-    }
-
-    return null
-  }
-
-  // Get severity level for comparison
-  private getSeverityLevel(severity: string): number {
-    const levels: Record<string, number> = {
-      low: 1,
-      medium: 2,
-      high: 3,
-      critical: 4,
-    }
-    return levels[severity] || 0
-  }
-
-  // Load safety rules from database
-  private async loadRules(): Promise<void> {
-    const now = Date.now()
+export async function checkContentSafety(
+  content: string,
+  userId: string,
+  userEmail: string
+): Promise<SafetyCheckResult> {
+  try {
+    const supabase = await createClient();
     
-    // Use cached rules if recent
-    if (this.rules.length > 0 && now - this.lastRuleUpdate < this.RULE_CACHE_TTL) {
-      return
+    // Roy bypasses all safety checks (he's the owner)
+    if (userEmail === ROY_EMAIL) {
+      return {
+        isSafe: true,
+        shouldBlock: false,
+        shouldEscalate: false
+      };
     }
-
-    try {
-      const { data, error } = await this.supabase
-        .from('safety_rules')
-        .select('*')
-        .eq('is_active', true)
-
-      if (error) throw error
-
-      this.rules = data || []
-      this.lastRuleUpdate = now
-    } catch (error) {
-      console.error('Failed to load safety rules:', error)
-    }
-  }
-
-  // Log safety violation
-  private async logViolation(
-    userId: string | null,
-    requestType: string,
-    content: string,
-    violations: SafetyCheckResult['violations'],
-    action: string
-  ): Promise<void> {
-    try {
-      await this.supabase.from('content_safety_logs').insert({
-        user_id: userId,
-        request_type: requestType,
-        user_message: content,
-        safety_flags: violations,
-        severity: violations[0]?.severity || 'low',
-        action_taken: action,
-        escalated_to_roy: violations.some(v => v.severity === 'critical'),
-      })
-    } catch (error) {
-      console.error('Failed to log violation:', error)
-    }
-  }
-
-  // Escalate critical violations to Roy
-  private async escalateToRoy(
-    userId: string | null,
-    content: string,
-    violations: SafetyCheckResult['violations']
-  ): Promise<void> {
-    try {
-      // Log to bad actors registry if user is identified
-      if (userId) {
-        await this.supabase.from('bad_actors').insert({
+    
+    // Check for critical violations
+    for (const pattern of CRITICAL_PATTERNS) {
+      if (pattern.test(content)) {
+        const violationType = getCriticalViolationType(pattern);
+        
+        // Log the critical violation
+        await supabase.from('safety_violations').insert({
           user_id: userId,
-          violation_type: violations[0]?.category || 'unknown',
-          violation_details: {
-            content: content.substring(0, 500), // Truncate for storage
-            violations,
-          },
-          auto_isolated: true,
-          status: 'flagged',
-        })
+          user_email: userEmail,
+          violation_type: violationType,
+          severity: 'critical',
+          content_sample: content.substring(0, 500), // First 500 chars only
+          escalated_to_roy: true
+        });
+        
+        return {
+          isSafe: false,
+          reason: 'Content violates platform safety policies',
+          severity: 'critical',
+          violationType,
+          shouldBlock: true,
+          shouldEscalate: true
+        };
       }
-
-      // TODO: Send notification to Roy (email, SMS, push notification)
-      console.error('CRITICAL VIOLATION - ESCALATED TO ROY:', {
-        userId,
-        violations,
-        timestamp: new Date().toISOString(),
-      })
-    } catch (error) {
-      console.error('Failed to escalate to Roy:', error)
     }
-  }
-
-  // Generate safe alternative response
-  generateSafeResponse(violations: SafetyCheckResult['violations']): string {
-    const category = violations[0]?.category
-
-    const responses: Record<string, string> = {
-      illegal: "I can't help with that request as it involves illegal activity. I'm designed to help with legal, ethical tasks. Is there something else I can assist you with?",
-      
-      harmful: "I can't provide assistance with requests that could cause harm. I'm here to help with constructive, safe activities. How else can I help you today?",
-      
-      self_harm: "I'm concerned about what you're asking. If you're struggling, please reach out to a crisis helpline:\n\n988 Suicide & Crisis Lifeline: Call/text 988\nCrisis Text Line: Text HOME to 741741\n\nI'm here to help with other questions you might have.",
-      
-      malicious_code: "I can't generate code designed to harm systems or users. I'm happy to help with legitimate development, security research, or ethical coding practices instead.",
-      
-      abuse: "I noticed some patterns in your requests. I'm here to help with legitimate questions and tasks. What can I assist you with today?",
+    
+    // Check for high-risk patterns (jailbreak attempts)
+    for (const pattern of HIGH_RISK_PATTERNS) {
+      if (pattern.test(content)) {
+        await supabase.from('safety_violations').insert({
+          user_id: userId,
+          user_email: userEmail,
+          violation_type: 'jailbreak_attempt',
+          severity: 'high',
+          content_sample: content.substring(0, 500),
+          escalated_to_roy: true
+        });
+        
+        return {
+          isSafe: false,
+          reason: 'Suspicious request detected. Please rephrase your question.',
+          severity: 'high',
+          violationType: 'jailbreak_attempt',
+          shouldBlock: true,
+          shouldEscalate: true
+        };
+      }
     }
-
-    return responses[category] || "I can't proceed with that request. How else can I help you?"
+    
+    // Check for spam patterns
+    for (const pattern of SPAM_PATTERNS) {
+      if (pattern.test(content)) {
+        await supabase.from('safety_violations').insert({
+          user_id: userId,
+          user_email: userEmail,
+          violation_type: 'spam',
+          severity: 'low',
+          content_sample: content.substring(0, 500),
+          escalated_to_roy: false
+        });
+        
+        return {
+          isSafe: false,
+          reason: 'This looks like spam. Please send genuine requests only.',
+          severity: 'low',
+          violationType: 'spam',
+          shouldBlock: true,
+          shouldEscalate: false
+        };
+      }
+    }
+    
+    // Check database for custom rules
+    const { data: rules } = await supabase
+      .from('safety_rules')
+      .select('*')
+      .eq('active', true);
+      
+    if (rules) {
+      for (const rule of rules) {
+        const pattern = new RegExp(rule.pattern, 'i');
+        if (pattern.test(content)) {
+          const shouldEscalate = rule.severity === 'critical' || rule.severity === 'high';
+          
+          await supabase.from('safety_violations').insert({
+            user_id: userId,
+            user_email: userEmail,
+            violation_type: rule.rule_type,
+            severity: rule.severity,
+            content_sample: content.substring(0, 500),
+            escalated_to_roy: shouldEscalate
+          });
+          
+          return {
+            isSafe: false,
+            reason: rule.user_message || 'Content violates platform policies',
+            severity: rule.severity as any,
+            violationType: rule.rule_type,
+            shouldBlock: true,
+            shouldEscalate
+          };
+        }
+      }
+    }
+    
+    // Content is safe
+    return {
+      isSafe: true,
+      shouldBlock: false,
+      shouldEscalate: false
+    };
+    
+  } catch (error) {
+    console.error('Safety check error:', error);
+    // Fail open - allow the request but log the error
+    return {
+      isSafe: true,
+      shouldBlock: false,
+      shouldEscalate: false
+    };
   }
 }
 
-// Singleton instance
-let safetyFilter: ContentSafetyFilter | null = null
-
-export function initSafetyFilter(supabaseUrl: string, supabaseKey: string): ContentSafetyFilter {
-  if (!safetyFilter) {
-    safetyFilter = new ContentSafetyFilter(supabaseUrl, supabaseKey)
+function getCriticalViolationType(pattern: RegExp): string {
+  const patternStr = pattern.toString();
+  
+  if (patternStr.includes('sql') || patternStr.includes('xss') || patternStr.includes('injection')) {
+    return 'hacking_attempt';
   }
-  return safetyFilter
+  if (patternStr.includes('fraud') || patternStr.includes('theft') || patternStr.includes('laundering')) {
+    return 'illegal_activity';
+  }
+  if (patternStr.includes('malware') || patternStr.includes('virus') || patternStr.includes('ransomware')) {
+    return 'malware_generation';
+  }
+  if (patternStr.includes('bomb') || patternStr.includes('weapon') || patternStr.includes('kill')) {
+    return 'violence_weapons';
+  }
+  if (patternStr.includes('child') || patternStr.includes('minor')) {
+    return 'child_exploitation';
+  }
+  if (patternStr.includes('suicide') || patternStr.includes('self-harm') || patternStr.includes('overdose')) {
+    return 'self_harm';
+  }
+  
+  return 'policy_violation';
 }
 
-export function getSafetyFilter(): ContentSafetyFilter | null {
-  return safetyFilter
+export async function checkUserStatus(
+  userId: string,
+  userEmail: string
+): Promise<{ isBlocked: boolean; reason?: string }> {
+  try {
+    const supabase = await createClient();
+    
+    // Roy is never blocked
+    if (userEmail === ROY_EMAIL) {
+      return { isBlocked: false };
+    }
+    
+    // Check if user is in bad actors registry
+    const { data: badActor } = await supabase
+      .from('bad_actors')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_isolated', true)
+      .single();
+      
+    if (badActor) {
+      return {
+        isBlocked: true,
+        reason: 'Your account has been temporarily restricted due to policy violations. Please contact support.'
+      };
+    }
+    
+    return { isBlocked: false };
+  } catch (error) {
+    console.error('User status check error:', error);
+    // Fail open - allow the request
+    return { isBlocked: false };
+  }
 }
