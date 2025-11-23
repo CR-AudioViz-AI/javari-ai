@@ -15,7 +15,13 @@
   ],
   "git": {
     "deploymentEnabled": {
-      "main": true
+      "main": false
     }
+  },
+  "github": {
+    "enabled": true,
+    "autoAlias": false,
+    "silent": true,
+    "autoJobCancelation": true
   }
 }
