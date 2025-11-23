@@ -311,10 +311,28 @@ export default function MainJavariInterface() {
   const handleSendMessage = async () => {
     if (!inputMessage.trim()) return;
 
+    const userMessage = inputMessage;
+    setInputMessage('');
+
+    // Get or create conversation
+    let convId = currentConversation?.id;
+    if (!convId) {
+      const newConvo = await ChatService.createConversation(userMessage.substring(0, 50));
+      if (!newConvo) return;
+      convId = newConvo.id;
+      setCurrentConversation({
+        id: newConvo.id,
+        title: newConvo.title,
+        starred: false,
+        messages: [],
+        updated_at: newConvo.updated_at,
+      });
+    }
+
     // Auto-detect best AI if in auto mode
     let aiToUse = selectedAI;
     if (selectedAI === 'auto') {
-      const detected = detectBestAI(inputMessage);
+      const detected = detectBestAI(userMessage);
       setRecommendedAI(detected);
       aiToUse = detected;
     }
@@ -322,12 +340,12 @@ export default function MainJavariInterface() {
     const newMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: inputMessage,
+      content: userMessage,
       timestamp: new Date().toISOString(),
     };
 
-    setMessages([...messages, newMessage]);
-    setInputMessage('');
+    setMessages(prev => [...prev, newMessage]);
+    await ChatService.saveMessage(convId, 'user', userMessage);
 
     // Create placeholder for AI response
     const aiResponseId = (Date.now() + 1).toString();
@@ -342,7 +360,6 @@ export default function MainJavariInterface() {
     setMessages(prev => [...prev, aiResponse]);
 
     try {
-      // Call REAL OpenAI API with streaming
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
@@ -354,20 +371,68 @@ export default function MainJavariInterface() {
               role: m.role,
               content: m.content
             })),
-            { role: 'user', content: newMessage.content }
+            { role: 'user', content: userMessage }
           ],
-          aiProvider: aiToUse
+          aiProvider: aiToUse,
+          conversationId: convId
         }),
       });
 
-      if (!response.ok) {
-        throw new Error('API request failed');
+      if (!response.ok) throw new Error('API request failed');
+
+      const data = await response.json();
+
+      // Check if autonomous deployment
+      if (data.isAutonomous && data.workflowId) {
+        setMessages(prev =>
+          prev.map(m =>
+            m.id === aiResponseId ? { ...m, content: data.message, provider: 'javari' } : m
+          )
+        );
+
+        // Poll for deployment status
+        const pollInterval = setInterval(async () => {
+          const statusRes = await fetch(`/api/autonomous/status/${data.workflowId}`);
+          const { workflow } = await statusRes.json();
+
+          if (workflow.status === 'success') {
+            clearInterval(pollInterval);
+            const successMsg = `✅ Live: https://${workflow.artifacts.deploymentUrl}\n📁 Repo: ${workflow.artifacts.repoUrl}`;
+            setMessages(prev => [...prev, {
+              id: Date.now().toString(),
+              role: 'assistant',
+              content: successMsg,
+              timestamp: new Date().toISOString(),
+              provider: 'javari',
+            }]);
+            await ChatService.saveMessage(convId, 'assistant', successMsg, 'javari');
+          } else if (workflow.status === 'failed') {
+            clearInterval(pollInterval);
+            const errorMsg = `❌ Build failed: ${workflow.error?.message || 'Unknown error'}`;
+            setMessages(prev => [...prev, {
+              id: Date.now().toString(),
+              role: 'assistant',
+              content: errorMsg,
+              timestamp: new Date().toISOString(),
+              provider: 'error',
+            }]);
+            await ChatService.saveMessage(convId, 'assistant', errorMsg, 'error');
+          }
+        }, 5000);
+        return;
       }
 
-      // Handle streaming response
+      // Regular response - no streaming, just display
+      setMessages(prev =>
+        prev.map(m =>
+          m.id === aiResponseId ? { ...m, content: data.message, provider: data.provider } : m
+        )
+      );
+
+      // Handle streaming response (legacy support)
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
-      let accumulatedContent = '';
+      let accumulatedContent = data.message || '';
 
       if (reader) {
         while (true) {
