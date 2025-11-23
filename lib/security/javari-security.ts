@@ -142,7 +142,7 @@ interface KillCommandState {
   snapshot_id?: string;
 }
 
-export class KillCommandSystem {
+class KillCommandSystem {
   private static COMMAND_PHRASE = process.env.KILL_COMMAND_PHRASE!; // Set in environment variables
   
   /**
