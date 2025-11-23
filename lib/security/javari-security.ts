@@ -142,7 +142,7 @@ interface KillCommandState {
   snapshot_id?: string;
 }
 
-class KillCommandSystem {
+export class KillCommandSystem {
   private static COMMAND_PHRASE = process.env.KILL_COMMAND_PHRASE!; // Set in environment variables
   
   /**
@@ -734,17 +734,3 @@ export async function checkRateLimit(
   return { allowed, remaining, resetAt };
 }
 
-// ═══════════════════════════════════════════════════════════
-// EXPORTS
-// ═══════════════════════════════════════════════════════════
-
-export {
-  KillCommandSystem,
-  checkEthicalViolation,
-  checkRateLimit,
-  logSecurityViolation,
-  logSecurityAction,
-  getUserSecurityLevel,
-  requireOwner,
-  requireSecurityLevel
-};
