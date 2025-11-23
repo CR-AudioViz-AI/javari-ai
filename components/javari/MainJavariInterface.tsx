@@ -574,10 +574,10 @@ export default function MainJavariInterface() {
       {/* Mobile Menu Button */}
       <button
         onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
-        className="md:hidden fixed top-4 left-4 z-50 p-3 rounded-lg shadow-lg"
-        style={{ backgroundColor: COLORS.navy, border: `1px solid ${COLORS.cyan}` }}
+        className="md:hidden fixed top-4 left-4 z-50 p-4 rounded-lg shadow-xl"
+        style={{ backgroundColor: COLORS.navy, border: `2px solid ${COLORS.cyan}` }}
       >
-        <MessageSquare className="w-6 h-6" style={{ color: COLORS.cyan }} />
+        <MessageSquare className="w-7 h-7" style={{ color: COLORS.cyan }} />
       </button>
 
       {/* Mobile Backdrop */}
@@ -593,21 +593,29 @@ export default function MainJavariInterface() {
         {/* LEFT SIDEBAR */}
         {leftSidebarOpen && (
           <div 
-            className="w-80 md:w-80 w-full md:relative absolute inset-y-0 left-0 z-40 border-r flex flex-col"
+            className="w-full md:w-80 md:relative absolute inset-y-0 left-0 z-40 border-r flex flex-col"
             style={{ 
               backgroundColor: COLORS.navy,
               borderColor: COLORS.cyan + '40'
             }}
           >
             {/* Logo - Top of Sidebar */}
-            <div className="p-4 flex justify-center border-b" style={{ borderColor: COLORS.cyan + '40' }}>
+            <div className="p-4 flex justify-between items-center border-b" style={{ borderColor: COLORS.cyan + '40' }}>
               <Image
                 src="/javariailogo.png"
                 alt="Javari AI"
-                width={80}
-                height={80}
-                className="rounded-lg"
+                width={60}
+                height={60}
+                className="rounded-lg md:w-[80px] md:h-[80px]"
               />
+              {/* Mobile close button */}
+              <button
+                onClick={() => setLeftSidebarOpen(false)}
+                className="md:hidden p-2 rounded-lg"
+                style={{ backgroundColor: COLORS.navy, border: `1px solid ${COLORS.cyan}` }}
+              >
+                <X className="w-5 h-5" style={{ color: COLORS.cyan }} />
+              </button>
             </div>
 
             {/* Quick Actions */}
@@ -1051,8 +1059,8 @@ export default function MainJavariInterface() {
           </div>
         )}
 
-        {/* Right sidebar toggle */}
-        <div className="absolute right-0 top-1/2 -translate-y-1/2 z-10">
+        {/* Right sidebar toggle - Hidden on mobile */}
+        <div className="hidden md:block absolute right-0 top-1/2 -translate-y-1/2 z-10">
           <Button
             size="sm"
             variant="outline"
