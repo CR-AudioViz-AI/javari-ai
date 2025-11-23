@@ -1,230 +1,180 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { ProviderManager, type ChatMessage, type ProviderName } from '@/lib/provider-manager'
-import { routeTask, type TaskType, type AIProvider } from '@/lib/ai-routing'
-import { getErrorMessage } from '@/lib/utils/error-utils'
-import { safeAsync } from '@/lib/error-handler'
-import { isDefined } from '@/lib/typescript-helpers'
-import { JAVARI_SYSTEM_PROMPT } from '@/lib/javari-system-prompt'
+import { NextRequest, NextResponse } from 'next/server';
+import { ChatService, AutonomousService } from '@/lib/javari-services';
 
-export const runtime = 'edge'
-export const maxDuration = 300
-
-interface ChatRequestBody {
-  messages?: ChatMessage[]
-  aiProvider?: string
-  taskType?: TaskType
-  prioritizeCost?: boolean
-}
-
-/**
- * JAVARI AI - AUTONOMOUS MULTI-PROVIDER CHAT ENDPOINT
- * 
- * Features:
- * - Intelligent routing to 4 AI providers (OpenAI, Claude, Gemini, Mistral)
- * - Streaming responses for all providers
- * - Automatic fallback on provider failure
- * - Cost optimization and tracking
- * - Performance monitoring
- * 
- * Created: November 19, 2025 - 4:05 PM EST
- * Part of Javari Autonomous System Integration
- */
 export async function POST(req: NextRequest) {
-  return await safeAsync(
-    async () => {
-      const startTime = Date.now()
+  try {
+    const body = await req.json();
+    const { messages, aiProvider = 'gpt-4', conversationId } = body;
+
+    if (!messages || !Array.isArray(messages)) {
+      return NextResponse.json({ error: 'Invalid messages format' }, { status: 400 });
+    }
+
+    const lastMessage = messages[messages.length - 1];
+    
+    // Check if this is a build request
+    const buildRequest = AutonomousService.detectBuildRequest(lastMessage.content);
+
+    if (buildRequest.isBuild && buildRequest.appName) {
+      // Handle autonomous deployment
+      const deployment = await AutonomousService.deploy(buildRequest.appName, buildRequest.description!);
       
-      // Parse request
-      const body = await req.json() as ChatRequestBody
-      const messages = body.messages
-      const userProvider = body.aiProvider
-      const taskType = (body.taskType || 'chat') as TaskType
-      const prioritizeCost = body.prioritizeCost || false
+      if (deployment) {
+        const response = {
+          message: `🚀 **Building ${buildRequest.appName}**
 
-      // Validate messages
-      if (!isDefined(messages) || !Array.isArray(messages) || messages.length === 0) {
-        return NextResponse.json(
-          { error: 'Messages array is required' },
-          { status: 400 }
-        )
-      }
+I'm creating your application now with autonomous deployment:
 
-      // Get current time for context
-      const now = new Date()
-      const currentDateTime = now.toLocaleString('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true,
-        timeZone: 'America/New_York'
-      })
+1. ✅ Generating project structure
+2. ⏳ Creating GitHub repository  
+3. ⏳ Deploying to Vercel
 
-      // Add Javari system prompt with time awareness
-      const systemMessage: ChatMessage = {
-        role: 'system',
-        content: `${JAVARI_SYSTEM_PROMPT}
+**Workflow ID:** ${deployment.workflowId}
 
-## CURRENT DATE & TIME AWARENESS
+I'll update you with the live URL in about 3-5 minutes. You can continue chatting while I build in the background.`,
+          provider: 'javari-autonomous',
+          workflowId: deployment.workflowId,
+          isAutonomous: true,
+        };
 
-**Current Date & Time:** ${currentDateTime} EST
-**User Location:** Fort Myers, Florida (Eastern Time Zone)
+        // Save to database if conversationId provided
+        if (conversationId) {
+          await ChatService.saveMessage(conversationId, 'assistant', response.message, 'javari-autonomous');
+        }
 
-You ALWAYS know the current date and time. Use this information when answering time-related questions.
-
-NEVER say "I'm unable to provide real-time updates" or "I don't have access to current time." You DO have this information!`
-      }
-
-      const fullMessages = [systemMessage, ...messages]
-
-      // Estimate tokens
-      const totalChars = fullMessages.reduce((sum, msg) => sum + msg.content.length, 0)
-      const estimatedTokens = Math.ceil(totalChars / 4)
-
-      // Determine provider using intelligent routing
-      let selectedProvider: ProviderName
-      let routingReason: string
-
-      if (userProvider && ['openai', 'claude', 'gemini', 'mistral'].includes(userProvider)) {
-        selectedProvider = userProvider as ProviderName
-        routingReason = 'User-specified provider'
+        return NextResponse.json(response);
       } else {
-        const routing = routeTask(
-          taskType,
-          estimatedTokens,
-          userProvider as AIProvider | undefined,
-          prioritizeCost
-        )
-        selectedProvider = mapProviderToName(routing.provider)
-        routingReason = routing.reasoning
+        return NextResponse.json({
+          message: '❌ Sorry, I encountered an error starting the autonomous deployment. Please try again.',
+          provider: 'error',
+        });
       }
+    }
 
-      // Select model
-      const modelMap: Record<ProviderName, string> = {
-        'openai': 'gpt-4-turbo-preview',
-        'claude': 'claude-sonnet-4-20250514',
-        'gemini': 'gemini-1.5-flash',
-        'mistral': 'mistral-large-latest'
-      }
+    // Regular chat - call AI provider
+    const aiResponse = await callAIProvider(messages, aiProvider);
 
-      const model = modelMap[selectedProvider]
+    // Save to database if conversationId provided
+    if (conversationId && aiResponse) {
+      await ChatService.saveMessage(conversationId, 'assistant', aiResponse, aiProvider);
+    }
 
-      // Initialize provider manager
-      const providerManager = new ProviderManager()
+    return NextResponse.json({
+      message: aiResponse,
+      provider: aiProvider,
+      isAutonomous: false,
+    });
 
-      // Create streaming response
-      const encoder = new TextEncoder()
-      const stream = new ReadableStream({
-        async start(controller) {
-          try {
-            // Send provider info
-            controller.enqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({ 
-                  type: 'provider', 
-                  provider: selectedProvider,
-                  model,
-                  reason: routingReason
-                })}\n\n`
-              )
-            )
-
-            // Stream the response
-            const streamGenerator = providerManager.chatStream({
-              provider: selectedProvider,
-              model,
-              messages: fullMessages,
-              temperature: 0.7,
-              maxTokens: 4000,
-              stream: true
-            })
-
-            let totalChunks = 0
-            let fullResponse = ''
-
-            for await (const chunk of streamGenerator) {
-              if (chunk.text) {
-                fullResponse += chunk.text
-                totalChunks++
-                
-                controller.enqueue(
-                  encoder.encode(
-                    `data: ${JSON.stringify({ 
-                      type: 'text', 
-                      text: chunk.text 
-                    })}\n\n`
-                  )
-                )
-              }
-
-              if (chunk.done) {
-                // Send final metadata
-                const latency = Date.now() - startTime
-                controller.enqueue(
-                  encoder.encode(
-                    `data: ${JSON.stringify({
-                      type: 'metadata',
-                      chunks: totalChunks,
-                      latency,
-                      provider: selectedProvider,
-                      model
-                    })}\n\n`
-                  )
-                )
-              }
-            }
-
-            // Send completion signal
-            controller.enqueue(encoder.encode('data: [DONE]\n\n'))
-            controller.close()
-
-          } catch (error: unknown) {
-            console.error('Stream error:', error)
-            
-            controller.enqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({ 
-                  type: 'error', 
-                  error: getErrorMessage(error)
-                })}\n\n`
-              )
-            )
-            
-            controller.close()
-          }
-        }
-      })
-
-      return new Response(stream, {
-        headers: {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive',
-        }
-      })
-    },
-    { file: 'chat/route.ts', function: 'POST' },
-    NextResponse.json(
-      { error: 'Internal server error' },
+  } catch (error) {
+    console.error('Chat API error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error', message: 'Sorry, I encountered an error. Please try again.' },
       { status: 500 }
-    )
-  ) || NextResponse.json(
-    { error: 'Unexpected error' },
-    { status: 500 }
-  )
+    );
+  }
 }
 
-/**
- * Map AI routing provider names to ProviderManager names
- */
-function mapProviderToName(provider: AIProvider): ProviderName {
-  const mapping: Record<string, ProviderName> = {
+async function callAIProvider(messages: any[], provider: string): Promise<string> {
+  // Map provider names
+  const providerMap: Record<string, string> = {
     'gpt-4': 'openai',
-    'claude': 'claude',
-    'gemini': 'gemini',
-    'mistral': 'mistral'
+    'claude-sonnet': 'anthropic',
+    'gemini': 'google',
+    'auto': 'openai', // Default to OpenAI
+  };
+
+  const actualProvider = providerMap[provider] || 'openai';
+
+  try {
+    switch (actualProvider) {
+      case 'openai':
+        return await callOpenAI(messages);
+      case 'anthropic':
+        return await callAnthropic(messages);
+      case 'google':
+        return await callGemini(messages);
+      default:
+        return await callOpenAI(messages);
+    }
+  } catch (error) {
+    console.error(`Error calling ${actualProvider}:`, error);
+    throw error;
   }
-  return mapping[provider] || 'openai'
+}
+
+async function callOpenAI(messages: any[]): Promise<string> {
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: 'gpt-4-turbo-preview',
+      messages,
+      temperature: 0.7,
+      max_tokens: 2000,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`OpenAI API error: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.choices[0].message.content;
+}
+
+async function callAnthropic(messages: any[]): Promise<string> {
+  // Convert messages format for Anthropic
+  const systemMessage = messages.find(m => m.role === 'system');
+  const conversationMessages = messages.filter(m => m.role !== 'system');
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': process.env.ANTHROPIC_API_KEY!,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-3-5-sonnet-20241022',
+      max_tokens: 4000,
+      system: systemMessage?.content || 'You are Javari, an autonomous AI assistant.',
+      messages: conversationMessages,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Anthropic API error: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.content[0].text;
+}
+
+async function callGemini(messages: any[]): Promise<string> {
+  // Convert to Gemini format
+  const contents = messages
+    .filter(m => m.role !== 'system')
+    .map(m => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }],
+    }));
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${process.env.GOOGLE_GEMINI_API_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents }),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Gemini API error: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.candidates[0].content.parts[0].text;
 }
