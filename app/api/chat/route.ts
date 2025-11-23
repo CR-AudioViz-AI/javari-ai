@@ -21,17 +21,7 @@ export async function POST(req: NextRequest) {
       
       if (deployment) {
         const response = {
-          message: `🚀 **Building ${buildRequest.appName}**
-
-I'm creating your application now with autonomous deployment:
-
-1. ✅ Generating project structure
-2. ⏳ Creating GitHub repository  
-3. ⏳ Deploying to Vercel
-
-**Workflow ID:** ${deployment.workflowId}
-
-I'll update you with the live URL in about 3-5 minutes. You can continue chatting while I build in the background.`,
+          message: `🚀 Building ${buildRequest.appName}...\n\nGenerating code → Creating repo → Deploying to Vercel\n\nLive URL in ~3 minutes.`,
           provider: 'javari-autonomous',
           workflowId: deployment.workflowId,
           isAutonomous: true,
@@ -103,6 +93,16 @@ async function callAIProvider(messages: any[], provider: string): Promise<string
 }
 
 async function callOpenAI(messages: any[]): Promise<string> {
+  // Add system prompt for direct, crisp responses
+  const systemPrompt = {
+    role: 'system',
+    content: 'You are Javari, an autonomous AI assistant. Be DIRECT and CRISP. No long explanations unless asked. Give actionable answers in 2-3 sentences max. Customers want to build, not read essays.'
+  };
+
+  const messagesWithSystem = messages[0]?.role === 'system' 
+    ? messages 
+    : [systemPrompt, ...messages];
+
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -111,9 +111,9 @@ async function callOpenAI(messages: any[]): Promise<string> {
     },
     body: JSON.stringify({
       model: 'gpt-4-turbo-preview',
-      messages,
+      messages: messagesWithSystem,
       temperature: 0.7,
-      max_tokens: 2000,
+      max_tokens: 500,
     }),
   });
 
@@ -130,6 +130,8 @@ async function callAnthropic(messages: any[]): Promise<string> {
   const systemMessage = messages.find(m => m.role === 'system');
   const conversationMessages = messages.filter(m => m.role !== 'system');
 
+  const systemPrompt = systemMessage?.content || 'You are Javari, an autonomous AI assistant. Be DIRECT and CRISP. No long explanations unless asked. Give actionable answers in 2-3 sentences max. Customers want to build, not read essays.';
+
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -139,8 +141,8 @@ async function callAnthropic(messages: any[]): Promise<string> {
     },
     body: JSON.stringify({
       model: 'claude-3-5-sonnet-20241022',
-      max_tokens: 4000,
-      system: systemMessage?.content || 'You are Javari, an autonomous AI assistant.',
+      max_tokens: 500,
+      system: systemPrompt,
       messages: conversationMessages,
     }),
   });
