@@ -105,8 +105,8 @@ interface AISelectionModal {
 
 export default function MainJavariInterface() {
   // State management
-  const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
-  const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
+  const [leftSidebarOpen, setLeftSidebarOpen] = useState(false); // Hidden on mobile by default
+  const [rightSidebarOpen, setRightSidebarOpen] = useState(false); // Hidden on mobile by default
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState('');
@@ -571,12 +571,29 @@ export default function MainJavariInterface() {
 
   return (
     <div className="h-screen flex flex-col" style={{ backgroundColor: COLORS.javaribg }}>
+      {/* Mobile Menu Button */}
+      <button
+        onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
+        className="md:hidden fixed top-4 left-4 z-50 p-3 rounded-lg shadow-lg"
+        style={{ backgroundColor: COLORS.navy, border: `1px solid ${COLORS.cyan}` }}
+      >
+        <MessageSquare className="w-6 h-6" style={{ color: COLORS.cyan }} />
+      </button>
+
+      {/* Mobile Backdrop */}
+      {leftSidebarOpen && (
+        <div
+          className="md:hidden fixed inset-0 bg-black/50 z-30"
+          onClick={() => setLeftSidebarOpen(false)}
+        />
+      )}
+
       {/* Main 3-Column Layout */}
       <div className="flex-1 flex overflow-hidden">
         {/* LEFT SIDEBAR */}
         {leftSidebarOpen && (
           <div 
-            className="w-80 border-r flex flex-col"
+            className="w-80 md:w-80 w-full md:relative absolute inset-y-0 left-0 z-40 border-r flex flex-col"
             style={{ 
               backgroundColor: COLORS.navy,
               borderColor: COLORS.cyan + '40'
@@ -706,8 +723,8 @@ export default function MainJavariInterface() {
 
         {/* CENTER COLUMN */}
         <div className="flex-1 flex flex-col relative">
-          {/* Toggle buttons */}
-          <div className="absolute left-0 top-1/2 -translate-y-1/2 z-10">
+          {/* Toggle buttons - Hide on mobile */}
+          <div className="hidden md:block absolute left-0 top-1/2 -translate-y-1/2 z-10">
             <Button
               size="sm"
               variant="outline"
@@ -719,8 +736,8 @@ export default function MainJavariInterface() {
           </div>
 
           {/* Chat Messages Area */}
-          <ScrollArea className="flex-1 p-6">
-            <div className="space-y-4 max-w-4xl mx-auto ml-[220px] pt-6">{/* Adjusted padding after moving avatar to right sidebar */}
+          <ScrollArea className="flex-1 p-3 md:p-6">
+            <div className="space-y-4 max-w-4xl mx-auto md:ml-[220px] pt-6">{/* Adjusted padding after moving avatar to right sidebar */}
 
               {/* Messages */}
               {messages.length === 0 ? (
@@ -738,7 +755,7 @@ export default function MainJavariInterface() {
                     className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
                   >
                     <div
-                      className="max-w-[70%] p-4 rounded-lg"
+                      className="max-w-[85%] md:max-w-[70%] p-3 md:p-4 rounded-lg text-sm md:text-base"
                       style={{
                         backgroundColor: message.role === 'user' ? COLORS.cyan : COLORS.navy,
                         color: 'white',
@@ -773,12 +790,13 @@ export default function MainJavariInterface() {
           </ScrollArea>
 
           {/* Input Area with AI Selector Below */}
-          <div className="p-4 pb-24 border-t" style={{ borderColor: COLORS.cyan + '40', backgroundColor: COLORS.navy }}>
+          <div className="p-2 md:p-4 pb-6 md:pb-24 border-t" style={{ borderColor: COLORS.cyan + '40', backgroundColor: COLORS.navy }}>
             {/* Text Input */}
             <div className="flex gap-2 mb-3">
               <Button
                 size="icon"
                 variant="outline"
+                className="hidden md:flex"
                 style={{ borderColor: COLORS.cyan }}
                 onClick={() => setIsListening(!isListening)}
               >
@@ -794,7 +812,7 @@ export default function MainJavariInterface() {
                 onChange={(e) => setInputMessage(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
                 placeholder="Type your message..."
-                className="flex-1 px-4 py-2 rounded-lg border focus:outline-none focus:ring-2"
+                className="flex-1 px-3 md:px-4 py-2 md:py-3 text-sm md:text-base rounded-lg border focus:outline-none focus:ring-2"
                 style={{
                   backgroundColor: COLORS.javaribg,
                   borderColor: COLORS.cyan,
@@ -803,22 +821,23 @@ export default function MainJavariInterface() {
               />
               <Button
                 onClick={handleSendMessage}
+                className="px-3 md:px-4"
                 style={{ backgroundColor: COLORS.red, color: 'white' }}
               >
                 Send
               </Button>
             </div>
 
-            {/* AI Model Selector - Large & Prominent */}
-            <div className="flex justify-center mt-4">
-              <div className="flex items-center gap-3 bg-gray-900/50 rounded-lg p-3 border" style={{ borderColor: COLORS.cyan + '40' }}>
-                <span className="text-sm text-white font-medium">Select AI Model:</span>
+            {/* AI Model Selector - Scrollable on mobile */}
+            <div className="flex justify-center mt-2 md:mt-4 overflow-x-auto">
+              <div className="flex items-center gap-2 md:gap-3 bg-gray-900/50 rounded-lg p-2 md:p-3 border whitespace-nowrap" style={{ borderColor: COLORS.cyan + '40' }}>
+                <span className="text-xs md:text-sm text-white font-medium hidden md:inline">Select AI:</span>
                 {/* Auto Button */}
                 <Button
-                  size="default"
+                  size="sm"
                   variant={selectedAI === 'auto' ? 'default' : 'outline'}
                   onClick={() => setSelectedAI('auto')}
-                  className="h-10 px-4 text-sm font-medium"
+                  className="h-8 md:h-10 px-2 md:px-4 text-xs md:text-sm font-medium"
                   style={selectedAI === 'auto' ? { 
                     backgroundColor: COLORS.javariCyan,
                     color: COLORS.navy,
@@ -835,10 +854,10 @@ export default function MainJavariInterface() {
                 {Object.values(aiProviders).map(provider => (
                   <Button
                     key={provider.id}
-                    size="default"
+                    size="sm"
                     variant={selectedAI === provider.id ? 'default' : 'outline'}
                     onClick={() => handleAIChange(provider.id)}
-                    className="h-10 px-4 text-sm font-medium"
+                    className="h-8 md:h-10 px-2 md:px-4 text-xs md:text-sm font-medium"
                     style={selectedAI === provider.id ? { 
                       backgroundColor: COLORS.cyan,
                       color: COLORS.navy,
@@ -856,10 +875,10 @@ export default function MainJavariInterface() {
           </div>
         </div>
 
-        {/* RIGHT SIDEBAR - Artifacts with Claude-Style Output */}
+        {/* RIGHT SIDEBAR - Artifacts with Claude-Style Output - Hidden on mobile */}
         {rightSidebarOpen && (
           <div 
-            className="w-96 border-l flex flex-col sticky top-0 h-screen overflow-y-auto"
+            className="hidden md:flex w-96 border-l flex-col sticky top-0 h-screen overflow-y-auto"
             style={{ 
               backgroundColor: COLORS.navy,
               borderColor: COLORS.cyan + '40'
