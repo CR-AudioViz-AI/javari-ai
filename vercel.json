@@ -12,16 +12,5 @@
       "path": "/api/cron/self-healing",
       "schedule": "*/5 * * * *"
     }
-  ],
-  "git": {
-    "deploymentEnabled": {
-      "main": false
-    }
-  },
-  "github": {
-    "enabled": true,
-    "autoAlias": false,
-    "silent": true,
-    "autoJobCancelation": true
-  }
+  ]
 }
