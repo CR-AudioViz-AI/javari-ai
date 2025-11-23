@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
+import { ChatService, AutonomousService } from '@/lib/javari-services';
 import { PromptHintsBar } from '@/components/javari/PromptHintsBar';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -127,6 +128,47 @@ export default function MainJavariInterface() {
     newCredits: 0,
   });
   const [copiedArtifacts, setCopiedArtifacts] = useState<Record<string, boolean>>({});
+
+  // Load conversations from database on mount
+  useEffect(() => {
+    const loadData = async () => {
+      const conversations = await ChatService.loadConversations();
+      if (conversations.length > 0) {
+        const projectWithConvos: Project = {
+          id: 'main',
+          name: 'My Conversations',
+          conversations: conversations.map(c => ({
+            id: c.id,
+            title: c.title,
+            starred: c.starred || false,
+            messages: [],
+            updated_at: c.updated_at,
+          })),
+          starred: false,
+        };
+        setProjects([projectWithConvos]);
+      }
+    };
+    loadData();
+  }, []);
+
+  // Load messages when conversation changes
+  useEffect(() => {
+    const loadMsgs = async () => {
+      if (currentConversation) {
+        const msgs = await ChatService.loadMessages(currentConversation.id);
+        setMessages(msgs.map(m => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          timestamp: m.created_at,
+          provider: m.provider,
+        })));
+      }
+    };
+    loadMsgs();
+  }, [currentConversation]);
+
   
   // Ref for auto-scrolling messages
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -261,10 +303,28 @@ export default function MainJavariInterface() {
   const handleSendMessage = async () => {
     if (!inputMessage.trim()) return;
 
-    // Auto-detect best AI if in auto mode
+    const userMessage = inputMessage;
+    setInputMessage('');
+
+    // Get or create conversation
+    let convId = currentConversation?.id;
+    if (!convId) {
+      const newConvo = await ChatService.createConversation(userMessage.substring(0, 50));
+      if (!newConvo) return;
+      convId = newConvo.id;
+      setCurrentConversation({
+        id: newConvo.id,
+        title: newConvo.title,
+        starred: false,
+        messages: [],
+        updated_at: newConvo.updated_at,
+      });
+    }
+
+    // Auto-detect best AI
     let aiToUse = selectedAI;
     if (selectedAI === 'auto') {
-      const detected = detectBestAI(inputMessage);
+      const detected = detectBestAI(userMessage);
       setRecommendedAI(detected);
       aiToUse = detected;
     }
@@ -272,12 +332,12 @@ export default function MainJavariInterface() {
     const newMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: inputMessage,
+      content: userMessage,
       timestamp: new Date().toISOString(),
     };
 
-    setMessages([...messages, newMessage]);
-    setInputMessage('');
+    setMessages(prev => [...prev, newMessage]);
+    await ChatService.saveMessage(convId, 'user', userMessage);
 
     // Create placeholder for AI response
     const aiResponseId = (Date.now() + 1).toString();
@@ -292,72 +352,117 @@ export default function MainJavariInterface() {
     setMessages(prev => [...prev, aiResponse]);
 
     try {
-      // Call REAL OpenAI API with streaming
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: [
-            ...messages.map(m => ({
-              role: m.role,
-              content: m.content
-            })),
-            { role: 'user', content: newMessage.content }
+            ...messages.map(m => ({ role: m.role, content: m.content })),
+            { role: 'user', content: userMessage }
           ],
-          aiProvider: aiToUse
+          aiProvider: aiToUse,
+          conversationId: convId,
         }),
       });
 
-      if (!response.ok) {
-        throw new Error('API request failed');
-      }
+      if (!response.ok) throw new Error('API request failed');
 
-      // Handle streaming response
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      let accumulatedContent = '';
+      const data = await response.json();
 
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+      // Check if this is an autonomous deployment
+      if (data.isAutonomous && data.workflowId) {
+        // Update with initial response
+        setMessages(prev =>
+          prev.map(m =>
+            m.id === aiResponseId ? { ...m, content: data.message, provider: 'javari-autonomous' } : m
+          )
+        );
 
-          const chunk = decoder.decode(value);
-          const lines = chunk.split('\n');
+        // Poll for deployment status
+        const pollInterval = setInterval(async () => {
+          const status = await AutonomousService.getDeploymentStatus(data.workflowId);
+          
+          if (status?.status === 'success') {
+            clearInterval(pollInterval);
+            const successMsg = `✅ **Deployment Complete!**\n\n🔗 **Repository:** ${status.artifacts.repoUrl}\n🚀 **Live URL:** https://${status.artifacts.deploymentUrl}\n\nYour application is live!`;
+            setMessages(prev => [...prev, {
+              id: Date.now().toString(),
+              role: 'assistant',
+              content: successMsg,
+              timestamp: new Date().toISOString(),
+              provider: 'javari-autonomous',
+            }]);
+            await ChatService.saveMessage(convId, 'assistant', successMsg, 'javari-autonomous');
+          } else if (status?.status === 'failed') {
+            clearInterval(pollInterval);
+            const errorMsg = `❌ **Deployment Failed**\n\n${status.error?.message || 'Unknown error'}`;
+            setMessages(prev => [...prev, {
+              id: Date.now().toString(),
+              role: 'assistant',
+              content: errorMsg,
+              timestamp: new Date().toISOString(),
+              provider: 'error',
+            }]);
+            await ChatService.saveMessage(convId, 'assistant', errorMsg, 'error');
+          }
+        }, 5000);
 
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6);
-              if (data === '[DONE]') break;
+      } else {
+        // Regular chat response - handle streaming if available
+        if (response.headers.get('content-type')?.includes('text/event-stream')) {
+          const reader = response.body?.getReader();
+          const decoder = new TextDecoder();
+          let accumulatedContent = '';
 
-              try {
-                const { text } = JSON.parse(data);
-                accumulatedContent += text;
+          if (reader) {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
 
-                // Update message with streaming content
-                setMessages(prev => 
-                  prev.map(m => 
-                    m.id === aiResponseId 
-                      ? { ...m, content: accumulatedContent }
-                      : m
-                  )
-                );
-              } catch (e) {
-                // Skip invalid JSON
+              const chunk = decoder.decode(value);
+              const lines = chunk.split('\n');
+
+              for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                  const lineData = line.slice(6);
+                  if (lineData === '[DONE]') continue;
+                  
+                  try {
+                    const parsed = JSON.parse(lineData);
+                    const content = parsed.choices?.[0]?.delta?.content;
+                    if (content) {
+                      accumulatedContent += content;
+                      setMessages(prev =>
+                        prev.map(m =>
+                          m.id === aiResponseId ? { ...m, content: accumulatedContent } : m
+                        )
+                      );
+                    }
+                  } catch (e) {}
+                }
               }
             }
           }
+        } else {
+          // Non-streaming response
+          setMessages(prev =>
+            prev.map(m =>
+              m.id === aiResponseId ? { ...m, content: data.message, provider: data.provider } : m
+            )
+          );
         }
       }
 
-      // TODO: Parse content for artifacts (code blocks, documents, etc.)
-      // If code blocks found, create artifacts
-      const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
-      const codeBlocks = [...accumulatedContent.matchAll(codeBlockRegex)];
-      
-      if (codeBlocks.length > 0) {
+    } catch (error) {
+      console.error('Chat error:', error);
+      const errorMessage = 'Sorry, I encountered an error. Please try again.';
+      setMessages(prev =>
+        prev.map(m =>
+          m.id === aiResponseId ? { ...m, content: errorMessage } : m
+        )
+      );
+    }
+  };
         codeBlocks.forEach((match, index) => {
           const language = match[1] || 'text';
           const code = match[2];
