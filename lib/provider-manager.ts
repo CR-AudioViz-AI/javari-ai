@@ -1,7 +1,7 @@
 /**
  * JAVARI AI - MULTI-PROVIDER MANAGER WITH STREAMING
  * Enhanced with streaming support for all providers
- * Updated: November 19, 2025 - 4:01 PM EST
+ * Updated: November 24, 2025 - 4:40 AM EST - Added getProviderManager singleton
  */
 
 import OpenAI from 'openai';
@@ -538,4 +538,21 @@ export class ProviderManager {
       console.error('Failed to log performance:', error);
     }
   }
+}
+
+// ================================================================
+// SINGLETON INSTANCE GETTER
+// ================================================================
+
+let providerManagerInstance: ProviderManager | null = null;
+
+/**
+ * Get singleton instance of ProviderManager
+ * This ensures we only initialize providers once
+ */
+export function getProviderManager(): ProviderManager {
+  if (!providerManagerInstance) {
+    providerManagerInstance = new ProviderManager();
+  }
+  return providerManagerInstance;
 }
