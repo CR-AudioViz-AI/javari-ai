@@ -1,6 +1,6 @@
 // app/api/feedback/route.ts
-// Javari AI Feedback API - Handle user feedback on conversations
-// Timestamp: 2025-11-29 15:45 UTC
+// Javari AI Feedback API - Allows users to rate conversations
+// Timestamp: 2025-11-29 15:42 UTC
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
@@ -17,75 +17,93 @@ export async function POST(req: NextRequest) {
     const { 
       conversationId,
       messageId,
-      rating, // 'up' | 'down' | 1-5 scale
+      rating, // 'helpful' | 'not_helpful' | number (1-5)
       userMessage,
       assistantResponse,
-      feedbackText
+      comment
     } = body;
 
-    if (!conversationId || rating === undefined) {
+    // Validate required fields
+    if (!rating) {
       return NextResponse.json(
-        { error: 'Missing required fields: conversationId and rating' },
+        { error: 'Missing required field: rating' },
         { status: 400 }
       );
     }
 
-    // Normalize rating to boolean for learning
-    const wasHelpful = rating === 'up' || rating === 'helpful' || 
-                       (typeof rating === 'number' && rating >= 3);
-    const solutionWorked = rating === 'up' || rating === 'helpful' ||
-                          (typeof rating === 'number' && rating >= 4);
+    // Normalize rating to boolean and score
+    let isHelpful: boolean;
+    let feedbackScore: number;
 
-    // Store feedback in database (if table exists)
-    // Note: conversation_feedback table may need to be created
-    try {
-      const { error: feedbackError } = await supabase
-        .from('conversation_feedback')
-        .insert({
-          conversation_id: conversationId,
-          message_id: messageId || null,
-          rating: typeof rating === 'number' ? rating : (wasHelpful ? 5 : 1),
-          rating_type: typeof rating === 'string' ? rating : 'numeric',
-          feedback_text: feedbackText || null,
-          user_message_preview: userMessage?.substring(0, 200) || null,
-          created_at: new Date().toISOString()
-        });
-
-      if (feedbackError) {
-        console.log('Feedback storage skipped (table may not exist):', feedbackError.message);
-      }
-    } catch (dbError) {
-      console.log('Feedback storage not available:', dbError);
-      // Continue anyway - feedback storage is not critical
+    if (typeof rating === 'number') {
+      feedbackScore = Math.min(5, Math.max(1, rating));
+      isHelpful = feedbackScore >= 3;
+    } else if (rating === 'helpful' || rating === 'thumbs_up' || rating === 'up') {
+      isHelpful = true;
+      feedbackScore = 5;
+    } else if (rating === 'not_helpful' || rating === 'thumbs_down' || rating === 'down') {
+      isHelpful = false;
+      feedbackScore = 1;
+    } else {
+      return NextResponse.json(
+        { error: 'Invalid rating value. Use "helpful", "not_helpful", or a number 1-5' },
+        { status: 400 }
+      );
     }
 
-    // If we have the conversation content and it was helpful, trigger learning
+    // Store feedback in database
+    const feedbackRecord = {
+      conversation_id: conversationId || null,
+      message_id: messageId || null,
+      rating: rating,
+      is_helpful: isHelpful,
+      feedback_score: feedbackScore,
+      comment: comment || null,
+      user_message_preview: userMessage ? userMessage.substring(0, 200) : null,
+      assistant_response_preview: assistantResponse ? assistantResponse.substring(0, 200) : null,
+      created_at: new Date().toISOString()
+    };
+
+    // Try to store in feedback table (if it exists)
+    try {
+      await supabase
+        .from('conversation_feedback')
+        .insert(feedbackRecord);
+    } catch (dbError) {
+      // Table might not exist yet - that's OK, we'll still process the learning
+      console.log('Feedback table not available, continuing with learning...');
+    }
+
+    // If positive feedback and we have the conversation content, enhance learning
     let learningResult = null;
-    if (userMessage && assistantResponse && wasHelpful) {
+    if (isHelpful && userMessage && assistantResponse) {
       learningResult = await learnFromConversation({
-        conversationId,
+        conversationId: conversationId || `feedback_${Date.now()}`,
         userMessage,
         assistantResponse,
-        wasHelpful,
-        feedbackScore: typeof rating === 'number' ? rating : (wasHelpful ? 5 : 1),
-        solutionWorked
+        wasHelpful: true,
+        feedbackScore,
+        solutionWorked: feedbackScore >= 4
+      });
+    }
+
+    // If negative feedback, we could use this to improve
+    // For now, just log it
+    if (!isHelpful) {
+      console.log('[Feedback] Negative feedback received:', {
+        conversationId,
+        messageId,
+        feedbackScore,
+        comment,
+        userMessagePreview: userMessage?.substring(0, 100)
       });
     }
 
     return NextResponse.json({
       success: true,
-      message: 'Feedback recorded',
-      wasHelpful,
-      learning: learningResult ? {
-        triggered: true,
-        success: learningResult.success,
-        knowledgeId: learningResult.knowledgeId
-      } : {
-        triggered: false,
-        reason: !userMessage || !assistantResponse 
-          ? 'Missing conversation content' 
-          : 'Negative feedback - not learning'
-      }
+      message: `Feedback recorded: ${isHelpful ? 'helpful' : 'not helpful'}`,
+      learningTriggered: !!learningResult?.success,
+      knowledgeId: learningResult?.knowledgeId
     });
 
   } catch (error) {
@@ -93,7 +111,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { 
         success: false, 
-        error: 'Internal server error',
+        error: 'Failed to process feedback',
         message: error instanceof Error ? error.message : 'Unknown error'
       },
       { status: 500 }
@@ -102,51 +120,24 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const conversationId = searchParams.get('conversationId');
-
-  if (!conversationId) {
-    return NextResponse.json({
-      success: true,
-      message: 'Javari Feedback API',
-      endpoints: {
-        'POST /api/feedback': {
-          description: 'Submit feedback for a conversation',
-          required: ['conversationId', 'rating'],
-          optional: ['messageId', 'userMessage', 'assistantResponse', 'feedbackText'],
-          ratingOptions: {
-            thumbs: ['up', 'down'],
-            stars: '1-5 numeric scale'
-          },
-          note: 'Positive feedback triggers learning if conversation content is provided'
-        },
-        'GET /api/feedback?conversationId=xxx': {
-          description: 'Get feedback for a specific conversation'
-        }
-      }
-    });
-  }
-
-  try {
-    const { data: feedback, error } = await supabase
-      .from('conversation_feedback')
-      .select('*')
-      .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-
-    return NextResponse.json({
-      success: true,
-      conversationId,
-      feedback: feedback || []
-    });
-
-  } catch (error) {
-    console.error('Error fetching feedback:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to fetch feedback' },
-      { status: 500 }
-    );
-  }
+  return NextResponse.json({
+    success: true,
+    message: 'Javari Feedback API',
+    usage: {
+      method: 'POST',
+      body: {
+        rating: 'Required - "helpful", "not_helpful", or number 1-5',
+        conversationId: 'Optional - ID of the conversation',
+        messageId: 'Optional - ID of the specific message',
+        userMessage: 'Optional - The user message (for learning)',
+        assistantResponse: 'Optional - The assistant response (for learning)',
+        comment: 'Optional - Additional feedback text'
+      },
+      examples: [
+        { rating: 'helpful' },
+        { rating: 'not_helpful', comment: 'Response was too long' },
+        { rating: 5, userMessage: '...', assistantResponse: '...' }
+      ]
+    }
+  });
 }
