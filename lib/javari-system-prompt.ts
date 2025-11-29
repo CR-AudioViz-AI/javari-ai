@@ -1,3 +1,4 @@
+// Fixed timestamp: 2025-11-29T14:58:00Z - Removed escaped backticks
 /**
  * Javari AI System Prompt - THE ALIVE UPDATE
  * NOT a robot. An intelligent FRIEND.
