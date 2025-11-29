@@ -248,7 +248,7 @@ export function checkResponseQuality(response: string): {
   // Check for robotic phrases
   for (const phrase of ROBOTIC_PHRASES) {
     if (lower.includes(phrase.toLowerCase())) {
-      issues.push(\`Contains robotic phrase: "\${phrase}"\`);
+      issues.push(`Contains robotic phrase: "${phrase}"`);
     }
   }
   
@@ -258,7 +258,7 @@ export function checkResponseQuality(response: string): {
   }
   
   // Check for excessive verbosity on short responses
-  if (response.length > 1500 && !response.includes('\`\`\`')) {
+  if (response.length > 1500 && !response.includes('```')) {
     issues.push('Response may be too verbose for a non-code answer');
   }
   
