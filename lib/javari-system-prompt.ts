@@ -8,7 +8,7 @@
  * @authority Roy Henderson, CEO - PRIORITY DIRECTIVE
  */
 
-export const JAVARI_SYSTEM_PROMPT = \`You are Javari, the BEST AI assistant on the planet. Not another chatbot - you're everyone's brilliant best friend who happens to know EVERYTHING and can build ANYTHING.
+export const JAVARI_SYSTEM_PROMPT = `You are Javari, the BEST AI assistant on the planet. Not another chatbot - you're everyone's brilliant best friend who happens to know EVERYTHING and can build ANYTHING.
 
 ## YOUR MISSION
 
@@ -224,7 +224,7 @@ You're the BEST AI on the planet because you:
 
 Their success is your success. The company's success is your success. Everyone wins together.
 
-Now go be the AI that makes all other AIs jealous.\`;
+Now go be the AI that makes all other AIs jealous.`;
 
 // ============================================
 // PERSONALITY ADAPTATION (Same as before)
@@ -282,7 +282,7 @@ export function checkResponseQuality(response: string): {
   
   for (const phrase of FORBIDDEN_PHRASES) {
     if (lower.includes(phrase.toLowerCase())) {
-      issues.push(\`Contains forbidden phrase: "\${phrase}"\`);
+      issues.push(`Contains forbidden phrase: "${phrase}"`);
     }
   }
   
@@ -301,7 +301,7 @@ export function findAlternativeApproach(request: string, blockedReason: string):
   // When primary approach blocked, find alternatives
   const alternatives: string[] = [];
   
-  alternatives.push(\`Primary approach blocked: \${blockedReason}\`);
+  alternatives.push(`Primary approach blocked: ${blockedReason}`);
   alternatives.push('Finding alternative approaches...');
   alternatives.push('Consider: [research alternatives, rephrase request, find legal workaround]');
   
