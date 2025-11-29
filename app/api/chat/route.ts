@@ -1,11 +1,12 @@
 // app/api/chat/route.ts
-// Javari AI Chat API - ENHANCED with Full System Prompt, Knowledge Retrieval & Learning
-// Timestamp: 2025-11-29 15:00 UTC
-// Features: Knowledge retrieval, conversation learning, multi-provider support
+// Javari AI Chat API - ENHANCED with Full System Prompt & Knowledge Retrieval
+// Timestamp: 2025-11-29 14:40 UTC
+// FIX: Corrected javari_knowledge table reference and column names
 
 import { NextRequest, NextResponse } from 'next/server';
 import { ChatService, AutonomousService } from '@/lib/javari-services';
 import { JAVARI_SYSTEM_PROMPT } from '@/lib/javari-system-prompt';
+import { JAVARI_KNOWLEDGE_BASE } from '@/lib/javari-knowledge-base';
 import { createClient } from '@supabase/supabase-js';
 
 // Initialize Supabase client for knowledge retrieval
@@ -77,7 +78,8 @@ async function getRelevantKnowledge(query: string): Promise<string> {
       return formatKnowledgeContext(cachedKnowledge, query);
     }
 
-    // Query the correct table: javari_knowledge
+    // Query the correct table: javari_knowledge (not javari_knowledge_base)
+    // With correct column names: topic, subtopic, concept, explanation
     const { data: knowledge, error } = await supabase
       .from('javari_knowledge')
       .select('id, topic, subtopic, concept, explanation, examples, best_practices, tags, keywords')
@@ -140,9 +142,9 @@ function formatKnowledgeContext(knowledge: any[], query: string): string {
     .slice(0, 5);
 
   // If no relevant matches, include core knowledge (Founders, Company, Values)
-  const coreTopics = ['Founders', 'Company', 'Values', 'Platform'];
+  const coreTpics = ['Founders', 'Company', 'Values', 'Platform'];
   const coreKnowledge = relevant.length === 0 
-    ? knowledge.filter(k => coreTopics.includes(k.topic)).slice(0, 4)
+    ? knowledge.filter(k => coreTpics.includes(k.topic)).slice(0, 4)
     : relevant;
 
   if (coreKnowledge.length === 0) return '';
@@ -192,51 +194,10 @@ async function buildEnhancedSystemPrompt(userMessage: string): Promise<string> {
   return enhancedPrompt;
 }
 
-// Background learning function - extracts insights from conversations
-async function learnFromConversation(
-  userMessage: string, 
-  assistantResponse: string,
-  conversationId?: string
-): Promise<void> {
-  try {
-    // Don't learn from very short exchanges
-    if (assistantResponse.length < 150) return;
-
-    // Call the learning API in the background
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL 
-      ? `https://${process.env.VERCEL_URL}` 
-      : 'http://localhost:3000';
-
-    // Fire and forget - don't wait for response
-    fetch(`${baseUrl}/api/javari/learn`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'extract',
-        userMessage,
-        assistantResponse,
-        conversationId,
-        wasHelpful: true, // Assume helpful unless feedback says otherwise
-      }),
-    }).catch(err => {
-      console.error('Background learning failed:', err);
-    });
-  } catch (error) {
-    // Don't let learning errors affect the main response
-    console.error('Learning error (non-blocking):', error);
-  }
-}
-
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { 
-      messages, 
-      aiProvider = 'gpt-4', 
-      conversationId, 
-      useFullKnowledge = true,
-      enableLearning = true 
-    } = body;
+    const { messages, aiProvider = 'gpt-4', conversationId, useFullKnowledge = true } = body;
 
     if (!messages || !Array.isArray(messages)) {
       return NextResponse.json({ error: 'Invalid messages format' }, { status: 400 });
@@ -285,18 +246,12 @@ export async function POST(req: NextRequest) {
       await ChatService.saveMessage(conversationId, 'assistant', aiResponse, aiProvider);
     }
 
-    // Trigger background learning (non-blocking)
-    if (enableLearning && aiResponse) {
-      learnFromConversation(lastMessage.content, aiResponse, conversationId);
-    }
-
     return NextResponse.json({
       message: aiResponse,
       provider: aiProvider,
       isAutonomous: false,
       knowledgeEnabled: useFullKnowledge,
       knowledgeCount: cachedKnowledge?.length || 0,
-      learningEnabled: enableLearning,
     });
 
   } catch (error) {
@@ -361,7 +316,7 @@ async function callOpenAI(messages: any[], systemPrompt: string): Promise<string
       model: 'gpt-4-turbo-preview',
       messages: messagesWithSystem,
       temperature: 0.7,
-      max_tokens: 2000,
+      max_tokens: 2000, // Increased for more detailed responses
     }),
   });
 
@@ -442,4 +397,3 @@ async function callGemini(messages: any[], systemPrompt: string): Promise<string
   const data = await response.json();
   return data.candidates[0].content.parts[0].text;
 }
-
