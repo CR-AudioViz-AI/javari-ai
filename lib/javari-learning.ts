@@ -63,7 +63,8 @@ export async function learnFromConversation(learning: ConversationLearning): Pro
       learning.assistantResponse
     );
 
-    if (!extracted) {
+    if (!extracted || !extracted.concept || !extracted.explanation) {
+      console.log('Extraction failed or incomplete:', extracted);
       return {
         success: false,
         message: 'No actionable knowledge extracted from conversation'
@@ -100,6 +101,7 @@ export async function learnFromConversation(learning: ConversationLearning): Pro
     }
 
     // Insert new knowledge
+    console.log('Extracted knowledge:', JSON.stringify(extracted, null, 2));
     const { data, error } = await supabase
       .from('javari_knowledge')
       .insert({
