@@ -1,6 +1,7 @@
 // app/api/chat/route.ts
 // Javari AI Chat API - ENHANCED with Full System Prompt & Knowledge Retrieval
-// Timestamp: 2025-11-28 15:58 UTC
+// Timestamp: 2025-11-29 14:40 UTC
+// FIX: Corrected javari_knowledge table reference and column names
 
 import { NextRequest, NextResponse } from 'next/server';
 import { ChatService, AutonomousService } from '@/lib/javari-services';
@@ -18,6 +19,10 @@ const supabase = createClient(
 let cachedApps: any[] | null = null;
 let cacheTimestamp = 0;
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// Knowledge cache
+let cachedKnowledge: any[] | null = null;
+let knowledgeCacheTimestamp = 0;
 
 async function getAppsContext(): Promise<string> {
   const now = Date.now();
@@ -65,26 +70,106 @@ function formatAppsContext(apps: any[]): string {
 }
 
 async function getRelevantKnowledge(query: string): Promise<string> {
+  const now = Date.now();
+  
   try {
-    // Search knowledge base for relevant entries
-    const { data: knowledge } = await supabase
-      .from('javari_knowledge_base')
-      .select('topic, content, category')
-      .limit(5);
+    // Use cache if valid (knowledge doesn't change often)
+    if (cachedKnowledge && (now - knowledgeCacheTimestamp) < CACHE_TTL) {
+      return formatKnowledgeContext(cachedKnowledge, query);
+    }
+
+    // Query the correct table: javari_knowledge (not javari_knowledge_base)
+    // With correct column names: topic, subtopic, concept, explanation
+    const { data: knowledge, error } = await supabase
+      .from('javari_knowledge')
+      .select('id, topic, subtopic, concept, explanation, examples, best_practices, tags, keywords')
+      .eq('verified', true)
+      .order('topic');
+
+    if (error) {
+      console.error('Error fetching knowledge:', error);
+      return '';
+    }
 
     if (!knowledge || knowledge.length === 0) {
       return '';
     }
 
-    let context = '\n\n## RELEVANT KNOWLEDGE\n';
-    knowledge.forEach(k => {
-      context += `\n### ${k.topic}\n${k.content}\n`;
-    });
-    return context;
+    cachedKnowledge = knowledge;
+    knowledgeCacheTimestamp = now;
+    
+    return formatKnowledgeContext(knowledge, query);
   } catch (error) {
     console.error('Error fetching knowledge:', error);
     return '';
   }
+}
+
+function formatKnowledgeContext(knowledge: any[], query: string): string {
+  if (!knowledge || knowledge.length === 0) return '';
+
+  // Simple relevance scoring based on query keywords
+  const queryLower = query.toLowerCase();
+  const queryWords = queryLower.split(/\s+/).filter(w => w.length > 2);
+
+  const scored = knowledge.map(k => {
+    let score = 0;
+    const searchableText = [
+      k.topic,
+      k.subtopic,
+      k.concept,
+      k.explanation,
+      ...(k.keywords || []),
+      ...(k.tags || [])
+    ].join(' ').toLowerCase();
+
+    // Score based on keyword matches
+    queryWords.forEach(word => {
+      if (searchableText.includes(word)) score += 1;
+    });
+
+    // Boost for exact topic/concept matches
+    if (k.topic?.toLowerCase().includes(queryLower)) score += 5;
+    if (k.concept?.toLowerCase().includes(queryLower)) score += 3;
+
+    return { ...k, score };
+  });
+
+  // Sort by relevance and take top 5
+  const relevant = scored
+    .filter(k => k.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
+
+  // If no relevant matches, include core knowledge (Founders, Company, Values)
+  const coreTpics = ['Founders', 'Company', 'Values', 'Platform'];
+  const coreKnowledge = relevant.length === 0 
+    ? knowledge.filter(k => coreTpics.includes(k.topic)).slice(0, 4)
+    : relevant;
+
+  if (coreKnowledge.length === 0) return '';
+
+  let context = '\n\n## JAVARI KNOWLEDGE BASE (Verified)\n';
+  
+  // Group by topic for cleaner output
+  const byTopic: Record<string, any[]> = {};
+  coreKnowledge.forEach(k => {
+    const topic = k.topic || 'General';
+    if (!byTopic[topic]) byTopic[topic] = [];
+    byTopic[topic].push(k);
+  });
+
+  for (const [topic, items] of Object.entries(byTopic)) {
+    context += `\n### ${topic}\n`;
+    items.forEach(k => {
+      context += `**${k.concept}**: ${k.explanation}\n`;
+      if (k.examples && k.examples.length > 0) {
+        context += `Examples: ${k.examples.join(', ')}\n`;
+      }
+    });
+  }
+
+  return context;
 }
 
 async function buildEnhancedSystemPrompt(userMessage: string): Promise<string> {
@@ -97,14 +182,14 @@ async function buildEnhancedSystemPrompt(userMessage: string): Promise<string> {
     enhancedPrompt += appsContext;
   }
 
-  // Add relevant knowledge (RAG-style)
+  // Add relevant knowledge from javari_knowledge table (RAG-style)
   const knowledgeContext = await getRelevantKnowledge(userMessage);
   if (knowledgeContext) {
     enhancedPrompt += knowledgeContext;
   }
 
   // Add current date/time context
-  enhancedPrompt += `\n\n## CURRENT CONTEXT\n- Date: ${new Date().toISOString()}\n- Mode: Full Knowledge Active\n`;
+  enhancedPrompt += `\n\n## CURRENT CONTEXT\n- Date: ${new Date().toISOString()}\n- Mode: Full Knowledge Active\n- Knowledge Table: javari_knowledge (${cachedKnowledge?.length || 0} entries)\n`;
 
   return enhancedPrompt;
 }
@@ -166,6 +251,7 @@ export async function POST(req: NextRequest) {
       provider: aiProvider,
       isAutonomous: false,
       knowledgeEnabled: useFullKnowledge,
+      knowledgeCount: cachedKnowledge?.length || 0,
     });
 
   } catch (error) {
