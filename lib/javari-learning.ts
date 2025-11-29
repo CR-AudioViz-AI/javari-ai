@@ -171,11 +171,11 @@ export async function learnFromConversation(learning: ConversationLearning): Pro
       examples: Array.isArray(extracted.examples) ? extracted.examples : [],
       best_practices: Array.isArray(extracted.best_practices) ? extracted.best_practices : [],
       common_mistakes: Array.isArray(extracted.common_mistakes) ? extracted.common_mistakes : [],
-      source_ids: learning.conversationId ? [learning.conversationId] : null,
+      source_ids: null, // source_ids requires UUID format, storing conversationId in tags instead
       confidence_score: learning.solutionWorked ? 0.8 : 0.6,
       verified: false,
       verified_by: 'auto-learned',
-      tags: Array.isArray(extracted.tags) ? extracted.tags : [],
+      tags: [...(Array.isArray(extracted.tags) ? extracted.tags : []), learning.conversationId ? `conv:${learning.conversationId}` : null].filter(Boolean) as string[],
       keywords: Array.isArray(extracted.keywords) ? extracted.keywords : [],
       times_referenced: 1,
       last_used_at: new Date().toISOString()
