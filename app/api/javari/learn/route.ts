@@ -1,6 +1,7 @@
 // app/api/javari/learn/route.ts
 // Javari AI Learning API - Save learnings from conversations to knowledge base
-// Timestamp: 2025-11-29 14:50 UTC
+// Timestamp: 2025-11-29 15:05 UTC
+// Fixed: Removed invalid rpc call
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
@@ -76,16 +77,14 @@ export async function GET(req: NextRequest) {
     if (error) throw error;
 
     // Get topic statistics
-    const { data: topicStats } = await supabase
+    const { data: allKnowledge } = await supabase
       .from('javari_knowledge')
-      .select('topic')
-      .then(result => {
-        const topics: Record<string, number> = {};
-        result.data?.forEach(row => {
-          topics[row.topic] = (topics[row.topic] || 0) + 1;
-        });
-        return { data: topics };
-      });
+      .select('topic');
+    
+    const topicStats: Record<string, number> = {};
+    allKnowledge?.forEach(row => {
+      topicStats[row.topic] = (topicStats[row.topic] || 0) + 1;
+    });
 
     return NextResponse.json({
       entries: data,
@@ -114,7 +113,7 @@ async function saveLearning(learning: LearnRequest): Promise<NextResponse> {
   // Check for duplicates
   const { data: existing } = await supabase
     .from('javari_knowledge')
-    .select('id, concept')
+    .select('id, concept, times_referenced')
     .eq('topic', learning.topic)
     .eq('concept', learning.concept)
     .single();
@@ -131,7 +130,7 @@ async function saveLearning(learning: LearnRequest): Promise<NextResponse> {
         tags: learning.tags || [],
         keywords: learning.keywords || [],
         confidence_score: learning.confidenceScore || 0.8,
-        times_referenced: supabase.rpc('increment_times_referenced', { row_id: existing.id }),
+        times_referenced: (existing.times_referenced || 0) + 1,
         updated_at: new Date().toISOString(),
       })
       .eq('id', existing.id)
