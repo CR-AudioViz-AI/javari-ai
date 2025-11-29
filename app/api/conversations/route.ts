@@ -1,17 +1,14 @@
 // app/api/conversations/route.ts
-// Javari AI Conversations API - Simplified version
-// Timestamp: 2025-11-29 17:12 UTC
+// Javari AI Conversations API - Uses chat_conversations table
+// Timestamp: 2025-11-29 17:18 UTC
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY! // Service role bypasses RLS
 );
-
-// We'll use javari_conversations table which we control
-// This stores conversation metadata with messages in a JSONB column
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -19,45 +16,62 @@ export async function GET(req: NextRequest) {
   const limit = parseInt(searchParams.get('limit') || '20');
 
   try {
-    // Check if javari_conversations table exists, if not use in-memory
-    const { data, error } = await supabase
-      .from('javari_conversations')
-      .select('*')
+    if (conversationId) {
+      // Get single conversation with messages
+      const { data: conv, error } = await supabase
+        .from('chat_conversations')
+        .select('*')
+        .eq('id', conversationId)
+        .single();
+
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 404 });
+      }
+
+      // Get messages for this conversation
+      const { data: messages } = await supabase
+        .from('chat_messages')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true });
+
+      return NextResponse.json({
+        success: true,
+        conversation: conv,
+        messages: messages || []
+      });
+    }
+
+    // List all conversations
+    const { data, error, count } = await supabase
+      .from('chat_conversations')
+      .select('*', { count: 'exact' })
       .order('updated_at', { ascending: false })
       .limit(limit);
 
     if (error) {
-      // Table might not exist - return empty
-      console.log('Conversations table error:', error.message);
+      console.error('Error fetching conversations:', error);
       return NextResponse.json({
         success: true,
         conversations: [],
         total: 0,
-        note: 'Conversation storage not configured'
-      });
-    }
-
-    if (conversationId) {
-      const conv = data?.find(c => c.id === conversationId);
-      return NextResponse.json({
-        success: true,
-        conversation: conv || null,
-        messages: conv?.messages || []
+        error: error.message
       });
     }
 
     return NextResponse.json({
       success: true,
       conversations: data || [],
-      total: data?.length || 0
+      total: count || 0
     });
 
   } catch (error) {
+    console.error('Conversations GET error:', error);
     return NextResponse.json({
-      success: true,
+      success: false,
       conversations: [],
       total: 0,
-      note: 'Using default response'
+      error: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 }
@@ -68,27 +82,25 @@ export async function POST(req: NextRequest) {
     const { action, conversationId, title, message, role } = body;
 
     if (action === 'create') {
-      const newConv = {
-        id: `conv_${Date.now()}`,
-        title: title || 'New Conversation',
-        messages: [],
-        provider: 'openai',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-
       const { data, error } = await supabase
-        .from('javari_conversations')
-        .insert(newConv)
+        .from('chat_conversations')
+        .insert({
+          title: title || 'New Conversation'
+        })
         .select()
         .single();
 
       if (error) {
-        // Return a mock conversation if table doesn't exist
+        console.error('Create conversation error:', error);
+        // Return mock if table insert fails
         return NextResponse.json({
           success: true,
-          conversation: newConv,
-          note: 'Created in-memory conversation'
+          conversation: {
+            id: `temp_${Date.now()}`,
+            title: title || 'New Conversation',
+            created_at: new Date().toISOString()
+          },
+          note: 'Created temporary conversation'
         });
       }
 
@@ -99,43 +111,78 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'add_message' && conversationId && message && role) {
-      // Get existing conversation
-      const { data: conv } = await supabase
-        .from('javari_conversations')
-        .select('*')
-        .eq('id', conversationId)
+      const { data, error } = await supabase
+        .from('chat_messages')
+        .insert({
+          conversation_id: conversationId,
+          role: role,
+          content: message
+        })
+        .select()
         .single();
 
-      if (conv) {
-        const messages = conv.messages || [];
-        messages.push({
-          role,
-          content: message,
-          timestamp: new Date().toISOString()
+      if (error) {
+        console.error('Add message error:', error);
+        return NextResponse.json({
+          success: false,
+          error: error.message
         });
-
-        await supabase
-          .from('javari_conversations')
-          .update({
-            messages,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', conversationId);
       }
+
+      // Update conversation timestamp
+      await supabase
+        .from('chat_conversations')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', conversationId);
 
       return NextResponse.json({
         success: true,
-        message: { role, content: message }
+        message: data
       });
     }
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
 
   } catch (error) {
-    return NextResponse.json(
-      { error: 'Request failed', message: error instanceof Error ? error.message : 'Unknown' },
-      { status: 500 }
-    );
+    console.error('Conversations POST error:', error);
+    return NextResponse.json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { conversationId, title, isArchived } = body;
+
+    if (!conversationId) {
+      return NextResponse.json({ error: 'Missing conversationId' }, { status: 400 });
+    }
+
+    const updates: any = { updated_at: new Date().toISOString() };
+    if (title !== undefined) updates.title = title;
+    if (isArchived !== undefined) updates.is_archived = isArchived;
+
+    const { data, error } = await supabase
+      .from('chat_conversations')
+      .update(updates)
+      .eq('id', conversationId)
+      .select()
+      .single();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, conversation: data });
+
+  } catch (error) {
+    return NextResponse.json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
   }
 }
 
@@ -148,13 +195,28 @@ export async function DELETE(req: NextRequest) {
   }
 
   try {
+    // Delete messages first
     await supabase
-      .from('javari_conversations')
+      .from('chat_messages')
+      .delete()
+      .eq('conversation_id', id);
+
+    // Delete conversation
+    const { error } = await supabase
+      .from('chat_conversations')
       .delete()
       .eq('id', id);
 
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
     return NextResponse.json({ success: true });
+
   } catch (error) {
-    return NextResponse.json({ success: true, note: 'Delete attempted' });
+    return NextResponse.json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
   }
 }
