@@ -6,7 +6,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ChatService, AutonomousService } from '@/lib/javari-services';
 import { JAVARI_SYSTEM_PROMPT } from '@/lib/javari-system-prompt';
-import { JAVARI_KNOWLEDGE_BASE } from '@/lib/javari-knowledge-base';
 import { createClient } from '@supabase/supabase-js';
 
 // Initialize Supabase client for knowledge retrieval
@@ -443,3 +442,4 @@ async function callGemini(messages: any[], systemPrompt: string): Promise<string
   const data = await response.json();
   return data.candidates[0].content.parts[0].text;
 }
+
