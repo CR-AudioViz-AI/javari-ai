@@ -1,12 +1,14 @@
 // app/api/chat/route.ts
 // Javari AI Chat API - ENHANCED with Full System Prompt & Knowledge Retrieval
-// Timestamp: 2025-11-29 14:40 UTC
+// Timestamp: 2025-11-29 15:40 UTC
+// ENHANCED: Added automatic background learning from conversations
 // FIX: Corrected javari_knowledge table reference and column names
 
 import { NextRequest, NextResponse } from 'next/server';
 import { ChatService, AutonomousService } from '@/lib/javari-services';
 import { JAVARI_SYSTEM_PROMPT } from '@/lib/javari-system-prompt';
 import { createClient } from '@supabase/supabase-js';
+import { learnFromConversation } from '@/lib/javari-learning';
 
 // Initialize Supabase client for knowledge retrieval
 const supabase = createClient(
@@ -171,6 +173,45 @@ function formatKnowledgeContext(knowledge: any[], query: string): string {
   return context;
 }
 
+
+// Background learning - don't block the response
+async function triggerBackgroundLearning(
+  userMessage: string,
+  assistantResponse: string,
+  conversationId?: string
+): Promise<void> {
+  // Only learn from substantive conversations (not greetings, not too short)
+  if (userMessage.length < 20 || assistantResponse.length < 50) {
+    return;
+  }
+
+  // Skip learning for certain patterns
+  const skipPatterns = [
+    /^(hi|hello|hey|good morning|good evening)/i,
+    /^(thanks|thank you|okay|ok|got it)/i,
+    /^(yes|no|maybe|sure)/i
+  ];
+  
+  if (skipPatterns.some(p => p.test(userMessage.trim()))) {
+    return;
+  }
+
+  // Fire and forget - don't await
+  learnFromConversation({
+    conversationId: conversationId || `chat_${Date.now()}`,
+    userMessage,
+    assistantResponse,
+    wasHelpful: true, // Assume helpful by default, can be updated by feedback
+    solutionWorked: true
+  }).then(result => {
+    if (result.success) {
+      console.log(`[Learning] Saved knowledge: ${result.knowledgeId}`);
+    }
+  }).catch(err => {
+    console.error('[Learning] Background learning error:', err);
+  });
+}
+
 async function buildEnhancedSystemPrompt(userMessage: string): Promise<string> {
   // Start with the full system prompt
   let enhancedPrompt = JAVARI_SYSTEM_PROMPT;
@@ -245,12 +286,16 @@ export async function POST(req: NextRequest) {
       await ChatService.saveMessage(conversationId, 'assistant', aiResponse, aiProvider);
     }
 
+    // Trigger background learning (non-blocking)
+    triggerBackgroundLearning(lastMessage.content, aiResponse, conversationId);
+
     return NextResponse.json({
       message: aiResponse,
       provider: aiProvider,
       isAutonomous: false,
       knowledgeEnabled: useFullKnowledge,
       knowledgeCount: cachedKnowledge?.length || 0,
+      learningEnabled: true,
     });
 
   } catch (error) {
