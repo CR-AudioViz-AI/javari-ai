@@ -1,6 +1,7 @@
 // lib/javari-learning.ts
 // Javari AI Learning System - Saves insights to javari_knowledge table
-// Timestamp: 2025-11-29 14:52 UTC
+// Timestamp: 2025-11-29 15:15 UTC
+// Fixed: Added comprehensive error handling and logging
 
 import { createClient } from '@supabase/supabase-js';
 
@@ -47,34 +48,88 @@ export async function learnFromConversation(learning: ConversationLearning): Pro
   success: boolean;
   knowledgeId?: string;
   message: string;
+  debug?: any;
 }> {
+  const debug: any = {
+    step: 'start',
+    learning: {
+      hasUserMessage: !!learning.userMessage,
+      hasAssistantResponse: !!learning.assistantResponse,
+      wasHelpful: learning.wasHelpful,
+      solutionWorked: learning.solutionWorked
+    }
+  };
+
   try {
-    // Only learn from helpful/successful conversations
-    if (!learning.wasHelpful && !learning.solutionWorked) {
+    // Validate inputs
+    if (!learning.userMessage || !learning.assistantResponse) {
       return {
         success: false,
-        message: 'Skipped learning - conversation was not marked as helpful'
+        message: 'Missing required fields: userMessage or assistantResponse',
+        debug
       };
     }
 
+    // Only learn from helpful/successful conversations
+    if (!learning.wasHelpful && !learning.solutionWorked) {
+      debug.step = 'skipped-not-helpful';
+      return {
+        success: false,
+        message: 'Skipped learning - conversation was not marked as helpful',
+        debug
+      };
+    }
+
+    debug.step = 'extracting';
+
     // Analyze the conversation to extract knowledge
-    const extracted = await extractKnowledgeFromConversation(
+    const extracted = extractKnowledgeFromConversation(
       learning.userMessage,
       learning.assistantResponse
     );
 
-    if (!extracted || !extracted.concept || !extracted.explanation) {
-      console.log('Extraction failed or incomplete:', extracted);
+    debug.extracted = {
+      topic: extracted?.topic,
+      subtopic: extracted?.subtopic,
+      concept: extracted?.concept?.substring(0, 50),
+      explanationLength: extracted?.explanation?.length,
+      hasExamples: extracted?.examples?.length || 0,
+      hasBestPractices: extracted?.best_practices?.length || 0
+    };
+
+    if (!extracted) {
+      debug.step = 'extraction-returned-null';
       return {
         success: false,
-        message: 'No actionable knowledge extracted from conversation'
+        message: 'No actionable knowledge extracted from conversation (null result)',
+        debug
       };
     }
 
+    if (!extracted.concept || !extracted.explanation) {
+      debug.step = 'extraction-missing-fields';
+      return {
+        success: false,
+        message: `Missing required extracted fields: concept=${!!extracted.concept}, explanation=${!!extracted.explanation}`,
+        debug
+      };
+    }
+
+    debug.step = 'checking-duplicates';
+
     // Check if similar knowledge already exists
-    const existingKnowledge = await findSimilarKnowledge(extracted.concept, extracted.topic);
+    let existingKnowledge = null;
+    try {
+      existingKnowledge = await findSimilarKnowledge(extracted.concept, extracted.topic);
+      debug.existingKnowledge = existingKnowledge ? existingKnowledge.id : null;
+    } catch (findError) {
+      console.error('Error finding similar knowledge:', findError);
+      debug.findError = findError instanceof Error ? findError.message : 'Unknown';
+      // Continue with insert anyway
+    }
     
     if (existingKnowledge) {
+      debug.step = 'updating-existing';
       // Update existing knowledge with new insights
       const { error } = await supabase
         .from('javari_knowledge')
@@ -91,104 +146,140 @@ export async function learnFromConversation(learning: ConversationLearning): Pro
         })
         .eq('id', existingKnowledge.id);
 
-      if (error) throw error;
+      if (error) {
+        debug.updateError = error.message;
+        throw error;
+      }
 
       return {
         success: true,
         knowledgeId: existingKnowledge.id,
-        message: `Updated existing knowledge: ${extracted.concept}`
+        message: `Updated existing knowledge: ${extracted.concept}`,
+        debug
       };
     }
 
+    debug.step = 'inserting-new';
+
+    // Prepare insert data with all null checks
+    const insertData = {
+      topic: extracted.topic || 'General',
+      subtopic: extracted.subtopic || extracted.topic || 'General',
+      skill_level: extracted.skill_level || 'intermediate',
+      concept: extracted.concept,
+      explanation: extracted.explanation,
+      examples: Array.isArray(extracted.examples) ? extracted.examples : [],
+      best_practices: Array.isArray(extracted.best_practices) ? extracted.best_practices : [],
+      common_mistakes: Array.isArray(extracted.common_mistakes) ? extracted.common_mistakes : [],
+      source_ids: learning.conversationId ? [learning.conversationId] : null,
+      confidence_score: learning.solutionWorked ? 0.8 : 0.6,
+      verified: false,
+      verified_by: 'auto-learned',
+      tags: Array.isArray(extracted.tags) ? extracted.tags : [],
+      keywords: Array.isArray(extracted.keywords) ? extracted.keywords : [],
+      times_referenced: 1,
+      last_used_at: new Date().toISOString()
+    };
+
+    debug.insertData = {
+      topic: insertData.topic,
+      subtopic: insertData.subtopic,
+      concept: insertData.concept.substring(0, 30),
+      explanationLength: insertData.explanation.length
+    };
+
     // Insert new knowledge
-    console.log('Extracted knowledge:', JSON.stringify(extracted, null, 2));
     const { data, error } = await supabase
       .from('javari_knowledge')
-      .insert({
-        topic: extracted.topic,
-        subtopic: extracted.subtopic,
-        skill_level: extracted.skill_level,
-        concept: extracted.concept,
-        explanation: extracted.explanation,
-        examples: extracted.examples || [],
-        best_practices: extracted.best_practices || [],
-        common_mistakes: extracted.common_mistakes || [],
-        source_ids: learning.conversationId ? [learning.conversationId] : null,
-        confidence_score: learning.solutionWorked ? 0.8 : 0.6,
-        verified: false,
-        verified_by: 'auto-learned',
-        tags: extracted.tags || [],
-        keywords: extracted.keywords || [],
-        times_referenced: 1,
-        last_used_at: new Date().toISOString()
-      })
+      .insert(insertData)
       .select('id')
       .single();
 
-    if (error) throw error;
+    if (error) {
+      debug.insertError = error.message;
+      debug.insertErrorCode = error.code;
+      throw error;
+    }
+
+    debug.step = 'complete';
 
     return {
       success: true,
       knowledgeId: data?.id,
-      message: `Learned new knowledge: ${extracted.concept}`
+      message: `Learned new knowledge: ${extracted.concept}`,
+      debug
     };
 
   } catch (error) {
+    debug.step = 'error';
+    debug.errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    debug.errorStack = error instanceof Error ? error.stack?.split('\n').slice(0, 3) : undefined;
+    
     console.error('Error learning from conversation:', error);
+    console.error('Debug info:', JSON.stringify(debug, null, 2));
+    
     return {
       success: false,
-      message: `Learning failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+      message: `Learning failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      debug
     };
   }
 }
 
 /**
- * Extract structured knowledge from conversation text
+ * Extract structured knowledge from conversation text (synchronous)
  */
-async function extractKnowledgeFromConversation(
+function extractKnowledgeFromConversation(
   userMessage: string,
   assistantResponse: string
-): Promise<KnowledgeEntry | null> {
-  // Classify the problem type
-  const problemType = classifyProblem(userMessage);
-  
-  // Skip generic greetings or simple questions
-  if (problemType === 'greeting' || problemType === 'simple_question') {
+): KnowledgeEntry | null {
+  try {
+    // Classify the problem type
+    const problemType = classifyProblem(userMessage);
+    
+    // Skip generic greetings or simple questions
+    if (problemType === 'greeting' || problemType === 'simple_question') {
+      console.log('Skipping extraction - problem type:', problemType);
+      return null;
+    }
+
+    // Determine topic based on problem type
+    const { topic, subtopic } = determineTopicFromProblem(problemType, userMessage);
+    
+    // Extract key concepts from the response
+    const concept = extractConcept(problemType, userMessage);
+    
+    // Create a summary explanation
+    const explanation = summarizeResponse(assistantResponse);
+    
+    // Skip if explanation is too short (lowered threshold from 50 to 20)
+    if (explanation.length < 20) {
+      console.log('Skipping extraction - explanation too short:', explanation.length);
+      return null;
+    }
+
+    // Extract keywords from both user message and response
+    const keywords = extractKeywords(userMessage + ' ' + assistantResponse);
+    
+    // Determine skill level based on complexity
+    const skill_level = determineSkillLevel(userMessage, assistantResponse);
+
+    return {
+      topic,
+      subtopic,
+      skill_level,
+      concept,
+      explanation,
+      examples: extractExamples(assistantResponse),
+      best_practices: extractBestPractices(assistantResponse),
+      common_mistakes: extractCommonMistakes(assistantResponse),
+      tags: [problemType, topic.toLowerCase()].filter(Boolean),
+      keywords
+    };
+  } catch (error) {
+    console.error('Error in extractKnowledgeFromConversation:', error);
     return null;
   }
-
-  // Determine topic based on problem type
-  const { topic, subtopic } = determineTopicFromProblem(problemType, userMessage);
-  
-  // Extract key concepts from the response
-  const concept = extractConcept(problemType, userMessage);
-  
-  // Create a summary explanation
-  const explanation = summarizeResponse(assistantResponse);
-  
-  // Skip if explanation is too short or generic
-  if (explanation.length < 50) {
-    return null;
-  }
-
-  // Extract keywords from both user message and response
-  const keywords = extractKeywords(userMessage + ' ' + assistantResponse);
-  
-  // Determine skill level based on complexity
-  const skill_level = determineSkillLevel(userMessage, assistantResponse);
-
-  return {
-    topic,
-    subtopic,
-    skill_level,
-    concept,
-    explanation,
-    examples: extractExamples(assistantResponse),
-    best_practices: extractBestPractices(assistantResponse),
-    common_mistakes: extractCommonMistakes(assistantResponse),
-    tags: [problemType, topic.toLowerCase()],
-    keywords
-  };
 }
 
 /**
@@ -197,12 +288,16 @@ async function extractKnowledgeFromConversation(
 async function findSimilarKnowledge(concept: string, topic: string): Promise<any | null> {
   try {
     // First try exact concept match
-    const { data: exactMatch } = await supabase
+    const { data: exactMatch, error: exactError } = await supabase
       .from('javari_knowledge')
       .select('*')
       .eq('concept', concept)
       .eq('topic', topic)
-      .single();
+      .maybeSingle(); // Use maybeSingle instead of single to avoid error when not found
+
+    if (exactError) {
+      console.error('Error in exact match query:', exactError);
+    }
 
     if (exactMatch) return exactMatch;
 
@@ -210,11 +305,15 @@ async function findSimilarKnowledge(concept: string, topic: string): Promise<any
     const keywords = concept.toLowerCase().split(' ').filter(w => w.length > 3);
     if (keywords.length === 0) return null;
 
-    const { data: partialMatches } = await supabase
+    const { data: partialMatches, error: partialError } = await supabase
       .from('javari_knowledge')
       .select('*')
       .eq('topic', topic)
       .limit(10);
+
+    if (partialError) {
+      console.error('Error in partial match query:', partialError);
+    }
 
     if (!partialMatches || partialMatches.length === 0) return null;
 
@@ -245,8 +344,8 @@ function classifyProblem(content: string): string {
     return 'greeting';
   }
 
-  // Simple factual questions
-  if (text.length < 30 && /^(what is|who is|when was|where is|how many)\b/.test(text)) {
+  // Simple factual questions (very short and basic)
+  if (text.length < 20 && /^(what is|who is|when was|where is|how many)\b/.test(text)) {
     return 'simple_question';
   }
 
@@ -348,7 +447,7 @@ function extractExamples(response: string): string[] {
   // Look for code blocks
   const codeBlocks = response.match(/```[\s\S]*?```/g);
   if (codeBlocks) {
-    codeBlocks.slice(0, 3).forEach((block, i) => {
+    codeBlocks.slice(0, 3).forEach((block) => {
       const cleaned = block.replace(/```\w*\n?/g, '').trim();
       if (cleaned.length > 10 && cleaned.length < 500) {
         examples.push(cleaned);
@@ -364,7 +463,6 @@ function extractExamples(response: string): string[] {
  */
 function extractBestPractices(response: string): string[] {
   const practices: string[] = [];
-  const text = response.toLowerCase();
 
   // Look for patterns indicating best practices
   const patterns = [
