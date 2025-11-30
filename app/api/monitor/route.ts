@@ -17,10 +17,15 @@ const VERCEL_TEAM_ID = 'team_Z0yef7NlFu1coCJWz8UmUdI5';
 // Critical apps that need monitoring
 const CRITICAL_APPS = [
   { name: 'crav-javari', url: 'https://javariai.com', healthEndpoint: '/api/javari/health' },
-  { name: 'crav-website', url: 'https://craudiovizai.com', healthEndpoint: null },
+  { name: 'crav-website', url: 'https://craudiovizai-website.vercel.app', healthEndpoint: null },
   { name: 'crav-admin', url: 'https://craudiovizai-admin-dashboard.vercel.app', healthEndpoint: null },
   { name: 'crav-market-oracle', url: 'https://crav-market-oracle.vercel.app', healthEndpoint: null },
   { name: 'cr-realtor-platform', url: 'https://cr-realtor-platform.vercel.app', healthEndpoint: null },
+  { name: 'crav-partner-portal', url: 'https://crav-partner-portal.vercel.app', healthEndpoint: null },
+  { name: 'crav-legalease', url: 'https://crav-legalease.vercel.app', healthEndpoint: null },
+  { name: 'crav-pdf-builder', url: 'https://crav-pdf-builder.vercel.app', healthEndpoint: null },
+  { name: 'crav-logo-studio', url: 'https://crav-logo-studio.vercel.app', healthEndpoint: null },
+  { name: 'crav-verifyforge', url: 'https://crav-verifyforge.vercel.app', healthEndpoint: null },
 ];
 
 interface MonitorResult {
