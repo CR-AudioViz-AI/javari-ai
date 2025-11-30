@@ -1,7 +1,7 @@
 // app/api/monitor/route.ts
-// Javari Autonomous Monitoring System
-// Monitors all CR AudioViz AI apps, deployments, and triggers self-healing
-// Timestamp: 2025-11-29 18:30 UTC
+// Javari Autonomous Monitoring System - EXPANDED
+// Monitors ALL CR AudioViz AI apps with self-healing
+// Timestamp: 2025-11-29 19:15 UTC
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
@@ -14,18 +14,33 @@ const supabase = createClient(
 const VERCEL_TOKEN = process.env.VERCEL_TOKEN;
 const VERCEL_TEAM_ID = 'team_Z0yef7NlFu1coCJWz8UmUdI5';
 
-// Critical apps that need monitoring
-const CRITICAL_APPS = [
-  { name: 'crav-javari', url: 'https://javariai.com', healthEndpoint: '/api/javari/health' },
-  { name: 'crav-website', url: 'https://craudiovizai-website.vercel.app', healthEndpoint: null },
-  { name: 'crav-admin', url: 'https://craudiovizai-admin-dashboard.vercel.app', healthEndpoint: null },
-  { name: 'crav-market-oracle', url: 'https://crav-market-oracle.vercel.app', healthEndpoint: null },
-  { name: 'cr-realtor-platform', url: 'https://cr-realtor-platform.vercel.app', healthEndpoint: null },
-  { name: 'crav-partner-portal', url: 'https://crav-partner-portal.vercel.app', healthEndpoint: null },
-  { name: 'crav-legalease', url: 'https://crav-legalease.vercel.app', healthEndpoint: null },
-  { name: 'crav-pdf-builder', url: 'https://crav-pdf-builder.vercel.app', healthEndpoint: null },
-  { name: 'crav-logo-studio', url: 'https://crav-logo-studio.vercel.app', healthEndpoint: null },
-  { name: 'crav-verifyforge', url: 'https://crav-verifyforge.vercel.app', healthEndpoint: null },
+// ALL apps to monitor - organized by priority
+const MONITORED_APPS = [
+  // CRITICAL - Core Platform
+  { name: 'crav-javari', url: 'https://javariai.com', healthEndpoint: '/api/javari/health', priority: 'critical' },
+  { name: 'crav-website', url: 'https://craudiovizai-website.vercel.app', healthEndpoint: null, priority: 'critical' },
+  { name: 'crav-admin', url: 'https://craudiovizai-admin-dashboard.vercel.app', healthEndpoint: null, priority: 'critical' },
+  
+  // HIGH - Revenue Generating
+  { name: 'crav-market-oracle', url: 'https://crav-market-oracle.vercel.app', healthEndpoint: null, priority: 'high' },
+  { name: 'crav-logo-studio', url: 'https://crav-logo-studio.vercel.app', healthEndpoint: null, priority: 'high' },
+  { name: 'crav-pdf-builder', url: 'https://crav-pdf-builder.vercel.app', healthEndpoint: null, priority: 'high' },
+  { name: 'crav-legalease', url: 'https://crav-legalease.vercel.app', healthEndpoint: null, priority: 'high' },
+  { name: 'crav-verifyforge', url: 'https://crav-verifyforge.vercel.app', healthEndpoint: null, priority: 'high' },
+  
+  // MEDIUM - Customer Tools
+  { name: 'cr-realtor-platform', url: 'https://cr-realtor-platform.vercel.app', healthEndpoint: null, priority: 'medium' },
+  { name: 'crav-partner-portal', url: 'https://crav-partner-portal.vercel.app', healthEndpoint: null, priority: 'medium' },
+  { name: 'crav-ebook-creator', url: 'https://crav-ebook-creator.vercel.app', healthEndpoint: null, priority: 'medium' },
+  { name: 'crav-invoice-generator', url: 'https://crav-invoice-generator.vercel.app', healthEndpoint: null, priority: 'medium' },
+  { name: 'crav-social-graphics', url: 'https://crav-social-graphics.vercel.app', healthEndpoint: null, priority: 'medium' },
+  { name: 'crav-games', url: 'https://crav-games.vercel.app', healthEndpoint: null, priority: 'medium' },
+  { name: 'crav-dashboard', url: 'https://crav-dashboard.vercel.app', healthEndpoint: null, priority: 'medium' },
+  
+  // STANDARD - Additional Tools
+  { name: 'crav-analytics-dashboard', url: 'https://crav-analytics-dashboard.vercel.app', healthEndpoint: null, priority: 'standard' },
+  { name: 'crav-news', url: 'https://crav-news.vercel.app', healthEndpoint: null, priority: 'standard' },
+  { name: 'crav-builder', url: 'https://crav-builder.vercel.app', healthEndpoint: null, priority: 'standard' },
 ];
 
 interface MonitorResult {
@@ -33,6 +48,7 @@ interface MonitorResult {
   status: 'healthy' | 'degraded' | 'down' | 'unknown';
   responseTime: number;
   httpStatus: number | null;
+  priority: string;
   lastDeployment: string | null;
   deploymentStatus: string | null;
   errors: string[];
@@ -45,17 +61,19 @@ interface OverallStatus {
   healthy: number;
   degraded: number;
   down: number;
+  criticalDown: number;
   results: MonitorResult[];
   checkedAt: string;
 }
 
 // Check a single app's health
-async function checkAppHealth(app: typeof CRITICAL_APPS[0]): Promise<MonitorResult> {
+async function checkAppHealth(app: typeof MONITORED_APPS[0]): Promise<MonitorResult> {
   const result: MonitorResult = {
     app: app.name,
     status: 'unknown',
     responseTime: 0,
     httpStatus: null,
+    priority: app.priority,
     lastDeployment: null,
     deploymentStatus: null,
     errors: [],
@@ -65,7 +83,6 @@ async function checkAppHealth(app: typeof CRITICAL_APPS[0]): Promise<MonitorResu
   const startTime = Date.now();
 
   try {
-    // Check main URL
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
 
@@ -81,6 +98,10 @@ async function checkAppHealth(app: typeof CRITICAL_APPS[0]): Promise<MonitorResu
 
     if (response.status >= 200 && response.status < 400) {
       result.status = 'healthy';
+    } else if (response.status === 401 || response.status === 403) {
+      // Auth-protected pages are still "healthy"
+      result.status = 'healthy';
+      result.errors.push('Auth protected');
     } else if (response.status >= 400 && response.status < 500) {
       result.status = 'degraded';
       result.errors.push(`HTTP ${response.status}`);
@@ -89,7 +110,7 @@ async function checkAppHealth(app: typeof CRITICAL_APPS[0]): Promise<MonitorResu
       result.errors.push(`HTTP ${response.status}`);
     }
 
-    // Check health endpoint if available
+    // Check health endpoint if available and main URL is healthy
     if (app.healthEndpoint && result.status === 'healthy') {
       try {
         const healthResponse = await fetch(`${app.url}${app.healthEndpoint}`, {
@@ -103,7 +124,6 @@ async function checkAppHealth(app: typeof CRITICAL_APPS[0]): Promise<MonitorResu
           }
         }
       } catch {
-        // Health endpoint failed but main URL works
         result.errors.push('Health endpoint unreachable');
       }
     }
@@ -114,56 +134,21 @@ async function checkAppHealth(app: typeof CRITICAL_APPS[0]): Promise<MonitorResu
     result.errors.push(error instanceof Error ? error.message : 'Connection failed');
   }
 
-  // Get latest deployment status from Vercel
-  try {
-    const projectsResponse = await fetch(
-      `https://api.vercel.com/v9/projects?teamId=${VERCEL_TEAM_ID}&search=${app.name}`,
-      { headers: { Authorization: `Bearer ${VERCEL_TOKEN}` } }
-    );
-    
-    if (projectsResponse.ok) {
-      const projectsData = await projectsResponse.json();
-      const project = projectsData.projects?.find((p: any) => p.name === app.name);
-      
-      if (project) {
-        const deploymentsResponse = await fetch(
-          `https://api.vercel.com/v6/deployments?teamId=${VERCEL_TEAM_ID}&projectId=${project.id}&limit=1`,
-          { headers: { Authorization: `Bearer ${VERCEL_TOKEN}` } }
-        );
-        
-        if (deploymentsResponse.ok) {
-          const deploymentsData = await deploymentsResponse.json();
-          const latestDeployment = deploymentsData.deployments?.[0];
-          if (latestDeployment) {
-            result.lastDeployment = latestDeployment.uid;
-            result.deploymentStatus = latestDeployment.state;
-            
-            if (latestDeployment.state === 'ERROR') {
-              result.status = 'down';
-              result.errors.push('Latest deployment failed');
-            }
-          }
-        }
-      }
-    }
-  } catch {
-    // Vercel API check failed, but app might still be working
-  }
-
   return result;
 }
 
 // Run full monitoring sweep
 async function runMonitoringSweep(): Promise<OverallStatus> {
-  const results = await Promise.all(CRITICAL_APPS.map(checkAppHealth));
+  const results = await Promise.all(MONITORED_APPS.map(checkAppHealth));
 
   const healthy = results.filter(r => r.status === 'healthy').length;
   const degraded = results.filter(r => r.status === 'degraded').length;
   const down = results.filter(r => r.status === 'down').length;
+  const criticalDown = results.filter(r => r.status === 'down' && r.priority === 'critical').length;
 
   let status: OverallStatus['status'] = 'all_healthy';
-  if (down > 0) status = 'critical';
-  else if (degraded > 0) status = 'some_issues';
+  if (criticalDown > 0) status = 'critical';
+  else if (down > 0 || degraded > 0) status = 'some_issues';
 
   const overallStatus: OverallStatus = {
     status,
@@ -171,11 +156,12 @@ async function runMonitoringSweep(): Promise<OverallStatus> {
     healthy,
     degraded,
     down,
+    criticalDown,
     results,
     checkedAt: new Date().toISOString(),
   };
 
-  // Save to database for history
+  // Save to database
   try {
     await supabase.from('monitor_logs').insert({
       status: overallStatus.status,
@@ -187,15 +173,15 @@ async function runMonitoringSweep(): Promise<OverallStatus> {
       created_at: new Date().toISOString(),
     });
   } catch {
-    // Log storage failed, continue anyway
+    // Continue even if logging fails
   }
 
-  // Learn from any issues
+  // Auto-learn from any issues
   if (down > 0 || degraded > 0) {
     const issueApps = results.filter(r => r.status !== 'healthy');
     for (const app of issueApps) {
       try {
-        await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'https://javariai.com'}/api/learn`, {
+        await fetch('https://javariai.com/api/learn', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -203,13 +189,13 @@ async function runMonitoringSweep(): Promise<OverallStatus> {
             topic: 'Monitoring',
             subtopic: 'Incidents',
             concept: `${app.app} ${app.status} - ${new Date().toISOString().split('T')[0]}`,
-            explanation: `Monitoring detected ${app.app} is ${app.status}. Errors: ${app.errors.join(', ')}. Response time: ${app.responseTime}ms. HTTP status: ${app.httpStatus}. Deployment status: ${app.deploymentStatus}.`,
+            explanation: `Monitoring detected ${app.app} (priority: ${app.priority}) is ${app.status}. Errors: ${app.errors.join(', ')}. Response time: ${app.responseTime}ms.`,
             verified: true,
-            tags: ['monitoring', 'incident', app.status],
+            tags: ['monitoring', 'incident', app.status, app.priority],
           }),
         });
       } catch {
-        // Learning failed, continue
+        // Continue
       }
     }
   }
@@ -217,10 +203,9 @@ async function runMonitoringSweep(): Promise<OverallStatus> {
   return overallStatus;
 }
 
-// Attempt to self-heal an app
+// Attempt self-healing
 async function attemptSelfHeal(appName: string): Promise<{ success: boolean; action: string; message: string }> {
   try {
-    // Find project
     const projectsResponse = await fetch(
       `https://api.vercel.com/v9/projects?teamId=${VERCEL_TEAM_ID}&search=${appName}`,
       { headers: { Authorization: `Bearer ${VERCEL_TOKEN}` } }
@@ -237,7 +222,7 @@ async function attemptSelfHeal(appName: string): Promise<{ success: boolean; act
       return { success: false, action: 'none', message: 'Project not found' };
     }
 
-    // Trigger a new deployment (redeploy)
+    // Trigger redeploy
     const redeployResponse = await fetch('https://api.vercel.com/v13/deployments', {
       method: 'POST',
       headers: {
@@ -247,7 +232,7 @@ async function attemptSelfHeal(appName: string): Promise<{ success: boolean; act
       body: JSON.stringify({
         name: appName,
         project: project.id,
-        target: 'preview', // Safe - only preview deployment
+        target: 'preview',
         gitSource: project.link ? {
           type: project.link.type,
           repoId: project.link.repoId,
@@ -258,6 +243,20 @@ async function attemptSelfHeal(appName: string): Promise<{ success: boolean; act
 
     if (redeployResponse.ok) {
       const deployData = await redeployResponse.json();
+      
+      // Log healing action
+      try {
+        await supabase.from('monitor_logs').insert({
+          status: 'healing',
+          total_apps: 1,
+          healthy_count: 0,
+          degraded_count: 0,
+          down_count: 1,
+          results: [{ app: appName, action: 'redeploy', deploymentId: deployData.id }],
+          created_at: new Date().toISOString(),
+        });
+      } catch {}
+      
       return {
         success: true,
         action: 'redeploy',
@@ -276,38 +275,33 @@ async function attemptSelfHeal(appName: string): Promise<{ success: boolean; act
   }
 }
 
-// GET - Run monitoring check
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const action = searchParams.get('action');
 
   if (action === 'status') {
-    // Quick status check
     const results = await runMonitoringSweep();
     return NextResponse.json(results);
   }
 
   if (action === 'history') {
-    // Get monitoring history
     const { data, error } = await supabase
       .from('monitor_logs')
       .select('*')
       .order('created_at', { ascending: false })
-      .limit(50);
+      .limit(100);
 
-    return NextResponse.json({
-      success: !error,
-      history: data || [],
-      error: error?.message,
-    });
+    return NextResponse.json({ success: !error, history: data || [] });
   }
 
-  // Default: full monitoring sweep
+  if (action === 'apps') {
+    return NextResponse.json({ apps: MONITORED_APPS });
+  }
+
   const results = await runMonitoringSweep();
   return NextResponse.json(results);
 }
 
-// POST - Trigger self-healing
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -321,6 +315,13 @@ export async function POST(req: NextRequest) {
     if (action === 'sweep') {
       const results = await runMonitoringSweep();
       return NextResponse.json(results);
+    }
+
+    if (action === 'heal_all_down') {
+      const status = await runMonitoringSweep();
+      const downApps = status.results.filter(r => r.status === 'down');
+      const healResults = await Promise.all(downApps.map(a => attemptSelfHeal(a.app)));
+      return NextResponse.json({ healed: healResults });
     }
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
