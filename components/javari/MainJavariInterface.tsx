@@ -318,7 +318,10 @@ export default function MainJavariInterface() {
     let convId = currentConversation?.id;
     if (!convId) {
       const newConvo = await ChatService.createConversation(userMessage.substring(0, 50));
-      if (!newConvo) return;
+      if (!newConvo) {
+        console.error('Failed to create conversation');
+        return;
+      }
       convId = newConvo.id;
       setCurrentConversation({
         id: newConvo.id,
@@ -352,7 +355,7 @@ export default function MainJavariInterface() {
     const aiResponse: Message = {
       id: aiResponseId,
       role: 'assistant',
-      content: '',
+      content: '...',
       timestamp: new Date().toISOString(),
       provider: aiToUse,
       hasArtifacts: false,
@@ -378,99 +381,73 @@ export default function MainJavariInterface() {
         }),
       });
 
-      if (!response.ok) throw new Error('API request failed');
+      if (!response.ok) {
+        throw new Error(`API request failed: ${response.status}`);
+      }
 
       const data = await response.json();
+      console.log('API response:', data);
 
       // Check if autonomous deployment
       if (data.isAutonomous && data.workflowId) {
         setMessages(prev =>
           prev.map(m =>
-            m.id === aiResponseId ? { ...m, content: data.message, provider: 'javari' } : m
+            m.id === aiResponseId ? { ...m, content: data.content || 'Starting deployment...', provider: 'javari' } : m
           )
         );
 
         // Poll for deployment status
         const pollInterval = setInterval(async () => {
-          const statusRes = await fetch(`/api/autonomous/status/${data.workflowId}`);
-          const { workflow } = await statusRes.json();
+          try {
+            const statusRes = await fetch(`/api/autonomous/status/${data.workflowId}`);
+            const statusData = await statusRes.json();
+            const workflow = statusData.workflow;
 
-          if (workflow.status === 'success') {
-            clearInterval(pollInterval);
-            const successMsg = `✅ Live: https://${workflow.artifacts.deploymentUrl}\n📁 Repo: ${workflow.artifacts.repoUrl}`;
-            setMessages(prev => [...prev, {
-              id: Date.now().toString(),
-              role: 'assistant',
-              content: successMsg,
-              timestamp: new Date().toISOString(),
-              provider: 'javari',
-            }]);
-            await ChatService.saveMessage(convId, 'assistant', successMsg, 'javari');
-          } else if (workflow.status === 'failed') {
-            clearInterval(pollInterval);
-            const errorMsg = `❌ Build failed: ${workflow.error?.message || 'Unknown error'}`;
-            setMessages(prev => [...prev, {
-              id: Date.now().toString(),
-              role: 'assistant',
-              content: errorMsg,
-              timestamp: new Date().toISOString(),
-              provider: 'error',
-            }]);
-            await ChatService.saveMessage(convId, 'assistant', errorMsg, 'error');
+            if (workflow?.status === 'success') {
+              clearInterval(pollInterval);
+              const successMsg = `✅ Live: https://${workflow.artifacts?.deploymentUrl}\n📁 Repo: ${workflow.artifacts?.repoUrl}`;
+              setMessages(prev => [...prev, {
+                id: Date.now().toString(),
+                role: 'assistant',
+                content: successMsg,
+                timestamp: new Date().toISOString(),
+                provider: 'javari',
+              }]);
+              await ChatService.saveMessage(convId, 'assistant', successMsg, 'javari');
+            } else if (workflow?.status === 'failed') {
+              clearInterval(pollInterval);
+              const errorMsg = `❌ Build failed: ${workflow.error?.message || 'Unknown error'}`;
+              setMessages(prev => [...prev, {
+                id: Date.now().toString(),
+                role: 'assistant',
+                content: errorMsg,
+                timestamp: new Date().toISOString(),
+                provider: 'error',
+              }]);
+              await ChatService.saveMessage(convId, 'assistant', errorMsg, 'error');
+            }
+          } catch (e) {
+            console.error('Polling error:', e);
           }
         }, 5000);
         return;
       }
 
-      // Regular response - no streaming, just display
+      // Regular response - update the placeholder with actual content
+      const responseContent = data.content || data.message || 'No response received';
+      
       setMessages(prev =>
         prev.map(m =>
-          m.id === aiResponseId ? { ...m, content: data.message, provider: data.provider } : m
+          m.id === aiResponseId ? { ...m, content: responseContent, provider: data.provider || aiToUse } : m
         )
       );
 
-      // Handle streaming response (legacy support)
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      let accumulatedContent = data.message || '';
+      // Save assistant message
+      await ChatService.saveMessage(convId, 'assistant', responseContent, data.provider || aiToUse);
 
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          const chunk = decoder.decode(value);
-          const lines = chunk.split('\n');
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6);
-              if (data === '[DONE]') break;
-
-              try {
-                const { text } = JSON.parse(data);
-                accumulatedContent += text;
-
-                // Update message with streaming content
-                setMessages(prev => 
-                  prev.map(m => 
-                    m.id === aiResponseId 
-                      ? { ...m, content: accumulatedContent }
-                      : m
-                  )
-                );
-              } catch (e) {
-                // Skip invalid JSON
-              }
-            }
-          }
-        }
-      }
-
-      // TODO: Parse content for artifacts (code blocks, documents, etc.)
-      // If code blocks found, create artifacts
+      // Parse content for artifacts (code blocks)
       const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
-      const codeBlocks = [...accumulatedContent.matchAll(codeBlockRegex)];
+      const codeBlocks = [...responseContent.matchAll(codeBlockRegex)];
       
       if (codeBlocks.length > 0) {
         codeBlocks.forEach((match, index) => {
@@ -499,14 +476,16 @@ export default function MainJavariInterface() {
 
     } catch (error: unknown) {
       console.error('Error calling AI API:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
       // Update message with error
       setMessages(prev => 
         prev.map(m => 
           m.id === aiResponseId 
             ? { 
                 ...m, 
-                content: 'Sorry, I encountered an error processing your request. Please try again.',
-                provider: aiToUse
+                content: `Sorry, I encountered an error: ${errorMessage}. Please try again.`,
+                provider: 'error'
               }
             : m
         )
