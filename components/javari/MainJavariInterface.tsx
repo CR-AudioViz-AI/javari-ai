@@ -314,22 +314,33 @@ export default function MainJavariInterface() {
     const userMessage = inputMessage;
     setInputMessage('');
 
-    // Get or create conversation
+    // Get or create conversation (allow guest mode)
     let convId = currentConversation?.id;
+    let isGuest = false;
+    
     if (!convId) {
-      const newConvo = await ChatService.createConversation(userMessage.substring(0, 50));
-      if (!newConvo) {
-        console.error('Failed to create conversation');
-        return;
+      try {
+        const newConvo = await ChatService.createConversation(userMessage.substring(0, 50));
+        if (newConvo) {
+          convId = newConvo.id;
+          setCurrentConversation({
+            id: newConvo.id,
+            title: newConvo.title,
+            starred: false,
+            messages: [],
+            updated_at: newConvo.updated_at,
+          });
+        } else {
+          // Guest mode - no auth, just chat without saving
+          isGuest = true;
+          convId = 'guest-' + Date.now();
+          console.log('Running in guest mode - chat will not be saved');
+        }
+      } catch (e) {
+        console.error('Error creating conversation:', e);
+        isGuest = true;
+        convId = 'guest-' + Date.now();
       }
-      convId = newConvo.id;
-      setCurrentConversation({
-        id: newConvo.id,
-        title: newConvo.title,
-        starred: false,
-        messages: [],
-        updated_at: newConvo.updated_at,
-      });
     }
 
     // Auto-detect best AI if in auto mode
@@ -348,14 +359,18 @@ export default function MainJavariInterface() {
     };
 
     setMessages(prev => [...prev, newMessage]);
-    await ChatService.saveMessage(convId, 'user', userMessage);
+    
+    // Only save to DB if not guest
+    if (!isGuest) {
+      await ChatService.saveMessage(convId, 'user', userMessage);
+    }
 
     // Create placeholder for AI response
     const aiResponseId = (Date.now() + 1).toString();
     const aiResponse: Message = {
       id: aiResponseId,
       role: 'assistant',
-      content: '...',
+      content: 'Thinking...',
       timestamp: new Date().toISOString(),
       provider: aiToUse,
       hasArtifacts: false,
@@ -377,7 +392,7 @@ export default function MainJavariInterface() {
             { role: 'user', content: userMessage }
           ],
           aiProvider: aiToUse,
-          conversationId: convId
+          conversationId: isGuest ? undefined : convId
         }),
       });
 
@@ -413,7 +428,9 @@ export default function MainJavariInterface() {
                 timestamp: new Date().toISOString(),
                 provider: 'javari',
               }]);
-              await ChatService.saveMessage(convId, 'assistant', successMsg, 'javari');
+              if (!isGuest) {
+                await ChatService.saveMessage(convId, 'assistant', successMsg, 'javari');
+              }
             } else if (workflow?.status === 'failed') {
               clearInterval(pollInterval);
               const errorMsg = `❌ Build failed: ${workflow.error?.message || 'Unknown error'}`;
@@ -424,7 +441,9 @@ export default function MainJavariInterface() {
                 timestamp: new Date().toISOString(),
                 provider: 'error',
               }]);
-              await ChatService.saveMessage(convId, 'assistant', errorMsg, 'error');
+              if (!isGuest) {
+                await ChatService.saveMessage(convId, 'assistant', errorMsg, 'error');
+              }
             }
           } catch (e) {
             console.error('Polling error:', e);
@@ -442,8 +461,10 @@ export default function MainJavariInterface() {
         )
       );
 
-      // Save assistant message
-      await ChatService.saveMessage(convId, 'assistant', responseContent, data.provider || aiToUse);
+      // Save assistant message (only if not guest)
+      if (!isGuest) {
+        await ChatService.saveMessage(convId, 'assistant', responseContent, data.provider || aiToUse);
+      }
 
       // Parse content for artifacts (code blocks)
       const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
@@ -492,8 +513,6 @@ export default function MainJavariInterface() {
       );
     }
   };
-
-  // Handle New Chat - Clear current chat and allow rename
   const handleNewChat = () => {
     // Clear messages
     setMessages([]);
