@@ -1,6 +1,6 @@
 // app/api/chat/route.ts
-// JAVARI CHAT API - FIXED with proper error handling
-// Timestamp: 2025-11-30 07:30 AM EST
+// JAVARI CHAT API - With Autonomous App Building
+// Timestamp: 2025-12-02 11:10 AM EST
 
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -12,47 +12,81 @@ const SYSTEM_PROMPT = `You are JAVARI - the AI that DELIVERS for CR AudioViz AI.
 3. DON'T STEAL - Be original. Respect others' work.
 4. DELIVER - Every customer gets results. Period.
 
+## CRITICAL INSTRUCTION FOR APP BUILDING
+
+When a user asks you to BUILD an app, website, tool, or calculator:
+- DO NOT give them instructions to run locally
+- DO NOT tell them to use npm, create-react-app, etc.
+- DO NOT just provide code snippets
+
+Instead, you MUST:
+1. Create a COMPLETE, working React component
+2. Format it so our system can deploy it automatically
+3. The user will get a LIVE URL they can use immediately
+
+When building apps, ALWAYS output your code in this EXACT format:
+
+\`\`\`deploy:AppName.tsx
+// Your complete React component here
+// Must be a single-file React component
+// Use Tailwind CSS for styling
+// Must have a default export
+\`\`\`
+
+Example - if user asks for a mortgage calculator:
+
+\`\`\`deploy:MortgageCalculator.tsx
+'use client';
+import React, { useState } from 'react';
+
+export default function MortgageCalculator() {
+  // ... complete working code
+}
+\`\`\`
+
+The system will automatically:
+- Deploy this to Vercel
+- Give the user a live URL
+- No setup required from the user
+
 ## YOUR CAPABILITIES
 
-You can BUILD things:
-- Complete React components that render live
-- HTML pages with Tailwind CSS
-- Full applications with multiple files
-- APIs and backend code
+You can BUILD things that get deployed automatically:
+- Calculators, tools, utilities
+- Landing pages, portfolios
+- Dashboards, admin panels
+- Forms, surveys, quizzes
+- Games, interactive experiences
 
-You can EXECUTE actions:
-- Create Stripe products, prices, payment links
-- Send emails via SendGrid/Resend
-- Query and update databases
-- Deploy to Vercel
-- Commit to GitHub
-
-You know ALL CR AudioViz products (60+ tools).
-
-## HOW TO RESPOND
-
-When building/creating, output complete, working code.
-When asked to do something, DO IT - don't just explain how.
-Always deliver results, not just explanations.
-
-## OUTPUT FORMAT FOR CODE
-
-When creating files, use this format:
-\`\`\`filename.tsx
-// complete code here
-\`\`\`
+You can also:
+- Answer questions directly
+- Provide code for users who WANT to run locally (only if they specifically ask)
+- Research current information
+- Help with any task
 
 ## YOUR VOICE
 Direct. Honest. Warm. Results-focused. Never preachy.
 
+When building apps: Don't explain what you're going to do. Just build it and tell them it's being deployed.
+
 Now deliver.`;
+
+// Detect if this is a build request
+function detectBuildRequest(message: string): boolean {
+  const m = message.toLowerCase();
+  const buildKeywords = [
+    'build me', 'create me', 'make me',
+    'build a', 'create a', 'make a',
+    'i need an app', 'i need a tool', 'i need a calculator',
+    'actual app', 'working app', 'live app', 'real app',
+    'deploy', 'i can use', 'that works'
+  ];
+  return buildKeywords.some(k => m.includes(k));
+}
 
 async function callOpenAI(messages: any[], system: string): Promise<{ content: string; error?: string }> {
   const apiKey = process.env.OPENAI_API_KEY;
-  
-  if (!apiKey) {
-    return { content: '', error: 'OpenAI API key not configured' };
-  }
+  if (!apiKey) return { content: '', error: 'OpenAI API key not configured' };
 
   try {
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -82,14 +116,7 @@ async function callOpenAI(messages: any[], system: string): Promise<{ content: s
     }
 
     const data = await res.json();
-    const content = data.choices?.[0]?.message?.content;
-    
-    if (!content) {
-      console.error('OpenAI returned no content:', JSON.stringify(data));
-      return { content: '', error: 'OpenAI returned empty response' };
-    }
-    
-    return { content };
+    return { content: data.choices?.[0]?.message?.content || '' };
   } catch (error: any) {
     console.error('OpenAI call failed:', error);
     return { content: '', error: error.message };
@@ -98,10 +125,7 @@ async function callOpenAI(messages: any[], system: string): Promise<{ content: s
 
 async function callClaude(messages: any[], system: string): Promise<{ content: string; error?: string }> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  
-  if (!apiKey) {
-    return { content: '', error: 'Anthropic API key not configured' };
-  }
+  if (!apiKey) return { content: '', error: 'Anthropic API key not configured' };
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -129,14 +153,7 @@ async function callClaude(messages: any[], system: string): Promise<{ content: s
     }
 
     const data = await res.json();
-    const content = data.content?.[0]?.text;
-    
-    if (!content) {
-      console.error('Claude returned no content:', JSON.stringify(data));
-      return { content: '', error: 'Claude returned empty response' };
-    }
-    
-    return { content };
+    return { content: data.content?.[0]?.text || '' };
   } catch (error: any) {
     console.error('Claude call failed:', error);
     return { content: '', error: error.message };
@@ -145,10 +162,7 @@ async function callClaude(messages: any[], system: string): Promise<{ content: s
 
 async function callPerplexity(query: string): Promise<{ content: string; error?: string }> {
   const apiKey = process.env.PERPLEXITY_API_KEY;
-  
-  if (!apiKey) {
-    return { content: '', error: 'Perplexity API key not configured' };
-  }
+  if (!apiKey) return { content: '', error: 'Perplexity API key not configured' };
 
   try {
     const res = await fetch('https://api.perplexity.ai/chat/completions', {
@@ -165,27 +179,19 @@ async function callPerplexity(query: string): Promise<{ content: string; error?:
     });
 
     if (!res.ok) {
-      const errorText = await res.text();
-      console.error('Perplexity API error:', res.status, errorText);
       return { content: '', error: `Perplexity API error: ${res.status}` };
     }
 
     const data = await res.json();
-    const content = data.choices?.[0]?.message?.content;
-    
-    if (!content) {
-      console.error('Perplexity returned no content:', JSON.stringify(data));
-      return { content: '', error: 'Perplexity returned empty response' };
-    }
-    
-    return { content };
+    return { content: data.choices?.[0]?.message?.content || '' };
   } catch (error: any) {
-    console.error('Perplexity call failed:', error);
     return { content: '', error: error.message };
   }
 }
 
-function selectAI(message: string): string {
+function selectAI(message: string, isBuildRequest: boolean): string {
+  if (isBuildRequest) return 'claude'; // Claude is best for coding
+  
   const m = message.toLowerCase();
   if (/\b(current|today|latest|price|news|weather|stock)\b/.test(m)) return 'perplexity';
   if (/\b(build|create|code|component|fix|debug|typescript|react|function)\b/.test(m)) return 'claude';
@@ -199,99 +205,66 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { messages, aiProvider } = body;
     
-    console.log('Request body:', JSON.stringify({ 
-      messageCount: messages?.length,
-      aiProvider,
-      lastMessage: messages?.[messages.length - 1]?.content?.substring(0, 100)
-    }));
-    
     if (!messages?.length) {
       return NextResponse.json({ error: 'No messages provided' }, { status: 400 });
     }
     
     const lastMessage = messages[messages.length - 1]?.content || '';
+    const isBuildRequest = detectBuildRequest(lastMessage);
     
     // Determine which AI to use
-    let ai = aiProvider && aiProvider !== 'auto' ? aiProvider : selectAI(lastMessage);
-    
-    // Normalize AI names
+    let ai = aiProvider && aiProvider !== 'auto' ? aiProvider : selectAI(lastMessage, isBuildRequest);
     if (ai === 'gpt-4') ai = 'gpt4';
     
-    console.log('Selected AI:', ai);
+    console.log('Selected AI:', ai, 'Build request:', isBuildRequest);
+    
+    // Use enhanced system prompt for build requests
+    const systemPrompt = SYSTEM_PROMPT;
     
     let result: { content: string; error?: string };
     
-    // Try primary AI
     if (ai === 'perplexity') {
       result = await callPerplexity(lastMessage);
     } else if (ai === 'claude') {
-      result = await callClaude(messages, SYSTEM_PROMPT);
+      result = await callClaude(messages, systemPrompt);
     } else {
-      result = await callOpenAI(messages, SYSTEM_PROMPT);
+      result = await callOpenAI(messages, systemPrompt);
     }
     
-    // If primary failed, try fallback
+    // Fallback if primary fails
     if (!result.content && result.error) {
-      console.log('Primary AI failed, trying fallback. Error:', result.error);
-      
-      // Try a different provider
-      if (ai !== 'gpt4') {
-        result = await callOpenAI(messages, SYSTEM_PROMPT);
-      } else {
-        result = await callClaude(messages, SYSTEM_PROMPT);
-      }
+      console.log('Primary AI failed, trying fallback');
+      result = ai !== 'gpt4' 
+        ? await callOpenAI(messages, systemPrompt)
+        : await callClaude(messages, systemPrompt);
     }
     
-    // If still no content, try the last option
-    if (!result.content && result.error) {
-      console.log('Fallback also failed, trying last option. Error:', result.error);
-      
-      // Try perplexity as last resort for simple queries
-      if (ai !== 'perplexity') {
-        result = await callPerplexity(lastMessage);
-      }
-    }
-    
-    // If all failed, return error message
     if (!result.content) {
-      console.error('All AI providers failed');
       return NextResponse.json({
-        content: `I'm having trouble connecting to my AI providers right now. Error: ${result.error || 'Unknown error'}. Please try again in a moment.`,
-        provider: 'error',
-        error: result.error
+        content: `I'm having trouble connecting right now. Error: ${result.error}. Please try again.`,
+        provider: 'error'
       });
     }
     
-    console.log('Success! Response length:', result.content.length);
-    
     return NextResponse.json({
       content: result.content,
-      provider: ai
+      provider: ai,
+      isBuildRequest
     });
     
   } catch (error: any) {
     console.error('Chat API error:', error);
     return NextResponse.json({
       content: `Sorry, I encountered an error: ${error.message}. Please try again.`,
-      provider: 'error',
-      error: error.message
+      provider: 'error'
     }, { status: 500 });
   }
 }
 
 export async function GET() {
-  // Health check endpoint
-  const hasOpenAI = !!process.env.OPENAI_API_KEY;
-  const hasClaude = !!process.env.ANTHROPIC_API_KEY;
-  const hasPerplexity = !!process.env.PERPLEXITY_API_KEY;
-  
   return NextResponse.json({
     status: 'ok',
-    version: '2.1',
-    providers: {
-      openai: hasOpenAI ? 'configured' : 'missing',
-      claude: hasClaude ? 'configured' : 'missing',
-      perplexity: hasPerplexity ? 'configured' : 'missing'
-    }
+    version: '2.2',
+    features: ['multi-ai', 'build-detection', 'auto-deploy']
   });
 }
