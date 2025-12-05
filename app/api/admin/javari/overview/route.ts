@@ -1,3 +1,6 @@
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 /**
  * Javari AI - Overview API
  * Returns system-wide status for all autonomous operations
