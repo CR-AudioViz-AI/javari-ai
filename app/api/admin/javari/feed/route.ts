@@ -1,3 +1,6 @@
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 /**
  * Javari AI - Manual Knowledge Feed API
  * Allows Roy to manually feed knowledge to Javari from admin dashboard
