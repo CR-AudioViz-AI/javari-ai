@@ -1,3 +1,6 @@
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 import { getErrorMessage, logError } from '@/lib/utils/error-utils';
 import { safeAsync, handleError } from '@/lib/error-handler';
 import { isDefined, toString, toNumber, isArray } from '@/lib/typescript-helpers';
