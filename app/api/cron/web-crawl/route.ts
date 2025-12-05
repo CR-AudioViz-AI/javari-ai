@@ -1,3 +1,6 @@
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 import { NextResponse } from 'next/server';
 import { safeAsync } from '@/lib/error-handler';
 import { isDefined } from '@/lib/typescript-helpers';
