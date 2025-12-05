@@ -1,3 +1,6 @@
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 /**
  * JAVARI AI - ANALYTICS API
  * Usage stats, costs, provider performance, recommendations
