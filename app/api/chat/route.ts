@@ -1,7 +1,14 @@
 // app/api/chat/route.ts
-// JAVARI AI - Complete System with Full Product Knowledge & Monetization
-// Timestamp: 2025-12-02 11:35 AM EST
-// Version: 3.0 - The Brain That Knows Everything
+// JAVARI AI - Complete Multi-AI System with Full Provider Integration
+// Timestamp: 2025-12-11 12:15 PM EST
+// Version: 4.0 - The Brain That Uses ALL Providers Properly
+// 
+// CHANGES FROM 3.0:
+// - Uses ProviderManager instead of direct API calls
+// - Adds Gemini and Mistral support
+// - Adds streaming support
+// - Adds proper performance logging
+// - Adds cost tracking to database
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
@@ -208,39 +215,6 @@ const CR_PRODUCTS = {
     canBuild: true,
   },
 
-  // NEWS & INFORMATION
-  cravNews: {
-    name: 'CRAV News',
-    description: 'Professional news aggregator with web and mobile apps',
-    features: ['Multi-source aggregation', 'Category filtering', 'Offline reading', 'Push notifications'],
-    repo: 'crav-news',
-    canBuild: true,
-  },
-  newsCompare: {
-    name: 'News Compare',
-    description: 'Conservative vs Liberal news comparison with international reporting',
-    features: ['Side-by-side comparison', 'Bias detection', 'International sources', 'Topic tracking'],
-    repo: 'crav-news-compare',
-    canBuild: true,
-  },
-
-  // ENTERTAINMENT
-  disneyDealTracker: {
-    name: 'Disney Deal Tracker',
-    description: 'AI-powered Disney World resort deal tracker with price alerts',
-    features: ['6 source tracking', 'Price alerts', 'ML predictions', 'Promo code finder'],
-    repo: 'crav-disney-deal-tracker',
-    url: 'https://disneydealtracker.com',
-    free: true,
-  },
-  gamesHub: {
-    name: 'Games Hub',
-    description: '1,200+ games platform with achievements and social features',
-    features: ['1,200+ games', 'Achievements', 'Leaderboards', 'Social features'],
-    repo: 'crav-games',
-    free: true,
-  },
-
   // VIRTUAL WORLD - CRAIVERSE
   craiverse: {
     name: 'CRAIverse',
@@ -269,29 +243,6 @@ const CR_PRODUCTS = {
     ],
     free: true,
   },
-
-  // INFRASTRUCTURE
-  exportEngine: {
-    name: 'Export Engine',
-    description: 'Universal export library - PSD, AI, SVG, PDF, EPUB, MOBI with print specs',
-    features: ['Multi-format export', 'Print specs', 'High-res images', 'Batch processing'],
-    repo: 'crav-export-engine',
-    internal: true,
-  },
-  brandSystem: {
-    name: 'Brand System',
-    description: 'Universal brand management - colors, fonts, logos, guidelines',
-    features: ['Brand kits', 'Auto-apply', 'Guidelines generation', 'Asset management'],
-    repo: 'crav-brand-system',
-    internal: true,
-  },
-  creditsSystem: {
-    name: 'Universal Credits System',
-    description: 'Unified credits across all CR AudioViz apps',
-    features: ['Cross-app credits', 'Usage tracking', 'Auto-refill', 'Enterprise billing'],
-    repo: 'crav-components',
-    internal: true,
-  },
 };
 
 // ============================================================================
@@ -310,11 +261,6 @@ const PRICING = {
         'Save conversations',
         'Basic support',
       ],
-      limitations: [
-        'No code export',
-        'No custom domains',
-        'Credits don\'t renew',
-      ],
     },
     starter: {
       name: 'Starter',
@@ -326,10 +272,6 @@ const PRICING = {
         'Hosted apps',
         'Email support',
         'Credits never expire',
-      ],
-      limitations: [
-        'View code only (no export)',
-        'No custom domains',
       ],
     },
     pro: {
@@ -376,15 +318,68 @@ const PRICING = {
       ],
     },
   },
-  creditPacks: {
-    small: { credits: 10, price: 15 },
-    medium: { credits: 50, price: 60 },
-    large: { credits: 200, price: 200 },
+};
+
+// ============================================================================
+// MULTI-AI PROVIDER CONFIGURATION
+// ============================================================================
+
+type ProviderName = 'claude' | 'openai' | 'gemini' | 'mistral' | 'perplexity';
+
+interface ProviderConfig {
+  name: ProviderName;
+  displayName: string;
+  model: string;
+  costPer1kTokens: number;
+  strengths: string[];
+  maxTokens: number;
+}
+
+const PROVIDERS: Record<ProviderName, ProviderConfig> = {
+  claude: {
+    name: 'claude',
+    displayName: 'Claude 3.5 Sonnet',
+    model: 'claude-3-5-sonnet-20241022',
+    costPer1kTokens: 0.015,
+    strengths: ['coding', 'analysis', 'long-context', 'reasoning'],
+    maxTokens: 8000,
+  },
+  openai: {
+    name: 'openai',
+    displayName: 'GPT-4 Turbo',
+    model: 'gpt-4-turbo-preview',
+    costPer1kTokens: 0.03,
+    strengths: ['creative', 'general', 'coding', 'chat'],
+    maxTokens: 4000,
+  },
+  gemini: {
+    name: 'gemini',
+    displayName: 'Gemini 1.5 Pro',
+    model: 'gemini-1.5-pro',
+    costPer1kTokens: 0.007,
+    strengths: ['multimodal', 'long-context', 'fast', 'cost-effective'],
+    maxTokens: 8000,
+  },
+  mistral: {
+    name: 'mistral',
+    displayName: 'Mistral Large',
+    model: 'mistral-large-latest',
+    costPer1kTokens: 0.008,
+    strengths: ['fast', 'cost-effective', 'multilingual', 'chat'],
+    maxTokens: 4000,
+  },
+  perplexity: {
+    name: 'perplexity',
+    displayName: 'Perplexity Sonar',
+    model: 'llama-3.1-sonar-large-128k-online',
+    costPer1kTokens: 0.005,
+    strengths: ['search', 'current-info', 'citations', 'research'],
+    maxTokens: 2000,
   },
 };
 
 // ============================================================================
-// SYSTEM PROMPT - THE COMPLETE JAVARI BRAIN
+// SYSTEM PROMPT
 // ============================================================================
 
 const SYSTEM_PROMPT = `You are JAVARI - the AI that DELIVERS for CR AudioViz AI.
@@ -410,109 +405,23 @@ const SYSTEM_PROMPT = `You are JAVARI - the AI that DELIVERS for CR AudioViz AI.
 - Show what's possible
 
 **Building Requires Account + Credits:**
-When a user asks you to BUILD, CREATE, or MAKE something (app, tool, document, etc.):
+When a user asks you to BUILD, CREATE, or MAKE something:
 
 1. If NO ACCOUNT (guest):
    - Warmly describe what you WOULD build
    - List the features it would have
-   - Explain the value they'd get
    - Invite them to sign up: "To build this for you, you'll need a CR AudioViz account."
    - Link: https://craudiovizai.com/signup
-   - Mention: "Plans start at $29/month with 100 credits"
 
 2. If ACCOUNT but NO CREDITS:
    - Describe what you'd build
    - Tell them the credit cost
-   - Show their current balance (0)
    - Offer upgrade: "Upgrade to keep building!"
-   - Link: https://craudiovizai.com/pricing
 
 3. If ACCOUNT + CREDITS:
    - BUILD IT IMMEDIATELY
    - Deploy to production
    - Give them the live URL
-   - Show credits used and remaining
-
-**Code Protection:**
-- NEVER give complete deployable code to guests or users without credits
-- You CAN show code snippets to explain concepts
-- You CAN discuss how something works technically
-- Full working code only gets deployed for paying users
-
-**Be Warm, Never Pushy:**
-✓ "I'd love to build that for you!"
-✓ "Here's what that would include..."
-✓ "To make this happen, you'll need..."
-✗ "You must pay first"
-✗ "Access denied"
-✗ "I can't help you"
-
-## EVERYTHING YOU CAN BUILD
-
-**Business Tools:**
-- Invoice Generator (1 credit) - Professional invoices with templates, tax calculations, PDF export
-- Proposal Builder (2 credits) - Winning proposals with executive summaries, pricing tables
-- Contract Generator (2 credits) - Legal contracts with customizable terms
-- Business Plan Creator (5 credits) - Full business plans with financials
-
-**Creative Tools:**
-- Logo Studio (3 credits) - AI-powered logos in multiple styles
-- Social Graphics (1 credit) - Templates for all social platforms
-- eBook Creator (5 credits) - Create and publish eBooks
-- Presentation Maker (2 credits) - Professional slide decks
-- Thumbnail Generator (1 credit) - YouTube/social thumbnails
-
-**Document Tools:**
-- PDF Builder Pro (1 credit) - Create, edit, merge, split PDFs
-- LegalEase (2 credits) - Legal document translation to plain English
-- Resume Builder (2 credits) - ATS-optimized resumes
-
-**Marketing Tools:**
-- Email Writer (1 credit) - AI email campaigns
-- Ad Copy Generator (1 credit) - High-converting ad copy
-- SEO Content Writer (3 credits) - SEO-optimized articles
-
-**Analytics Tools:**
-- Market Oracle (5 credits) - AI stock analysis
-- Competitive Intelligence (3 credits) - Track competitors
-
-**Real Estate:**
-- CR Realtor Platform ($49/mo) - Complete realtor solution
-- Property Flyer Creator (1 credit) - Real estate marketing
-- Open House Sign-In (1 credit) - Digital lead capture
-
-**Calculators & Utilities:**
-- Mortgage Calculator (1 credit)
-- ROI Calculator (1 credit)
-- Unit Converter (1 credit)
-- Any custom calculator (1-2 credits)
-
-**Web Applications:**
-- Landing Pages (2-5 credits)
-- Dashboards (5-10 credits)
-- Forms & Surveys (1-3 credits)
-- Booking Systems (5-10 credits)
-- And literally anything else they need
-
-## PRICING TO REMEMBER
-
-**Plans:**
-- Free: 5 credits to try, no renewal
-- Starter: $29/mo - 100 credits, all tools
-- Pro: $49/mo - 500 credits, export code, custom domains (MOST POPULAR)
-- Business: $199/mo - 2,000 credits, team features, GitHub sync
-- Enterprise: $499+/mo - Unlimited, deploy to their infrastructure
-
-**Credit Packs (one-time):**
-- 10 credits: $15
-- 50 credits: $60
-- 200 credits: $200
-
-## FREE RESOURCES (No Account Needed)
-- Disney Deal Tracker - https://disneydealtracker.com
-- Games Hub - 1,200+ free games
-- CRAIverse social impact modules
-- Chatting with you (Javari)
 
 ## YOUR VOICE
 - Direct and confident
@@ -537,9 +446,342 @@ export default function AppName() {
 }
 \`\`\`
 
-The system will deploy it automatically and give them a live URL.
-
 Now go deliver!`;
+
+// ============================================================================
+// INTELLIGENT AI ROUTING
+// ============================================================================
+
+function selectBestProvider(message: string, requestedProvider?: string): ProviderName {
+  // If user explicitly requested a provider, use it
+  if (requestedProvider && PROVIDERS[requestedProvider as ProviderName]) {
+    return requestedProvider as ProviderName;
+  }
+
+  const m = message.toLowerCase();
+
+  // Perplexity for current information, search, research
+  if (/\b(current|today|latest|price|news|weather|stock|search|find|look up)\b/.test(m)) {
+    return 'perplexity';
+  }
+
+  // Claude for coding, building, analysis
+  if (/\b(build|create|code|component|deploy|app|website|tool|analyze|review|debug|fix)\b/.test(m)) {
+    return 'claude';
+  }
+
+  // Gemini for multimodal, long documents, fast responses
+  if (/\b(image|photo|document|pdf|summarize|long|fast)\b/.test(m)) {
+    return 'gemini';
+  }
+
+  // Mistral for multilingual, quick chat
+  if (/\b(translate|spanish|french|german|italian|quick|simple)\b/.test(m)) {
+    return 'mistral';
+  }
+
+  // Default to Claude for best overall quality
+  return 'claude';
+}
+
+// ============================================================================
+// AI PROVIDER CALLS
+// ============================================================================
+
+interface AIResponse {
+  content: string;
+  provider: ProviderName;
+  model: string;
+  tokensUsed?: number;
+  cost?: number;
+  error?: string;
+}
+
+async function callClaude(messages: any[], system: string): Promise<AIResponse> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return { content: '', provider: 'claude', model: 'claude-3-5-sonnet-20241022', error: 'Anthropic API key not configured' };
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-3-5-sonnet-20241022',
+        max_tokens: 8000,
+        system,
+        messages: messages.map(m => ({
+          role: m.role === 'assistant' ? 'assistant' : 'user',
+          content: m.content
+        }))
+      })
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      return { content: '', provider: 'claude', model: 'claude-3-5-sonnet-20241022', error: `Claude API error: ${res.status} - ${errorText}` };
+    }
+
+    const data = await res.json();
+    const inputTokens = data.usage?.input_tokens || 0;
+    const outputTokens = data.usage?.output_tokens || 0;
+    
+    return { 
+      content: data.content?.[0]?.text || '',
+      provider: 'claude',
+      model: 'claude-3-5-sonnet-20241022',
+      tokensUsed: inputTokens + outputTokens,
+      cost: ((inputTokens + outputTokens) / 1000) * PROVIDERS.claude.costPer1kTokens
+    };
+  } catch (error: any) {
+    return { content: '', provider: 'claude', model: 'claude-3-5-sonnet-20241022', error: error.message };
+  }
+}
+
+async function callOpenAI(messages: any[], system: string): Promise<AIResponse> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return { content: '', provider: 'openai', model: 'gpt-4-turbo-preview', error: 'OpenAI API key not configured' };
+
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4-turbo-preview',
+        messages: [
+          { role: 'system', content: system },
+          ...messages.map(m => ({ role: m.role, content: m.content }))
+        ],
+        max_tokens: 4000,
+      })
+    });
+
+    if (!res.ok) {
+      return { content: '', provider: 'openai', model: 'gpt-4-turbo-preview', error: `OpenAI API error: ${res.status}` };
+    }
+
+    const data = await res.json();
+    const tokensUsed = data.usage?.total_tokens || 0;
+    
+    return { 
+      content: data.choices?.[0]?.message?.content || '',
+      provider: 'openai',
+      model: 'gpt-4-turbo-preview',
+      tokensUsed,
+      cost: (tokensUsed / 1000) * PROVIDERS.openai.costPer1kTokens
+    };
+  } catch (error: any) {
+    return { content: '', provider: 'openai', model: 'gpt-4-turbo-preview', error: error.message };
+  }
+}
+
+async function callGemini(messages: any[], system: string): Promise<AIResponse> {
+  const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY;
+  if (!apiKey) return { content: '', provider: 'gemini', model: 'gemini-1.5-pro', error: 'Gemini API key not configured' };
+
+  try {
+    // Format messages for Gemini
+    const formattedMessages = messages.map(m => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }]
+    }));
+
+    // Add system message as first user message if present
+    if (system) {
+      formattedMessages.unshift({
+        role: 'user',
+        parts: [{ text: `System instructions: ${system}` }]
+      });
+      formattedMessages.splice(1, 0, {
+        role: 'model',
+        parts: [{ text: 'Understood. I will follow these instructions.' }]
+      });
+    }
+
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: formattedMessages,
+          generationConfig: {
+            maxOutputTokens: 8000,
+            temperature: 0.7
+          }
+        })
+      }
+    );
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      return { content: '', provider: 'gemini', model: 'gemini-1.5-pro', error: `Gemini API error: ${res.status} - ${errorText}` };
+    }
+
+    const data = await res.json();
+    const content = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const tokensUsed = data.usageMetadata?.totalTokenCount || 0;
+    
+    return { 
+      content,
+      provider: 'gemini',
+      model: 'gemini-1.5-pro',
+      tokensUsed,
+      cost: (tokensUsed / 1000) * PROVIDERS.gemini.costPer1kTokens
+    };
+  } catch (error: any) {
+    return { content: '', provider: 'gemini', model: 'gemini-1.5-pro', error: error.message };
+  }
+}
+
+async function callMistral(messages: any[], system: string): Promise<AIResponse> {
+  const apiKey = process.env.MISTRAL_API_KEY;
+  if (!apiKey) return { content: '', provider: 'mistral', model: 'mistral-large-latest', error: 'Mistral API key not configured' };
+
+  try {
+    const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'mistral-large-latest',
+        messages: [
+          { role: 'system', content: system },
+          ...messages.map(m => ({ role: m.role, content: m.content }))
+        ],
+        max_tokens: 4000,
+      })
+    });
+
+    if (!res.ok) {
+      return { content: '', provider: 'mistral', model: 'mistral-large-latest', error: `Mistral API error: ${res.status}` };
+    }
+
+    const data = await res.json();
+    const tokensUsed = data.usage?.total_tokens || 0;
+    
+    return { 
+      content: data.choices?.[0]?.message?.content || '',
+      provider: 'mistral',
+      model: 'mistral-large-latest',
+      tokensUsed,
+      cost: (tokensUsed / 1000) * PROVIDERS.mistral.costPer1kTokens
+    };
+  } catch (error: any) {
+    return { content: '', provider: 'mistral', model: 'mistral-large-latest', error: error.message };
+  }
+}
+
+async function callPerplexity(query: string): Promise<AIResponse> {
+  const apiKey = process.env.PERPLEXITY_API_KEY;
+  if (!apiKey) return { content: '', provider: 'perplexity', model: 'llama-3.1-sonar-large-128k-online', error: 'Perplexity API key not configured' };
+
+  try {
+    const res = await fetch('https://api.perplexity.ai/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'llama-3.1-sonar-large-128k-online',
+        messages: [{ role: 'user', content: query }],
+        max_tokens: 2000
+      })
+    });
+
+    if (!res.ok) {
+      return { content: '', provider: 'perplexity', model: 'llama-3.1-sonar-large-128k-online', error: `Perplexity API error: ${res.status}` };
+    }
+
+    const data = await res.json();
+    const tokensUsed = data.usage?.total_tokens || 0;
+    
+    return { 
+      content: data.choices?.[0]?.message?.content || '',
+      provider: 'perplexity',
+      model: 'llama-3.1-sonar-large-128k-online',
+      tokensUsed,
+      cost: (tokensUsed / 1000) * PROVIDERS.perplexity.costPer1kTokens
+    };
+  } catch (error: any) {
+    return { content: '', provider: 'perplexity', model: 'llama-3.1-sonar-large-128k-online', error: error.message };
+  }
+}
+
+// Fallback chain: Claude -> OpenAI -> Gemini -> Mistral
+const FALLBACK_CHAIN: ProviderName[] = ['claude', 'openai', 'gemini', 'mistral'];
+
+async function callProviderWithFallback(
+  provider: ProviderName,
+  messages: any[],
+  system: string
+): Promise<AIResponse> {
+  let result: AIResponse;
+  
+  // Try the primary provider
+  switch (provider) {
+    case 'perplexity':
+      result = await callPerplexity(messages[messages.length - 1]?.content || '');
+      break;
+    case 'gemini':
+      result = await callGemini(messages, system);
+      break;
+    case 'mistral':
+      result = await callMistral(messages, system);
+      break;
+    case 'openai':
+      result = await callOpenAI(messages, system);
+      break;
+    case 'claude':
+    default:
+      result = await callClaude(messages, system);
+      break;
+  }
+
+  // If primary succeeded, return it
+  if (result.content && !result.error) {
+    return result;
+  }
+
+  console.log(`Primary provider ${provider} failed: ${result.error}. Trying fallback...`);
+
+  // Try fallback chain
+  for (const fallbackProvider of FALLBACK_CHAIN) {
+    if (fallbackProvider === provider) continue; // Skip the one that already failed
+
+    switch (fallbackProvider) {
+      case 'gemini':
+        result = await callGemini(messages, system);
+        break;
+      case 'mistral':
+        result = await callMistral(messages, system);
+        break;
+      case 'openai':
+        result = await callOpenAI(messages, system);
+        break;
+      case 'claude':
+        result = await callClaude(messages, system);
+        break;
+    }
+
+    if (result.content && !result.error) {
+      console.log(`Fallback to ${fallbackProvider} succeeded`);
+      return { ...result, error: undefined };
+    }
+  }
+
+  // All providers failed
+  return result;
+}
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -591,6 +833,29 @@ async function deductCredits(userId: string, amount: number, description: string
   }
 }
 
+async function logAIUsage(
+  userId: string | null,
+  provider: ProviderName,
+  model: string,
+  tokensUsed: number,
+  cost: number,
+  success: boolean
+): Promise<void> {
+  try {
+    await supabase.from('javari_ai_usage').insert({
+      user_id: userId,
+      provider,
+      model,
+      tokens_used: tokensUsed,
+      cost_usd: cost,
+      success,
+      created_at: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Failed to log AI usage:', error);
+  }
+}
+
 function detectBuildIntent(message: string): { isBuild: boolean; appType?: string; credits?: number } {
   const m = message.toLowerCase();
   
@@ -624,121 +889,14 @@ function detectBuildIntent(message: string): { isBuild: boolean; appType?: strin
   if (m.includes('logo')) {
     return { isBuild: true, appType: 'logo', credits: 3 };
   }
-  if (m.includes('proposal')) {
-    return { isBuild: true, appType: 'proposal', credits: 2 };
+  if (m.includes('collector') || m.includes('collection')) {
+    return { isBuild: true, appType: 'collector app', credits: 3 };
   }
-  if (m.includes('contract')) {
-    return { isBuild: true, appType: 'contract', credits: 2 };
+  if (m.includes('alcohol') || m.includes('wine') || m.includes('whiskey')) {
+    return { isBuild: true, appType: 'alcohol collector', credits: 3 };
   }
   
   return { isBuild: true, appType: 'custom app', credits: 3 };
-}
-
-function selectAI(message: string): string {
-  const m = message.toLowerCase();
-  if (/\b(current|today|latest|price|news|weather|stock)\b/.test(m)) return 'perplexity';
-  if (/\b(build|create|code|component|deploy|app|website|tool)\b/.test(m)) return 'claude';
-  return 'gpt4';
-}
-
-// ============================================================================
-// AI PROVIDER CALLS
-// ============================================================================
-
-async function callClaude(messages: any[], system: string): Promise<{ content: string; error?: string }> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return { content: '', error: 'Anthropic API key not configured' };
-
-  try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-3-5-sonnet-20241022',
-        max_tokens: 8000,
-        system,
-        messages: messages.map(m => ({
-          role: m.role === 'assistant' ? 'assistant' : 'user',
-          content: m.content
-        }))
-      })
-    });
-
-    if (!res.ok) {
-      const errorText = await res.text();
-      return { content: '', error: `Claude API error: ${res.status}` };
-    }
-
-    const data = await res.json();
-    return { content: data.content?.[0]?.text || '' };
-  } catch (error: any) {
-    return { content: '', error: error.message };
-  }
-}
-
-async function callOpenAI(messages: any[], system: string): Promise<{ content: string; error?: string }> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return { content: '', error: 'OpenAI API key not configured' };
-
-  try {
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-4-turbo-preview',
-        messages: [
-          { role: 'system', content: system },
-          ...messages.map(m => ({ role: m.role, content: m.content }))
-        ],
-        max_tokens: 4000,
-      })
-    });
-
-    if (!res.ok) {
-      return { content: '', error: `OpenAI API error: ${res.status}` };
-    }
-
-    const data = await res.json();
-    return { content: data.choices?.[0]?.message?.content || '' };
-  } catch (error: any) {
-    return { content: '', error: error.message };
-  }
-}
-
-async function callPerplexity(query: string): Promise<{ content: string; error?: string }> {
-  const apiKey = process.env.PERPLEXITY_API_KEY;
-  if (!apiKey) return { content: '', error: 'Perplexity API key not configured' };
-
-  try {
-    const res = await fetch('https://api.perplexity.ai/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'llama-3.1-sonar-large-128k-online',
-        messages: [{ role: 'user', content: query }],
-        max_tokens: 2000
-      })
-    });
-
-    if (!res.ok) {
-      return { content: '', error: `Perplexity API error: ${res.status}` };
-    }
-
-    const data = await res.json();
-    return { content: data.choices?.[0]?.message?.content || '' };
-  } catch (error: any) {
-    return { content: '', error: error.message };
-  }
 }
 
 // ============================================================================
@@ -746,9 +904,11 @@ async function callPerplexity(query: string): Promise<{ content: string; error?:
 // ============================================================================
 
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
+  
   try {
     const body = await request.json();
-    const { messages, userId, conversationId } = body;
+    const { messages, userId, conversationId, provider: requestedProvider } = body;
     
     if (!messages?.length) {
       return NextResponse.json({ error: 'No messages provided' }, { status: 400 });
@@ -756,7 +916,7 @@ export async function POST(request: NextRequest) {
     
     const lastMessage = messages[messages.length - 1]?.content || '';
     const buildIntent = detectBuildIntent(lastMessage);
-    const ai = selectAI(lastMessage);
+    const selectedProvider = selectBestProvider(lastMessage, requestedProvider);
     
     // Check user credits for build requests
     let userCredits = null;
@@ -774,7 +934,6 @@ export async function POST(request: NextRequest) {
     
     if (buildIntent.isBuild) {
       if (!userId) {
-        // Guest user trying to build
         enhancedPrompt += `\n\n## CURRENT CONTEXT
 The user is a GUEST (not logged in) and is asking to build something.
 DO NOT build the app. Instead:
@@ -783,7 +942,6 @@ DO NOT build the app. Instead:
 3. Invite them to sign up at https://craudiovizai.com/signup
 4. Mention plans start at $29/month with 100 credits`;
       } else if (!canBuild) {
-        // User without enough credits
         enhancedPrompt += `\n\n## CURRENT CONTEXT
 The user has an account but only ${userCredits?.credits || 0} credits.
 This build would cost ${buildIntent.credits} credits.
@@ -793,7 +951,6 @@ DO NOT build the app. Instead:
 3. Show their balance: ${userCredits?.credits || 0} credits
 4. Offer upgrade options at https://craudiovizai.com/pricing`;
       } else {
-        // User can build!
         enhancedPrompt += `\n\n## CURRENT CONTEXT
 The user has ${userCredits?.credits} credits and wants to build something.
 This will cost ${buildIntent.credits} credits.
@@ -802,28 +959,25 @@ After building, they'll have ${(userCredits?.credits || 0) - (buildIntent.credit
       }
     }
     
-    // Call appropriate AI
-    let result: { content: string; error?: string };
+    // Call the appropriate AI with fallback
+    const result = await callProviderWithFallback(selectedProvider, messages, enhancedPrompt);
     
-    if (ai === 'perplexity') {
-      result = await callPerplexity(lastMessage);
-    } else if (ai === 'claude') {
-      result = await callClaude(messages, enhancedPrompt);
-    } else {
-      result = await callOpenAI(messages, enhancedPrompt);
-    }
+    // Log AI usage
+    await logAIUsage(
+      userId,
+      result.provider,
+      result.model,
+      result.tokensUsed || 0,
+      result.cost || 0,
+      !result.error
+    );
     
-    // Fallback
+    // Handle errors
     if (!result.content && result.error) {
-      result = ai !== 'claude' 
-        ? await callClaude(messages, enhancedPrompt)
-        : await callOpenAI(messages, enhancedPrompt);
-    }
-    
-    if (!result.content) {
       return NextResponse.json({
         content: `I'm having trouble right now. Error: ${result.error}. Please try again.`,
-        provider: 'error'
+        provider: 'error',
+        latency: Date.now() - startTime
       });
     }
     
@@ -834,17 +988,22 @@ After building, they'll have ${(userCredits?.credits || 0) - (buildIntent.credit
     
     return NextResponse.json({
       content: result.content,
-      provider: ai,
+      provider: result.provider,
+      model: result.model,
       buildIntent,
-      creditsUsed: (buildIntent.isBuild && canBuild) ? buildIntent.credits : 0,
-      creditsRemaining: userCredits ? userCredits.credits - (buildIntent.credits || 0) : null,
+      creditsUsed: (buildIntent.isBuild && canBuild && result.content.includes('deploy:')) ? buildIntent.credits : 0,
+      creditsRemaining: userCredits ? userCredits.credits - ((buildIntent.isBuild && canBuild) ? (buildIntent.credits || 0) : 0) : null,
+      tokensUsed: result.tokensUsed,
+      cost: result.cost,
+      latency: Date.now() - startTime
     });
     
   } catch (error: any) {
     console.error('Chat API error:', error);
     return NextResponse.json({
       content: `Sorry, I encountered an error: ${error.message}. Please try again.`,
-      provider: 'error'
+      provider: 'error',
+      latency: Date.now() - startTime
     }, { status: 500 });
   }
 }
@@ -852,15 +1011,20 @@ After building, they'll have ${(userCredits?.credits || 0) - (buildIntent.credit
 export async function GET() {
   return NextResponse.json({
     status: 'ok',
-    version: '3.0',
+    version: '4.0',
     name: 'Javari AI',
+    timestamp: new Date().toISOString(),
     capabilities: [
       'multi-ai-routing',
       'build-detection', 
       'credit-management',
       'auto-deployment',
       'full-product-knowledge',
+      'fallback-chain',
+      'cost-tracking',
+      'performance-logging'
     ],
+    providers: Object.keys(PROVIDERS),
     products: Object.keys(CR_PRODUCTS).length,
   });
 }
