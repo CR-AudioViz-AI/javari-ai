@@ -3,8 +3,8 @@
  * Supports: OpenAI GPT-4, Claude Sonnet 4.5, Claude Opus 4
  * 
  * @route /api/javari/chat
- * @version 3.0.0 - MULTI-MODEL SUPPORT
- * @last-updated 2025-10-28
+ * @version 4.0.0 - VIP DETECTION + ACTION MODE
+ * @last-updated 2025-12-13
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -31,6 +31,24 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+// VIP User Detection
+const VIP_IDENTIFIERS = [
+  'roy henderson',
+  'i am roy',
+  "i'm roy",
+  'cindy henderson',
+  'i am cindy',
+  "i'm cindy",
+  '@craudiovizai.com',
+  'ceo',
+  'co-founder',
+  'cofounder',
+];
+
+const VIP_USER_IDS = [
+  // Add specific user IDs here when known
+];
+
 // Supported AI models
 export type AIModel = 
   | 'gpt-4-turbo-preview' 
@@ -51,9 +69,11 @@ interface ChatRequest {
   projectId?: string;
   sessionId?: string;
   userId?: string;
+  userEmail?: string;
+  userName?: string;
   conversationId?: string;
   parentId?: string;
-  model?: AIModel; // Model selection
+  model?: AIModel;
   maxTokens?: number;
   temperature?: number;
 }
@@ -113,6 +133,61 @@ const MODEL_CONFIG: Record<AIModel, ModelCapabilities> = {
 };
 
 /**
+ * Detect if the user is a VIP (owner/admin)
+ */
+function detectVIP(message: string, history: ChatMessage[], userId?: string, userEmail?: string, userName?: string): { isVIP: boolean; vipName?: string } {
+  const fullConversation = [
+    ...history.map(m => m.content),
+    message
+  ].join(' ').toLowerCase();
+
+  // Check message content for VIP identifiers
+  for (const identifier of VIP_IDENTIFIERS) {
+    if (fullConversation.includes(identifier.toLowerCase())) {
+      if (identifier.includes('roy')) return { isVIP: true, vipName: 'Roy Henderson (CEO)' };
+      if (identifier.includes('cindy')) return { isVIP: true, vipName: 'Cindy Henderson (CMO)' };
+      if (identifier.includes('@craudiovizai.com')) return { isVIP: true, vipName: 'CR AudioViz Staff' };
+      return { isVIP: true, vipName: 'VIP User' };
+    }
+  }
+
+  // Check user email
+  if (userEmail?.toLowerCase().includes('@craudiovizai.com')) {
+    return { isVIP: true, vipName: 'CR AudioViz Staff' };
+  }
+
+  // Check user name
+  if (userName) {
+    const nameLower = userName.toLowerCase();
+    if (nameLower.includes('roy henderson') || nameLower.includes('cindy henderson')) {
+      return { isVIP: true, vipName: userName };
+    }
+  }
+
+  // Check user ID
+  if (userId && VIP_USER_IDS.includes(userId)) {
+    return { isVIP: true, vipName: 'VIP User' };
+  }
+
+  return { isVIP: false };
+}
+
+/**
+ * Detect if this is a BUILD request
+ */
+function isBuildRequest(message: string): boolean {
+  const buildKeywords = [
+    'build', 'create', 'make', 'generate', 'design', 'develop',
+    'write code', 'write a', 'code a', 'implement',
+    'calculator', 'app', 'tool', 'component', 'page', 'website',
+    'dashboard', 'form', 'landing', 'interface', 'ui',
+  ];
+  
+  const messageLower = message.toLowerCase();
+  return buildKeywords.some(keyword => messageLower.includes(keyword));
+}
+
+/**
  * Stream response from OpenAI
  */
 async function streamOpenAI(
@@ -158,7 +233,6 @@ async function streamClaude(
 ): Promise<string> {
   let fullResponse = '';
 
-  // Convert messages to Claude format
   const claudeMessages = messages.map(msg => ({
     role: msg.role === 'assistant' ? 'assistant' : 'user',
     content: msg.content,
@@ -184,7 +258,7 @@ async function streamClaude(
 }
 
 /**
- * Calculate estimated cost based on token usage
+ * Calculate estimated cost
  */
 function estimateCost(model: AIModel, inputTokens: number, outputTokens: number): number {
   const config = MODEL_CONFIG[model];
@@ -194,7 +268,7 @@ function estimateCost(model: AIModel, inputTokens: number, outputTokens: number)
 }
 
 /**
- * Rough token estimation (4 chars ≈ 1 token)
+ * Rough token estimation
  */
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
@@ -202,7 +276,7 @@ function estimateTokens(text: string): number {
 
 /**
  * POST /api/javari/chat
- * Multi-model chat endpoint with streaming support
+ * Multi-model chat endpoint with VIP detection and streaming
  */
 export async function POST(request: NextRequest) {
   try {
@@ -213,9 +287,11 @@ export async function POST(request: NextRequest) {
       projectId, 
       sessionId, 
       userId, 
+      userEmail,
+      userName,
       conversationId, 
       parentId,
-      model = 'gpt-4-turbo-preview', // Default model
+      model = 'gpt-4-turbo-preview',
       maxTokens = 4096,
       temperature = 0.7,
     } = body;
@@ -253,17 +329,67 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Build contextual system prompt
-    const contextualSystemPrompt = `${JAVARI_SYSTEM_PROMPT}
+    // === VIP DETECTION ===
+    const { isVIP, vipName } = detectVIP(message, history, userId, userEmail, userName);
+    const isBuild = isBuildRequest(message);
+
+    // === BUILD CONTEXTUAL SYSTEM PROMPT ===
+    let contextualSystemPrompt = JAVARI_SYSTEM_PROMPT;
+
+    // Add VIP context if detected
+    if (isVIP) {
+      contextualSystemPrompt += `
+
+## 🔴 VIP USER DETECTED: ${vipName} 🔴
+
+THIS IS AN OWNER/FOUNDER OF CR AUDIOVIZ AI.
+
+CRITICAL RULES FOR THIS USER:
+- NEVER mention signup, pricing, plans, credits, or accounts
+- NEVER ask them to "grab an account" or "upgrade"
+- BUILD IMMEDIATELY without any barriers
+- They own the platform - treat them as the boss
+- Be direct and efficient - they value speed over pleasantries
+- Output working code FIRST, explanations SECOND
+`;
+    }
+
+    // Add BUILD mode context if this is a build request
+    if (isBuild) {
+      contextualSystemPrompt += `
+
+## 🛠️ BUILD REQUEST DETECTED 🛠️
+
+The user wants you to BUILD something. Your response MUST:
+1. START with working code (React/TSX component)
+2. Use Tailwind CSS for all styling
+3. Include all necessary state and functionality
+4. Add realistic sample/mock data
+5. Be complete and deployable
+6. Keep explanations BRIEF (2-3 sentences max) AFTER the code
+
+DO NOT:
+- List features or describe what you "would" build
+- Ask clarifying questions (make reasonable assumptions)
+- Give a roadmap or development plan
+- Say "Here's how we'll approach this"
+
+Just BUILD IT. Output the code FIRST.
+`;
+    }
+
+    // Add conversation context
+    contextualSystemPrompt += `
 
 ## CURRENT CONVERSATION CONTEXT
 ${projectId ? `Project ID: ${projectId}` : 'No specific project context'}
 ${sessionId ? `Session ID: ${sessionId}` : 'New session'}
-${conversationId ? `Conversation ID: ${conversationId}` : parentId ? 'This is a continuation of a previous conversation' : 'This is a new conversation'}
+${conversationId ? `Conversation ID: ${conversationId}` : parentId ? 'Continuation of previous conversation' : 'New conversation'}
 ${userId ? `User ID: ${userId}` : 'User: demo-user'}
+${isVIP ? `🔴 VIP STATUS: ${vipName}` : ''}
 Model: ${modelConfig.name} (${model})
 
-Remember: You know Roy and Cindy Henderson. You understand the CR AudioViz AI mission. Respond as their partner, not a generic AI.`;
+You are Javari AI. You BUILD things. You don't describe things. ACTION over words.`;
 
     let fullResponse = '';
     let newConversationId = conversationId;
@@ -279,7 +405,6 @@ Remember: You know Roy and Cindy Henderson. You understand the CR AudioViz AI mi
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          // Route to appropriate AI provider
           if (modelConfig.provider === 'openai') {
             const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
               { role: 'system', content: contextualSystemPrompt },
@@ -319,7 +444,7 @@ Remember: You know Roy and Cindy Henderson. You understand the CR AudioViz AI mi
           outputTokens = estimateTokens(fullResponse);
           const estimatedCost = estimateCost(model, inputTokens, outputTokens);
 
-          // Save to database after streaming completes
+          // Save to database
           if (userId) {
             try {
               const updatedMessages = [
@@ -329,7 +454,6 @@ Remember: You know Roy and Cindy Henderson. You understand the CR AudioViz AI mi
               ];
 
               if (conversationId) {
-                // Update existing conversation
                 await supabase
                   .from('conversations')
                   .update({
@@ -339,7 +463,6 @@ Remember: You know Roy and Cindy Henderson. You understand the CR AudioViz AI mi
                   })
                   .eq('id', conversationId);
               } else {
-                // Calculate continuation depth if has parent
                 let continuationDepth = 0;
                 if (parentId) {
                   const { data: parent } = await supabase
@@ -353,7 +476,6 @@ Remember: You know Roy and Cindy Henderson. You understand the CR AudioViz AI mi
                   }
                 }
 
-                // Create new conversation
                 const title = message.slice(0, 100);
                 const { data } = await supabase
                   .from('conversations')
@@ -370,6 +492,7 @@ Remember: You know Roy and Cindy Henderson. You understand the CR AudioViz AI mi
                     continuation_depth: continuationDepth,
                     token_count: inputTokens + outputTokens,
                     estimated_cost: estimatedCost,
+                    is_vip: isVIP,
                   })
                   .select()
                   .single();
@@ -379,7 +502,7 @@ Remember: You know Roy and Cindy Henderson. You understand the CR AudioViz AI mi
                 }
               }
 
-              // Log usage for analytics
+              // Log usage
               await supabase
                 .from('javari_usage_logs')
                 .insert({
@@ -390,19 +513,22 @@ Remember: You know Roy and Cindy Henderson. You understand the CR AudioViz AI mi
                   output_tokens: outputTokens,
                   estimated_cost: estimatedCost,
                   provider: modelConfig.provider,
+                  is_vip: isVIP,
+                  is_build_request: isBuild,
                 });
             } catch (dbError) {
               console.error('Error saving conversation:', dbError);
-              // Don't fail the request if DB save fails
             }
           }
 
-          // Send completion signal with metadata
+          // Send completion signal
           controller.enqueue(
             encoder.encode(
               `data: ${JSON.stringify({ 
                 done: true, 
                 conversationId: newConversationId,
+                isVIP,
+                isBuildRequest: isBuild,
                 metadata: {
                   model: model,
                   provider: modelConfig.provider,
