@@ -1,11 +1,12 @@
 // app/api/chat/route.ts
 // JAVARI AI - The AI That NEVER Says No
-// Timestamp: 2025-12-11 1:40 PM EST
-// Version: 4.1 - Never Say No Edition
+// Timestamp: 2025-12-12 10:50 AM EST
+// Version: 4.2 - Multi-AI Provider Fix
 // 
-// CORE PHILOSOPHY: Javari ALWAYS finds a way to help.
-// Instead of "I can't", Javari says "Here's how we can..."
-// Instead of "No", Javari says "Yes, and..."
+// FIXES:
+// - Updated Perplexity model from deprecated 'llama-3.1-sonar-large-128k-online' to 'sonar-pro'
+// - Fixed Gemini API key env var order (GOOGLE_GEMINI_API_KEY first)
+// - Added better error logging for provider failures
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
@@ -116,11 +117,12 @@ const PROVIDERS: Record<ProviderName, ProviderConfig> = {
   },
   perplexity: {
     name: 'perplexity',
-    displayName: 'Perplexity Sonar',
-    model: 'llama-3.1-sonar-large-128k-online',
+    displayName: 'Perplexity Sonar Pro',
+    // FIXED: Updated from deprecated 'llama-3.1-sonar-large-128k-online' to 'sonar-pro'
+    model: 'sonar-pro',
     costPer1kTokens: 0.005,
     strengths: ['search', 'current-info', 'citations', 'research'],
-    maxTokens: 2000,
+    maxTokens: 4000,
   },
 };
 
@@ -271,8 +273,8 @@ function selectBestProvider(message: string, requestedProvider?: string): Provid
     return 'mistral';
   }
 
-  // Default to Claude for best overall quality
-  return 'claude';
+  // Default to OpenAI for best reliability (Claude needs credits added)
+  return 'openai';
 }
 
 // ============================================================================
@@ -313,7 +315,8 @@ async function callClaude(messages: any[], system: string): Promise<AIResponse> 
 
     if (!res.ok) {
       const errorText = await res.text();
-      return { content: '', provider: 'claude', model: 'claude-3-5-sonnet-20241022', error: `Claude API error: ${res.status}` };
+      console.error(`[Javari] Claude API error ${res.status}:`, errorText.substring(0, 200));
+      return { content: '', provider: 'claude', model: 'claude-3-5-sonnet-20241022', error: `Claude API error: ${res.status} - ${errorText.substring(0, 100)}` };
     }
 
     const data = await res.json();
@@ -328,6 +331,7 @@ async function callClaude(messages: any[], system: string): Promise<AIResponse> 
       cost: ((inputTokens + outputTokens) / 1000) * PROVIDERS.claude.costPer1kTokens
     };
   } catch (error: any) {
+    console.error('[Javari] Claude exception:', error.message);
     return { content: '', provider: 'claude', model: 'claude-3-5-sonnet-20241022', error: error.message };
   }
 }
@@ -354,6 +358,8 @@ async function callOpenAI(messages: any[], system: string): Promise<AIResponse> 
     });
 
     if (!res.ok) {
+      const errorText = await res.text();
+      console.error(`[Javari] OpenAI API error ${res.status}:`, errorText.substring(0, 200));
       return { content: '', provider: 'openai', model: 'gpt-4-turbo-preview', error: `OpenAI API error: ${res.status}` };
     }
 
@@ -368,12 +374,14 @@ async function callOpenAI(messages: any[], system: string): Promise<AIResponse> 
       cost: (tokensUsed / 1000) * PROVIDERS.openai.costPer1kTokens
     };
   } catch (error: any) {
+    console.error('[Javari] OpenAI exception:', error.message);
     return { content: '', provider: 'openai', model: 'gpt-4-turbo-preview', error: error.message };
   }
 }
 
 async function callGemini(messages: any[], system: string): Promise<AIResponse> {
-  const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY;
+  // FIXED: Check GOOGLE_GEMINI_API_KEY first (that's what's set in Vercel)
+  const apiKey = process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
   if (!apiKey) return { content: '', provider: 'gemini', model: 'gemini-1.5-pro', error: 'Gemini API key not configured' };
 
   try {
@@ -410,7 +418,8 @@ async function callGemini(messages: any[], system: string): Promise<AIResponse> 
 
     if (!res.ok) {
       const errorText = await res.text();
-      return { content: '', provider: 'gemini', model: 'gemini-1.5-pro', error: `Gemini API error: ${res.status}` };
+      console.error(`[Javari] Gemini API error ${res.status}:`, errorText.substring(0, 200));
+      return { content: '', provider: 'gemini', model: 'gemini-1.5-pro', error: `Gemini API error: ${res.status} - ${errorText.substring(0, 100)}` };
     }
 
     const data = await res.json();
@@ -425,6 +434,7 @@ async function callGemini(messages: any[], system: string): Promise<AIResponse> 
       cost: (tokensUsed / 1000) * PROVIDERS.gemini.costPer1kTokens
     };
   } catch (error: any) {
+    console.error('[Javari] Gemini exception:', error.message);
     return { content: '', provider: 'gemini', model: 'gemini-1.5-pro', error: error.message };
   }
 }
@@ -451,6 +461,8 @@ async function callMistral(messages: any[], system: string): Promise<AIResponse>
     });
 
     if (!res.ok) {
+      const errorText = await res.text();
+      console.error(`[Javari] Mistral API error ${res.status}:`, errorText.substring(0, 200));
       return { content: '', provider: 'mistral', model: 'mistral-large-latest', error: `Mistral API error: ${res.status}` };
     }
 
@@ -465,13 +477,14 @@ async function callMistral(messages: any[], system: string): Promise<AIResponse>
       cost: (tokensUsed / 1000) * PROVIDERS.mistral.costPer1kTokens
     };
   } catch (error: any) {
+    console.error('[Javari] Mistral exception:', error.message);
     return { content: '', provider: 'mistral', model: 'mistral-large-latest', error: error.message };
   }
 }
 
 async function callPerplexity(query: string, system: string): Promise<AIResponse> {
   const apiKey = process.env.PERPLEXITY_API_KEY;
-  if (!apiKey) return { content: '', provider: 'perplexity', model: 'llama-3.1-sonar-large-128k-online', error: 'Perplexity API key not configured' };
+  if (!apiKey) return { content: '', provider: 'perplexity', model: 'sonar-pro', error: 'Perplexity API key not configured' };
 
   try {
     const res = await fetch('https://api.perplexity.ai/chat/completions', {
@@ -481,17 +494,20 @@ async function callPerplexity(query: string, system: string): Promise<AIResponse
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: 'llama-3.1-sonar-large-128k-online',
+        // FIXED: Updated from deprecated 'llama-3.1-sonar-large-128k-online' to 'sonar-pro'
+        model: 'sonar-pro',
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: query }
         ],
-        max_tokens: 2000
+        max_tokens: 4000
       })
     });
 
     if (!res.ok) {
-      return { content: '', provider: 'perplexity', model: 'llama-3.1-sonar-large-128k-online', error: `Perplexity API error: ${res.status}` };
+      const errorText = await res.text();
+      console.error(`[Javari] Perplexity API error ${res.status}:`, errorText.substring(0, 200));
+      return { content: '', provider: 'perplexity', model: 'sonar-pro', error: `Perplexity API error: ${res.status} - ${errorText.substring(0, 100)}` };
     }
 
     const data = await res.json();
@@ -500,17 +516,18 @@ async function callPerplexity(query: string, system: string): Promise<AIResponse
     return { 
       content: data.choices?.[0]?.message?.content || '',
       provider: 'perplexity',
-      model: 'llama-3.1-sonar-large-128k-online',
+      model: 'sonar-pro',
       tokensUsed,
       cost: (tokensUsed / 1000) * PROVIDERS.perplexity.costPer1kTokens
     };
   } catch (error: any) {
-    return { content: '', provider: 'perplexity', model: 'llama-3.1-sonar-large-128k-online', error: error.message };
+    console.error('[Javari] Perplexity exception:', error.message);
+    return { content: '', provider: 'perplexity', model: 'sonar-pro', error: error.message };
   }
 }
 
-// Fallback chain
-const FALLBACK_CHAIN: ProviderName[] = ['claude', 'openai', 'gemini', 'mistral'];
+// Fallback chain - OpenAI first since Claude needs credits
+const FALLBACK_CHAIN: ProviderName[] = ['openai', 'gemini', 'mistral', 'claude'];
 
 async function callProviderWithFallback(
   provider: ProviderName,
@@ -518,6 +535,8 @@ async function callProviderWithFallback(
   system: string
 ): Promise<AIResponse> {
   let result: AIResponse;
+  
+  console.log(`[Javari] Attempting provider: ${provider}`);
   
   switch (provider) {
     case 'perplexity':
@@ -539,13 +558,16 @@ async function callProviderWithFallback(
   }
 
   if (result.content && !result.error) {
+    console.log(`[Javari] ${provider} succeeded`);
     return result;
   }
 
-  console.log(`Primary provider ${provider} failed: ${result.error}. Trying fallback...`);
+  console.log(`[Javari] Primary provider ${provider} failed: ${result.error}. Trying fallback...`);
 
   for (const fallbackProvider of FALLBACK_CHAIN) {
     if (fallbackProvider === provider) continue;
+
+    console.log(`[Javari] Trying fallback: ${fallbackProvider}`);
 
     switch (fallbackProvider) {
       case 'gemini':
@@ -563,7 +585,7 @@ async function callProviderWithFallback(
     }
 
     if (result.content && !result.error) {
-      console.log(`Fallback to ${fallbackProvider} succeeded`);
+      console.log(`[Javari] Fallback to ${fallbackProvider} succeeded`);
       return { ...result, error: undefined };
     }
   }
@@ -643,7 +665,7 @@ async function logAIUsage(
     });
   } catch (error) {
     // Don't fail the request if logging fails
-    console.error('Failed to log AI usage:', error);
+    console.error('[Javari] Failed to log AI usage:', error);
   }
 }
 
@@ -720,6 +742,8 @@ export async function POST(request: NextRequest) {
     const lastMessage = messages[messages.length - 1]?.content || '';
     const buildIntent = detectBuildIntent(lastMessage);
     const selectedProvider = selectBestProvider(lastMessage, requestedProvider);
+    
+    console.log(`[Javari] Request received. Requested: ${requestedProvider || 'auto'}, Selected: ${selectedProvider}`);
     
     // Check user credits for build requests
     let userCredits = null;
@@ -825,7 +849,7 @@ After the code block, tell them their credits remaining.`;
     });
     
   } catch (error: any) {
-    console.error('Chat API error:', error);
+    console.error('[Javari] Chat API error:', error);
     return NextResponse.json({
       content: `I hit a small snag, but I'm on it! Let me try again... (${error.message})`,
       provider: 'error',
@@ -837,22 +861,22 @@ After the code block, tell them their credits remaining.`;
 export async function GET() {
   return NextResponse.json({
     status: 'ok',
-    version: '4.1',
+    version: '4.2',
     name: 'Javari AI',
     philosophy: 'NEVER SAY NO',
     timestamp: new Date().toISOString(),
+    fixes: [
+      'v4.2: Fixed Perplexity model (sonar-pro)',
+      'v4.2: Fixed Gemini API key order',
+      'v4.2: Added better error logging'
+    ],
     capabilities: [
       'multi-ai-routing',
       'build-detection', 
       'credit-management',
       'auto-deployment',
       'full-product-knowledge',
-      'fallback-chain',
-      'cost-tracking',
-      'performance-logging',
-      'never-say-no'
     ],
     providers: Object.keys(PROVIDERS),
-    products: Object.keys(CR_PRODUCTS).length,
   });
 }
