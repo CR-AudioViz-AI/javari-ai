@@ -347,29 +347,36 @@ $$;
 export async function GET(request: NextRequest) {
   const startTime = Date.now();
   
-  // Build connection string from env vars
-  const dbPassword = process.env.SUPABASE_DB_PASSWORD;
-  const projectRef = process.env.SUPABASE_PROJECT_REF || 'kteobfyferrukqeolofj';
+  // Use DATABASE_URL if available, otherwise build from parts
+  let connectionString = process.env.DATABASE_URL;
   
-  if (!dbPassword) {
-    return NextResponse.json({
-      error: 'Missing SUPABASE_DB_PASSWORD environment variable',
-      setup_required: 'Add SUPABASE_DB_PASSWORD to Vercel environment variables'
-    }, { status: 500 });
+  if (!connectionString) {
+    const dbPassword = process.env.SUPABASE_DB_PASSWORD;
+    const projectRef = process.env.SUPABASE_PROJECT_REF || 'kteobfyferrukqeolofj';
+    
+    if (!dbPassword) {
+      return NextResponse.json({
+        error: 'Missing DATABASE_URL or SUPABASE_DB_PASSWORD environment variable',
+        setup_required: 'Add DATABASE_URL to Vercel environment variables'
+      }, { status: 500 });
+    }
+    
+    // URL encode the password (@ becomes %40)
+    const encodedPassword = encodeURIComponent(dbPassword);
+    
+    // Use pooler connection (works from serverless)
+    connectionString = `postgresql://postgres.${projectRef}:${encodedPassword}@aws-0-us-east-1.pooler.supabase.com:6543/postgres`;
   }
-  
-  // URL encode the password (@ becomes %40)
-  const encodedPassword = encodeURIComponent(dbPassword);
-  
-  // Use pooler connection (works from serverless)
-  const connectionString = `postgresql://postgres.${projectRef}:${encodedPassword}@aws-0-us-east-1.pooler.supabase.com:6543/postgres`;
   
   const pool = new Pool({
     connectionString,
     ssl: { rejectUnauthorized: false },
-    connectionTimeoutMillis: 30000,
-    idleTimeoutMillis: 30000
+    connectionTimeoutMillis: 60000,
+    idleTimeoutMillis: 30000,
+    max: 1 // Single connection for DDL
   });
+  
+  console.log('[Setup] Using connection:', connectionString.replace(/:[^:@]+@/, ':****@'));
   
   const results: { step: string; success: boolean; message: string }[] = [];
   
