@@ -10,10 +10,6 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchAllSources, cleanupExpiredData, getDataSourceStats } from '@/lib/external-data-fetcher';
-import { updateAllMissingEmbeddings } from '@/lib/embeddings';
-import { generateNewsSuggestions, storeSuggestions, cleanupExpiredSuggestions } from '@/lib/proactive-suggestions';
-import { getLearningInsights, getTopKnowledgeGaps } from '@/lib/feedback-learning';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300; // 5 minutes max
@@ -48,6 +44,16 @@ export async function GET(request: NextRequest) {
   };
 
   try {
+    // Dynamic imports to avoid build issues
+    const { fetchAllSources, cleanupExpiredData, getDataSourceStats } = 
+      await import('@/lib/autonomous-enhanced/external-data-fetcher');
+    const { updateAllMissingEmbeddings } = 
+      await import('@/lib/autonomous-enhanced/embeddings');
+    const { generateNewsSuggestions, storeSuggestions, cleanupExpiredSuggestions } = 
+      await import('@/lib/autonomous-enhanced/proactive-suggestions');
+    const { getLearningInsights, getTopKnowledgeGaps } = 
+      await import('@/lib/autonomous-enhanced/feedback-learning');
+
     // ========================================================================
     // PHASE 1: FETCH EXTERNAL DATA
     // ========================================================================
@@ -161,6 +167,16 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString(),
       phase: phase || 'all',
     };
+
+    // Dynamic imports
+    const { fetchAllSources, cleanupExpiredData, getDataSourceStats } = 
+      await import('@/lib/autonomous-enhanced/external-data-fetcher');
+    const { updateAllMissingEmbeddings } = 
+      await import('@/lib/autonomous-enhanced/embeddings');
+    const { generateNewsSuggestions, storeSuggestions, cleanupExpiredSuggestions } = 
+      await import('@/lib/autonomous-enhanced/proactive-suggestions');
+    const { getLearningInsights, getTopKnowledgeGaps } = 
+      await import('@/lib/autonomous-enhanced/feedback-learning');
 
     switch (phase) {
       case 'external_data':
