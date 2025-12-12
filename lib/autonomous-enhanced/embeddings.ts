@@ -1,6 +1,8 @@
 /**
- * Javari AI - Embeddings & Semantic Search System
- * Generates embeddings and enables semantic search across knowledge base
+ * Javari AI - Embeddings & Semantic Search
+ * 
+ * Uses OpenAI's text-embedding-3-small for semantic understanding.
+ * Enables Javari to find relevant knowledge even with different wording.
  * 
  * Created: December 13, 2025
  */
@@ -8,98 +10,48 @@
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 
-// Initialize clients
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
+  apiKey: process.env.OPENAI_API_KEY
 });
 
-// Constants
 const EMBEDDING_MODEL = 'text-embedding-3-small';
 const EMBEDDING_DIMENSIONS = 1536;
-const DEFAULT_MATCH_THRESHOLD = 0.7;
-const DEFAULT_MATCH_COUNT = 5;
-
-export interface EmbeddingResult {
-  embedding: number[];
-  tokens: number;
-  model: string;
-}
-
-export interface SearchResult {
-  id: string;
-  category: string;
-  subcategory?: string;
-  title: string;
-  content: string;
-  keywords?: string[];
-  confidence_score: number;
-  similarity: number;
-}
-
-export interface HybridSearchResult {
-  id: string;
-  category: string;
-  title: string;
-  content: string;
-  score: number;
-}
 
 /**
- * Generate embedding for text using OpenAI
+ * Generate embedding for a single text
  */
-export async function generateEmbedding(text: string): Promise<EmbeddingResult> {
+export async function generateEmbedding(text: string): Promise<number[] | null> {
   try {
-    // Clean and truncate text to avoid token limits
-    const cleanedText = text
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 8000); // ~2000 tokens max
-
     const response = await openai.embeddings.create({
       model: EMBEDDING_MODEL,
-      input: cleanedText,
+      input: text.substring(0, 8000), // Limit to 8000 chars
     });
-
-    return {
-      embedding: response.data[0].embedding,
-      tokens: response.usage.total_tokens,
-      model: EMBEDDING_MODEL,
-    };
+    return response.data[0].embedding;
   } catch (error) {
-    console.error('Error generating embedding:', error);
-    throw error;
+    console.error('[Embeddings] Error generating embedding:', error);
+    return null;
   }
 }
 
 /**
- * Generate embeddings for multiple texts (batched)
+ * Generate embeddings for multiple texts (batch processing)
  */
-export async function generateEmbeddingsBatch(
-  texts: string[]
-): Promise<EmbeddingResult[]> {
+export async function generateEmbeddingsBatch(texts: string[]): Promise<(number[] | null)[]> {
   try {
-    const cleanedTexts = texts.map(text =>
-      text.replace(/\s+/g, ' ').trim().slice(0, 8000)
-    );
-
+    const truncatedTexts = texts.map(t => t.substring(0, 8000));
     const response = await openai.embeddings.create({
       model: EMBEDDING_MODEL,
-      input: cleanedTexts,
+      input: truncatedTexts,
     });
-
-    return response.data.map((item, index) => ({
-      embedding: item.embedding,
-      tokens: Math.floor(response.usage.total_tokens / texts.length),
-      model: EMBEDDING_MODEL,
-    }));
+    return response.data.map(d => d.embedding);
   } catch (error) {
-    console.error('Error generating batch embeddings:', error);
-    throw error;
+    console.error('[Embeddings] Batch error:', error);
+    return texts.map(() => null);
   }
 }
 
@@ -109,233 +61,203 @@ export async function generateEmbeddingsBatch(
 export async function searchKnowledge(
   query: string,
   options: {
-    matchThreshold?: number;
-    matchCount?: number;
-    category?: string;
-  } = {}
-): Promise<SearchResult[]> {
-  const {
-    matchThreshold = DEFAULT_MATCH_THRESHOLD,
-    matchCount = DEFAULT_MATCH_COUNT,
-    category,
-  } = options;
-
-  try {
-    // Generate embedding for query
-    const { embedding } = await generateEmbedding(query);
-
-    // Call the search_knowledge function in Supabase
-    const { data, error } = await supabase.rpc('search_knowledge', {
-      query_embedding: embedding,
-      match_threshold: matchThreshold,
-      match_count: matchCount,
-    });
-
-    if (error) {
-      console.error('Error searching knowledge:', error);
-      // Fallback to keyword search
-      return keywordSearch(query, matchCount, category);
-    }
-
-    // Filter by category if specified
-    let results = data as SearchResult[];
-    if (category) {
-      results = results.filter(r => r.category === category);
-    }
-
-    return results;
-  } catch (error) {
-    console.error('Error in searchKnowledge:', error);
-    // Fallback to keyword search
-    return keywordSearch(query, matchCount, category);
-  }
-}
-
-/**
- * Hybrid search (keyword + semantic)
- */
-export async function hybridSearch(
-  query: string,
-  options: {
+    threshold?: number;
     limit?: number;
     category?: string;
   } = {}
-): Promise<HybridSearchResult[]> {
-  const { limit = 5, category } = options;
+): Promise<any[]> {
+  const { threshold = 0.7, limit = 5, category } = options;
+  
+  const embedding = await generateEmbedding(query);
+  if (!embedding) {
+    console.warn('[Embeddings] Could not generate embedding, falling back to keyword search');
+    return keywordSearch(query, limit, category);
+  }
 
   try {
-    // Generate embedding
-    const { embedding } = await generateEmbedding(query);
-
-    // Call hybrid search function
-    const { data, error } = await supabase.rpc('hybrid_search_knowledge', {
-      p_query: query,
-      p_embedding: embedding,
-      p_category: category,
-      p_limit: limit,
+    // Use the search_knowledge function we created
+    const { data, error } = await supabase.rpc('search_knowledge', {
+      query_embedding: embedding,
+      match_threshold: threshold,
+      match_count: limit
     });
 
     if (error) {
-      console.error('Hybrid search error:', error);
+      console.error('[Embeddings] Search error:', error);
       return keywordSearch(query, limit, category);
     }
 
-    return data as HybridSearchResult[];
+    // Filter by category if specified
+    if (category && data) {
+      return data.filter((r: any) => r.category === category);
+    }
+
+    return data || [];
   } catch (error) {
-    console.error('Error in hybridSearch:', error);
+    console.error('[Embeddings] Search failed:', error);
     return keywordSearch(query, limit, category);
   }
 }
 
 /**
- * Keyword-only search (fallback)
+ * Keyword-based fallback search
  */
 export async function keywordSearch(
   query: string,
   limit: number = 5,
   category?: string
-): Promise<SearchResult[]> {
-  try {
-    let queryBuilder = supabase
-      .from('javari_knowledge')
-      .select('id, category, subcategory, title, content, keywords, confidence_score')
-      .or(`title.ilike.%${query}%,content.ilike.%${query}%`)
-      .order('confidence_score', { ascending: false })
-      .limit(limit);
+): Promise<any[]> {
+  let queryBuilder = supabase
+    .from('javari_knowledge')
+    .select('id, category, subcategory, title, content, keywords, confidence_score')
+    .textSearch('content', query.split(' ').join(' | '), { type: 'websearch' })
+    .limit(limit);
 
-    if (category) {
-      queryBuilder = queryBuilder.eq('category', category);
-    }
+  if (category) {
+    queryBuilder = queryBuilder.eq('category', category);
+  }
 
-    const { data, error } = await queryBuilder;
+  const { data, error } = await queryBuilder;
 
-    if (error) {
-      console.error('Keyword search error:', error);
-      return [];
-    }
-
-    return (data || []).map(item => ({
-      ...item,
-      similarity: 0.5, // Default for keyword matches
-    })) as SearchResult[];
-  } catch (error) {
-    console.error('Error in keywordSearch:', error);
+  if (error) {
+    console.error('[Embeddings] Keyword search error:', error);
     return [];
   }
+
+  return data || [];
 }
 
 /**
- * Update embedding for a knowledge entry
+ * Hybrid search: combines semantic and keyword search
  */
-export async function updateKnowledgeEmbedding(
-  knowledgeId: string
-): Promise<boolean> {
+export async function hybridSearch(
+  query: string,
+  options: {
+    semanticWeight?: number;
+    limit?: number;
+    category?: string;
+  } = {}
+): Promise<any[]> {
+  const { semanticWeight = 0.7, limit = 5, category } = options;
+
+  const [semanticResults, keywordResults] = await Promise.all([
+    searchKnowledge(query, { limit: limit * 2, category }),
+    keywordSearch(query, limit * 2, category)
+  ]);
+
+  // Combine and deduplicate results
+  const resultMap = new Map<string, any>();
+
+  // Add semantic results with weight
+  semanticResults.forEach((r, i) => {
+    const score = (1 - i / semanticResults.length) * semanticWeight;
+    resultMap.set(r.id, { ...r, hybrid_score: score });
+  });
+
+  // Add keyword results with remaining weight
+  keywordResults.forEach((r, i) => {
+    const keywordScore = (1 - i / keywordResults.length) * (1 - semanticWeight);
+    if (resultMap.has(r.id)) {
+      const existing = resultMap.get(r.id);
+      existing.hybrid_score += keywordScore;
+    } else {
+      resultMap.set(r.id, { ...r, hybrid_score: keywordScore });
+    }
+  });
+
+  // Sort by hybrid score and return top results
+  return Array.from(resultMap.values())
+    .sort((a, b) => b.hybrid_score - a.hybrid_score)
+    .slice(0, limit);
+}
+
+/**
+ * Update embedding for a specific knowledge entry
+ */
+export async function updateKnowledgeEmbedding(knowledgeId: string): Promise<boolean> {
   try {
-    // Fetch the knowledge entry
-    const { data: entry, error: fetchError } = await supabase
+    const { data: knowledge, error: fetchError } = await supabase
       .from('javari_knowledge')
       .select('title, content')
       .eq('id', knowledgeId)
       .single();
 
-    if (fetchError || !entry) {
-      console.error('Error fetching knowledge entry:', fetchError);
+    if (fetchError || !knowledge) {
+      console.error('[Embeddings] Could not fetch knowledge:', fetchError);
       return false;
     }
 
-    // Generate embedding from title + content
-    const textToEmbed = `${entry.title}\n\n${entry.content}`;
-    const { embedding } = await generateEmbedding(textToEmbed);
+    const textToEmbed = `${knowledge.title}\n${knowledge.content}`;
+    const embedding = await generateEmbedding(textToEmbed);
 
-    // Update the entry with embedding
+    if (!embedding) {
+      return false;
+    }
+
     const { error: updateError } = await supabase
       .from('javari_knowledge')
       .update({ embedding })
       .eq('id', knowledgeId);
 
     if (updateError) {
-      console.error('Error updating embedding:', updateError);
+      console.error('[Embeddings] Update error:', updateError);
       return false;
     }
 
     return true;
   } catch (error) {
-    console.error('Error in updateKnowledgeEmbedding:', error);
+    console.error('[Embeddings] updateKnowledgeEmbedding error:', error);
     return false;
   }
 }
 
 /**
- * Batch update embeddings for all knowledge without embeddings
+ * Batch update all knowledge entries missing embeddings
  */
-export async function updateAllMissingEmbeddings(): Promise<{
-  updated: number;
-  failed: number;
-  errors: string[];
-}> {
-  const result = {
-    updated: 0,
-    failed: 0,
-    errors: [] as string[],
-  };
+export async function updateAllMissingEmbeddings(): Promise<{ updated: number; failed: number }> {
+  const { data: missingEmbeddings, error } = await supabase
+    .from('javari_knowledge')
+    .select('id, title, content')
+    .is('embedding', null)
+    .limit(100); // Process 100 at a time
 
-  try {
-    // Fetch entries without embeddings
-    const { data: entries, error } = await supabase
-      .from('javari_knowledge')
-      .select('id, title, content')
-      .is('embedding', null)
-      .limit(100);
-
-    if (error || !entries) {
-      result.errors.push(`Fetch error: ${error?.message}`);
-      return result;
-    }
-
-    // Process in batches of 10
-    const batchSize = 10;
-    for (let i = 0; i < entries.length; i += batchSize) {
-      const batch = entries.slice(i, i + batchSize);
-      
-      // Generate texts for embedding
-      const texts = batch.map(e => `${e.title}\n\n${e.content}`);
-      
-      try {
-        // Generate batch embeddings
-        const embeddings = await generateEmbeddingsBatch(texts);
-        
-        // Update each entry
-        for (let j = 0; j < batch.length; j++) {
-          const { error: updateError } = await supabase
-            .from('javari_knowledge')
-            .update({ embedding: embeddings[j].embedding })
-            .eq('id', batch[j].id);
-
-          if (updateError) {
-            result.failed++;
-            result.errors.push(`Update ${batch[j].id}: ${updateError.message}`);
-          } else {
-            result.updated++;
-          }
-        }
-      } catch (batchError: any) {
-        result.failed += batch.length;
-        result.errors.push(`Batch error: ${batchError.message}`);
-      }
-
-      // Rate limit: wait between batches
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
-
-    return result;
-  } catch (error: any) {
-    result.errors.push(`General error: ${error.message}`);
-    return result;
+  if (error || !missingEmbeddings) {
+    console.error('[Embeddings] Could not fetch missing embeddings:', error);
+    return { updated: 0, failed: 0 };
   }
+
+  let updated = 0;
+  let failed = 0;
+
+  // Process in batches of 10
+  for (let i = 0; i < missingEmbeddings.length; i += 10) {
+    const batch = missingEmbeddings.slice(i, i + 10);
+    const texts = batch.map(k => `${k.title}\n${k.content}`);
+    const embeddings = await generateEmbeddingsBatch(texts);
+
+    for (let j = 0; j < batch.length; j++) {
+      if (embeddings[j]) {
+        const { error: updateError } = await supabase
+          .from('javari_knowledge')
+          .update({ embedding: embeddings[j] })
+          .eq('id', batch[j].id);
+
+        if (updateError) {
+          failed++;
+        } else {
+          updated++;
+        }
+      } else {
+        failed++;
+      }
+    }
+  }
+
+  return { updated, failed };
 }
 
 /**
- * Search external data (news, financial, etc.)
+ * Search external data with embeddings
  */
 export async function searchExternalData(
   query: string,
@@ -346,94 +268,65 @@ export async function searchExternalData(
 ): Promise<any[]> {
   const { dataType, limit = 10 } = options;
 
-  try {
-    const { embedding } = await generateEmbedding(query);
+  // For now, use keyword search on external data
+  // Embeddings will be added as data is fetched
+  let queryBuilder = supabase
+    .from('javari_external_data')
+    .select('*')
+    .textSearch('content', query.split(' ').join(' | '), { type: 'websearch' })
+    .order('published_at', { ascending: false })
+    .limit(limit);
 
-    let queryBuilder = supabase
-      .from('javari_external_data')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(limit);
+  if (dataType) {
+    queryBuilder = queryBuilder.eq('data_type', dataType);
+  }
 
-    if (dataType) {
-      queryBuilder = queryBuilder.eq('data_type', dataType);
-    }
+  const { data, error } = await queryBuilder;
 
-    const { data, error } = await queryBuilder;
-
-    if (error) {
-      console.error('External data search error:', error);
-      return [];
-    }
-
-    return data || [];
-  } catch (error) {
-    console.error('Error in searchExternalData:', error);
+  if (error) {
+    console.error('[Embeddings] External data search error:', error);
     return [];
   }
+
+  return data || [];
 }
 
 /**
- * Get relevant context for a query (combines knowledge + external data)
+ * Get relevant context for a user query
+ * Combines knowledge base and external data
  */
 export async function getRelevantContext(
   query: string,
   options: {
-    maxKnowledge?: number;
-    maxExternal?: number;
     includeExternal?: boolean;
+    maxTokens?: number;
   } = {}
-): Promise<{
-  knowledge: SearchResult[];
-  external: any[];
-  contextText: string;
-}> {
-  const {
-    maxKnowledge = 3,
-    maxExternal = 2,
-    includeExternal = true,
-  } = options;
+): Promise<string> {
+  const { includeExternal = true, maxTokens = 2000 } = options;
 
-  // Search knowledge base
-  const knowledge = await hybridSearch(query, { limit: maxKnowledge });
+  const [knowledgeResults, externalResults] = await Promise.all([
+    hybridSearch(query, { limit: 3 }),
+    includeExternal ? searchExternalData(query, { limit: 2 }) : Promise.resolve([])
+  ]);
 
-  // Search external data if enabled
-  const external = includeExternal
-    ? await searchExternalData(query, { limit: maxExternal })
-    : [];
+  let context = '';
 
-  // Build context text
-  let contextText = '';
-
-  if (knowledge.length > 0) {
-    contextText += '### Relevant Knowledge:\n';
-    knowledge.forEach((k, i) => {
-      contextText += `\n**${k.title}** (${k.category})\n${k.content}\n`;
-    });
+  // Add knowledge base context
+  if (knowledgeResults.length > 0) {
+    context += '## From Knowledge Base:\n';
+    for (const result of knowledgeResults) {
+      context += `### ${result.title}\n${result.content}\n\n`;
+    }
   }
 
-  if (external.length > 0) {
-    contextText += '\n### Recent Information:\n';
-    external.forEach((e, i) => {
-      contextText += `\n**${e.title}** (${e.data_type})\n${e.content}\n`;
-    });
+  // Add external data context
+  if (externalResults.length > 0) {
+    context += '## Recent Information:\n';
+    for (const result of externalResults) {
+      context += `### ${result.title} (${result.source_name})\n${result.content?.substring(0, 500)}...\n\n`;
+    }
   }
 
-  return {
-    knowledge: knowledge as SearchResult[],
-    external,
-    contextText,
-  };
+  // Truncate to max tokens (rough estimate: 4 chars per token)
+  return context.substring(0, maxTokens * 4);
 }
-
-export default {
-  generateEmbedding,
-  generateEmbeddingsBatch,
-  searchKnowledge,
-  hybridSearch,
-  keywordSearch,
-  updateKnowledgeEmbedding,
-  updateAllMissingEmbeddings,
-  searchExternalData,
-  getRelevantContext,
-};
