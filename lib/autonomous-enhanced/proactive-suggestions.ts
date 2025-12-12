@@ -1,6 +1,8 @@
 /**
  * Javari AI - Proactive Suggestions Engine
- * Generates intelligent suggestions based on user behavior and context
+ * 
+ * Generates smart suggestions based on user behavior, trending topics,
+ * and platform features. Makes Javari proactively helpful.
  * 
  * Created: December 13, 2025
  */
@@ -8,229 +10,184 @@
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 
-// Initialize clients
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
+  apiKey: process.env.OPENAI_API_KEY
 });
 
-// ============================================================================
-// TYPES
-// ============================================================================
-
-export interface Suggestion {
-  id?: string;
-  user_id?: string;
+interface Suggestion {
+  userId?: string;
   type: 'feature' | 'tip' | 'upsell' | 'news' | 'reminder' | 'insight';
   title: string;
   content: string;
-  relevance_score: number;
-  trigger_condition?: Record<string, any>;
-  expires_at?: string;
+  relevanceScore: number;
+  triggerCondition?: Record<string, any>;
+  expiresAt?: string;
 }
-
-export interface UserContext {
-  user_id: string;
-  recent_queries?: string[];
-  recent_products?: string[];
-  subscription_tier?: string;
-  credits_remaining?: number;
-  total_usage?: number;
-  last_active?: string;
-}
-
-// ============================================================================
-// SUGGESTION GENERATORS
-// ============================================================================
 
 /**
- * Generate suggestions based on user context
+ * Generate context-aware suggestions
  */
 export async function generateSuggestions(
-  context: UserContext
+  userId?: string,
+  context?: {
+    recentActivity?: string[];
+    creditsRemaining?: number;
+    subscriptionTier?: string;
+    lastLogin?: string;
+  }
 ): Promise<Suggestion[]> {
   const suggestions: Suggestion[] = [];
-
-  // 1. Low credits warning
-  if (context.credits_remaining !== undefined && context.credits_remaining < 20) {
+  
+  // Low credits warning
+  if (context?.creditsRemaining !== undefined && context.creditsRemaining < 100) {
     suggestions.push({
-      user_id: context.user_id,
+      userId,
       type: 'reminder',
-      title: 'Credits Running Low',
-      content: `You have ${context.credits_remaining} credits remaining. Consider upgrading your plan or purchasing a credit pack to continue creating without interruption.`,
-      relevance_score: 0.95,
-      trigger_condition: { credits_below: 20 },
-      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      title: '💳 Low Credits Alert',
+      content: `You have ${context.creditsRemaining} credits remaining. ` +
+               `Consider upgrading your plan or purchasing additional credits to continue using Javari AI.`,
+      relevanceScore: 0.95,
+      triggerCondition: { credits_below: 100 },
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
     });
   }
-
-  // 2. Feature tips based on recent activity
-  if (context.recent_products && context.recent_products.length > 0) {
-    const relatedFeatures = await getRelatedFeatures(context.recent_products[0]);
-    if (relatedFeatures) {
+  
+  // Feature tips based on activity
+  if (context?.recentActivity?.length) {
+    const hasUsedChat = context.recentActivity.includes('chat');
+    const hasUsedTools = context.recentActivity.includes('tools');
+    
+    if (hasUsedChat && !hasUsedTools) {
       suggestions.push({
-        user_id: context.user_id,
+        userId,
         type: 'tip',
-        title: `Did You Know?`,
-        content: relatedFeatures,
-        relevance_score: 0.8,
-        trigger_condition: { recent_product: context.recent_products[0] },
-        expires_at: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+        title: '🛠️ Explore Our 60+ Creative Tools',
+        content: 'Did you know Javari can help you access over 60 professional creative tools? ' +
+                 'Try asking "What tools can help me create a logo?" or "Show me video editing tools".',
+        relevanceScore: 0.8,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
       });
     }
   }
-
-  // 3. Upsell based on usage patterns
-  if (
-    context.subscription_tier === 'starter' &&
-    context.total_usage !== undefined &&
-    context.total_usage > 50
-  ) {
+  
+  // Upsell for free tier
+  if (context?.subscriptionTier === 'free') {
     suggestions.push({
-      user_id: context.user_id,
+      userId,
       type: 'upsell',
-      title: 'Ready to Level Up?',
-      content:
-        "You've been creating amazing things! Upgrade to Pro for 5x the credits, API access, and priority AI routing. Save 20% with annual billing.",
-      relevance_score: 0.85,
-      trigger_condition: { usage_above: 50, tier: 'starter' },
-      expires_at: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+      title: '⭐ Upgrade to Creator Plan',
+      content: 'Unlock unlimited AI generations, priority support, and access to premium tools. ' +
+               'Save 20% with annual billing!',
+      relevanceScore: 0.6,
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
     });
   }
-
-  // 4. Engagement reminder for inactive users
-  if (context.last_active) {
-    const daysSinceActive = Math.floor(
-      (Date.now() - new Date(context.last_active).getTime()) / (24 * 60 * 60 * 1000)
-    );
-    if (daysSinceActive > 7) {
+  
+  // Re-engagement for inactive users
+  if (context?.lastLogin) {
+    const lastLoginDate = new Date(context.lastLogin);
+    const daysSinceLogin = (Date.now() - lastLoginDate.getTime()) / (24 * 60 * 60 * 1000);
+    
+    if (daysSinceLogin > 7) {
       suggestions.push({
-        user_id: context.user_id,
+        userId,
         type: 'reminder',
-        title: 'We Miss You!',
-        content: `It's been ${daysSinceActive} days since your last visit. Come back and check out what's new - we've added exciting features!`,
-        relevance_score: 0.7,
-        trigger_condition: { days_inactive: daysSinceActive },
-        expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        title: '👋 Welcome Back!',
+        content: 'We\'ve added new features since your last visit! ' +
+                 'Check out our improved AI models and new creative tools.',
+        relevanceScore: 0.85,
+        expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
       });
     }
   }
-
+  
   return suggestions;
-}
-
-/**
- * Get related feature tips for a product
- */
-async function getRelatedFeatures(product: string): Promise<string | null> {
-  const featureTips: Record<string, string> = {
-    'invoice-generator':
-      'Try our Proposal Builder next! Create professional proposals that include your invoices and close deals faster.',
-    'proposal-builder':
-      'Add Contract Generator to your workflow - send binding agreements right after your proposals are accepted.',
-    'logo-studio':
-      'Export your logo to Social Graphics Creator to instantly generate branded social media posts.',
-    'market-oracle':
-      'Combine Market Oracle with Competitive Intelligence for complete market visibility.',
-    'ebook-creator':
-      'Use SEO Content Writer to optimize your eBook chapters for better discoverability.',
-    'resume-builder':
-      'Our Email Writer can help you craft the perfect cover letter to go with your resume.',
-  };
-
-  return featureTips[product] || null;
 }
 
 /**
  * Generate AI-powered personalized insight
  */
 export async function generatePersonalizedInsight(
-  context: UserContext
+  userId: string,
+  userData: {
+    usagePatterns?: string[];
+    recentQueries?: string[];
+    preferredTools?: string[];
+  }
 ): Promise<Suggestion | null> {
-  if (!context.recent_queries || context.recent_queries.length < 3) {
+  if (!userData.recentQueries?.length && !userData.usagePatterns?.length) {
     return null;
   }
 
   try {
-    const prompt = `Based on these recent user queries, generate a brief, helpful insight or tip that would be valuable to them.
+    const prompt = `Based on this user's activity, generate ONE helpful insight or tip:
 
-Recent queries:
-${context.recent_queries.slice(0, 5).map((q, i) => `${i + 1}. "${q}"`).join('\n')}
+Usage patterns: ${userData.usagePatterns?.join(', ') || 'Not available'}
+Recent queries: ${userData.recentQueries?.slice(0, 5).join('; ') || 'Not available'}
+Preferred tools: ${userData.preferredTools?.join(', ') || 'Not available'}
 
-Generate a personalized insight in JSON format:
+Generate a brief, actionable insight (2-3 sentences) that would help this user be more productive.
+Focus on features they might not know about or ways to improve their workflow.
+
+Respond in JSON format:
 {
-  "title": "Short, catchy title (max 50 chars)",
-  "content": "Helpful insight or tip (max 200 chars)",
-  "relevance": 0.0-1.0 score
+  "title": "Brief title (with emoji)",
+  "content": "The insight content",
+  "relevance": 0.0-1.0
 }`;
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
-      max_tokens: 200,
+      max_tokens: 300
     });
 
     const insight = JSON.parse(response.choices[0].message.content || '{}');
 
-    if (insight.title && insight.content) {
-      return {
-        user_id: context.user_id,
-        type: 'insight',
-        title: insight.title,
-        content: insight.content,
-        relevance_score: insight.relevance || 0.7,
-        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-      };
-    }
-
-    return null;
+    return {
+      userId,
+      type: 'insight',
+      title: insight.title || '💡 Productivity Tip',
+      content: insight.content || '',
+      relevanceScore: insight.relevance || 0.7,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+    };
   } catch (error) {
-    console.error('Error generating personalized insight:', error);
+    console.error('[Suggestions] Error generating insight:', error);
     return null;
   }
 }
 
-// ============================================================================
-// NEWS & UPDATE SUGGESTIONS
-// ============================================================================
-
 /**
- * Generate suggestions from recent news/updates
+ * Generate suggestions from trending news
  */
 export async function generateNewsSuggestions(): Promise<Suggestion[]> {
-  const suggestions: Suggestion[] = [];
-
-  // Get recent external news that might be relevant
-  const { data: news } = await supabase
+  const { data: news, error } = await supabase
     .from('javari_external_data')
-    .select('title, content, data_type, metadata')
-    .in('data_type', ['news', 'financial'])
+    .select('title, content, url, source_name, metadata')
+    .eq('data_type', 'news')
     .order('created_at', { ascending: false })
     .limit(5);
 
-  if (news && news.length > 0) {
-    // Pick top news item
-    const topNews = news[0];
-    suggestions.push({
-      type: 'news',
-      title: 'Trending Now',
-      content: `${topNews.title}: ${topNews.content.slice(0, 150)}...`,
-      relevance_score: 0.6,
-      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-    });
+  if (error || !news?.length) {
+    return [];
   }
 
-  return suggestions;
+  return news.map(item => ({
+    type: 'news' as const,
+    title: `📰 ${item.title.substring(0, 50)}...`,
+    content: item.content?.substring(0, 200) + '...',
+    relevanceScore: 0.5,
+    triggerCondition: { source: item.source_name, url: item.url },
+    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+  }));
 }
-
-// ============================================================================
-// SUGGESTION STORAGE & RETRIEVAL
-// ============================================================================
 
 /**
  * Store suggestions in database
@@ -238,23 +195,21 @@ export async function generateNewsSuggestions(): Promise<Suggestion[]> {
 export async function storeSuggestions(suggestions: Suggestion[]): Promise<number> {
   if (suggestions.length === 0) return 0;
 
-  const { error, data } = await supabase
+  const { data, error } = await supabase
     .from('javari_proactive_suggestions')
-    .insert(
-      suggestions.map(s => ({
-        user_id: s.user_id,
-        suggestion_type: s.type,
-        title: s.title,
-        content: s.content,
-        relevance_score: s.relevance_score,
-        trigger_condition: s.trigger_condition,
-        expires_at: s.expires_at,
-      }))
-    )
+    .insert(suggestions.map(s => ({
+      user_id: s.userId,
+      suggestion_type: s.type,
+      title: s.title,
+      content: s.content,
+      relevance_score: s.relevanceScore,
+      trigger_condition: s.triggerCondition,
+      expires_at: s.expiresAt
+    })))
     .select('id');
 
   if (error) {
-    console.error('Error storing suggestions:', error);
+    console.error('[Suggestions] Error storing suggestions:', error);
     return 0;
   }
 
@@ -267,7 +222,7 @@ export async function storeSuggestions(suggestions: Suggestion[]): Promise<numbe
 export async function getSuggestionsForUser(
   userId: string,
   limit: number = 5
-): Promise<Suggestion[]> {
+): Promise<any[]> {
   const { data, error } = await supabase
     .from('javari_proactive_suggestions')
     .select('*')
@@ -278,24 +233,18 @@ export async function getSuggestionsForUser(
     .order('relevance_score', { ascending: false })
     .limit(limit);
 
-  if (error || !data) return [];
+  if (error) {
+    console.error('[Suggestions] Error getting user suggestions:', error);
+    return [];
+  }
 
-  return data.map(s => ({
-    id: s.id,
-    user_id: s.user_id,
-    type: s.suggestion_type,
-    title: s.title,
-    content: s.content,
-    relevance_score: s.relevance_score,
-    trigger_condition: s.trigger_condition,
-    expires_at: s.expires_at,
-  }));
+  return data || [];
 }
 
 /**
  * Get global suggestions (not user-specific)
  */
-export async function getGlobalSuggestions(limit: number = 3): Promise<Suggestion[]> {
+export async function getGlobalSuggestions(limit: number = 3): Promise<any[]> {
   const { data, error } = await supabase
     .from('javari_proactive_suggestions')
     .select('*')
@@ -305,16 +254,12 @@ export async function getGlobalSuggestions(limit: number = 3): Promise<Suggestio
     .order('relevance_score', { ascending: false })
     .limit(limit);
 
-  if (error || !data) return [];
+  if (error) {
+    console.error('[Suggestions] Error getting global suggestions:', error);
+    return [];
+  }
 
-  return data.map(s => ({
-    id: s.id,
-    type: s.suggestion_type,
-    title: s.title,
-    content: s.content,
-    relevance_score: s.relevance_score,
-    expires_at: s.expires_at,
-  }));
+  return data || [];
 }
 
 /**
@@ -342,9 +287,9 @@ export async function markSuggestionClicked(suggestionId: string): Promise<boole
 }
 
 /**
- * Dismiss a suggestion
+ * Mark suggestion as dismissed
  */
-export async function dismissSuggestion(suggestionId: string): Promise<boolean> {
+export async function markSuggestionDismissed(suggestionId: string): Promise<boolean> {
   const { error } = await supabase
     .from('javari_proactive_suggestions')
     .update({ dismissed: true })
@@ -354,7 +299,49 @@ export async function dismissSuggestion(suggestionId: string): Promise<boolean> 
 }
 
 /**
- * Clean up expired suggestions
+ * Get "What's New" digest
+ */
+export async function getWhatsNew(since?: Date): Promise<{
+  features: any[];
+  news: any[];
+  updates: any[];
+}> {
+  const sinceDate = since || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+  // Get feature suggestions
+  const { data: features } = await supabase
+    .from('javari_proactive_suggestions')
+    .select('title, content, created_at')
+    .eq('suggestion_type', 'feature')
+    .gte('created_at', sinceDate.toISOString())
+    .limit(5);
+
+  // Get news
+  const { data: news } = await supabase
+    .from('javari_external_data')
+    .select('title, content, url, source_name, created_at')
+    .eq('data_type', 'news')
+    .gte('created_at', sinceDate.toISOString())
+    .order('created_at', { ascending: false })
+    .limit(10);
+
+  // Get recent updates from knowledge base
+  const { data: updates } = await supabase
+    .from('javari_knowledge')
+    .select('title, content, updated_at')
+    .gte('updated_at', sinceDate.toISOString())
+    .order('updated_at', { ascending: false })
+    .limit(5);
+
+  return {
+    features: features || [],
+    news: news || [],
+    updates: updates || []
+  };
+}
+
+/**
+ * Cleanup expired suggestions
  */
 export async function cleanupExpiredSuggestions(): Promise<number> {
   const { data, error } = await supabase
@@ -364,80 +351,9 @@ export async function cleanupExpiredSuggestions(): Promise<number> {
     .select('id');
 
   if (error) {
-    console.error('Error cleaning up suggestions:', error);
+    console.error('[Suggestions] Cleanup error:', error);
     return 0;
   }
 
   return data?.length || 0;
 }
-
-// ============================================================================
-// "WHAT'S NEW" FEATURE
-// ============================================================================
-
-/**
- * Generate "What's New" summary for a user
- */
-export async function getWhatsNew(
-  userId?: string,
-  since?: string
-): Promise<{
-  features: string[];
-  news: string[];
-  updates: string[];
-}> {
-  const sinceDate = since || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-
-  const result = {
-    features: [] as string[],
-    news: [] as string[],
-    updates: [] as string[],
-  };
-
-  // Get recent news
-  const { data: newsData } = await supabase
-    .from('javari_external_data')
-    .select('title, content')
-    .eq('data_type', 'news')
-    .gte('created_at', sinceDate)
-    .order('created_at', { ascending: false })
-    .limit(5);
-
-  if (newsData) {
-    result.news = newsData.map(n => n.title);
-  }
-
-  // Get recent knowledge additions (features/updates)
-  const { data: knowledgeData } = await supabase
-    .from('javari_knowledge')
-    .select('title, category')
-    .in('category', ['products', 'features'])
-    .gte('created_at', sinceDate)
-    .order('created_at', { ascending: false })
-    .limit(5);
-
-  if (knowledgeData) {
-    result.features = knowledgeData
-      .filter(k => k.category === 'products')
-      .map(k => k.title);
-    result.updates = knowledgeData
-      .filter(k => k.category === 'features')
-      .map(k => k.title);
-  }
-
-  return result;
-}
-
-export default {
-  generateSuggestions,
-  generatePersonalizedInsight,
-  generateNewsSuggestions,
-  storeSuggestions,
-  getSuggestionsForUser,
-  getGlobalSuggestions,
-  markSuggestionShown,
-  markSuggestionClicked,
-  dismissSuggestion,
-  cleanupExpiredSuggestions,
-  getWhatsNew,
-};
