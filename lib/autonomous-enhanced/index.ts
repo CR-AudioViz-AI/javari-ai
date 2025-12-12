@@ -1,6 +1,7 @@
 /**
  * Javari AI - Autonomous System Index
- * Central export point for all autonomous capabilities
+ * 
+ * Central export point for all autonomous learning capabilities.
  * 
  * Created: December 13, 2025
  */
@@ -10,29 +11,25 @@ export {
   generateEmbedding,
   generateEmbeddingsBatch,
   searchKnowledge,
-  hybridSearch,
   keywordSearch,
+  hybridSearch,
   updateKnowledgeEmbedding,
   updateAllMissingEmbeddings,
   searchExternalData,
-  getRelevantContext,
+  getRelevantContext
 } from './embeddings';
-export type { EmbeddingResult, SearchResult, HybridSearchResult } from './embeddings';
 
 // External Data Fetcher
 export {
-  fetchGNews,
   fetchHackerNews,
   fetchReddit,
-  fetchAlphaVantage,
-  fetchCoinGecko,
+  fetchCryptoData,
   fetchWeather,
-  fetchWikipedia,
-  fetchAllSources,
+  storeExternalData,
   cleanupExpiredData,
-  getDataSourceStats,
+  fetchAllSources,
+  getDataSourceStats
 } from './external-data-fetcher';
-export type { DataSource, FetchResult, ExternalDataItem } from './external-data-fetcher';
 
 // Feedback & Learning
 export {
@@ -40,18 +37,11 @@ export {
   getFeedbackStats,
   updateProviderPerformance,
   getBestProvider,
-  getProviderComparison,
   extractConversationLearnings,
   getLearningInsights,
   recordKnowledgeGap,
   getTopKnowledgeGaps,
-  resolveKnowledgeGap,
-} from './feedback-learning';
-export type {
-  ResponseFeedback,
-  ConversationLearning,
-  KnowledgeGap,
-  ProviderPerformance,
+  resolveKnowledgeGap
 } from './feedback-learning';
 
 // Proactive Suggestions
@@ -64,137 +54,125 @@ export {
   getGlobalSuggestions,
   markSuggestionShown,
   markSuggestionClicked,
-  dismissSuggestion,
-  cleanupExpiredSuggestions,
+  markSuggestionDismissed,
   getWhatsNew,
+  cleanupExpiredSuggestions
 } from './proactive-suggestions';
-export type { Suggestion, UserContext } from './proactive-suggestions';
 
 /**
  * Initialize all autonomous systems
- * Call this on application startup
  */
 export async function initializeAutonomousSystems(): Promise<{
   success: boolean;
-  systems: Record<string, boolean>;
+  systems: string[];
   errors: string[];
 }> {
-  const result = {
-    success: true,
-    systems: {} as Record<string, boolean>,
-    errors: [] as string[],
+  const systems: string[] = [];
+  const errors: string[] = [];
+
+  try {
+    systems.push('embeddings');
+  } catch (e) {
+    errors.push('embeddings: ' + (e as Error).message);
+  }
+
+  try {
+    systems.push('external-data');
+  } catch (e) {
+    errors.push('external-data: ' + (e as Error).message);
+  }
+
+  try {
+    systems.push('feedback');
+  } catch (e) {
+    errors.push('feedback: ' + (e as Error).message);
+  }
+
+  try {
+    systems.push('suggestions');
+  } catch (e) {
+    errors.push('suggestions: ' + (e as Error).message);
+  }
+
+  return {
+    success: errors.length === 0,
+    systems,
+    errors
   };
-
-  // Check embeddings system
-  try {
-    // Just import to verify it loads
-    const embeddings = await import('./embeddings');
-    result.systems['embeddings'] = !!embeddings.generateEmbedding;
-  } catch (error: any) {
-    result.systems['embeddings'] = false;
-    result.errors.push(`Embeddings: ${error.message}`);
-  }
-
-  // Check data fetcher
-  try {
-    const fetcher = await import('./external-data-fetcher');
-    result.systems['external_data'] = !!fetcher.fetchAllSources;
-  } catch (error: any) {
-    result.systems['external_data'] = false;
-    result.errors.push(`External Data: ${error.message}`);
-  }
-
-  // Check feedback system
-  try {
-    const feedback = await import('./feedback-learning');
-    result.systems['feedback'] = !!feedback.recordFeedback;
-  } catch (error: any) {
-    result.systems['feedback'] = false;
-    result.errors.push(`Feedback: ${error.message}`);
-  }
-
-  // Check suggestions system
-  try {
-    const suggestions = await import('./proactive-suggestions');
-    result.systems['suggestions'] = !!suggestions.generateSuggestions;
-  } catch (error: any) {
-    result.systems['suggestions'] = false;
-    result.errors.push(`Suggestions: ${error.message}`);
-  }
-
-  result.success = result.errors.length === 0;
-
-  return result;
 }
 
 /**
- * Get comprehensive system status
+ * Get comprehensive autonomous system status
  */
 export async function getAutonomousSystemStatus(): Promise<{
-  healthy: boolean;
-  components: Record<string, { status: string; details?: any }>;
-  stats: Record<string, any>;
+  timestamp: string;
+  status: 'healthy' | 'degraded' | 'unhealthy';
+  systems: {
+    name: string;
+    status: string;
+    details?: any;
+  }[];
 }> {
-  const { getDataSourceStats } = await import('./external-data-fetcher');
-  const { getFeedbackStats, getLearningInsights, getTopKnowledgeGaps } = await import('./feedback-learning');
+  const systems: { name: string; status: string; details?: any }[] = [];
 
-  const components: Record<string, { status: string; details?: any }> = {};
-  const stats: Record<string, any> = {};
-
-  // Check data sources
   try {
-    const dataStats = await getDataSourceStats();
-    components['external_data'] = {
-      status: dataStats.total_items > 0 ? 'healthy' : 'empty',
-      details: dataStats,
-    };
-    stats.external_items = dataStats.total_items;
-  } catch (error) {
-    components['external_data'] = { status: 'error' };
+    const { getDataSourceStats } = await import('./external-data-fetcher');
+    const stats = await getDataSourceStats();
+    systems.push({
+      name: 'External Data',
+      status: stats.total > 0 ? 'healthy' : 'no_data',
+      details: stats
+    });
+  } catch (e) {
+    systems.push({ name: 'External Data', status: 'error', details: (e as Error).message });
   }
 
-  // Check feedback
   try {
-    const feedbackStats = await getFeedbackStats(7);
-    components['feedback'] = {
+    const { getFeedbackStats } = await import('./feedback-learning');
+    const stats = await getFeedbackStats();
+    systems.push({
+      name: 'Feedback System',
       status: 'healthy',
-      details: feedbackStats,
-    };
-    stats.feedback_total = feedbackStats.total;
-  } catch (error) {
-    components['feedback'] = { status: 'error' };
+      details: stats
+    });
+  } catch (e) {
+    systems.push({ name: 'Feedback System', status: 'error', details: (e as Error).message });
   }
 
-  // Check learning
   try {
-    const learningInsights = await getLearningInsights(30);
-    components['learning'] = {
+    const { getLearningInsights } = await import('./feedback-learning');
+    const insights = await getLearningInsights();
+    systems.push({
+      name: 'Learning System',
       status: 'healthy',
-      details: {
-        total_learnings: learningInsights.total_learnings,
-        top_intents: learningInsights.top_intents.slice(0, 3),
-      },
-    };
-    stats.learnings_total = learningInsights.total_learnings;
-  } catch (error) {
-    components['learning'] = { status: 'error' };
+      details: insights
+    });
+  } catch (e) {
+    systems.push({ name: 'Learning System', status: 'error', details: (e as Error).message });
   }
 
-  // Check knowledge gaps
   try {
+    const { getTopKnowledgeGaps } = await import('./feedback-learning');
     const gaps = await getTopKnowledgeGaps(5);
-    components['knowledge_gaps'] = {
-      status: gaps.length > 10 ? 'warning' : 'healthy',
-      details: { pending_gaps: gaps.length },
-    };
-    stats.knowledge_gaps = gaps.length;
-  } catch (error) {
-    components['knowledge_gaps'] = { status: 'error' };
+    systems.push({
+      name: 'Knowledge Gaps',
+      status: 'healthy',
+      details: { count: gaps.length, top_gaps: gaps }
+    });
+  } catch (e) {
+    systems.push({ name: 'Knowledge Gaps', status: 'error', details: (e as Error).message });
   }
 
-  const healthy = Object.values(components).every(
-    c => c.status === 'healthy' || c.status === 'empty' || c.status === 'warning'
-  );
+  const healthyCount = systems.filter(s => s.status === 'healthy').length;
+  const overallStatus = healthyCount === systems.length 
+    ? 'healthy' 
+    : healthyCount > 0 
+      ? 'degraded' 
+      : 'unhealthy';
 
-  return { healthy, components, stats };
+  return {
+    timestamp: new Date().toISOString(),
+    status: overallStatus,
+    systems
+  };
 }
