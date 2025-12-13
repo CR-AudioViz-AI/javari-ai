@@ -1,109 +1,96 @@
-/**
- * Javari AI - Conversations API
- * Manage chat sessions: save, list, resume, archive
- * 
- * @route /api/javari/conversations
- * @version 1.0.0
- * @date October 27, 2025 - 2:38 PM ET
- */
+// app/api/javari/conversations/route.ts
+// Javari AI Conversations API - Load, Save, Delete conversations
+// Version: 1.0.0
+// Timestamp: 2025-12-13 8:55 AM EST
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
-// Initialize Supabase client
+export const runtime = 'edge';
+export const dynamic = 'force-dynamic';
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
-
-interface Message {
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: string;
-}
 
 interface Conversation {
   id: string;
-  numeric_id: number;
   user_id: string;
-  project_id?: string;
-  parent_id?: string;
   title: string;
-  summary?: string;
-  messages: Message[];
-  status: 'active' | 'inactive' | 'archived';
-  starred: boolean;
-  continuation_depth: number;
+  messages: any[];
   message_count: number;
-  model: string;
+  starred: boolean;
+  model?: string;
+  status: string;
   created_at: string;
   updated_at: string;
 }
 
 /**
  * GET /api/javari/conversations
- * List all conversations for a user
+ * Get all conversations for a user
  */
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get('userId');
     const projectId = searchParams.get('projectId');
-    const status = searchParams.get('status') || 'active';
-    const starred = searchParams.get('starred');
-    const search = searchParams.get('search');
     const limit = parseInt(searchParams.get('limit') || '50');
-    const offset = parseInt(searchParams.get('offset') || '0');
-
+    const starred = searchParams.get('starred') === 'true';
+    
     if (!userId) {
       return NextResponse.json(
         { error: 'userId is required' },
         { status: 400 }
       );
     }
-
-    // Build query
+    
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    
     let query = supabase
       .from('conversations')
-      .select('*', { count: 'exact' })
+      .select('id, user_id, title, message_count, starred, model, status, created_at, updated_at')
       .eq('user_id', userId)
-      .eq('status', status)
+      .eq('status', 'active')
       .order('updated_at', { ascending: false })
-      .range(offset, offset + limit - 1);
-
-    // Apply filters
+      .limit(limit);
+    
     if (projectId) {
       query = query.eq('project_id', projectId);
     }
-
-    if (starred === 'true') {
+    
+    if (starred) {
       query = query.eq('starred', true);
     }
-
-    if (search) {
-      query = query.or(`title.ilike.%${search}%,summary.ilike.%${search}%`);
-    }
-
-    const { data, error, count } = await query;
-
+    
+    const { data, error } = await query;
+    
     if (error) {
-      logError('Error fetching conversations:', error);
+      console.error('Error fetching conversations:', error);
       return NextResponse.json(
         { error: 'Failed to fetch conversations' },
         { status: 500 }
       );
     }
-
+    
+    // Transform to frontend format
+    const conversations = (data || []).map((c: any) => ({
+      id: c.id,
+      title: c.title || 'Untitled',
+      messageCount: c.message_count || 0,
+      starred: c.starred || false,
+      model: c.model,
+      createdAt: c.created_at,
+      updatedAt: c.updated_at,
+    }));
+    
     return NextResponse.json({
-      conversations: data,
-      total: count,
-      limit,
-      offset,
+      conversations,
+      count: conversations.length,
     });
-  } catch (error: unknown) {
-    logError('Conversations GET error:', error);
+  } catch (error) {
+    console.error('Conversations API error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'An error occurred' },
       { status: 500 }
     );
   }
@@ -116,184 +103,160 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const {
-      userId,
-      projectId,
-      parentId,
-      title,
-      summary,
-      messages = [],
-      model = 'gpt-4',
-    } = body;
-
-    if (!userId || !title) {
+    const { userId, projectId, title, messages = [] } = body;
+    
+    if (!userId) {
       return NextResponse.json(
-        { error: 'userId and title are required' },
+        { error: 'userId is required' },
         { status: 400 }
       );
     }
-
-    // Calculate continuation depth if has parent
-    let continuationDepth = 0;
-    if (parentId) {
-      const { data: parent } = await supabase
-        .from('conversations')
-        .select('continuation_depth')
-        .eq('id', parentId)
-        .single();
-
-      if (parent) {
-        continuationDepth = parent.continuation_depth + 1;
-      }
-    }
-
-    // Insert new conversation
+    
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    
     const { data, error } = await supabase
       .from('conversations')
       .insert({
         user_id: userId,
         project_id: projectId,
-        parent_id: parentId,
-        title,
-        summary,
+        title: title || 'New Conversation',
         messages,
         message_count: messages.length,
-        continuation_depth: continuationDepth,
-        model,
         status: 'active',
         starred: false,
       })
       .select()
       .single();
-
+    
     if (error) {
-      logError('Error creating conversation:', error);
+      console.error('Error creating conversation:', error);
       return NextResponse.json(
         { error: 'Failed to create conversation' },
         { status: 500 }
       );
     }
-
-    return NextResponse.json({ conversation: data });
-  } catch (error: unknown) {
-    logError('Conversations POST error:', error);
+    
+    return NextResponse.json({
+      conversation: {
+        id: data.id,
+        title: data.title,
+        messageCount: data.message_count,
+        starred: data.starred,
+        createdAt: data.created_at,
+        updatedAt: data.updated_at,
+      },
+    });
+  } catch (error) {
+    console.error('Create conversation error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'An error occurred' },
       { status: 500 }
     );
   }
 }
 
 /**
- * PATCH /api/javari/conversations/:id
- * Update a conversation (add messages, change status, star, etc)
+ * PATCH /api/javari/conversations
+ * Update a conversation (star, rename, add messages)
  */
 export async function PATCH(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const conversationId = searchParams.get('id');
-
-    if (!conversationId) {
+    const body = await request.json();
+    const { conversationId, userId, title, starred, messages } = body;
+    
+    if (!conversationId || !userId) {
       return NextResponse.json(
-        { error: 'Conversation ID is required' },
+        { error: 'conversationId and userId are required' },
         { status: 400 }
       );
     }
-
-    const body = await request.json();
-    const { messages, title, summary, status, starred } = body;
-
-    const updates: any = { updated_at: new Date().toISOString() };
-
-    if (messages) {
+    
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    
+    const updates: any = {
+      updated_at: new Date().toISOString(),
+    };
+    
+    if (title !== undefined) updates.title = title;
+    if (starred !== undefined) updates.starred = starred;
+    if (messages !== undefined) {
       updates.messages = messages;
       updates.message_count = messages.length;
     }
-
-    if (title) updates.title = title;
-    if (summary) updates.summary = summary;
-    if (status) updates.status = status;
-    if (starred !== undefined) updates.starred = starred;
-
+    
     const { data, error } = await supabase
       .from('conversations')
       .update(updates)
       .eq('id', conversationId)
+      .eq('user_id', userId)
       .select()
       .single();
-
+    
     if (error) {
-      logError('Error updating conversation:', error);
+      console.error('Error updating conversation:', error);
       return NextResponse.json(
         { error: 'Failed to update conversation' },
         { status: 500 }
       );
     }
-
-    return NextResponse.json({ conversation: data });
-  } catch (error: unknown) {
-    logError('Conversations PATCH error:', error);
+    
+    return NextResponse.json({
+      conversation: {
+        id: data.id,
+        title: data.title,
+        messageCount: data.message_count,
+        starred: data.starred,
+        updatedAt: data.updated_at,
+      },
+    });
+  } catch (error) {
+    console.error('Update conversation error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'An error occurred' },
       { status: 500 }
     );
   }
 }
 
 /**
- * DELETE /api/javari/conversations/:id
- * Delete or archive a conversation
+ * DELETE /api/javari/conversations
+ * Delete (soft) a conversation
  */
 export async function DELETE(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const conversationId = searchParams.get('id');
-    const archive = searchParams.get('archive') === 'true';
-
-    if (!conversationId) {
+    const conversationId = searchParams.get('conversationId');
+    const userId = searchParams.get('userId');
+    
+    if (!conversationId || !userId) {
       return NextResponse.json(
-        { error: 'Conversation ID is required' },
+        { error: 'conversationId and userId are required' },
         { status: 400 }
       );
     }
-
-    if (archive) {
-      // Archive instead of delete
-      const { error } = await supabase
-        .from('conversations')
-        .update({ status: 'archived', updated_at: new Date().toISOString() })
-        .eq('id', conversationId);
-
-      if (error) {
-        logError('Error archiving conversation:', error);
-        return NextResponse.json(
-          { error: 'Failed to archive conversation' },
-          { status: 500 }
-        );
-      }
-
-      return NextResponse.json({ success: true, archived: true });
-    } else {
-      // Permanent delete
-      const { error } = await supabase
-        .from('conversations')
-        .delete()
-        .eq('id', conversationId);
-
-      if (error) {
-        logError('Error deleting conversation:', error);
-        return NextResponse.json(
-          { error: 'Failed to delete conversation' },
-          { status: 500 }
-        );
-      }
-
-      return NextResponse.json({ success: true, deleted: true });
+    
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    
+    // Soft delete - set status to 'deleted'
+    const { error } = await supabase
+      .from('conversations')
+      .update({ status: 'deleted', updated_at: new Date().toISOString() })
+      .eq('id', conversationId)
+      .eq('user_id', userId);
+    
+    if (error) {
+      console.error('Error deleting conversation:', error);
+      return NextResponse.json(
+        { error: 'Failed to delete conversation' },
+        { status: 500 }
+      );
     }
-  } catch (error: unknown) {
-    logError('Conversations DELETE error:', error);
+    
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('Delete conversation error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'An error occurred' },
       { status: 500 }
     );
   }
