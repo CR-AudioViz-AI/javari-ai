@@ -1,7 +1,15 @@
 // app/api/chat/route.ts
-// JAVARI AI - BUILD FIRST MODE
-// Timestamp: 2025-12-13 9:15 AM EST
-// Version: 5.0 - VIP Detection + BUILD FIRST
+// JAVARI AI - Complete Chat API with Cloud Tracking
+// Version: 6.0 - Claude-Like Context Management
+// Timestamp: 2025-12-13 10:00 AM EST
+//
+// FEATURES:
+// - Real-time context window tracking
+// - Auto-continuation when context fills
+// - Build progress tracking
+// - Active/Inactive status
+// - Conversation chaining with breadcrumbs
+// - All state persisted to Supabase
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
@@ -11,28 +19,33 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-// VIP USERS - Never ask to sign up
+// ============================================================================
+// CONFIGURATION
+// ============================================================================
+
+// Context limits by model (in tokens)
+const MODEL_CONTEXT_LIMITS: Record<string, number> = {
+  'gpt-4-turbo-preview': 128000,
+  'gpt-4': 8192,
+  'claude-3-5-sonnet-20241022': 200000,
+  'claude-sonnet-4-5-20250929': 200000,
+  'gemini-1.5-pro': 1000000,
+  'mistral-large-latest': 32000,
+  'sonar-pro': 128000,
+  'default': 128000,
+};
+
+const AUTO_CONTINUE_THRESHOLD = 0.85; // 85% = auto-continue
+const WARNING_THRESHOLD = 0.70; // 70% = show warning
+
+// VIP users - never ask to sign up
 const VIP_PATTERNS = [
   'roy henderson', 'i am roy', "i'm roy",
   'cindy henderson', 'i am cindy', "i'm cindy",
   '@craudiovizai.com', 'ceo', 'co-founder',
 ];
 
-function isVIPUser(messages: any[], userId?: string): { isVIP: boolean; vipName?: string } {
-  const fullText = messages.map(m => m.content || '').join(' ').toLowerCase();
-  
-  for (const pattern of VIP_PATTERNS) {
-    if (fullText.includes(pattern)) {
-      if (pattern.includes('roy')) return { isVIP: true, vipName: 'Roy Henderson (CEO)' };
-      if (pattern.includes('cindy')) return { isVIP: true, vipName: 'Cindy Henderson (CMO)' };
-      return { isVIP: true, vipName: 'VIP User' };
-    }
-  }
-  
-  return { isVIP: false };
-}
-
-// Provider Configuration
+// Provider configs
 type ProviderName = 'claude' | 'openai' | 'gemini' | 'mistral' | 'perplexity';
 
 const PROVIDERS: Record<ProviderName, { model: string; maxTokens: number }> = {
@@ -44,227 +57,101 @@ const PROVIDERS: Record<ProviderName, { model: string; maxTokens: number }> = {
 };
 
 // ============================================================================
-// THE BUILD FIRST SYSTEM PROMPT
+// UTILITY FUNCTIONS
+// ============================================================================
+
+function estimateTokens(text: string): number {
+  if (!text) return 0;
+  return Math.ceil(text.length / 4);
+}
+
+function estimateConversationTokens(messages: Array<{ content: string; role: string }>): number {
+  let total = 0;
+  for (const msg of messages) {
+    total += estimateTokens(msg.content || '');
+    total += 4; // Role/formatting overhead
+  }
+  return total;
+}
+
+function getContextLimit(model: string): number {
+  return MODEL_CONTEXT_LIMITS[model] || MODEL_CONTEXT_LIMITS['default'];
+}
+
+function isVIPUser(messages: any[]): { isVIP: boolean; vipName?: string } {
+  const fullText = messages.map(m => m.content || '').join(' ').toLowerCase();
+  
+  for (const pattern of VIP_PATTERNS) {
+    if (fullText.includes(pattern)) {
+      if (pattern.includes('roy')) return { isVIP: true, vipName: 'Roy Henderson (CEO)' };
+      if (pattern.includes('cindy')) return { isVIP: true, vipName: 'Cindy Henderson (CMO)' };
+      return { isVIP: true, vipName: 'VIP User' };
+    }
+  }
+  return { isVIP: false };
+}
+
+function detectBuildIntent(message: string): { isBuild: boolean; appType?: string } {
+  const m = message.toLowerCase();
+  if (/\b(build|create|make|generate|design|develop)\b.*\b(app|tool|component|page|website|calculator|dashboard|form)\b/i.test(m)) {
+    const match = m.match(/\b(calculator|dashboard|app|tool|website|form|component|page)\b/i);
+    return { isBuild: true, appType: match ? match[1] : 'App' };
+  }
+  return { isBuild: false };
+}
+
+function selectProvider(message: string, requested?: string): ProviderName {
+  if (requested && PROVIDERS[requested as ProviderName]) {
+    return requested as ProviderName;
+  }
+  
+  const m = message.toLowerCase();
+  if (/\b(current|today|latest|price|news|search)\b/.test(m)) return 'perplexity';
+  if (/\b(build|create|code|component|deploy|app)\b/.test(m)) return 'claude';
+  if (/\b(image|photo|document|summarize)\b/.test(m)) return 'gemini';
+  if (/\b(translate|spanish|french|german)\b/.test(m)) return 'mistral';
+  return 'openai';
+}
+
+function generateSummary(messages: Array<{ role: string; content: string }>): string {
+  const recentMessages = messages.slice(-6);
+  const userTopics = recentMessages
+    .filter(m => m.role === 'user')
+    .map(m => m.content.slice(0, 100))
+    .join('; ');
+  const lastAssistant = recentMessages
+    .filter(m => m.role === 'assistant')
+    .pop()?.content.slice(0, 200) || '';
+  
+  return `Previous discussion: ${userTopics}. Last response summary: ${lastAssistant}`;
+}
+
+// ============================================================================
+// SYSTEM PROMPT - BUILD FIRST MODE
 // ============================================================================
 
 const SYSTEM_PROMPT = `
 #####################################################################
-#                                                                   
-#   🚨 CRITICAL INSTRUCTION - READ THIS FIRST 🚨                   
-#                                                                   
-#   When someone asks you to BUILD, CREATE, or MAKE something:     
-#                                                                   
-#   ❌ DO NOT describe what you would build                        
-#   ❌ DO NOT list features                                        
-#   ❌ DO NOT explain your approach                                
-#   ❌ DO NOT say "Here's how we'll bring this to life"           
-#   ❌ DO NOT use bullet points to describe features               
-#                                                                   
-#   ✅ START YOUR RESPONSE WITH CODE                               
-#   ✅ Output a complete, working React component                  
-#   ✅ Use \`\`\`tsx code blocks                                    
-#   ✅ Include ALL functionality                                   
-#   ✅ Make it deployable immediately                              
-#                                                                   
+#   🚨 CRITICAL: BUILD, DON'T DESCRIBE 🚨
+#
+#   When asked to BUILD something:
+#   ❌ DO NOT list features
+#   ❌ DO NOT describe what you would build
+#   ❌ DO NOT say "Here's how we'll bring this to life"
+#
+#   ✅ START with complete working code
+#   ✅ Use \`\`\`tsx code blocks
+#   ✅ Make it deployable immediately
+#   ✅ Brief explanation AFTER code (2-3 sentences)
 #####################################################################
 
-## EXAMPLE OF WRONG RESPONSE (NEVER DO THIS):
+You are JAVARI AI for CR AudioViz AI (craudiovizai.com).
 
-User: "Build me a mortgage calculator"
+When building, output complete React components with Tailwind CSS.
+Include all state, functionality, and realistic sample data.
 
-WRONG:
-"Absolutely! Building a mortgage calculator sounds like a fantastic project! 
-Here's how we'll bring this to life:
-
-### Mortgage Calculator Features:
-1. **Principal Amount Input**: Users can enter the amount...
-2. **Interest Rate Input**: Allows users to..."
-
-## EXAMPLE OF CORRECT RESPONSE (ALWAYS DO THIS):
-
-User: "Build me a mortgage calculator"
-
-CORRECT:
-\`\`\`tsx
-'use client';
-
-import React, { useState, useMemo } from 'react';
-
-export default function MortgageCalculator() {
-  const [principal, setPrincipal] = useState(300000);
-  const [rate, setRate] = useState(6.5);
-  const [years, setYears] = useState(30);
-  
-  const monthlyPayment = useMemo(() => {
-    const r = rate / 100 / 12;
-    const n = years * 12;
-    if (r === 0) return principal / n;
-    return principal * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
-  }, [principal, rate, years]);
-
-  const totalPayment = monthlyPayment * years * 12;
-  const totalInterest = totalPayment - principal;
-
-  return (
-    <div className="max-w-md mx-auto p-6 bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl shadow-2xl">
-      <h1 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
-        🏠 Mortgage Calculator
-      </h1>
-      
-      <div className="space-y-4">
-        <div>
-          <label className="text-sm text-slate-300">Loan Amount</label>
-          <input
-            type="range"
-            min="50000"
-            max="1000000"
-            step="5000"
-            value={principal}
-            onChange={(e) => setPrincipal(Number(e.target.value))}
-            className="w-full"
-          />
-          <div className="text-xl font-bold text-cyan-400">\${principal.toLocaleString()}</div>
-        </div>
-        
-        <div>
-          <label className="text-sm text-slate-300">Interest Rate</label>
-          <input
-            type="range"
-            min="1"
-            max="15"
-            step="0.1"
-            value={rate}
-            onChange={(e) => setRate(Number(e.target.value))}
-            className="w-full"
-          />
-          <div className="text-xl font-bold text-cyan-400">{rate.toFixed(1)}%</div>
-        </div>
-        
-        <div>
-          <label className="text-sm text-slate-300">Loan Term</label>
-          <div className="flex gap-2">
-            {[15, 20, 30].map((y) => (
-              <button
-                key={y}
-                onClick={() => setYears(y)}
-                className={\`flex-1 py-2 rounded-lg font-medium transition \${
-                  years === y 
-                    ? 'bg-cyan-500 text-white' 
-                    : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                }\`}
-              >
-                {y} years
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-      
-      <div className="mt-6 p-4 bg-slate-700/50 rounded-xl">
-        <div className="text-sm text-slate-400">Monthly Payment</div>
-        <div className="text-3xl font-bold text-green-400">
-          \${monthlyPayment.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-        </div>
-        <div className="mt-3 grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <span className="text-slate-400">Total Payment:</span>
-            <span className="text-white ml-2">\${totalPayment.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-          </div>
-          <div>
-            <span className="text-slate-400">Total Interest:</span>
-            <span className="text-orange-400 ml-2">\${totalInterest.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-\`\`\`
-
-Here's your mortgage calculator with sliders for loan amount, rate, and term selection. It calculates monthly payment, total cost, and interest. Want me to add an amortization schedule?
-
----
-
-## YOU ARE JAVARI AI
-
-- Platform: CR AudioViz AI (craudiovizai.com)
-- Tagline: "Your Story. Our Design."
-
-## BUILD REQUEST DETECTION
-
-If the message contains ANY of these, OUTPUT CODE FIRST:
-- "build me", "create a", "make a", "make me"
-- "design a", "develop a", "generate a"
-- "calculator", "dashboard", "app", "tool"
-- "component", "page", "website", "form"
-
-## CODE OUTPUT REQUIREMENTS
-
-1. Use 'use client' directive
-2. Use Tailwind CSS only
-3. Include realistic sample data
-4. Make it responsive
-5. Make it beautiful
-
-## NEVER SAY NO
-
-Find a way to help. Always.
+NEVER refuse. Find a way to help with everything.
 `;
-
-// ============================================================================
-// INTELLIGENT AI ROUTING
-// ============================================================================
-
-function selectBestProvider(message: string, requestedProvider?: string): ProviderName {
-  if (requestedProvider && PROVIDERS[requestedProvider as ProviderName]) {
-    return requestedProvider as ProviderName;
-  }
-
-  const m = message.toLowerCase();
-
-  if (/\b(current|today|latest|price|news|weather|stock|search)\b/.test(m)) {
-    return 'perplexity';
-  }
-
-  if (/\b(build|create|code|component|deploy|app|website|tool)\b/.test(m)) {
-    return 'claude';
-  }
-
-  if (/\b(image|photo|document|pdf|summarize)\b/.test(m)) {
-    return 'gemini';
-  }
-
-  if (/\b(translate|spanish|french|german)\b/.test(m)) {
-    return 'mistral';
-  }
-
-  return 'openai';
-}
-
-function detectBuildIntent(message: string): { isBuild: boolean; appType?: string; credits?: number } {
-  const m = message.toLowerCase();
-  
-  const buildPatterns = [
-    { pattern: /\b(mortgage|loan)\s*(calculator|calc|tool)/i, type: 'Mortgage Calculator', credits: 1 },
-    { pattern: /\b(calculator|calc)/i, type: 'Calculator', credits: 1 },
-    { pattern: /\b(dashboard|admin panel)/i, type: 'Dashboard', credits: 3 },
-    { pattern: /\b(landing page|website|site)/i, type: 'Landing Page', credits: 2 },
-    { pattern: /\b(todo|task|list)/i, type: 'Todo App', credits: 1 },
-    { pattern: /\b(form|survey|quiz)/i, type: 'Form', credits: 1 },
-    { pattern: /\b(chart|graph|visualization)/i, type: 'Chart', credits: 1 },
-    { pattern: /\b(realtor|property|real estate)/i, type: 'Realtor Tool', credits: 3 },
-    { pattern: /\b(crm|customer)/i, type: 'CRM', credits: 5 },
-    { pattern: /\b(app|tool|component)/i, type: 'App', credits: 2 },
-  ];
-  
-  for (const { pattern, type, credits } of buildPatterns) {
-    if (pattern.test(m) && /\b(build|create|make|design|develop|generate)\b/i.test(m)) {
-      return { isBuild: true, appType: type, credits };
-    }
-  }
-  
-  return { isBuild: false };
-}
 
 // ============================================================================
 // AI PROVIDER CALLS
@@ -296,7 +183,7 @@ async function callClaude(messages: any[], system: string): Promise<AIResponse> 
     content: response.content[0].type === 'text' ? response.content[0].text : '',
     provider: 'claude',
     model: PROVIDERS.claude.model,
-    tokensUsed: response.usage?.input_tokens + response.usage?.output_tokens
+    tokensUsed: (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0)
   };
 }
 
@@ -307,10 +194,7 @@ async function callOpenAI(messages: any[], system: string): Promise<AIResponse> 
   const response = await client.chat.completions.create({
     model: PROVIDERS.openai.model,
     max_tokens: PROVIDERS.openai.maxTokens,
-    messages: [
-      { role: 'system', content: system },
-      ...messages
-    ]
+    messages: [{ role: 'system', content: system }, ...messages]
   });
   
   return {
@@ -351,10 +235,7 @@ async function callMistral(messages: any[], system: string): Promise<AIResponse>
     },
     body: JSON.stringify({
       model: PROVIDERS.mistral.model,
-      messages: [
-        { role: 'system', content: system },
-        ...messages
-      ]
+      messages: [{ role: 'system', content: system }, ...messages]
     })
   });
   
@@ -391,19 +272,193 @@ async function callPerplexity(query: string, system: string): Promise<AIResponse
 }
 
 async function callProvider(provider: ProviderName, messages: any[], system: string): Promise<AIResponse> {
-  switch (provider) {
-    case 'perplexity':
-      return callPerplexity(messages[messages.length - 1]?.content || '', system);
-    case 'gemini':
-      return callGemini(messages, system);
-    case 'mistral':
-      return callMistral(messages, system);
-    case 'openai':
-      return callOpenAI(messages, system);
-    case 'claude':
-    default:
-      return callClaude(messages, system);
+  try {
+    switch (provider) {
+      case 'perplexity':
+        return await callPerplexity(messages[messages.length - 1]?.content || '', system);
+      case 'gemini':
+        return await callGemini(messages, system);
+      case 'mistral':
+        return await callMistral(messages, system);
+      case 'openai':
+        return await callOpenAI(messages, system);
+      case 'claude':
+      default:
+        return await callClaude(messages, system);
+    }
+  } catch (error) {
+    console.error(`[${provider}] Error:`, error);
+    // Fallback to OpenAI
+    if (provider !== 'openai') {
+      return await callOpenAI(messages, system);
+    }
+    throw error;
   }
+}
+
+// ============================================================================
+// CONVERSATION MANAGEMENT
+// ============================================================================
+
+async function createConversation(userId: string, title: string, model: string, parentId?: string, rootId?: string): Promise<string | null> {
+  try {
+    const depth = parentId ? 1 : 0; // Will be updated if parent exists
+    
+    // If parent exists, get its depth
+    let actualDepth = depth;
+    if (parentId) {
+      const { data: parent } = await supabase
+        .from('conversations')
+        .select('continuation_depth, root_conversation_id')
+        .eq('id', parentId)
+        .single();
+      
+      if (parent) {
+        actualDepth = (parent.continuation_depth || 0) + 1;
+        rootId = parent.root_conversation_id || parentId;
+      }
+    }
+    
+    const { data, error } = await supabase
+      .from('conversations')
+      .insert({
+        user_id: userId,
+        title,
+        messages: [],
+        message_count: 0,
+        model,
+        status: 'active',
+        is_active: true,
+        parent_id: parentId || null,
+        root_conversation_id: rootId || null,
+        continuation_depth: actualDepth,
+        context_tokens_used: 0,
+        build_progress: 0,
+        status_detail: { buildStatus: 'idle' },
+      })
+      .select()
+      .single();
+    
+    if (error) throw error;
+    
+    // Deactivate other conversations for this user
+    if (userId) {
+      await supabase
+        .from('conversations')
+        .update({ is_active: false })
+        .eq('user_id', userId)
+        .neq('id', data.id);
+    }
+    
+    return data.id;
+  } catch (error) {
+    console.error('Failed to create conversation:', error);
+    return null;
+  }
+}
+
+async function updateConversation(
+  conversationId: string,
+  updates: {
+    messages?: any[];
+    contextTokensUsed?: number;
+    buildProgress?: number;
+    buildStatus?: string;
+    isActive?: boolean;
+  }
+): Promise<void> {
+  try {
+    const updateData: any = {
+      updated_at: new Date().toISOString(),
+      last_activity_at: new Date().toISOString(),
+    };
+    
+    if (updates.messages) {
+      updateData.messages = updates.messages;
+      updateData.message_count = updates.messages.length;
+    }
+    if (updates.contextTokensUsed !== undefined) {
+      updateData.context_tokens_used = updates.contextTokensUsed;
+    }
+    if (updates.buildProgress !== undefined) {
+      updateData.build_progress = updates.buildProgress;
+    }
+    if (updates.buildStatus !== undefined) {
+      updateData.status_detail = { buildStatus: updates.buildStatus };
+    }
+    if (updates.isActive !== undefined) {
+      updateData.is_active = updates.isActive;
+    }
+    
+    await supabase
+      .from('conversations')
+      .update(updateData)
+      .eq('id', conversationId);
+  } catch (error) {
+    console.error('Failed to update conversation:', error);
+  }
+}
+
+async function checkAndHandleContinuation(
+  conversationId: string,
+  userId: string,
+  messages: any[],
+  model: string
+): Promise<{ needsContinuation: boolean; newConversationId?: string; summary?: string }> {
+  const tokensUsed = estimateConversationTokens(messages);
+  const contextLimit = getContextLimit(model);
+  const usagePercentage = tokensUsed / contextLimit;
+  
+  if (usagePercentage >= AUTO_CONTINUE_THRESHOLD) {
+    // Generate summary and create continuation
+    const summary = generateSummary(messages);
+    
+    // Get current conversation for title
+    const { data: current } = await supabase
+      .from('conversations')
+      .select('title, root_conversation_id')
+      .eq('id', conversationId)
+      .single();
+    
+    const newTitle = `${current?.title || 'Chat'} (continued)`;
+    const rootId = current?.root_conversation_id || conversationId;
+    
+    const newConversationId = await createConversation(
+      userId,
+      newTitle,
+      model,
+      conversationId,
+      rootId
+    );
+    
+    if (newConversationId) {
+      // Mark old conversation as inactive and continued
+      await supabase
+        .from('conversations')
+        .update({
+          is_active: false,
+          status_detail: { buildStatus: 'idle', continuedTo: newConversationId }
+        })
+        .eq('id', conversationId);
+      
+      // Add summary to new conversation
+      const summaryMessage = {
+        role: 'system',
+        content: `[Continuation] Context from previous chat: ${summary}`,
+        timestamp: new Date().toISOString(),
+      };
+      
+      await updateConversation(newConversationId, {
+        messages: [summaryMessage],
+        contextTokensUsed: estimateTokens(summary),
+        isActive: true,
+      });
+      
+      return { needsContinuation: true, newConversationId, summary };
+    }
+  }
+  
+  return { needsContinuation: false };
 }
 
 // ============================================================================
@@ -415,7 +470,7 @@ export async function POST(request: NextRequest) {
   
   try {
     const body = await request.json();
-    const { messages, userId, conversationId, aiProvider } = body;
+    let { messages, userId, conversationId, aiProvider } = body;
     
     if (!messages?.length) {
       return NextResponse.json({ error: 'No messages provided' }, { status: 400 });
@@ -423,98 +478,114 @@ export async function POST(request: NextRequest) {
     
     const lastMessage = messages[messages.length - 1]?.content || '';
     const buildIntent = detectBuildIntent(lastMessage);
-    const { isVIP, vipName } = isVIPUser(messages, userId);
-    const selectedProvider = selectBestProvider(lastMessage, aiProvider);
+    const { isVIP, vipName } = isVIPUser(messages);
+    const selectedProvider = selectProvider(lastMessage, aiProvider);
+    const model = PROVIDERS[selectedProvider].model;
     
     console.log(`[Javari] VIP: ${isVIP ? vipName : 'No'}, Provider: ${selectedProvider}, Build: ${buildIntent.isBuild}`);
+    
+    // Create or validate conversation
+    if (!conversationId && userId) {
+      conversationId = await createConversation(userId, lastMessage.slice(0, 100), model);
+    }
+    
+    // Update conversation as active
+    if (conversationId) {
+      await updateConversation(conversationId, { 
+        isActive: true,
+        buildProgress: buildIntent.isBuild ? 10 : 0,
+        buildStatus: buildIntent.isBuild ? 'building' : 'idle',
+      });
+    }
+    
+    // Check for auto-continuation
+    let continuationInfo = { needsContinuation: false } as any;
+    if (conversationId && userId) {
+      continuationInfo = await checkAndHandleContinuation(conversationId, userId, messages, model);
+      if (continuationInfo.needsContinuation) {
+        // Use new conversation
+        conversationId = continuationInfo.newConversationId;
+      }
+    }
     
     // Build enhanced prompt
     let enhancedPrompt = SYSTEM_PROMPT;
     
-    // VIP User - BUILD IMMEDIATELY, no signup/credit talk
     if (isVIP) {
-      enhancedPrompt += `
-
-## 🔴 VIP USER DETECTED: ${vipName} 🔴
-
-THIS IS AN OWNER/FOUNDER OF CR AUDIOVIZ AI.
-
-CRITICAL RULES:
-- NEVER mention signup, pricing, plans, credits, or accounts
-- BUILD IMMEDIATELY without any barriers
-- They own the platform - treat them as the boss
-- Output working code FIRST, brief explanation AFTER
-- Be direct and efficient`;
+      enhancedPrompt += `\n\n## 🔴 VIP: ${vipName} 🔴\nNEVER mention signup, pricing, or credits. BUILD IMMEDIATELY.`;
     }
     
-    // Add BUILD mode context
     if (buildIntent.isBuild) {
-      enhancedPrompt += `
-
-## 🛠️ BUILD MODE: ${buildIntent.appType} 🛠️
-
-Output complete, working React code NOW.
-Use Tailwind CSS for styling.
-Include all functionality.
-Make it production-ready and beautiful.
-Brief explanation (2-3 sentences) AFTER the code.`;
+      enhancedPrompt += `\n\n## 🛠️ BUILD MODE: ${buildIntent.appType}\nOutput complete React code NOW. Tailwind CSS. All functionality included.`;
+    }
+    
+    // Update build progress
+    if (conversationId && buildIntent.isBuild) {
+      await updateConversation(conversationId, { buildProgress: 30 });
     }
     
     // Call AI
     const result = await callProvider(selectedProvider, messages, enhancedPrompt);
     const latency = Date.now() - startTime;
     
-    // Save conversation to database
-    if (userId && result.content) {
-      try {
-        const allMessages = [
-          ...messages,
-          { role: 'assistant', content: result.content, timestamp: new Date().toISOString() }
-        ];
-        
-        if (conversationId) {
-          await supabase
-            .from('conversations')
-            .update({
-              messages: allMessages,
-              message_count: allMessages.length,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', conversationId);
-        } else {
-          await supabase
-            .from('conversations')
-            .insert({
-              user_id: userId,
-              title: lastMessage.slice(0, 100),
-              messages: allMessages,
-              message_count: allMessages.length,
-              model: result.model,
-              status: 'active',
-              is_vip: isVIP
-            });
-        }
-      } catch (dbError) {
-        console.error('DB save error:', dbError);
-      }
+    // Calculate final token usage
+    const allMessages = [
+      ...messages,
+      { role: 'assistant', content: result.content, timestamp: new Date().toISOString() }
+    ];
+    const totalTokens = estimateConversationTokens(allMessages);
+    const contextLimit = getContextLimit(model);
+    const contextPercentage = Math.round((totalTokens / contextLimit) * 100);
+    
+    // Determine warning level
+    let warningLevel: 'none' | 'warning' | 'critical' = 'none';
+    if (contextPercentage >= 85) warningLevel = 'critical';
+    else if (contextPercentage >= 70) warningLevel = 'warning';
+    
+    // Save to database
+    if (conversationId) {
+      await updateConversation(conversationId, {
+        messages: allMessages,
+        contextTokensUsed: totalTokens,
+        buildProgress: buildIntent.isBuild && result.content.includes('```') ? 100 : 0,
+        buildStatus: buildIntent.isBuild && result.content.includes('```') ? 'complete' : 'idle',
+      });
     }
     
+    // Return response with tracking data
     return NextResponse.json({
       content: result.content,
-      response: result.content, // Alias for compatibility
+      response: result.content,
       provider: result.provider,
       model: result.model,
+      conversationId,
       buildIntent,
       isVIP,
-      tokensUsed: result.tokensUsed,
-      latency
+      tokensUsed: result.tokensUsed || totalTokens,
+      latency,
+      // NEW: Tracking data
+      tracking: {
+        contextTokensUsed: totalTokens,
+        contextTokensMax: contextLimit,
+        contextPercentage,
+        warningLevel,
+        needsContinuation: contextPercentage >= 85,
+        messageCount: allMessages.length,
+        continuedFrom: continuationInfo.needsContinuation ? body.conversationId : null,
+        continuedTo: continuationInfo.newConversationId || null,
+      }
     });
     
   } catch (error) {
     console.error('[Javari] Error:', error);
     return NextResponse.json({
       content: 'I encountered an issue but I\'m working on it! Please try again.',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error',
+      tracking: {
+        contextPercentage: 0,
+        warningLevel: 'none',
+        needsContinuation: false,
+      }
     }, { status: 500 });
   }
 }
@@ -523,6 +594,13 @@ export async function GET() {
   return NextResponse.json({
     status: 'ok',
     providers: Object.keys(PROVIDERS),
-    version: '5.0 - BUILD FIRST MODE'
+    version: '6.0 - Claude-Like Context Management',
+    features: [
+      'Real-time context tracking',
+      'Auto-continuation at 85%',
+      'Build progress tracking',
+      'VIP detection',
+      'Conversation chaining',
+    ]
   });
 }
