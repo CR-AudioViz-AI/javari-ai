@@ -387,13 +387,15 @@ export async function POST(request: NextRequest) {
     };
     
     // Log task start
-    await supabase.from('agent_tasks').insert({
-      task_id: agentTask.id,
-      description: task,
-      user_id: userId,
-      status: 'pending',
-      created_at: agentTask.startedAt
-    }).catch(() => {});
+    try {
+      await supabase.from('agent_tasks').insert({
+        task_id: agentTask.id,
+        description: task,
+        user_id: userId,
+        status: 'pending',
+        created_at: agentTask.startedAt
+      });
+    } catch (e) { /* ignore */ }
     
     if (async) {
       // Return immediately, execute in background
@@ -420,13 +422,15 @@ export async function POST(request: NextRequest) {
     const result = await executeAgent(agentTask);
     
     // Update database
-    await supabase.from('agent_tasks').update({
-      status: result.status,
-      plan: result.plan,
-      results: result.results,
-      error: result.error,
-      completed_at: result.completedAt
-    }).eq('task_id', agentTask.id).catch(() => {});
+    try {
+      await supabase.from('agent_tasks').update({
+        status: result.status,
+        plan: result.plan,
+        results: result.results,
+        error: result.error,
+        completed_at: result.completedAt
+      }).eq('task_id', agentTask.id);
+    } catch (e) { /* ignore */ }
     
     return NextResponse.json({
       success: result.status === 'completed',
