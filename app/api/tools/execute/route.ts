@@ -597,16 +597,21 @@ export async function POST(request: NextRequest) {
     
     const duration = Date.now() - startTime;
     
-    // Log execution
-    await supabase.from('tool_executions').insert({
-      tool_name: tool,
-      parameters: parameters,
-      result_preview: JSON.stringify(result).slice(0, 500),
-      success: true,
-      duration_ms: duration,
-      user_id: userId,
-      created_at: new Date().toISOString()
-    }).catch(() => {}); // Non-blocking
+    // Log execution (non-blocking)
+    try {
+      await supabase.from('tool_executions').insert({
+        tool_name: tool,
+        parameters: parameters,
+        result_preview: JSON.stringify(result).slice(0, 500),
+        success: true,
+        duration_ms: duration,
+        user_id: userId,
+        created_at: new Date().toISOString()
+      });
+    } catch (logError) {
+      // Ignore logging errors - don't block tool execution
+      console.log('[Tools] Logging skipped:', logError instanceof Error ? logError.message : 'table may not exist');
+    }
     
     return NextResponse.json({
       success: true,
