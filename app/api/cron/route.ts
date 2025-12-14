@@ -413,13 +413,15 @@ export async function POST(request: NextRequest) {
         results.push(result);
         
         // Log job execution
-        await supabase.from('cron_executions').insert({
-          job_name: name,
-          success: result.success,
-          message: result.message,
-          duration_ms: result.duration,
-          created_at: new Date().toISOString()
-        }).catch(() => {});
+        try {
+          await supabase.from('cron_executions').insert({
+            job_name: name,
+            success: result.success,
+            message: result.message,
+            duration_ms: result.duration,
+            created_at: new Date().toISOString()
+          });
+        } catch (e) { /* ignore if table doesn't exist */ }
       }
     }
     
