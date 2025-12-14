@@ -1,276 +1,314 @@
-import { createClient } from '@/lib/supabase/server';
-import { NextRequest, NextResponse } from 'next/server';
-import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
+// =============================================================================
+// JAVARI AI - HEALTH CHECK API
+// =============================================================================
+// Simple but essential: Can't self-heal without knowing what's broken
+// Endpoint: GET /api/health
+// Created: Saturday, December 13, 2025 - 6:18 PM EST
+// =============================================================================
 
-/**
- * GET /api/health - List build health tracking records
- * Query params:
- *   - project_id: Filter by project
- *   - build_status: Filter by status (success, failed, pending)
- *   - auto_fixable: Filter by auto-fixable flag
- *   - limit: Number of results (default 50)
- *   - offset: Pagination offset
- */
-export async function GET(request: NextRequest) {
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+
+// -----------------------------------------------------------------------------
+// Types
+// -----------------------------------------------------------------------------
+
+interface HealthStatus {
+  status: 'healthy' | 'degraded' | 'unhealthy';
+  timestamp: string;
+  version: string;
+  uptime: number;
+  checks: {
+    database: ServiceCheck;
+    api: ServiceCheck;
+    environment: ServiceCheck;
+  };
+  summary: {
+    total: number;
+    passed: number;
+    failed: number;
+    warnings: number;
+  };
+}
+
+interface ServiceCheck {
+  name: string;
+  status: 'pass' | 'fail' | 'warn';
+  latency_ms: number;
+  message: string;
+  details?: Record<string, unknown>;
+}
+
+// -----------------------------------------------------------------------------
+// Track server start time for uptime calculation
+// -----------------------------------------------------------------------------
+
+const SERVER_START = Date.now();
+
+// -----------------------------------------------------------------------------
+// Health Check Functions
+// -----------------------------------------------------------------------------
+
+async function checkDatabase(): Promise<ServiceCheck> {
+  const start = Date.now();
+  const name = 'Supabase Database';
+  
   try {
-    const supabase = await createClient();
-    const searchParams = request.nextUrl.searchParams;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     
-    const projectId = searchParams.get('project_id');
-    const buildStatus = searchParams.get('build_status');
-    const autoFixable = searchParams.get('auto_fixable');
-    const limit = parseInt(searchParams.get('limit') || '50');
-    const offset = parseInt(searchParams.get('offset') || '0');
-    
-    // Build query
-    let query = supabase
-      .from('javari_build_health_tracking')
-      .select('*', { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
-    
-    if (projectId) {
-      query = query.eq('project_id', projectId);
+    if (!supabaseUrl || !supabaseKey) {
+      return {
+        name,
+        status: 'fail',
+        latency_ms: Date.now() - start,
+        message: 'Missing Supabase credentials',
+        details: {
+          has_url: !!supabaseUrl,
+          has_key: !!supabaseKey
+        }
+      };
     }
     
-    if (buildStatus) {
-      query = query.eq('build_status', buildStatus);
-    }
+    const supabase = createClient(supabaseUrl, supabaseKey);
     
-    if (autoFixable !== null && autoFixable !== undefined) {
-      query = query.eq('auto_fixable', autoFixable === 'true');
-    }
+    // Simple query to verify connection
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('id')
+      .limit(1);
     
-    const { data, error, count } = await query;
+    const latency = Date.now() - start;
     
     if (error) {
-      logError('Error fetching health records:', error);
-      return NextResponse.json(
-        { error: 'Failed to fetch health records', details: error.message },
-        { status: 500 }
-      );
+      // Table might not exist yet - check if it's a missing table error
+      if (error.code === '42P01') {
+        return {
+          name,
+          status: 'warn',
+          latency_ms: latency,
+          message: 'Database connected but conversations table missing',
+          details: { error_code: error.code }
+        };
+      }
+      
+      return {
+        name,
+        status: 'fail',
+        latency_ms: latency,
+        message: `Database error: ${error.message}`,
+        details: { error_code: error.code }
+      };
     }
     
-    return NextResponse.json({
-      health_records: data || [],
-      total: count || 0,
-      limit,
-      offset,
+    return {
+      name,
+      status: 'pass',
+      latency_ms: latency,
+      message: `Connected successfully (${latency}ms)`,
+      details: { records_checked: data?.length ?? 0 }
+    };
+    
+  } catch (err) {
+    return {
+      name,
+      status: 'fail',
+      latency_ms: Date.now() - start,
+      message: `Connection failed: ${err instanceof Error ? err.message : 'Unknown error'}`
+    };
+  }
+}
+
+async function checkAPI(): Promise<ServiceCheck> {
+  const start = Date.now();
+  const name = 'API Runtime';
+  
+  try {
+    // Check critical environment variables for AI providers
+    const providers = {
+      openai: !!process.env.OPENAI_API_KEY,
+      anthropic: !!process.env.ANTHROPIC_API_KEY,
+      google: !!process.env.GOOGLE_API_KEY,
+    };
+    
+    const activeProviders = Object.entries(providers)
+      .filter(([, has]) => has)
+      .map(([name]) => name);
+    
+    const latency = Date.now() - start;
+    
+    if (activeProviders.length === 0) {
+      return {
+        name,
+        status: 'fail',
+        latency_ms: latency,
+        message: 'No AI providers configured',
+        details: { providers }
+      };
+    }
+    
+    if (activeProviders.length < 2) {
+      return {
+        name,
+        status: 'warn',
+        latency_ms: latency,
+        message: `Only ${activeProviders.length} AI provider configured (recommend 2+ for fallback)`,
+        details: { active_providers: activeProviders, providers }
+      };
+    }
+    
+    return {
+      name,
+      status: 'pass',
+      latency_ms: latency,
+      message: `${activeProviders.length} AI providers ready`,
+      details: { active_providers: activeProviders }
+    };
+    
+  } catch (err) {
+    return {
+      name,
+      status: 'fail',
+      latency_ms: Date.now() - start,
+      message: `Check failed: ${err instanceof Error ? err.message : 'Unknown error'}`
+    };
+  }
+}
+
+function checkEnvironment(): ServiceCheck {
+  const start = Date.now();
+  const name = 'Environment';
+  
+  const required = [
+    'NEXT_PUBLIC_SUPABASE_URL',
+    'NEXT_PUBLIC_SUPABASE_ANON_KEY',
+  ];
+  
+  const recommended = [
+    'SUPABASE_SERVICE_ROLE_KEY',
+    'OPENAI_API_KEY',
+    'ANTHROPIC_API_KEY',
+    'STRIPE_SECRET_KEY',
+  ];
+  
+  const missing_required = required.filter(key => !process.env[key]);
+  const missing_recommended = recommended.filter(key => !process.env[key]);
+  
+  const latency = Date.now() - start;
+  
+  if (missing_required.length > 0) {
+    return {
+      name,
+      status: 'fail',
+      latency_ms: latency,
+      message: `Missing required: ${missing_required.join(', ')}`,
+      details: { missing_required, missing_recommended }
+    };
+  }
+  
+  if (missing_recommended.length > 2) {
+    return {
+      name,
+      status: 'warn',
+      latency_ms: latency,
+      message: `Missing ${missing_recommended.length} recommended env vars`,
+      details: { missing_recommended }
+    };
+  }
+  
+  return {
+    name,
+    status: 'pass',
+    latency_ms: latency,
+    message: 'All required environment variables set',
+    details: {
+      required_set: required.length,
+      recommended_set: recommended.length - missing_recommended.length
+    }
+  };
+}
+
+// -----------------------------------------------------------------------------
+// Main Handler
+// -----------------------------------------------------------------------------
+
+export async function GET(request: NextRequest) {
+  const startTime = Date.now();
+  
+  try {
+    // Run all checks in parallel
+    const [database, api, environment] = await Promise.all([
+      checkDatabase(),
+      checkAPI(),
+      Promise.resolve(checkEnvironment())
+    ]);
+    
+    const checks = { database, api, environment };
+    
+    // Calculate summary
+    const allChecks = Object.values(checks);
+    const summary = {
+      total: allChecks.length,
+      passed: allChecks.filter(c => c.status === 'pass').length,
+      failed: allChecks.filter(c => c.status === 'fail').length,
+      warnings: allChecks.filter(c => c.status === 'warn').length,
+    };
+    
+    // Determine overall status
+    let status: HealthStatus['status'] = 'healthy';
+    if (summary.failed > 0) {
+      status = 'unhealthy';
+    } else if (summary.warnings > 0) {
+      status = 'degraded';
+    }
+    
+    const response: HealthStatus = {
+      status,
+      timestamp: new Date().toISOString(),
+      version: process.env.npm_package_version || '1.0.0',
+      uptime: Math.floor((Date.now() - SERVER_START) / 1000),
+      checks,
+      summary
+    };
+    
+    // Return appropriate HTTP status
+    const httpStatus = status === 'healthy' ? 200 : status === 'degraded' ? 200 : 503;
+    
+    return NextResponse.json(response, { 
+      status: httpStatus,
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'X-Health-Status': status,
+        'X-Response-Time': `${Date.now() - startTime}ms`
+      }
     });
     
-  } catch (error: unknown) {
-    logError('Unexpected error fetching health records:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+  } catch (error) {
+    return NextResponse.json({
+      status: 'unhealthy',
+      timestamp: new Date().toISOString(),
+      version: '1.0.0',
+      uptime: Math.floor((Date.now() - SERVER_START) / 1000),
+      error: error instanceof Error ? error.message : 'Health check failed',
+      checks: {},
+      summary: { total: 0, passed: 0, failed: 1, warnings: 0 }
+    }, { 
+      status: 503,
+      headers: {
+        'Cache-Control': 'no-cache',
+        'X-Health-Status': 'unhealthy'
+      }
+    });
   }
 }
 
-/**
- * POST /api/health - Create a new health tracking record
- * Body: Build health data
- */
-export async function POST(request: NextRequest) {
-  try {
-    const supabase = await createClient();
-    const body = await request.json();
-    
-    // Validate required fields
-    if (!body.project_id) {
-      return NextResponse.json(
-        { error: 'project_id is required' },
-        { status: 400 }
-      );
+// Also support HEAD requests for simple uptime checks
+export async function HEAD() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'X-Health-Status': 'ok',
+      'X-Timestamp': new Date().toISOString()
     }
-    
-    if (!body.build_status) {
-      return NextResponse.json(
-        { error: 'build_status is required' },
-        { status: 400 }
-      );
-    }
-    
-    // Verify project exists
-    const { data: project, error: projectError } = await supabase
-      .from('javari_projects')
-      .select('id')
-      .eq('id', body.project_id)
-      .single();
-    
-    if (projectError || !project) {
-      return NextResponse.json(
-        { error: 'Project not found' },
-        { status: 404 }
-      );
-    }
-    
-    // Analyze error and generate fix suggestion if build failed
-    let autoFixable = false;
-    let fixSuggestion = null;
-    let fixConfidence = null;
-    
-    if (body.build_status === 'failed' && body.error_message) {
-      const analysis = await analyzeError(body.error_message, body.error_stack);
-      autoFixable = analysis.autoFixable;
-      fixSuggestion = analysis.fixSuggestion;
-      fixConfidence = analysis.confidence;
-    }
-    
-    // Prepare health record data
-    const healthData = {
-      project_id: body.project_id,
-      chat_session_id: body.chat_session_id || null,
-      build_id: body.build_id,
-      build_status: body.build_status,
-      error_type: body.error_type,
-      error_message: body.error_message,
-      error_stack: body.error_stack,
-      auto_fixable: autoFixable,
-      fix_suggestion: fixSuggestion,
-      fix_confidence: fixConfidence,
-      fix_applied: false,
-      build_duration_seconds: body.build_duration_seconds,
-      files_affected: body.files_affected || [],
-      build_started_at: body.build_started_at || new Date().toISOString(),
-      build_completed_at: body.build_completed_at,
-    };
-    
-    // Insert health record
-    const { data: record, error } = await supabase
-      .from('javari_build_health_tracking')
-      .insert(healthData)
-      .select()
-      .single();
-    
-    if (error) {
-      logError('Error creating health record:', error);
-      return NextResponse.json(
-        { error: 'Failed to create health record', details: error.message },
-        { status: 500 }
-      );
-    }
-    
-    // If auto-fixable with high confidence, trigger auto-fix
-    if (autoFixable && fixConfidence && fixConfidence >= 0.8) {
-      // Queue auto-fix (implement in separate endpoint)
-      console.log('Auto-fix queued for record:', record.id);
-    }
-    
-    return NextResponse.json(record, { status: 201 });
-    
-  } catch (error: unknown) {
-    logError('Unexpected error creating health record:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
-  }
-}
-
-/**
- * Analyze error message and generate fix suggestion
- */
-async function analyzeError(
-  errorMessage: string,
-  errorStack?: string
-): Promise<{
-  autoFixable: boolean;
-  fixSuggestion: string | null;
-  confidence: number;
-}> {
-  const error = errorMessage.toLowerCase();
-  const stack = (errorStack || '').toLowerCase();
-  
-  // TypeScript errors
-  if (error.includes('type') && error.includes('not assignable')) {
-    return {
-      autoFixable: true,
-      fixSuggestion: 'Add proper type annotations or use type assertions. Check the TypeScript error output for specific type mismatches.',
-      confidence: 0.7,
-    };
-  }
-  
-  // Missing dependency
-  if (error.includes('cannot find module') || error.includes('module not found')) {
-    const match = error.match(/['"]([^'"]+)['"]/);
-    const moduleName = match ? match[1] : null;
-    return {
-      autoFixable: true,
-      fixSuggestion: moduleName 
-        ? `Install missing dependency: npm install ${moduleName}`
-        : 'Install missing dependencies: npm install',
-      confidence: moduleName ? 0.9 : 0.7,
-    };
-  }
-  
-  // Import/Export errors
-  if (error.includes('does not provide an export')) {
-    return {
-      autoFixable: true,
-      fixSuggestion: 'Check the import statement. The module may use default export instead of named export, or vice versa.',
-      confidence: 0.75,
-    };
-  }
-  
-  // Syntax errors
-  if (error.includes('unexpected token') || error.includes('syntax error')) {
-    return {
-      autoFixable: false,
-      fixSuggestion: 'Fix syntax error in the code. Check for missing brackets, semicolons, or invalid syntax.',
-      confidence: 0.5,
-    };
-  }
-  
-  // Environment variable errors
-  if (error.includes('env') || error.includes('environment variable')) {
-    return {
-      autoFixable: true,
-      fixSuggestion: 'Add missing environment variables to Vercel project settings or .env file.',
-      confidence: 0.85,
-    };
-  }
-  
-  // Build timeout
-  if (error.includes('timeout') || error.includes('timed out')) {
-    return {
-      autoFixable: true,
-      fixSuggestion: 'Optimize build process or increase build timeout. Consider code splitting or lazy loading.',
-      confidence: 0.6,
-    };
-  }
-  
-  // Memory errors
-  if (error.includes('out of memory') || error.includes('heap out of memory')) {
-    return {
-      autoFixable: true,
-      fixSuggestion: 'Increase Node memory limit with NODE_OPTIONS=--max-old-space-size=4096 or optimize memory usage.',
-      confidence: 0.8,
-    };
-  }
-  
-  // API errors
-  if (error.includes('api') && (error.includes('401') || error.includes('403'))) {
-    return {
-      autoFixable: true,
-      fixSuggestion: 'Check API credentials and authentication tokens. Ensure API keys are correctly set in environment variables.',
-      confidence: 0.75,
-    };
-  }
-  
-  // Network errors
-  if (error.includes('network') || error.includes('econnrefused') || error.includes('etimedout')) {
-    return {
-      autoFixable: false,
-      fixSuggestion: 'Network issue detected. This may be temporary. Try rebuilding or check external service availability.',
-      confidence: 0.5,
-    };
-  }
-  
-  // Unknown error
-  return {
-    autoFixable: false,
-    fixSuggestion: 'Manual investigation required. Check build logs for more details.',
-    confidence: 0.3,
-  };
+  });
 }
