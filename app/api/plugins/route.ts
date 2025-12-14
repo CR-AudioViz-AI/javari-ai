@@ -564,14 +564,16 @@ async function executePlugin(
     const result = await handler(parameters, plugin.config);
     
     // Log execution
-    await supabase.from('plugin_executions').insert({
-      plugin_id: pluginId,
-      action: actionName,
-      parameters,
-      success: true,
-      duration_ms: Date.now() - startTime,
-      created_at: new Date().toISOString()
-    }).catch(() => {});
+    try {
+      await supabase.from('plugin_executions').insert({
+        plugin_id: pluginId,
+        action: actionName,
+        parameters,
+        success: true,
+        duration_ms: Date.now() - startTime,
+        created_at: new Date().toISOString()
+      });
+    } catch (e) { /* ignore */ }
     
     return {
       pluginId,
@@ -583,15 +585,17 @@ async function executePlugin(
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     
-    await supabase.from('plugin_executions').insert({
-      plugin_id: pluginId,
-      action: actionName,
-      parameters,
-      success: false,
-      error: errorMessage,
-      duration_ms: Date.now() - startTime,
-      created_at: new Date().toISOString()
-    }).catch(() => {});
+    try {
+      await supabase.from('plugin_executions').insert({
+        plugin_id: pluginId,
+        action: actionName,
+        parameters,
+        success: false,
+        error: errorMessage,
+        duration_ms: Date.now() - startTime,
+        created_at: new Date().toISOString()
+      });
+    } catch (e) { /* ignore */ }
     
     return {
       pluginId,
