@@ -1,8 +1,8 @@
 // =============================================================================
-// JAVARI AI - POWERHOUSE CHAT API
+// JAVARI AI - POWERHOUSE CHAT API v3.0
 // =============================================================================
-// Intelligent chat with autonomous decision-making and multi-source data
-// Production Ready - Sunday, December 14, 2025
+// FIXED: Full Intelligence API integration, Claude as primary AI
+// Production Ready - Tuesday, December 16, 2025 - 11:15 PM EST
 // =============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -18,6 +18,13 @@ const supabase = createClient(
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+// Get base URL for internal API calls
+const getBaseUrl = () => {
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  if (process.env.NEXT_PUBLIC_BASE_URL) return process.env.NEXT_PUBLIC_BASE_URL;
+  return 'https://crav-javari.vercel.app';
+};
 
 // ============ TYPES ============
 
@@ -35,6 +42,7 @@ interface ChatRequest {
   systemContext?: string;
   tools?: boolean;
   stream?: boolean;
+  useKnowledgeBase?: boolean;
 }
 
 interface EnrichedContext {
@@ -45,345 +53,233 @@ interface EnrichedContext {
   wikipedia?: any;
   time?: any;
   location?: any;
+  knowledgeBase?: any;
 }
 
-// ============ INTENT DETECTION ============
+interface IntentResult {
+  intent: string;
+  confidence: number;
+  params: Record<string, any>;
+}
 
-function detectIntent(message: string): { intent: string; confidence: number; params: Record<string, any> } {
+// ============ INTENT DETECTION (FIXED ORDER) ============
+
+function detectIntent(message: string): IntentResult {
   const lower = message.toLowerCase();
+  const original = message;
   
-  // Weather detection
-  if (/\b(weather|temperature|forecast|rain|sunny|cloudy|snow|how (hot|cold|warm))\b/.test(lower)) {
-    const locationMatch = message.match(/(?:in|at|for)\s+([A-Za-z\s]+?)(?:\?|$|,)/i);
-    return {
-      intent: 'weather',
-      confidence: 0.9,
-      params: { location: locationMatch?.[1]?.trim() || 'Cape Coral, Florida' }
-    };
-  }
-  
-  // Stock detection
-  if (/\$[A-Z]{1,5}|\b(stock|share|price of|nasdaq|nyse)\b/.test(message)) {
-    const tickerMatch = message.match(/\$?([A-Z]{1,5})/);
-    return {
-      intent: 'stock',
-      confidence: 0.85,
-      params: { symbol: tickerMatch?.[1] || 'AAPL' }
-    };
-  }
-  
-  // Crypto detection
-  if (/\b(bitcoin|btc|ethereum|eth|crypto|cryptocurrency|coin)\b/.test(lower)) {
-    const cryptoMatch = lower.match(/\b(bitcoin|btc|ethereum|eth|solana|sol|dogecoin|doge)\b/);
+  // CRYPTO FIRST (before stock - they can overlap)
+  if (/\b(bitcoin|btc|ethereum|eth|crypto|cryptocurrency|coin|solana|sol|dogecoin|doge|cardano|ada|xrp|ripple)\b/i.test(lower)) {
+    const cryptoMatch = lower.match(/\b(bitcoin|btc|ethereum|eth|solana|sol|dogecoin|doge|cardano|ada|xrp|ripple)\b/i);
     const cryptoMap: Record<string, string> = {
       'bitcoin': 'bitcoin', 'btc': 'bitcoin',
       'ethereum': 'ethereum', 'eth': 'ethereum',
       'solana': 'solana', 'sol': 'solana',
-      'dogecoin': 'dogecoin', 'doge': 'dogecoin'
+      'dogecoin': 'dogecoin', 'doge': 'dogecoin',
+      'cardano': 'cardano', 'ada': 'cardano',
+      'xrp': 'ripple', 'ripple': 'ripple'
     };
+    const coinId = cryptoMap[cryptoMatch?.[1]?.toLowerCase() || 'bitcoin'] || 'bitcoin';
     return {
       intent: 'crypto',
-      confidence: 0.85,
-      params: { symbol: cryptoMap[cryptoMatch?.[1] || 'bitcoin'] || 'bitcoin' }
+      confidence: 0.95,
+      params: { coinId, query: coinId }
+    };
+  }
+  
+  // Weather detection
+  if (/\b(weather|temperature|forecast|rain|sunny|cloudy|snow|how (hot|cold|warm)|humidity|wind)\b/i.test(lower)) {
+    const locationMatch = original.match(/(?:in|at|for)\s+([A-Za-z\s,]+?)(?:\?|$|,|\.|!)/i);
+    return {
+      intent: 'weather',
+      confidence: 0.95,
+      params: { query: locationMatch?.[1]?.trim() || 'Cape Coral, Florida' }
+    };
+  }
+  
+  // Stock detection (after crypto)
+  if (/\$[A-Z]{1,5}|\b(stock|share|price of|nasdaq|nyse|dow|s&p|market)\b/i.test(message)) {
+    const tickerMatch = original.match(/\$([A-Z]{1,5})|(?:stock|price|share)s?\s+(?:of\s+)?([A-Z]{1,5})/i);
+    const ticker = tickerMatch?.[1] || tickerMatch?.[2] || 'AAPL';
+    return {
+      intent: 'stock',
+      confidence: 0.9,
+      params: { query: ticker.toUpperCase() }
     };
   }
   
   // News detection
-  if (/\b(news|headlines|latest|breaking|what('s| is) happening|current events)\b/.test(lower)) {
-    const topicMatch = message.match(/(?:about|on|regarding)\s+([A-Za-z\s]+?)(?:\?|$|,)/i);
+  if (/\b(news|headlines|latest|breaking|what('s| is) happening|current events|trending)\b/i.test(lower)) {
+    const topicMatch = original.match(/(?:about|on|regarding|for)\s+([A-Za-z\s]+?)(?:\?|$|,|\.|!)/i);
     return {
       intent: 'news',
-      confidence: 0.8,
-      params: { topic: topicMatch?.[1]?.trim() || 'technology' }
+      confidence: 0.85,
+      params: { query: topicMatch?.[1]?.trim() || 'technology AI' }
     };
   }
   
   // Wikipedia/Knowledge detection
-  if (/\b(who (is|was)|what (is|are)|explain|tell me about|define)\b/.test(lower)) {
-    const topicMatch = message.match(/(?:who is|what is|about|explain)\s+(.+?)(?:\?|$)/i);
+  if (/\b(who (is|was|are)|what (is|are|was)|explain|tell me about|define|meaning of|history of)\b/i.test(lower)) {
+    const topicMatch = original.match(/(?:who is|who was|what is|what are|about|explain|define|history of)\s+(.+?)(?:\?|$|\.)/i);
     return {
       intent: 'wikipedia',
-      confidence: 0.75,
+      confidence: 0.8,
       params: { query: topicMatch?.[1]?.trim() || message }
     };
   }
   
   // Translation detection
-  if (/\b(translate|translation|say .+ in|how do you say)\b/.test(lower)) {
-    const langMatch = lower.match(/\b(spanish|french|german|italian|portuguese|chinese|japanese|korean|arabic|russian|hindi)\b/);
+  if (/\b(translate|translation|say .+ in|how do you say|in spanish|in french|in german)\b/i.test(lower)) {
+    const langMatch = lower.match(/\b(spanish|french|german|italian|portuguese|chinese|japanese|korean|arabic|russian|hindi)\b/i);
     const langCodes: Record<string, string> = {
       'spanish': 'es', 'french': 'fr', 'german': 'de', 'italian': 'it',
       'portuguese': 'pt', 'chinese': 'zh', 'japanese': 'ja', 'korean': 'ko',
       'arabic': 'ar', 'russian': 'ru', 'hindi': 'hi'
     };
-    const textMatch = message.match(/(?:translate|say)\s+"?([^"]+?)"?\s+(?:to|in)/i);
+    const textMatch = original.match(/(?:translate|say)\s+"?([^"]+?)"?\s+(?:to|in|into)/i);
     return {
       intent: 'translate',
-      confidence: 0.85,
+      confidence: 0.9,
       params: {
-        text: textMatch?.[1] || message,
-        targetLang: langCodes[langMatch?.[1] || 'spanish'] || 'es'
+        query: textMatch?.[1] || message.replace(/translate|to \w+|in \w+/gi, '').trim(),
+        targetLang: langCodes[langMatch?.[1]?.toLowerCase() || 'spanish'] || 'es'
       }
     };
   }
   
-  // Time detection
-  if (/\b(time|date|day|what time|current time)\b/.test(lower)) {
-    const locationMatch = message.match(/(?:in|at)\s+([A-Za-z\s]+?)(?:\?|$)/i);
-    return {
-      intent: 'time',
-      confidence: 0.9,
-      params: { location: locationMatch?.[1]?.trim() }
-    };
+  // Joke/Entertainment
+  if (/\b(joke|funny|make me laugh|humor|tell me a joke)\b/i.test(lower)) {
+    return { intent: 'joke', confidence: 0.95, params: {} };
+  }
+  
+  // Quote
+  if (/\b(quote|inspiration|motivat|wise words)\b/i.test(lower)) {
+    return { intent: 'quote', confidence: 0.9, params: {} };
+  }
+  
+  // Fact
+  if (/\b(random fact|interesting fact|did you know|fun fact)\b/i.test(lower)) {
+    return { intent: 'fact', confidence: 0.9, params: {} };
   }
   
   // Code/Dev detection
-  if (/\b(code|program|function|debug|error|javascript|python|typescript|react|api)\b/.test(lower)) {
+  if (/\b(code|program|function|debug|error|javascript|python|typescript|react|api|build|create app|fix)\b/i.test(lower)) {
     return {
       intent: 'code',
-      confidence: 0.8,
-      params: {}
+      confidence: 0.85,
+      params: { query: message }
     };
   }
   
-  // Image search detection
-  if (/\b(show me|find|search for)\s+.*(image|photo|picture)/i.test(message)) {
-    const queryMatch = message.match(/(?:show me|find|search for)\s+(.+?)\s+(?:image|photo|picture)/i);
+  // Image search
+  if (/\b(show me|find|search for)\s+.*(image|photo|picture|gif)/i.test(message)) {
+    const queryMatch = original.match(/(?:show me|find|search for)\s+(.+?)\s*(?:image|photo|picture|gif)/i);
     return {
       intent: 'images',
-      confidence: 0.8,
-      params: { query: queryMatch?.[1]?.trim() || message }
+      confidence: 0.85,
+      params: { query: queryMatch?.[1]?.trim() || 'nature' }
     };
   }
   
-  // Fun detection
-  if (/\b(joke|funny|laugh|quote|inspiration|fact|trivia)\b/.test(lower)) {
-    if (/joke/.test(lower)) return { intent: 'joke', confidence: 0.9, params: {} };
-    if (/quote|inspiration/.test(lower)) return { intent: 'quote', confidence: 0.9, params: {} };
-    if (/fact|trivia/.test(lower)) return { intent: 'fact', confidence: 0.9, params: {} };
-  }
-  
-  // Default to general chat
-  return { intent: 'chat', confidence: 0.5, params: {} };
+  // Default chat
+  return {
+    intent: 'chat',
+    confidence: 1.0,
+    params: {}
+  };
 }
 
-// ============ DATA FETCHERS ============
+// ============ FETCH EXTERNAL DATA (FIXED - ACTUALLY CALLS INTELLIGENCE API) ============
 
 async function fetchExternalData(intent: string, params: Record<string, any>): Promise<any> {
+  const baseUrl = getBaseUrl();
+  
   try {
-    switch (intent) {
-      case 'weather': {
-        const location = params.location || 'Cape Coral, Florida';
-        const geoRes = await fetch(
-          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(location)}&count=1`
-        );
-        const geoData = await geoRes.json();
-        
-        if (!geoData.results?.[0]) return null;
-        
-        const { latitude, longitude, name, country } = geoData.results[0];
-        const weatherRes = await fetch(
-          `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,weather_code&timezone=auto&temperature_unit=fahrenheit&forecast_days=3`
-        );
-        const weather = await weatherRes.json();
-        
-        const weatherCodes: Record<number, string> = {
-          0: 'Clear', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast',
-          45: 'Foggy', 51: 'Light drizzle', 61: 'Light rain', 63: 'Rain',
-          65: 'Heavy rain', 71: 'Light snow', 73: 'Snow', 80: 'Rain showers',
-          95: 'Thunderstorm'
-        };
-        
-        return {
-          location: `${name}, ${country}`,
-          current: {
-            temp: Math.round(weather.current?.temperature_2m),
-            feelsLike: Math.round(weather.current?.apparent_temperature),
-            humidity: weather.current?.relative_humidity_2m,
-            wind: Math.round(weather.current?.wind_speed_10m),
-            condition: weatherCodes[weather.current?.weather_code] || 'Unknown'
-          },
-          forecast: weather.daily?.time?.slice(0, 3).map((date: string, i: number) => ({
-            date: new Date(date).toLocaleDateString('en-US', { weekday: 'short' }),
-            high: Math.round(weather.daily.temperature_2m_max[i]),
-            low: Math.round(weather.daily.temperature_2m_min[i]),
-            condition: weatherCodes[weather.daily.weather_code[i]] || 'Unknown'
-          }))
-        };
-      }
-      
-      case 'stock': {
-        const symbol = params.symbol?.toUpperCase() || 'AAPL';
-        
-        // Try Finnhub first
-        if (process.env.FINNHUB_KEY) {
-          const res = await fetch(
-            `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${process.env.FINNHUB_KEY}`
-          );
-          const data = await res.json();
-          if (data.c) {
-            return {
-              symbol,
-              price: data.c.toFixed(2),
-              change: data.d?.toFixed(2),
-              changePercent: data.dp?.toFixed(2),
-              high: data.h?.toFixed(2),
-              low: data.l?.toFixed(2),
-              previousClose: data.pc?.toFixed(2)
-            };
-          }
-        }
-        
-        // Fallback to Alpha Vantage
-        if (process.env.ALPHA_VANTAGE_KEY) {
-          const res = await fetch(
-            `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${process.env.ALPHA_VANTAGE_KEY}`
-          );
-          const data = await res.json();
-          const quote = data['Global Quote'];
-          if (quote) {
-            return {
-              symbol: quote['01. symbol'],
-              price: parseFloat(quote['05. price']).toFixed(2),
-              change: parseFloat(quote['09. change']).toFixed(2),
-              changePercent: parseFloat(quote['10. change percent']).toFixed(2),
-              high: parseFloat(quote['03. high']).toFixed(2),
-              low: parseFloat(quote['04. low']).toFixed(2),
-              volume: parseInt(quote['06. volume']).toLocaleString()
-            };
-          }
-        }
-        
-        return null;
-      }
-      
-      case 'crypto': {
-        const symbol = params.symbol || 'bitcoin';
-        const res = await fetch(
-          `https://api.coingecko.com/api/v3/coins/${symbol}?localization=false&tickers=false&community_data=false&developer_data=false`
-        );
-        const data = await res.json();
-        
-        if (data.id) {
-          return {
-            name: data.name,
-            symbol: data.symbol?.toUpperCase(),
-            price: data.market_data?.current_price?.usd?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-            change24h: data.market_data?.price_change_percentage_24h?.toFixed(2),
-            change7d: data.market_data?.price_change_percentage_7d?.toFixed(2),
-            marketCap: (data.market_data?.market_cap?.usd / 1e9)?.toFixed(2) + 'B',
-            volume24h: (data.market_data?.total_volume?.usd / 1e9)?.toFixed(2) + 'B'
-          };
-        }
-        return null;
-      }
-      
-      case 'news': {
-        const topic = params.topic || 'technology';
-        
-        if (process.env.GNEWS_API_KEY) {
-          const res = await fetch(
-            `https://gnews.io/api/v4/search?q=${encodeURIComponent(topic)}&token=${process.env.GNEWS_API_KEY}&lang=en&max=5`
-          );
-          const data = await res.json();
-          if (data.articles) {
-            return data.articles.slice(0, 5).map((a: any) => ({
-              title: a.title,
-              source: a.source.name,
-              url: a.url,
-              publishedAt: new Date(a.publishedAt).toLocaleDateString()
-            }));
-          }
-        }
-        return null;
-      }
-      
-      case 'wikipedia': {
-        const query = params.query;
-        const searchRes = await fetch(
-          `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&origin=*`
-        );
-        const searchData = await searchRes.json();
-        
-        if (searchData.query?.search?.[0]) {
-          const pageId = searchData.query.search[0].pageid;
-          const title = searchData.query.search[0].title;
-          
-          const contentRes = await fetch(
-            `https://en.wikipedia.org/w/api.php?action=query&pageids=${pageId}&prop=extracts&exintro=true&explaintext=true&format=json&origin=*`
-          );
-          const contentData = await contentRes.json();
-          const extract = contentData.query.pages[pageId]?.extract;
-          
-          return {
-            title,
-            summary: extract?.substring(0, 1000),
-            url: `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`
-          };
-        }
-        return null;
-      }
-      
-      case 'translate': {
-        const { text, targetLang } = params;
-        const res = await fetch(
-          `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|${targetLang}`
-        );
-        const data = await res.json();
-        
-        if (data.responseData?.translatedText) {
-          return {
-            original: text,
-            translated: data.responseData.translatedText,
-            targetLang
-          };
-        }
-        return null;
-      }
-      
-      case 'joke': {
-        const res = await fetch('https://official-joke-api.appspot.com/random_joke');
-        return await res.json();
-      }
-      
-      case 'quote': {
-        const res = await fetch('https://api.quotable.io/random');
-        return await res.json();
-      }
-      
-      case 'fact': {
-        const res = await fetch('https://uselessfacts.jsph.pl/random.json?language=en');
-        return await res.json();
-      }
-      
-      default:
-        return null;
+    // Build the Intelligence API URL
+    const queryParams = new URLSearchParams({
+      action: intent,
+      ...params
+    });
+    
+    const url = `${baseUrl}/api/intelligence?${queryParams.toString()}`;
+    
+    console.log(`[Powerhouse] Fetching: ${url}`);
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Request': 'powerhouse-chat'
+      },
+      // Short timeout for external data
+      signal: AbortSignal.timeout(8000)
+    });
+    
+    if (!response.ok) {
+      console.error(`[Powerhouse] Intelligence API error: ${response.status}`);
+      return null;
     }
-  } catch (e) {
-    console.error(`Data fetch error for ${intent}:`, e);
+    
+    const data = await response.json();
+    
+    if (data.success && data.data) {
+      console.log(`[Powerhouse] Got data for ${intent}:`, JSON.stringify(data.data).slice(0, 200));
+      return data.data;
+    }
+    
+    return data;
+  } catch (error) {
+    console.error(`[Powerhouse] Failed to fetch ${intent} data:`, error);
     return null;
   }
 }
 
-// ============ MODEL SELECTION ============
+// ============ KNOWLEDGE BASE QUERY ============
+
+async function queryKnowledgeBase(query: string): Promise<any> {
+  try {
+    // Search knowledge entries
+    const { data: knowledge } = await supabase
+      .from('javari_knowledge')
+      .select('*')
+      .textSearch('content', query.split(' ').slice(0, 5).join(' | '))
+      .limit(5);
+    
+    // Search learned patterns
+    const { data: patterns } = await supabase
+      .from('javari_learning')
+      .select('*')
+      .textSearch('query', query.split(' ').slice(0, 3).join(' | '))
+      .eq('outcome', 'success')
+      .limit(3);
+    
+    if ((knowledge && knowledge.length > 0) || (patterns && patterns.length > 0)) {
+      return { knowledge, patterns };
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('[Powerhouse] Knowledge base error:', error);
+    return null;
+  }
+}
+
+// ============ MODEL SELECTION (CLAUDE FIRST) ============
 
 function selectModel(intent: string, complexity: number): { model: string; provider: string } {
-  // Complex or creative tasks -> Claude
-  if (['code', 'creative', 'analysis'].includes(intent) || complexity > 50) {
-    return { model: 'claude-sonnet-4-20250514', provider: 'anthropic' };
-  }
+  // CLAUDE IS PRIMARY FOR EVERYTHING - This is the fix!
   
-  // Data-heavy tasks -> GPT-4
-  if (['stock', 'news', 'wikipedia'].includes(intent)) {
-    return { model: 'gpt-4-turbo-preview', provider: 'openai' };
-  }
-  
-  // Simple tasks -> GPT-3.5 for speed
-  if (['joke', 'quote', 'fact', 'time'].includes(intent)) {
+  // Simple quick queries -> GPT-3.5 for speed
+  if (['joke', 'quote', 'fact'].includes(intent) && complexity < 50) {
     return { model: 'gpt-3.5-turbo', provider: 'openai' };
   }
   
-  // Default to Claude for quality
+  // Translation -> GPT-4 is good at this
+  if (intent === 'translate') {
+    return { model: 'gpt-4-turbo-preview', provider: 'openai' };
+  }
+  
+  // EVERYTHING ELSE -> CLAUDE (coding, analysis, complex queries, chat)
   return { model: 'claude-sonnet-4-20250514', provider: 'anthropic' };
 }
 
@@ -397,31 +293,38 @@ async function callAI(
 ): Promise<{ content: string; tokensUsed: number }> {
   
   if (provider === 'anthropic') {
-    const response = await anthropic.messages.create({
-      model,
-      max_tokens: 2048,
-      system: systemPrompt,
-      messages: messages.map(m => ({
-        role: m.role === 'user' ? 'user' : 'assistant',
-        content: m.content
-      }))
-    });
-    
-    const content = response.content[0].type === 'text' ? response.content[0].text : '';
-    return {
-      content,
-      tokensUsed: response.usage.input_tokens + response.usage.output_tokens
-    };
+    try {
+      const response = await anthropic.messages.create({
+        model,
+        max_tokens: 4096,
+        system: systemPrompt,
+        messages: messages.map(m => ({
+          role: m.role === 'user' ? 'user' : 'assistant',
+          content: m.content
+        }))
+      });
+      
+      const content = response.content[0].type === 'text' ? response.content[0].text : '';
+      return {
+        content,
+        tokensUsed: response.usage.input_tokens + response.usage.output_tokens
+      };
+    } catch (anthropicError) {
+      console.error('[Powerhouse] Claude error, falling back to OpenAI:', anthropicError);
+      // Fallback to OpenAI
+      provider = 'openai';
+      model = 'gpt-4-turbo-preview';
+    }
   }
   
-  // OpenAI
+  // OpenAI (or fallback)
   const response = await openai.chat.completions.create({
     model,
     messages: [
       { role: 'system', content: systemPrompt },
       ...messages
     ],
-    max_tokens: 2048,
+    max_tokens: 4096,
     temperature: 0.7
   });
   
@@ -431,103 +334,262 @@ async function callAI(
   };
 }
 
+// ============ FORMAT ENRICHED DATA FOR PROMPT ============
+
+function formatEnrichedData(intent: string, data: any): string {
+  if (!data) return '';
+  
+  switch (intent) {
+    case 'crypto':
+      if (data.price !== undefined) {
+        return `
+LIVE CRYPTOCURRENCY DATA:
+- Coin: ${data.name || data.coinId || 'Unknown'}
+- Symbol: ${data.symbol?.toUpperCase() || 'N/A'}
+- Current Price: $${data.price?.toLocaleString() || 'N/A'}
+- 24h Change: ${data.change24h?.toFixed(2) || 'N/A'}%
+- Market Cap: $${data.marketCap?.toLocaleString() || 'N/A'}
+- 24h Volume: $${data.volume24h?.toLocaleString() || 'N/A'}
+- Updated: ${new Date().toLocaleString()}
+
+Use this real-time data to answer the user's question accurately.`;
+      }
+      break;
+      
+    case 'stock':
+      if (data.price !== undefined || data.c !== undefined) {
+        return `
+LIVE STOCK DATA:
+- Symbol: ${data.symbol || data.query || 'N/A'}
+- Current Price: $${(data.price || data.c)?.toFixed(2) || 'N/A'}
+- Change: ${data.change || data.d || 'N/A'} (${data.percentChange || data.dp || 'N/A'}%)
+- Open: $${(data.open || data.o)?.toFixed(2) || 'N/A'}
+- High: $${(data.high || data.h)?.toFixed(2) || 'N/A'}
+- Low: $${(data.low || data.l)?.toFixed(2) || 'N/A'}
+- Previous Close: $${(data.previousClose || data.pc)?.toFixed(2) || 'N/A'}
+- Updated: ${new Date().toLocaleString()}
+
+Use this real-time data to answer the user's question accurately.`;
+      }
+      break;
+      
+    case 'weather':
+      if (data.temp !== undefined || data.temperature !== undefined) {
+        return `
+LIVE WEATHER DATA:
+- Location: ${data.location || data.name || 'N/A'}
+- Temperature: ${data.temp || data.temperature || 'N/A'}°${data.unit || 'F'}
+- Feels Like: ${data.feelsLike || 'N/A'}°${data.unit || 'F'}
+- Conditions: ${data.description || data.conditions || 'N/A'}
+- Humidity: ${data.humidity || 'N/A'}%
+- Wind: ${data.windSpeed || 'N/A'} mph
+- Updated: ${new Date().toLocaleString()}
+
+Use this real-time data to answer the user's question accurately.`;
+      }
+      break;
+      
+    case 'news':
+      if (Array.isArray(data.articles) || Array.isArray(data)) {
+        const articles = data.articles || data;
+        const headlines = articles.slice(0, 5).map((a: any, i: number) => 
+          `${i + 1}. "${a.title || a.headline}" - ${a.source?.name || a.source || 'Unknown'}`
+        ).join('\n');
+        return `
+LIVE NEWS HEADLINES:
+${headlines}
+
+Use these current headlines to answer the user's question about news.`;
+      }
+      break;
+      
+    case 'wikipedia':
+      if (data.extract || data.summary || data.description) {
+        return `
+WIKIPEDIA KNOWLEDGE:
+Title: ${data.title || 'N/A'}
+Summary: ${(data.extract || data.summary || data.description).slice(0, 1000)}
+Source: Wikipedia
+
+Use this information to answer the user's question.`;
+      }
+      break;
+      
+    case 'joke':
+      if (data.joke || data.setup) {
+        return `
+Here's a joke to share:
+${data.joke || `${data.setup}\n${data.punchline}`}`;
+      }
+      break;
+      
+    case 'quote':
+      if (data.quote || data.content) {
+        return `
+INSPIRATIONAL QUOTE:
+"${data.quote || data.content}"
+- ${data.author || 'Unknown'}
+
+Share this quote naturally with the user.`;
+      }
+      break;
+      
+    case 'fact':
+      if (data.fact || data.text) {
+        return `
+INTERESTING FACT:
+${data.fact || data.text}
+
+Share this fact naturally with the user.`;
+      }
+      break;
+      
+    default:
+      return data ? `\nAdditional context: ${JSON.stringify(data)}` : '';
+  }
+  
+  // If we get here, return raw data as fallback
+  return data ? `\nReal-time data: ${JSON.stringify(data, null, 2)}` : '';
+}
+
 // ============ MAIN HANDLER ============
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
+  const requestId = `pwr_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
   
   try {
     const body: ChatRequest = await request.json();
-    const { messages, userId, sessionId, sourceApp, systemContext, tools = true } = body;
+    const { 
+      messages, 
+      userId, 
+      sessionId, 
+      sourceApp, 
+      systemContext, 
+      tools = true,
+      useKnowledgeBase = true 
+    } = body;
     
     if (!messages || messages.length === 0) {
-      return NextResponse.json({ error: 'No messages provided' }, { status: 400 });
+      return NextResponse.json({ error: 'No messages provided', requestId }, { status: 400 });
     }
     
     const lastMessage = messages[messages.length - 1];
     const userMessage = lastMessage.content;
     
-    // Detect intent and enrich context
-    const { intent, confidence, params } = detectIntent(userMessage);
-    let enrichedData: any = null;
+    console.log(`[Powerhouse ${requestId}] Processing: "${userMessage.slice(0, 100)}..."`);
     
-    // Fetch external data if tools enabled and confident intent
-    if (tools && confidence > 0.6 && intent !== 'chat') {
+    // Step 1: Detect intent
+    const { intent, confidence, params } = detectIntent(userMessage);
+    console.log(`[Powerhouse ${requestId}] Intent: ${intent} (${confidence}), Params:`, params);
+    
+    // Step 2: Fetch external data if tools enabled
+    let enrichedData: any = null;
+    if (tools && confidence > 0.6 && !['chat', 'code'].includes(intent)) {
+      console.log(`[Powerhouse ${requestId}] Fetching external data for ${intent}...`);
       enrichedData = await fetchExternalData(intent, params);
+      console.log(`[Powerhouse ${requestId}] Got enriched data:`, enrichedData ? 'YES' : 'NO');
     }
     
-    // Calculate complexity (word count + question marks + code indicators)
-    const complexity = userMessage.split(/\s+/).length + 
-                       (userMessage.match(/\?/g)?.length || 0) * 5 +
-                       (userMessage.match(/```|code|function|api/gi)?.length || 0) * 20;
+    // Step 3: Query knowledge base for relevant context
+    let knowledgeContext: any = null;
+    if (useKnowledgeBase) {
+      knowledgeContext = await queryKnowledgeBase(userMessage);
+    }
     
-    // Select best model
+    // Step 4: Calculate complexity for model selection
+    const complexity = 
+      userMessage.split(/\s+/).length + 
+      (userMessage.match(/\?/g)?.length || 0) * 5 +
+      (userMessage.match(/```|code|function|api|build|create/gi)?.length || 0) * 20;
+    
+    // Step 5: Select best model (Claude-first)
     const { model, provider } = selectModel(intent, complexity);
+    console.log(`[Powerhouse ${requestId}] Using ${provider}/${model}`);
     
-    // Build system prompt
-    let systemPrompt = `You are Javari, an advanced AI assistant created by CR AudioViz AI. You're helpful, knowledgeable, and friendly. Current date: ${new Date().toLocaleDateString()}.`;
+    // Step 6: Build system prompt
+    let systemPrompt = `You are Javari, CR AudioViz AI's advanced autonomous assistant. You are intelligent, helpful, accurate, and conversational.
+
+Current Date/Time: ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })} EST
+Your Creator: CR AudioViz AI, LLC
+Your Mission: Help users with anything they need - from coding to creative tasks to real-time information.`;
     
     if (systemContext) {
-      systemPrompt += `\n\n${systemContext}`;
+      systemPrompt += `\n\nApp Context: ${systemContext}`;
     }
     
+    // Add enriched real-time data to prompt
     if (enrichedData) {
-      systemPrompt += `\n\nREAL-TIME DATA (use this to answer the user's question):\n${JSON.stringify(enrichedData, null, 2)}`;
+      systemPrompt += formatEnrichedData(intent, enrichedData);
     }
     
-    systemPrompt += `\n\nGuidelines:
-- Be conversational and helpful
-- If you have real-time data, present it clearly
-- For weather: include current conditions and forecast
-- For stocks/crypto: include price, change, and context
-- For news: summarize key headlines
-- For facts/knowledge: be informative but concise
-- Always be accurate with data provided to you`;
+    // Add knowledge base context
+    if (knowledgeContext && knowledgeContext.knowledge?.length > 0) {
+      systemPrompt += `\n\nRELEVANT KNOWLEDGE:\n${knowledgeContext.knowledge.map((k: any) => k.content).join('\n')}`;
+    }
     
-    // Call AI
+    systemPrompt += `
+
+Guidelines:
+- If you have real-time data above, USE IT to answer accurately
+- Be conversational and friendly, not robotic
+- For financial data, always mention it's real-time and not financial advice
+- For weather, include helpful context
+- For code, provide complete, working solutions
+- Always be honest about what you know vs. don't know`;
+    
+    // Step 7: Call AI
     const { content, tokensUsed } = await callAI(messages, systemPrompt, model, provider);
     
     const responseTime = Date.now() - startTime;
     
-    // Log the interaction for learning
-    try {
-      await supabase.from('chat_logs').insert({
-        user_id: userId,
-        session_id: sessionId,
-        source_app: sourceApp || 'javariai.com',
-        user_message: userMessage,
-        assistant_response: content,
-        intent_detected: intent,
-        intent_confidence: confidence,
-        model_used: model,
-        provider_used: provider,
-        tokens_used: tokensUsed,
-        response_time_ms: responseTime,
-        enriched_data: enrichedData ? true : false,
-        created_at: new Date().toISOString()
-      });
-    } catch (e) {}
-    
-    // Record learning signal
-    try {
-      await supabase.from('learning_feedback').insert({
-        interaction_id: `${sessionId || 'anon'}_${Date.now()}`,
-        interaction_type: 'chat',
-        outcome: 'success',
-        context: { intent, params, enrichedData: !!enrichedData },
-        metrics: {
-          response_time_ms: responseTime,
+    // Step 8: Log for learning (non-blocking)
+    (async () => {
+      try {
+        await supabase.from('chat_logs').insert({
+          user_id: userId,
+          session_id: sessionId,
+          source_app: sourceApp || 'javariai.com',
+          user_message: userMessage,
+          assistant_response: content,
+          intent_detected: intent,
+          intent_confidence: confidence,
+          model_used: model,
+          provider_used: provider,
           tokens_used: tokensUsed,
-          model: model
-        },
-        created_at: new Date().toISOString()
-      });
-    } catch (e) {}
+          response_time_ms: responseTime,
+          enriched_data: enrichedData ? true : false,
+          knowledge_used: knowledgeContext ? true : false,
+          request_id: requestId,
+          created_at: new Date().toISOString()
+        });
+        
+        // Record learning signal
+        await supabase.from('javari_learning').insert({
+          interaction_id: requestId,
+          query: userMessage,
+          response: content.slice(0, 500),
+          intent: intent,
+          outcome: 'success',
+          metrics: {
+            response_time_ms: responseTime,
+            tokens_used: tokensUsed,
+            model,
+            provider,
+            had_enriched_data: !!enrichedData
+          },
+          created_at: new Date().toISOString()
+        });
+      } catch (e) {
+        console.error('[Powerhouse] Logging error:', e);
+      }
+    })();
     
+    // Return response
     return NextResponse.json({
       content,
       response: content,
-      provider: provider === 'anthropic' ? 'Anthropic Claude' : 'OpenAI GPT',
+      provider: provider === 'anthropic' ? 'Claude (Anthropic)' : 'OpenAI GPT',
       model,
       intent: {
         detected: intent,
@@ -535,16 +597,21 @@ export async function POST(request: NextRequest) {
         params
       },
       enrichedData: enrichedData ? true : false,
+      dataSource: enrichedData ? 'Intelligence API' : null,
+      knowledgeUsed: knowledgeContext ? true : false,
       tokensUsed,
       responseTime,
+      requestId,
+      version: '3.0 - FULL INTELLIGENCE MODE',
       timestamp: new Date().toISOString()
     });
     
   } catch (error) {
-    console.error('Chat error:', error);
+    console.error(`[Powerhouse] Error:`, error);
     
     return NextResponse.json({
       error: error instanceof Error ? error.message : 'Chat failed',
+      requestId,
       timestamp: new Date().toISOString()
     }, { status: 500 });
   }
@@ -553,19 +620,25 @@ export async function POST(request: NextRequest) {
 export async function GET() {
   return NextResponse.json({
     name: 'Javari Powerhouse Chat API',
-    version: '2.0.0',
+    version: '3.0.0',
     status: 'operational',
+    primaryAI: 'Claude (Anthropic)',
     capabilities: [
-      'Multi-model AI (Claude, GPT-4, GPT-3.5)',
-      'Real-time weather data',
-      'Live stock prices',
-      'Cryptocurrency data',
-      'News headlines',
-      'Wikipedia knowledge',
-      'Translation',
-      'Jokes, quotes, facts',
+      'Claude as primary AI',
+      'Real-time cryptocurrency prices',
+      'Live stock market data',
+      'Current weather conditions',
+      'Breaking news headlines',
+      'Wikipedia knowledge integration',
+      'Translation services',
+      'Entertainment (jokes, quotes, facts)',
+      'Knowledge base integration',
       'Autonomous learning',
-      'Intent detection'
+      'Intelligent intent detection'
+    ],
+    intelligenceEndpoints: [
+      'crypto', 'stock', 'weather', 'news', 
+      'wikipedia', 'translate', 'joke', 'quote', 'fact'
     ],
     timestamp: new Date().toISOString()
   });
