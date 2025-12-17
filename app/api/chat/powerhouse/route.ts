@@ -195,24 +195,23 @@ async function fetchExternalData(intent: string, params: Record<string, any>): P
   const baseUrl = getBaseUrl();
   
   try {
-    // Build the Intelligence API URL
-    const queryParams = new URLSearchParams({
-      action: intent,
-      ...params
-    });
+    const url = `${baseUrl}/api/intelligence`;
     
-    const url = `${baseUrl}/api/intelligence?${queryParams.toString()}`;
+    console.log(`[Powerhouse] Fetching ${intent} from Intelligence API...`);
     
-    console.log(`[Powerhouse] Fetching: ${url}`);
-    
+    // Use POST - the Intelligence API requires POST for data queries
     const response = await fetch(url, {
-      method: 'GET',
+      method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-Internal-Request': 'powerhouse-chat'
       },
+      body: JSON.stringify({
+        action: intent,
+        ...params
+      }),
       // Short timeout for external data
-      signal: AbortSignal.timeout(8000)
+      signal: AbortSignal.timeout(10000)
     });
     
     if (!response.ok) {
