@@ -1,107 +1,388 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
-import { Send, Upload, Download, Settings, Trash2, Star, Loader2 } from 'lucide-react';
+// =============================================================================
+// JAVARI AI - COMPLETE CHAT INTERFACE
+// =============================================================================
+// ALL AI providers visible | VIP detection by email | Never say no philosophy
+// Production Ready - Tuesday, December 16, 2025 - 11:45 PM EST
+// =============================================================================
+
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { 
+  Send, Upload, Settings, Trash2, Star, Loader2, 
+  Zap, Brain, Globe, Search, Code, Sparkles, 
+  ChevronDown, Shield, Crown, AlertCircle, Check
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
 import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { Slider } from '@/components/ui/slider';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/components/ui/use-toast';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
+
+// =============================================================================
+// TYPE DEFINITIONS
+// =============================================================================
 
 interface Message {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system';
   content: string;
   provider?: string;
   model?: string;
   timestamp: Date;
   rating?: number;
   files?: Array<{ name: string; type: string; size: number }>;
+  metadata?: {
+    tokensUsed?: number;
+    responseTimeMs?: number;
+    enrichedData?: boolean;
+    dataSource?: string;
+    intent?: string;
+    vipMode?: boolean;
+  };
 }
 
-interface Provider {
+interface AIModel {
   id: string;
   name: string;
-  models: { id: string; name: string }[];
+  contextWindow: number;
+  speed: 'fast' | 'medium' | 'slow';
+  bestFor: string[];
+}
+
+interface AIProvider {
+  id: string;
+  name: string;
+  description: string;
+  category: 'premium' | 'standard' | 'free' | 'specialized';
+  costTier: 'high' | 'medium' | 'low' | 'free';
+  models: AIModel[];
+  icon: React.ReactNode;
+  color: string;
   status: 'active' | 'inactive' | 'error';
 }
 
+interface VIPStatus {
+  isVIP: boolean;
+  name?: string;
+  role?: string;
+  accessLevel: 'unlimited' | 'premium' | 'standard' | 'free';
+}
+
+// =============================================================================
+// AI PROVIDERS - ALL 6 WITH ICONS
+// =============================================================================
+
+const AI_PROVIDERS: AIProvider[] = [
+  {
+    id: 'anthropic',
+    name: 'Claude (Anthropic)',
+    description: 'Most advanced reasoning & coding',
+    category: 'premium',
+    costTier: 'high',
+    icon: <Brain className="w-4 h-4" />,
+    color: 'bg-orange-500',
+    status: 'active',
+    models: [
+      { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', contextWindow: 200000, speed: 'medium', bestFor: ['coding', 'analysis'] },
+      { id: 'claude-opus-4-20250514', name: 'Claude Opus 4', contextWindow: 200000, speed: 'slow', bestFor: ['research', 'complex'] },
+      { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5', contextWindow: 200000, speed: 'medium', bestFor: ['balanced'] },
+    ]
+  },
+  {
+    id: 'openai',
+    name: 'OpenAI GPT',
+    description: 'Industry standard AI',
+    category: 'premium',
+    costTier: 'high',
+    icon: <Sparkles className="w-4 h-4" />,
+    color: 'bg-green-500',
+    status: 'active',
+    models: [
+      { id: 'gpt-4-turbo-preview', name: 'GPT-4 Turbo', contextWindow: 128000, speed: 'medium', bestFor: ['general', 'creative'] },
+      { id: 'gpt-4o', name: 'GPT-4o', contextWindow: 128000, speed: 'fast', bestFor: ['vision', 'multimodal'] },
+      { id: 'gpt-4o-mini', name: 'GPT-4o Mini', contextWindow: 128000, speed: 'fast', bestFor: ['quick', 'cost-effective'] },
+      { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', contextWindow: 16385, speed: 'fast', bestFor: ['simple', 'high volume'] },
+    ]
+  },
+  {
+    id: 'google',
+    name: 'Google Gemini',
+    description: 'Massive context & multimodal',
+    category: 'premium',
+    costTier: 'medium',
+    icon: <Globe className="w-4 h-4" />,
+    color: 'bg-blue-500',
+    status: 'active',
+    models: [
+      { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', contextWindow: 2000000, speed: 'medium', bestFor: ['long docs', 'video'] },
+      { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', contextWindow: 1000000, speed: 'fast', bestFor: ['fast', 'high volume'] },
+    ]
+  },
+  {
+    id: 'perplexity',
+    name: 'Perplexity AI',
+    description: 'Real-time web search + AI',
+    category: 'specialized',
+    costTier: 'medium',
+    icon: <Search className="w-4 h-4" />,
+    color: 'bg-purple-500',
+    status: 'active',
+    models: [
+      { id: 'llama-3.1-sonar-large-128k-online', name: 'Sonar Large Online', contextWindow: 128000, speed: 'medium', bestFor: ['search', 'research'] },
+      { id: 'llama-3.1-sonar-small-128k-online', name: 'Sonar Small Online', contextWindow: 128000, speed: 'fast', bestFor: ['quick search'] },
+    ]
+  },
+  {
+    id: 'groq',
+    name: 'Groq (Ultra-Fast)',
+    description: '10x faster inference - FREE!',
+    category: 'free',
+    costTier: 'free',
+    icon: <Zap className="w-4 h-4" />,
+    color: 'bg-yellow-500',
+    status: 'active',
+    models: [
+      { id: 'llama-3.1-70b-versatile', name: 'Llama 3.1 70B', contextWindow: 128000, speed: 'fast', bestFor: ['fast', 'coding'] },
+      { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B Instant', contextWindow: 128000, speed: 'fast', bestFor: ['ultra-fast'] },
+      { id: 'mixtral-8x7b-32768', name: 'Mixtral 8x7B', contextWindow: 32768, speed: 'fast', bestFor: ['multilingual'] },
+    ]
+  },
+  {
+    id: 'huggingface',
+    name: 'Hugging Face',
+    description: '100,000+ open source models',
+    category: 'free',
+    costTier: 'free',
+    icon: <Code className="w-4 h-4" />,
+    color: 'bg-pink-500',
+    status: 'active',
+    models: [
+      { id: 'meta-llama/Meta-Llama-3-70B-Instruct', name: 'Llama 3 70B', contextWindow: 8192, speed: 'medium', bestFor: ['general'] },
+      { id: 'mistralai/Mixtral-8x7B-Instruct-v0.1', name: 'Mixtral 8x7B', contextWindow: 32768, speed: 'medium', bestFor: ['multilingual'] },
+    ]
+  }
+];
+
+// =============================================================================
+// TERMS OF SERVICE
+// =============================================================================
+
+const TERMS_VERSION = '2.0.0';
+const TERMS_TEXT = `
+CR AUDIOVIZ AI - TERMS OF SERVICE & RESPONSIBILITY
+
+By using Javari AI and CR AudioViz AI services, you acknowledge and agree:
+
+1. USER RESPONSIBILITY
+   • You are solely responsible for all requests you make
+   • You are responsible for how you use generated content
+   • You must ensure your use complies with applicable laws
+   • You indemnify CR AudioViz AI from any claims arising from your use
+
+2. AI-GENERATED CONTENT
+   • All content is generated by artificial intelligence
+   • Content may contain errors or inaccuracies
+   • You must verify important information independently
+   • CR AudioViz AI makes no warranties about generated content
+
+3. INDEMNIFICATION
+   You agree to indemnify, defend, and hold harmless CR AudioViz AI, LLC,
+   its officers, directors, employees, and agents from any claims, damages,
+   losses, or expenses arising from:
+   a) Your use of the services
+   b) Content you generate or request
+   c) Your violation of these terms
+   d) Your violation of any third-party rights
+
+4. LIMITATION OF LIABILITY
+   • CR AudioViz AI is not liable for any indirect, incidental, special,
+     consequential, or punitive damages
+   • Our liability is limited to amounts you paid in the last 12 months
+
+5. ACCEPTABLE USE
+   • You agree not to use services for illegal activities
+   • You agree not to generate harmful or abusive content
+   • You agree to respect intellectual property rights
+
+Version: ${TERMS_VERSION}
+Effective Date: December 16, 2025
+`;
+
+// =============================================================================
+// MAIN COMPONENT
+// =============================================================================
+
 export default function ChatPage() {
   const { toast } = useToast();
+  
+  // State
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedProvider, setSelectedProvider] = useState('openai');
-  const [selectedModel, setSelectedModel] = useState('gpt-4-turbo-preview');
+  const [selectedProvider, setSelectedProvider] = useState('anthropic');
+  const [selectedModel, setSelectedModel] = useState('claude-sonnet-4-20250514');
+  const [autoSelectProvider, setAutoSelectProvider] = useState(true);
   const [temperature, setTemperature] = useState(0.7);
   const [maxTokens, setMaxTokens] = useState(4096);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
-  const [providers, setProviders] = useState<Provider[]>([
-    {
-      id: 'openai',
-      name: 'OpenAI',
-      models: [
-        { id: 'gpt-4-turbo-preview', name: 'GPT-4 Turbo' },
-        { id: 'gpt-4', name: 'GPT-4' },
-        { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo' },
-      ],
-      status: 'active',
-    },
-    {
-      id: 'anthropic',
-      name: 'Claude',
-      models: [
-        { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5' },
-        { id: 'claude-opus-4-20250514', name: 'Claude Opus 4' },
-        { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4' },
-      ],
-      status: 'active',
-    },
-  ]);
   const [showSettings, setShowSettings] = useState(false);
+  const [showTermsDialog, setShowTermsDialog] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [vipStatus, setVIPStatus] = useState<VIPStatus>({
+    isVIP: false,
+    accessLevel: 'standard'
+  });
+  const [usePowerhouse, setUsePowerhouse] = useState(true);
+  
+  // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const scrollToBottom = () => {
+  // =============================================================================
+  // EFFECTS
+  // =============================================================================
+
+  const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  }, []);
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, scrollToBottom]);
 
   useEffect(() => {
-    // Load provider status on mount
-    fetchProviderStatus();
+    // Check VIP status and terms on mount
+    checkVIPStatus();
+    checkTermsAcceptance();
   }, []);
 
-  const fetchProviderStatus = async () => {
+  // =============================================================================
+  // VIP & TERMS FUNCTIONS
+  // =============================================================================
+
+  const checkVIPStatus = async () => {
     try {
-      const response = await fetch('/api/javari/chat');
+      const response = await fetch('/api/auth/vip-status');
       if (response.ok) {
         const data = await response.json();
-        // Update providers with actual available models
-        console.log('Available models:', data.models);
+        setVIPStatus(data);
+        
+        if (data.isVIP) {
+          toast({
+            title: `Welcome back, ${data.name}!`,
+            description: `VIP Mode: ${data.accessLevel.toUpperCase()} - Full delivery access enabled`,
+          });
+        }
       }
-    } catch (error: unknown) {
-      console.error('Failed to fetch provider status:', error);
+    } catch (error) {
+      console.error('VIP check failed:', error);
     }
   };
+
+  const checkTermsAcceptance = async () => {
+    try {
+      const response = await fetch('/api/auth/terms-status');
+      if (response.ok) {
+        const data = await response.json();
+        setTermsAccepted(data.accepted);
+        if (!data.accepted) {
+          setShowTermsDialog(true);
+        }
+      }
+    } catch (error) {
+      // If API doesn't exist, check local storage
+      const localAcceptance = localStorage.getItem('javari_terms_accepted');
+      if (!localAcceptance) {
+        setShowTermsDialog(true);
+      } else {
+        setTermsAccepted(true);
+      }
+    }
+  };
+
+  const acceptTerms = async () => {
+    try {
+      await fetch('/api/auth/accept-terms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version: TERMS_VERSION })
+      });
+    } catch (error) {
+      // Fallback to local storage
+      localStorage.setItem('javari_terms_accepted', TERMS_VERSION);
+    }
+    setTermsAccepted(true);
+    setShowTermsDialog(false);
+    toast({
+      title: 'Terms Accepted',
+      description: 'Thank you! You now have full access to Javari AI.',
+    });
+  };
+
+  // =============================================================================
+  // PROVIDER SELECTION
+  // =============================================================================
+
+  const getProviderIcon = (providerId: string) => {
+    const provider = AI_PROVIDERS.find(p => p.id === providerId);
+    return provider?.icon || <Brain className="w-4 h-4" />;
+  };
+
+  const getProviderColor = (providerId: string) => {
+    const provider = AI_PROVIDERS.find(p => p.id === providerId);
+    return provider?.color || 'bg-gray-500';
+  };
+
+  const handleProviderChange = (providerId: string) => {
+    setSelectedProvider(providerId);
+    const provider = AI_PROVIDERS.find(p => p.id === providerId);
+    if (provider && provider.models.length > 0) {
+      setSelectedModel(provider.models[0].id);
+    }
+  };
+
+  // =============================================================================
+  // FILE UPLOAD
+  // =============================================================================
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     setUploadedFiles((prev) => [...prev, ...files]);
     toast({
       title: 'Files uploaded',
-      description: `${files.length} file(s) added to your message`,
+      description: `${files.length} file(s) ready to send`,
     });
   };
 
@@ -109,8 +390,16 @@ export default function ChatPage() {
     setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
+  // =============================================================================
+  // SEND MESSAGE
+  // =============================================================================
+
   const handleSendMessage = async () => {
     if (!input.trim() && uploadedFiles.length === 0) return;
+    if (!termsAccepted) {
+      setShowTermsDialog(true);
+      return;
+    }
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -126,485 +415,528 @@ export default function ChatPage() {
 
     setMessages((prev) => [...prev, userMessage]);
     setInput('');
+    setUploadedFiles([]);
     setIsLoading(true);
 
     try {
-      // Upload files first if any
-      let fileUrls: string[] = [];
-      if (uploadedFiles.length > 0) {
-        const formData = new FormData();
-        uploadedFiles.forEach((file) => {
-          formData.append('files', file);
-        });
+      // Use Powerhouse endpoint for VIP or if enabled
+      const endpoint = (vipStatus.isVIP || usePowerhouse) 
+        ? '/api/chat/powerhouse' 
+        : '/api/chat';
 
-        const uploadResponse = await fetch('/api/javari/files', {
-          method: 'POST',
-          body: formData,
-        });
-
-        if (uploadResponse.ok) {
-          const uploadData = await uploadResponse.json();
-          fileUrls = uploadData.urls || [];
-        }
-      }
-
-      // Build history array in correct format
-      const history = messages.slice(-10).map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
-
-      // Send chat message with streaming - FIXED PAYLOAD
-      const response = await fetch('/api/javari/chat', {
+      const response = await fetch(endpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: userMessage.content,
-          history: history, // Changed from conversationHistory
-          model: selectedModel, // Already in correct format
-          temperature: temperature,
-          maxTokens: maxTokens,
-          // Removed provider field - not needed
+          messages: [...messages, userMessage].map(m => ({
+            role: m.role,
+            content: m.content
+          })),
+          provider: autoSelectProvider ? 'auto' : selectedProvider,
+          model: autoSelectProvider ? 'auto' : selectedModel,
+          temperature,
+          maxTokens,
+          // VIP flags
+          vipMode: vipStatus.isVIP,
+          deliveryMode: vipStatus.accessLevel === 'unlimited' ? 'full' : 'standard',
         }),
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Failed to send message');
+        throw new Error('Failed to get response');
       }
 
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      let assistantMessage: Message = {
+      const data = await response.json();
+
+      const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: '',
-        provider: selectedProvider,
-        model: selectedModel,
+        content: data.content || data.response || 'I apologize, but I couldn\'t generate a response.',
+        provider: data.provider,
+        model: data.model,
         timestamp: new Date(),
+        metadata: {
+          tokensUsed: data.tokensUsed,
+          responseTimeMs: data.responseTimeMs,
+          enrichedData: data.enrichedData,
+          dataSource: data.dataSource,
+          intent: data.intent?.detected,
+          vipMode: data.vipMode,
+        },
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
 
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          const chunk = decoder.decode(value);
-          const lines = chunk.split('\n');
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const dataStr = line.slice(6).trim();
-              if (dataStr === '[DONE]') continue;
-
-              try {
-                const data = JSON.parse(dataStr);
-                
-                // Handle chunk content
-                if (data.chunk) {
-                  assistantMessage.content += data.chunk;
-                  setMessages((prev) =>
-                    prev.map((m) =>
-                      m.id === assistantMessage.id
-                        ? { ...m, content: assistantMessage.content }
-                        : m
-                    )
-                  );
-                }
-                
-                // Handle completion
-                if (data.done) {
-                  console.log('Stream complete:', data);
-                }
-                
-                // Handle errors
-                if (data.error) {
-                  throw new Error(data.error);
-                }
-              } catch (e) {
-                // Ignore parse errors for incomplete chunks
-                if (e instanceof Error && e.message !== 'Unexpected end of JSON input') {
-                  console.error('Parse error:', e);
-                }
-              }
-            }
-          }
-        }
+      // Show provider info
+      if (data.provider) {
+        toast({
+          title: `Response from ${data.provider}`,
+          description: data.enrichedData 
+            ? `Enhanced with real-time data from ${data.dataSource}` 
+            : `Model: ${data.model}`,
+        });
       }
 
-      setUploadedFiles([]);
-      toast({
-        title: 'Message sent',
-        description: 'Response received successfully',
-      });
-    } catch (error: unknown) {
+    } catch (error) {
       console.error('Chat error:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to send message';
       toast({
         title: 'Error',
-        description: errorMessage,
+        description: 'Failed to send message. Please try again.',
         variant: 'destructive',
       });
-
-      // Remove failed assistant message if it was added
-      setMessages((prev) => prev.filter((m) => m.role !== 'assistant' || m.content));
     } finally {
       setIsLoading(false);
     }
   };
+
+  // =============================================================================
+  // RATING
+  // =============================================================================
 
   const handleRateMessage = async (messageId: string, rating: number) => {
     setMessages((prev) =>
       prev.map((m) => (m.id === messageId ? { ...m, rating } : m))
     );
 
-    // Save rating to analytics
     try {
-      await fetch('/api/javari/analytics', {
+      await fetch('/api/javari/feedback', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messageId,
-          rating,
-          provider: messages.find((m) => m.id === messageId)?.provider,
-          model: messages.find((m) => m.id === messageId)?.model,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId, rating }),
       });
-    } catch (error: unknown) {
-      console.error('Failed to save rating:', error);
+    } catch (error) {
+      console.error('Failed to submit rating:', error);
     }
-
-    toast({
-      title: 'Rating saved',
-      description: 'Thank you for your feedback!',
-    });
   };
 
-  const exportConversation = () => {
-    const conversation = messages.map((m) => ({
-      role: m.role,
-      content: m.content,
-      provider: m.provider,
-      model: m.model,
-      timestamp: m.timestamp.toISOString(),
-      rating: m.rating,
-    }));
+  // =============================================================================
+  // RENDER
+  // =============================================================================
 
-    const blob = new Blob([JSON.stringify(conversation, null, 2)], {
-      type: 'application/json',
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `javari-conversation-${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-
-    toast({
-      title: 'Conversation exported',
-      description: 'Your conversation has been downloaded',
-    });
-  };
-
-  const clearConversation = () => {
-    setMessages([]);
-    toast({
-      title: 'Conversation cleared',
-      description: 'All messages have been removed',
-    });
-  };
-
-  const currentProvider = providers.find((p) => p.id === selectedProvider);
-  const availableModels = currentProvider?.models || [];
+  const currentProvider = AI_PROVIDERS.find(p => p.id === selectedProvider);
 
   return (
-    <div className="flex h-screen bg-gray-50">
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col">
+    <TooltipProvider>
+      <div className="flex flex-col h-screen bg-background">
         {/* Header */}
-        <header className="bg-white border-b px-6 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Javari AI</h1>
-            <p className="text-sm text-gray-500">Your autonomous AI assistant</p>
+        <header className="border-b px-4 py-3 flex items-center justify-between bg-card">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-500 to-pink-500 flex items-center justify-center">
+              <Brain className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h1 className="font-bold text-lg flex items-center gap-2">
+                Javari AI
+                {vipStatus.isVIP && (
+                  <Badge variant="default" className="bg-gradient-to-r from-yellow-500 to-orange-500">
+                    <Crown className="w-3 h-3 mr-1" />
+                    VIP
+                  </Badge>
+                )}
+              </h1>
+              <p className="text-xs text-muted-foreground">
+                {vipStatus.isVIP 
+                  ? `${vipStatus.name} - Full Delivery Mode` 
+                  : 'Your AI Assistant - Ready to Deliver'}
+              </p>
+            </div>
           </div>
+
           <div className="flex items-center gap-2">
-            <Select value={selectedProvider} onValueChange={(value) => {
-              setSelectedProvider(value);
-              // Auto-select first model when provider changes
-              const provider = providers.find(p => p.id === value);
-              if (provider && provider.models.length > 0) {
-                setSelectedModel(provider.models[0].id);
-              }
-            }}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Select provider" />
-              </SelectTrigger>
-              <SelectContent>
-                {providers.map((provider) => (
-                  <SelectItem key={provider.id} value={provider.id}>
-                    <div className="flex items-center gap-2">
-                      <div
-                        className={`w-2 h-2 rounded-full ${
-                          provider.status === 'active'
-                            ? 'bg-green-500'
-                            : 'bg-red-500'
-                        }`}
-                      />
-                      {provider.name}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={selectedModel} onValueChange={setSelectedModel}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Select model" />
-              </SelectTrigger>
-              <SelectContent>
-                {availableModels.map((model) => (
-                  <SelectItem key={model.id} value={model.id}>
-                    {model.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {/* Powerhouse Toggle */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-muted">
+                  <Zap className={`w-4 h-4 ${usePowerhouse ? 'text-yellow-500' : 'text-muted-foreground'}`} />
+                  <Switch
+                    checked={usePowerhouse}
+                    onCheckedChange={setUsePowerhouse}
+                  />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Powerhouse Mode: Real-time data + Smart routing</p>
+              </TooltipContent>
+            </Tooltip>
+
+            {/* Settings */}
             <Button
-              variant="outline"
+              variant="ghost"
               size="icon"
               onClick={() => setShowSettings(!showSettings)}
             >
-              <Settings className="h-4 w-4" />
+              <Settings className="w-5 h-5" />
             </Button>
-            <Button variant="outline" size="icon" onClick={exportConversation}>
-              <Download className="h-4 w-4" />
-            </Button>
-            <Button variant="outline" size="icon" onClick={clearConversation}>
-              <Trash2 className="h-4 w-4" />
+
+            {/* Clear Chat */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setMessages([])}
+            >
+              <Trash2 className="w-5 h-5" />
             </Button>
           </div>
         </header>
 
-        {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
-          {messages.length === 0 ? (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center">
-                <h2 className="text-2xl font-semibold text-gray-700 mb-2">
-                  Welcome to Javari AI
-                </h2>
-                <p className="text-gray-500">
-                  Start a conversation to get started
-                </p>
-                <p className="text-sm text-gray-400 mt-2">
-                  Current model: {availableModels.find(m => m.id === selectedModel)?.name || selectedModel}
-                </p>
-              </div>
-            </div>
-          ) : (
-            messages.map((message) => (
-              <Card
-                key={message.id}
-                className={`p-4 ${
-                  message.role === 'user'
-                    ? 'bg-blue-50 ml-12'
-                    : 'bg-white mr-12'
-                }`}
-              >
-                <div className="flex items-start gap-3">
-                  <div
-                    className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-semibold text-xs ${
-                      message.role === 'user' ? 'bg-blue-600' : 'bg-green-600'
-                    }`}
-                  >
-                    {message.role === 'user' ? 'You' : 'AI'}
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="text-sm text-gray-500">
-                        {message.timestamp.toLocaleTimeString()}
-                        {message.provider && (
-                          <span className="ml-2">
-                            • {message.provider} ({availableModels.find(m => m.id === message.model)?.name || message.model})
-                          </span>
-                        )}
-                      </div>
-                      {message.role === 'assistant' && (
-                        <div className="flex gap-1">
-                          {[1, 2, 3, 4, 5].map((rating) => (
-                            <button
-                              key={rating}
-                              onClick={() => handleRateMessage(message.id, rating)}
-                              className="focus:outline-none"
-                            >
-                              <Star
-                                className={`w-4 h-4 ${
-                                  message.rating && message.rating >= rating
-                                    ? 'fill-yellow-400 text-yellow-400'
-                                    : 'text-gray-300'
-                                }`}
-                              />
-                            </button>
+        {/* Settings Panel */}
+        <Collapsible open={showSettings}>
+          <CollapsibleContent>
+            <div className="border-b p-4 bg-muted/50">
+              <div className="max-w-4xl mx-auto space-y-4">
+                {/* Provider Selection */}
+                <div className="flex flex-wrap gap-4">
+                  <div className="flex-1 min-w-[200px]">
+                    <Label className="mb-2 block">AI Provider</Label>
+                    <Select
+                      value={selectedProvider}
+                      onValueChange={handleProviderChange}
+                      disabled={autoSelectProvider}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectLabel>Premium Providers</SelectLabel>
+                          {AI_PROVIDERS.filter(p => p.category === 'premium').map(provider => (
+                            <SelectItem key={provider.id} value={provider.id}>
+                              <div className="flex items-center gap-2">
+                                <div className={`w-2 h-2 rounded-full ${provider.color}`} />
+                                {provider.name}
+                              </div>
+                            </SelectItem>
                           ))}
-                        </div>
-                      )}
-                    </div>
-                    <div className="prose prose-sm max-w-none">
-                      <p className="whitespace-pre-wrap">{message.content}</p>
-                    </div>
-                    {message.files && message.files.length > 0 && (
-                      <div className="mt-2 space-y-1">
-                        {message.files.map((file, idx) => (
-                          <div
-                            key={idx}
-                            className="text-xs text-gray-500 flex items-center gap-2"
-                          >
-                            <Upload className="w-3 h-3" />
-                            {file.name} ({Math.round(file.size / 1024)}KB)
-                          </div>
+                        </SelectGroup>
+                        <SelectGroup>
+                          <SelectLabel>Specialized</SelectLabel>
+                          {AI_PROVIDERS.filter(p => p.category === 'specialized').map(provider => (
+                            <SelectItem key={provider.id} value={provider.id}>
+                              <div className="flex items-center gap-2">
+                                <div className={`w-2 h-2 rounded-full ${provider.color}`} />
+                                {provider.name}
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                        <SelectGroup>
+                          <SelectLabel>Free Providers</SelectLabel>
+                          {AI_PROVIDERS.filter(p => p.category === 'free').map(provider => (
+                            <SelectItem key={provider.id} value={provider.id}>
+                              <div className="flex items-center gap-2">
+                                <div className={`w-2 h-2 rounded-full ${provider.color}`} />
+                                {provider.name}
+                                <Badge variant="secondary" className="text-xs">FREE</Badge>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex-1 min-w-[200px]">
+                    <Label className="mb-2 block">Model</Label>
+                    <Select
+                      value={selectedModel}
+                      onValueChange={setSelectedModel}
+                      disabled={autoSelectProvider}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {currentProvider?.models.map(model => (
+                          <SelectItem key={model.id} value={model.id}>
+                            <div className="flex items-center gap-2">
+                              {model.name}
+                              <Badge variant="outline" className="text-xs">
+                                {model.speed}
+                              </Badge>
+                            </div>
+                          </SelectItem>
                         ))}
-                      </div>
-                    )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex items-end">
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        id="auto-select"
+                        checked={autoSelectProvider}
+                        onCheckedChange={setAutoSelectProvider}
+                      />
+                      <Label htmlFor="auto-select">Auto-select best AI</Label>
+                    </div>
                   </div>
                 </div>
-              </Card>
-            ))
-          )}
-          <div ref={messagesEndRef} />
+
+                {/* Advanced Settings */}
+                <div className="flex flex-wrap gap-6">
+                  <div className="flex-1 min-w-[200px]">
+                    <Label className="mb-2 block">Temperature: {temperature}</Label>
+                    <Slider
+                      value={[temperature]}
+                      onValueChange={([v]) => setTemperature(v)}
+                      min={0}
+                      max={2}
+                      step={0.1}
+                    />
+                  </div>
+                  <div className="flex-1 min-w-[200px]">
+                    <Label className="mb-2 block">Max Tokens: {maxTokens}</Label>
+                    <Slider
+                      value={[maxTokens]}
+                      onValueChange={([v]) => setMaxTokens(v)}
+                      min={256}
+                      max={16384}
+                      step={256}
+                    />
+                  </div>
+                </div>
+
+                {/* Provider Info Cards */}
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+                  {AI_PROVIDERS.map(provider => (
+                    <Card 
+                      key={provider.id}
+                      className={`p-2 cursor-pointer transition-all ${
+                        selectedProvider === provider.id 
+                          ? 'ring-2 ring-primary' 
+                          : 'hover:bg-muted'
+                      }`}
+                      onClick={() => !autoSelectProvider && handleProviderChange(provider.id)}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className={`w-8 h-8 rounded-full ${provider.color} flex items-center justify-center text-white`}>
+                          {provider.icon}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium truncate">{provider.name.split(' ')[0]}</p>
+                          <p className="text-[10px] text-muted-foreground">{provider.costTier}</p>
+                        </div>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="max-w-4xl mx-auto space-y-4">
+            {messages.length === 0 && (
+              <div className="text-center py-12">
+                <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-gradient-to-br from-orange-500 to-pink-500 flex items-center justify-center">
+                  <Brain className="w-10 h-10 text-white" />
+                </div>
+                <h2 className="text-2xl font-bold mb-2">Welcome to Javari AI</h2>
+                <p className="text-muted-foreground mb-4">
+                  {vipStatus.isVIP 
+                    ? `Hello ${vipStatus.name}! I'm ready to DELIVER whatever you need.`
+                    : 'Your AI assistant ready to help with anything.'}
+                </p>
+                <div className="flex flex-wrap justify-center gap-2">
+                  <Badge variant="secondary">6 AI Providers</Badge>
+                  <Badge variant="secondary">Real-time Data</Badge>
+                  <Badge variant="secondary">Smart Routing</Badge>
+                  <Badge variant="secondary">Build & Deliver</Badge>
+                </div>
+              </div>
+            )}
+
+            {messages.map((message) => (
+              <div
+                key={message.id}
+                className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              >
+                <Card
+                  className={`max-w-[80%] p-4 ${
+                    message.role === 'user'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-card'
+                  }`}
+                >
+                  {message.role === 'assistant' && message.provider && (
+                    <div className="flex items-center gap-2 mb-2 pb-2 border-b">
+                      <div className={`w-5 h-5 rounded-full ${getProviderColor(
+                        message.provider.toLowerCase().includes('claude') ? 'anthropic' :
+                        message.provider.toLowerCase().includes('gpt') ? 'openai' :
+                        message.provider.toLowerCase().includes('gemini') ? 'google' :
+                        message.provider.toLowerCase().includes('perplexity') ? 'perplexity' :
+                        message.provider.toLowerCase().includes('groq') ? 'groq' : 'huggingface'
+                      )} flex items-center justify-center text-white`}>
+                        {getProviderIcon(
+                          message.provider.toLowerCase().includes('claude') ? 'anthropic' :
+                          message.provider.toLowerCase().includes('gpt') ? 'openai' :
+                          message.provider.toLowerCase().includes('gemini') ? 'google' :
+                          message.provider.toLowerCase().includes('perplexity') ? 'perplexity' :
+                          message.provider.toLowerCase().includes('groq') ? 'groq' : 'huggingface'
+                        )}
+                      </div>
+                      <span className="text-xs text-muted-foreground">{message.provider}</span>
+                      {message.metadata?.enrichedData && (
+                        <Badge variant="secondary" className="text-xs">
+                          <Zap className="w-3 h-3 mr-1" />
+                          Live Data
+                        </Badge>
+                      )}
+                      {message.metadata?.vipMode && (
+                        <Badge variant="default" className="text-xs bg-yellow-500">
+                          <Crown className="w-3 h-3 mr-1" />
+                          VIP
+                        </Badge>
+                      )}
+                    </div>
+                  )}
+                  
+                  <div className="whitespace-pre-wrap">{message.content}</div>
+
+                  {message.files && message.files.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {message.files.map((file, i) => (
+                        <Badge key={i} variant="outline" className="text-xs">
+                          {file.name}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+
+                  {message.role === 'assistant' && (
+                    <div className="flex items-center gap-2 mt-3 pt-2 border-t">
+                      <span className="text-xs text-muted-foreground">Rate:</span>
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <button
+                          key={star}
+                          onClick={() => handleRateMessage(message.id, star)}
+                          className="hover:scale-110 transition-transform"
+                        >
+                          <Star
+                            className={`w-4 h-4 ${
+                              message.rating && star <= message.rating
+                                ? 'fill-yellow-400 text-yellow-400'
+                                : 'text-muted-foreground'
+                            }`}
+                          />
+                        </button>
+                      ))}
+                      {message.metadata?.responseTimeMs && (
+                        <span className="text-xs text-muted-foreground ml-auto">
+                          {(message.metadata.responseTimeMs / 1000).toFixed(1)}s
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </Card>
+              </div>
+            ))}
+            <div ref={messagesEndRef} />
+          </div>
         </div>
 
         {/* Input Area */}
-        <div className="bg-white border-t p-4">
-          {uploadedFiles.length > 0 && (
-            <div className="mb-2 flex flex-wrap gap-2">
-              {uploadedFiles.map((file, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-center gap-2 bg-gray-100 px-3 py-1 rounded-full text-sm"
-                >
-                  <Upload className="w-3 h-3" />
-                  {file.name}
-                  <button
-                    onClick={() => removeFile(idx)}
-                    className="text-red-500 hover:text-red-700"
+        <div className="border-t p-4 bg-card">
+          <div className="max-w-4xl mx-auto">
+            {uploadedFiles.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {uploadedFiles.map((file, index) => (
+                  <Badge
+                    key={index}
+                    variant="secondary"
+                    className="flex items-center gap-1"
                   >
-                    ×
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="flex gap-2">
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileUpload}
-              multiple
-              className="hidden"
-            />
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isLoading}
-            >
-              <Upload className="h-4 w-4" />
-            </Button>
-            <Textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSendMessage();
-                }
-              }}
-              placeholder="Type your message... (Shift+Enter for new line)"
-              className="flex-1 min-h-[60px] max-h-[200px]"
-              disabled={isLoading}
-            />
-            <Button
-              onClick={handleSendMessage}
-              disabled={isLoading || (!input.trim() && uploadedFiles.length === 0)}
-              size="icon"
-              className="h-[60px] w-[60px]"
-            >
-              {isLoading ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              ) : (
-                <Send className="h-5 w-5" />
-              )}
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {/* Settings Sidebar */}
-      {showSettings && (
-        <div className="w-80 bg-white border-l p-6 overflow-y-auto">
-          <h3 className="text-lg font-semibold mb-4">Settings</h3>
-          
-          <div className="space-y-6">
-            <div>
-              <Label htmlFor="temperature">Temperature: {temperature}</Label>
-              <Slider
-                id="temperature"
-                min={0}
-                max={2}
-                step={0.1}
-                value={[temperature]}
-                onValueChange={(values) => setTemperature(values[0])}
-                className="mt-2"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Higher values make output more random
-              </p>
-            </div>
-
-            <div>
-              <Label htmlFor="maxTokens">Max Tokens: {maxTokens}</Label>
-              <Slider
-                id="maxTokens"
-                min={100}
-                max={8000}
-                step={100}
-                value={[maxTokens]}
-                onValueChange={(values) => setMaxTokens(values[0])}
-                className="mt-2"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Maximum length of response
-              </p>
-            </div>
-
-            <div>
-              <h4 className="font-medium mb-2">Provider Status</h4>
-              <div className="space-y-2">
-                {providers.map((provider) => (
-                  <div
-                    key={provider.id}
-                    className="flex items-center justify-between p-2 bg-gray-50 rounded"
-                  >
-                    <span className="text-sm">{provider.name}</span>
-                    <div
-                      className={`w-2 h-2 rounded-full ${
-                        provider.status === 'active'
-                          ? 'bg-green-500'
-                          : 'bg-red-500'
-                      }`}
-                    />
-                  </div>
+                    {file.name}
+                    <button onClick={() => removeFile(index)}>×</button>
+                  </Badge>
                 ))}
               </div>
+            )}
+            
+            <div className="flex gap-2">
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                multiple
+                className="hidden"
+              />
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Upload className="w-4 h-4" />
+              </Button>
+              
+              <Textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendMessage();
+                  }
+                }}
+                placeholder={vipStatus.isVIP 
+                  ? "What would you like me to BUILD or DELIVER for you today?"
+                  : "Ask me anything..."}
+                className="flex-1 min-h-[50px] max-h-[200px]"
+                disabled={isLoading}
+              />
+              
+              <Button
+                onClick={handleSendMessage}
+                disabled={isLoading || (!input.trim() && uploadedFiles.length === 0)}
+                className="bg-gradient-to-r from-orange-500 to-pink-500 hover:from-orange-600 hover:to-pink-600"
+              >
+                {isLoading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
+              </Button>
             </div>
+            
+            <p className="text-xs text-muted-foreground mt-2 text-center">
+              Powered by 6 AI providers • {autoSelectProvider ? 'Auto-selecting best AI' : `Using ${currentProvider?.name}`}
+              {vipStatus.isVIP && ' • VIP Delivery Mode Active'}
+            </p>
           </div>
         </div>
-      )}
-    </div>
+
+        {/* Terms Dialog */}
+        <Dialog open={showTermsDialog} onOpenChange={setShowTermsDialog}>
+          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Shield className="w-5 h-5" />
+                Terms of Service & User Responsibility
+              </DialogTitle>
+              <DialogDescription>
+                Please read and accept our terms before using Javari AI
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="bg-muted p-4 rounded-lg text-sm font-mono whitespace-pre-wrap max-h-[400px] overflow-y-auto">
+              {TERMS_TEXT}
+            </div>
+            
+            <DialogFooter className="flex-col sm:flex-row gap-2">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <AlertCircle className="w-4 h-4" />
+                By clicking Accept, you agree to all terms above
+              </div>
+              <Button onClick={acceptTerms} className="bg-gradient-to-r from-orange-500 to-pink-500">
+                <Check className="w-4 h-4 mr-2" />
+                I Accept - Full Responsibility
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </TooltipProvider>
   );
 }
