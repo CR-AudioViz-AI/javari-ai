@@ -154,13 +154,14 @@ export default config;
 }
 
 function generateNextConfig(): string {
-  return `import type { NextConfig } from "next";
+  return `// @ts-check
 
-const nextConfig: NextConfig = {
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   reactStrictMode: true,
 };
 
-export default nextConfig;
+module.exports = nextConfig;
 `;
 }
 
@@ -358,7 +359,7 @@ function generateProjectFiles(
     { path: 'tsconfig.json', content: generateTsConfig() },
     { path: 'tailwind.config.ts', content: generateTailwindConfig() },
     { path: 'postcss.config.mjs', content: generatePostCssConfig() },
-    { path: 'next.config.ts', content: generateNextConfig() },
+    { path: 'next.config.mjs', content: generateNextConfig() },
     { path: '.gitignore', content: generateGitignore() },
     { path: 'next-env.d.ts', content: generateNextEnvDts() },
     { path: 'README.md', content: generateReadme(projectName, description) },
@@ -787,3 +788,4 @@ export async function GET(): Promise<NextResponse> {
     timestamp: new Date().toISOString(),
   });
 }
+
