@@ -1179,7 +1179,69 @@ export async function POST(request: NextRequest) {
     console.log(`[Javari] Response received in ${latency}ms from ${result.provider}`);
     
     // ─────────────────────────────────────────────────────────────────────────
-    // STEP 7: Save Conversation to Database
+    // STEP 7: DEPLOY APP IF BUILD INTENT DETECTED
+    // ─────────────────────────────────────────────────────────────────────────
+    let deploymentResult: { success: boolean; url?: string; repoUrl?: string; error?: string } | null = null;
+    
+    if (buildIntent.isBuild && result.response) {
+      console.log(`[Javari] 🚀 BUILD MODE - Attempting to deploy app...`);
+      
+      // Extract code blocks from the response
+      const codeBlockRegex = /```(?:tsx?|jsx?|typescript|javascript)?\n([\s\S]*?)```/g;
+      const codeBlocks = [...result.response.matchAll(codeBlockRegex)];
+      
+      if (codeBlocks.length > 0) {
+        // Use the first/main code block
+        const componentCode = codeBlocks[0][1];
+        
+        // Generate app name from the build intent
+        const appName = buildIntent.appType 
+          ? `${buildIntent.appType.charAt(0).toUpperCase() + buildIntent.appType.slice(1)} App`
+          : 'Javari Generated App';
+        
+        try {
+          // Call the build pipeline
+          const buildResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'https://javariai.com'}/api/build`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              componentCode,
+              appName,
+              appDescription: lastMessage.slice(0, 200),
+              userId,
+              conversationId,
+            }),
+          });
+          
+          if (buildResponse.ok) {
+            const buildData = await buildResponse.json();
+            if (buildData.success) {
+              deploymentResult = {
+                success: true,
+                url: buildData.deploymentUrl,
+                repoUrl: buildData.repoUrl,
+              };
+              console.log(`[Javari] ✅ App deployed to: ${deploymentResult.url}`);
+              
+              // Append deployment info to the response
+              result.response += `\n\n---\n\n🚀 **Your app is LIVE!**\n- **URL:** [${deploymentResult.url}](${deploymentResult.url})\n- **Repository:** [View on GitHub](${deploymentResult.repoUrl})\n\nClick the link above to see your app running!`;
+            } else {
+              console.error(`[Javari] Build failed:`, buildData.error);
+              deploymentResult = { success: false, error: buildData.error };
+            }
+          } else {
+            console.error(`[Javari] Build request failed:`, buildResponse.status);
+            deploymentResult = { success: false, error: `Build service returned ${buildResponse.status}` };
+          }
+        } catch (buildError) {
+          console.error(`[Javari] Build pipeline error:`, buildError);
+          deploymentResult = { success: false, error: buildError instanceof Error ? buildError.message : 'Unknown error' };
+        }
+      }
+    }
+    
+    // ─────────────────────────────────────────────────────────────────────────
+    // STEP 8: Save Conversation to Database
     // ─────────────────────────────────────────────────────────────────────────
     let savedConversationId = conversationId;
     
@@ -1276,7 +1338,13 @@ export async function POST(request: NextRequest) {
         dataTypes: Object.keys(enrichedContext),
         fallbackUsed: result.fallbackUsed
       },
-      version: '7.0 - POWERHOUSE + INTELLIGENCE API'
+      deployment: deploymentResult ? {
+        success: deploymentResult.success,
+        url: deploymentResult.url,
+        repoUrl: deploymentResult.repoUrl,
+        error: deploymentResult.error,
+      } : null,
+      version: '7.1 - POWERHOUSE + BUILD PIPELINE'
     });
     
   } catch (error) {
