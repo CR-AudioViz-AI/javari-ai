@@ -706,53 +706,39 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     
     console.log(`[BUILD] Vercel project created: ${vercelResult.projectId}`);
     
-    // STEP 6: Wait for deployment
-    console.log(`[BUILD] Step 6: Waiting for deployment...`);
-    const deployResult = await waitForDeployment(projectName, vercelToken);
-    
+    // STEP 6: Return immediately - GitHub integration will auto-deploy
+    // No waiting - Vercel functions have 60s timeout, deployment takes longer
     const latency = Date.now() - startTime;
-    
-    if (!deployResult.success) {
-      console.error(`[BUILD] Deployment failed:`, deployResult.error);
-      return NextResponse.json({
-        success: false,
-        status: 'error',
-        message: 'Deployment failed or timed out',
-        error: deployResult.error,
-        repoUrl: repoResult.repoUrl,
-        projectName,
-        buildId,
-      } as BuildResult, { status: 500 });
-    }
+    const expectedUrl = `https://${projectName}.vercel.app`;
     
     console.log(`[BUILD] ═══════════════════════════════════════════════════════════`);
-    console.log(`[BUILD] 🎉 SUCCESS! App deployed to: ${deployResult.url}`);
-    console.log(`[BUILD] Total time: ${latency}ms`);
+    console.log(`[BUILD] 🎉 SUCCESS! App will be live at: ${expectedUrl}`);
+    console.log(`[BUILD] Total time: ${latency}ms (deployment in progress)`);
     console.log(`[BUILD] ═══════════════════════════════════════════════════════════`);
     
-    // Log to database
-    try {
-      await supabase.from('build_logs').insert({
-        build_id: buildId,
-        user_id: userId,
-        conversation_id: conversationId,
-        app_name: appName,
-        repo_name: repoName,
-        repo_url: repoResult.repoUrl,
-        deployment_url: deployResult.url,
-        status: 'success',
-        build_time_ms: latency,
-        created_at: new Date().toISOString(),
-      });
-    } catch (dbError) {
+    // Log to database (async, don't wait)
+    supabase.from('build_logs').insert({
+      build_id: buildId,
+      user_id: userId,
+      conversation_id: conversationId,
+      app_name: appName,
+      repo_name: repoName,
+      repo_url: repoResult.repoUrl,
+      deployment_url: expectedUrl,
+      status: 'deploying',
+      build_time_ms: latency,
+      created_at: new Date().toISOString(),
+    }).then(() => {
+      console.log('[BUILD] Build logged to database');
+    }).catch((dbError) => {
       console.error('[BUILD] Failed to log build:', dbError);
-    }
+    });
     
     return NextResponse.json({
       success: true,
-      status: 'ready',
-      message: `🚀 Your app is LIVE!`,
-      deploymentUrl: deployResult.url,
+      status: 'deploying',
+      message: `🚀 Your app is being deployed! It will be live in ~60 seconds.`,
+      deploymentUrl: expectedUrl,
       repoUrl: repoResult.repoUrl,
       projectName,
       buildId,
