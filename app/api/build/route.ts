@@ -706,13 +706,49 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     
     console.log(`[BUILD] Vercel project created: ${vercelResult.projectId}`);
     
-    // STEP 6: Return immediately - GitHub integration will auto-deploy
-    // No waiting - Vercel functions have 60s timeout, deployment takes longer
+    // STEP 6: Trigger deployment (GitHub push was before project link, so we need manual trigger)
+    console.log(`[BUILD] Step 6: Triggering deployment...`);
+    let deploymentUrl = `https://${projectName}.vercel.app`;
+    
+    try {
+      const deployResponse = await fetch(
+        `${VERCEL_API}/v13/deployments?teamId=${VERCEL_TEAM_ID}`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${vercelToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            name: projectName,
+            project: projectName,
+            gitSource: {
+              type: 'github',
+              org: GITHUB_ORG,
+              repo: repoName,
+              ref: 'main',
+            },
+            target: 'production',
+          }),
+        }
+      );
+      
+      if (deployResponse.ok) {
+        const deployData = await deployResponse.json();
+        deploymentUrl = `https://${deployData.url}`;
+        console.log(`[BUILD] Deployment triggered: ${deploymentUrl}`);
+      } else {
+        console.warn(`[BUILD] Deployment trigger failed, using expected URL`);
+      }
+    } catch (deployErr) {
+      console.warn(`[BUILD] Deployment trigger error:`, deployErr);
+    }
+    
+    // Return immediately - don't wait for deployment to complete
     const latency = Date.now() - startTime;
-    const expectedUrl = `https://${projectName}.vercel.app`;
     
     console.log(`[BUILD] ═══════════════════════════════════════════════════════════`);
-    console.log(`[BUILD] 🎉 SUCCESS! App will be live at: ${expectedUrl}`);
+    console.log(`[BUILD] 🎉 SUCCESS! App will be live at: ${deploymentUrl}`);
     console.log(`[BUILD] Total time: ${latency}ms (deployment in progress)`);
     console.log(`[BUILD] ═══════════════════════════════════════════════════════════`);
     
@@ -724,7 +760,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       app_name: appName,
       repo_name: repoName,
       repo_url: repoResult.repoUrl,
-      deployment_url: expectedUrl,
+      deployment_url: deploymentUrl,
       status: 'deploying',
       build_time_ms: latency,
       created_at: new Date().toISOString(),
@@ -738,7 +774,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       success: true,
       status: 'deploying',
       message: `🚀 Your app is being deployed! It will be live in ~60 seconds.`,
-      deploymentUrl: expectedUrl,
+      deploymentUrl: deploymentUrl,
       repoUrl: repoResult.repoUrl,
       projectName,
       buildId,
