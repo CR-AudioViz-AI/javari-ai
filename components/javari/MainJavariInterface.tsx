@@ -105,8 +105,8 @@ interface AISelectionModal {
 
 export default function MainJavariInterface() {
   // State management
-  const [leftSidebarOpen, setLeftSidebarOpen] = useState(false); // Hidden on mobile by default
-  const [rightSidebarOpen, setRightSidebarOpen] = useState(false); // Hidden on mobile by default
+  const [leftSidebarOpen, setLeftSidebarOpen] = useState(true); // Hidden on mobile by default
+  const [rightSidebarOpen, setRightSidebarOpen] = useState(true); // Hidden on mobile by default
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState('');
@@ -128,6 +128,8 @@ export default function MainJavariInterface() {
     newCredits: 0,
   });
   const [copiedArtifacts, setCopiedArtifacts] = useState<Record<string, boolean>>({});
+  const [previewingArtifact, setPreviewingArtifact] = useState<Artifact | null>(null);
+  const [artifactViewMode, setArtifactViewMode] = useState<Record<string, 'code' | 'preview'>>({});
 
   // ADDED: Load conversations from database
   useEffect(() => {
@@ -567,6 +569,86 @@ export default function MainJavariInterface() {
     URL.revokeObjectURL(url);
   };
 
+  // Generate preview HTML for React/TSX components
+  const generatePreviewHTML = (code: string, language: string): string => {
+    const isReact = ['tsx', 'jsx', 'typescript', 'javascript'].includes(language?.toLowerCase() || '');
+    
+    if (isReact) {
+      // Clean the code for preview
+      const cleanCode = code
+        .replace(/import\s+.*?from\s+['"][^'"]+['"]\s*;?/g, '// import removed')
+        .replace(/export\s+default\s+/g, '')
+        .replace(/export\s+/g, '');
+      
+      return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://unpkg.com/react@18/umd/react.development.js"><\/script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"><\/script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>
+  <script src="https://cdn.tailwindcss.com"><\/script>
+  <style>
+    body { margin: 0; padding: 16px; background: #1e293b; color: white; font-family: system-ui, sans-serif; min-height: 100vh; }
+    .error { color: #f87171; padding: 16px; background: #7f1d1d; border-radius: 8px; margin: 16px; }
+    .loading { color: #94a3b8; padding: 16px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div id="root"><div class="loading">Loading preview...</div></div>
+  <script type="text/babel" data-presets="react,typescript">
+    const { useState, useEffect, useRef } = React;
+    
+    try {
+      ${cleanCode}
+      
+      // Find component to render
+      const findComponent = () => {
+        const code = \`${cleanCode.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`;
+        const match = code.match(/(?:const|function)\\s+([A-Z][a-zA-Z0-9]*)/);
+        if (match) return match[1];
+        return null;
+      };
+      
+      const compName = findComponent();
+      const Component = compName ? eval(compName) : null;
+      
+      if (Component) {
+        ReactDOM.createRoot(document.getElementById('root')).render(<Component />);
+      } else {
+        document.getElementById('root').innerHTML = '<div class="error">Component not found. Check console for errors.</div>';
+      }
+    } catch (e) {
+      document.getElementById('root').innerHTML = '<div class="error"><strong>Preview Error:</strong><br/>' + e.message + '</div>';
+      console.error('Preview error:', e);
+    }
+  <\/script>
+</body>
+</html>`;
+    }
+    
+    // For HTML
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"><\/script>
+  <style>body { margin: 0; background: #1e293b; color: white; min-height: 100vh; }</style>
+</head>
+<body>${code}</body>
+</html>`;
+  };
+
+  // Toggle artifact view mode
+  const toggleArtifactView = (artifactId: string) => {
+    setArtifactViewMode(prev => ({
+      ...prev,
+      [artifactId]: prev[artifactId] === 'preview' ? 'code' : 'preview'
+    }));
+  };
+
   return (
     <div className="h-screen flex flex-col" style={{ backgroundColor: COLORS.javaribg }}>
       {/* Mobile Menu Button */}
@@ -954,22 +1036,58 @@ export default function MainJavariInterface() {
                         backgroundColor: COLORS.javaribg 
                       }}
                     >
-                      {/* Artifact Header */}
+                      {/* Artifact Header with Tabs */}
                       <div className="p-3 border-b" style={{ borderColor: COLORS.cyan + '40' }}>
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
                             <FileText className="w-4 h-4" style={{ color: COLORS.cyan }} />
                             <span className="text-white text-sm font-medium">{artifact.name}</span>
                           </div>
                           <span className="text-xs text-white/60">{artifact.size}</span>
                         </div>
+                        {/* Code/Preview Tabs */}
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => setArtifactViewMode(prev => ({ ...prev, [artifact.id]: 'code' }))}
+                            className={`px-3 py-1 text-xs rounded-t ${
+                              artifactViewMode[artifact.id] !== 'preview' 
+                                ? 'bg-cyan-600 text-white' 
+                                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                            }`}
+                          >
+                            Code
+                          </button>
+                          <button
+                            onClick={() => setArtifactViewMode(prev => ({ ...prev, [artifact.id]: 'preview' }))}
+                            className={`px-3 py-1 text-xs rounded-t ${
+                              artifactViewMode[artifact.id] === 'preview' 
+                                ? 'bg-cyan-600 text-white' 
+                                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                            }`}
+                          >
+                            ▶ Preview
+                          </button>
+                        </div>
                       </div>
 
-                      {/* Artifact Content Preview */}
-                      <div className="p-3">
-                        <pre className="text-xs text-gray-300 overflow-x-auto">
-                          <code>{artifact.content.substring(0, 200)}...</code>
-                        </pre>
+                      {/* Artifact Content - Code or Preview */}
+                      <div className="relative">
+                        {artifactViewMode[artifact.id] === 'preview' ? (
+                          <div className="h-64 bg-slate-800">
+                            <iframe
+                              srcDoc={generatePreviewHTML(artifact.content, artifact.language || 'tsx')}
+                              className="w-full h-full border-0"
+                              sandbox="allow-scripts"
+                              title={`Preview: ${artifact.name}`}
+                            />
+                          </div>
+                        ) : (
+                          <div className="p-3 max-h-48 overflow-auto">
+                            <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
+                              <code>{artifact.content}</code>
+                            </pre>
+                          </div>
+                        )}
                       </div>
 
                       {/* Artifact Actions - Claude Style */}
