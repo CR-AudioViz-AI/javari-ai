@@ -1224,7 +1224,7 @@ export async function POST(request: NextRequest) {
               console.log(`[Javari] ✅ App deployed to: ${deploymentResult.url}`);
               
               // Append deployment info to the response
-              result.response += `\n\n---\n\n🚀 **Your app is LIVE!**\n- **URL:** [${deploymentResult.url}](${deploymentResult.url})\n- **Repository:** [View on GitHub](${deploymentResult.repoUrl})\n\nClick the link above to see your app running!`;
+              result.response += `\n\n---\n\n🚀 Your app is LIVE!\n\nURL: ${deploymentResult.url}\n\nRepository: ${deploymentResult.repoUrl}\n\nClick the URL above to see your app running!`;
             } else {
               console.error(`[Javari] Build failed:`, buildData.error);
               deploymentResult = { success: false, error: buildData.error };
