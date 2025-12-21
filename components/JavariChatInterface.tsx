@@ -10,7 +10,8 @@ import {
   Send, Bot, User, Loader2, AlertCircle, Sparkles, Zap, Brain, Globe, 
   Code, MessageSquare, History, Lightbulb, BookOpen, ChevronLeft, 
   ChevronRight, Star, Clock, FileText, Trash2, Plus, Search, Settings,
-  PanelLeftClose, PanelRightClose, Cpu, Wand2, TrendingUp, HelpCircle
+  PanelLeftClose, PanelRightClose, Cpu, Wand2, TrendingUp, HelpCircle,
+  CheckCircle
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -168,6 +169,7 @@ function LeftPanel({
   onSelectConversation,
   onNewConversation,
   onDeleteConversation,
+  onToggleStar,
   isCollapsed,
   onToggleCollapse
 }: {
@@ -176,6 +178,7 @@ function LeftPanel({
   onSelectConversation: (id: string) => void;
   onNewConversation: () => void;
   onDeleteConversation: (id: string) => void;
+  onToggleStar: (id: string) => void;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
 }) {
@@ -185,6 +188,10 @@ function LeftPanel({
     c.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
     c.lastMessage.toLowerCase().includes(searchTerm.toLowerCase())
   );
+  
+  // Separate active (starred) and completed (unstarred) conversations
+  const activeConversations = filteredConversations.filter(c => c.starred);
+  const completedConversations = filteredConversations.filter(c => !c.starred);
 
   if (isCollapsed) {
     return (
@@ -269,40 +276,115 @@ function LeftPanel({
             <p className="text-sm">No conversations yet</p>
           </div>
         ) : (
-          <div className="space-y-1">
-            {filteredConversations.map((conv) => (
-              <div
-                key={conv.id}
-                className={`group p-3 rounded-lg cursor-pointer transition-all ${
-                  conv.id === currentConversationId
-                    ? 'bg-cyan-500/20 border border-cyan-500/30'
-                    : 'hover:bg-slate-800 border border-transparent'
-                }`}
-                onClick={() => onSelectConversation(conv.id)}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      {conv.starred && <Star className="w-3 h-3 text-yellow-400 fill-yellow-400" />}
-                      <h3 className="text-sm font-medium text-white truncate">{conv.title}</h3>
+          <div className="space-y-3">
+            {/* Active Conversations (Starred) */}
+            {activeConversations.length > 0 && (
+              <div>
+                <div className="flex items-center gap-2 px-2 py-1.5 text-xs font-medium text-yellow-400 uppercase tracking-wide">
+                  <Star className="w-3 h-3 fill-yellow-400" />
+                  Active ({activeConversations.length})
+                </div>
+                <div className="space-y-1">
+                  {activeConversations.map((conv) => (
+                    <div
+                      key={conv.id}
+                      className={`group p-3 rounded-lg cursor-pointer transition-all ${
+                        conv.id === currentConversationId
+                          ? 'bg-yellow-500/20 border border-yellow-500/30'
+                          : 'hover:bg-slate-800 border border-transparent bg-slate-800/50'
+                      }`}
+                      onClick={() => onSelectConversation(conv.id)}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <Star className="w-3 h-3 text-yellow-400 fill-yellow-400 flex-shrink-0" />
+                            <h3 className="text-sm font-medium text-white truncate">{conv.title}</h3>
+                          </div>
+                          <p className="text-xs text-slate-400 truncate mt-1">{conv.lastMessage}</p>
+                          <div className="flex items-center gap-2 mt-1.5 text-xs text-slate-500">
+                            <Clock className="w-3 h-3" />
+                            <span>{new Date(conv.timestamp).toLocaleDateString()}</span>
+                            <span>•</span>
+                            <span>{conv.messageCount} msgs</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onToggleStar(conv.id); }}
+                            className="p-1.5 text-yellow-400 hover:text-green-400 transition-colors"
+                            title="Mark as complete"
+                          >
+                            <CheckCircle className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onDeleteConversation(conv.id); }}
+                            className="p-1.5 text-slate-500 hover:text-red-400 transition-colors"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                    <p className="text-xs text-slate-400 truncate mt-1">{conv.lastMessage}</p>
-                    <div className="flex items-center gap-2 mt-1.5 text-xs text-slate-500">
-                      <Clock className="w-3 h-3" />
-                      <span>{new Date(conv.timestamp).toLocaleDateString()}</span>
-                      <span>•</span>
-                      <span>{conv.messageCount} msgs</span>
-                    </div>
-                  </div>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onDeleteConversation(conv.id); }}
-                    className="p-1.5 text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  ))}
                 </div>
               </div>
-            ))}
+            )}
+            
+            {/* Completed Conversations (Unstarred) */}
+            {completedConversations.length > 0 && (
+              <div>
+                <div className="flex items-center gap-2 px-2 py-1.5 text-xs font-medium text-slate-500 uppercase tracking-wide">
+                  <CheckCircle className="w-3 h-3" />
+                  Completed ({completedConversations.length})
+                </div>
+                <div className="space-y-1">
+                  {completedConversations.map((conv) => (
+                    <div
+                      key={conv.id}
+                      className={`group p-3 rounded-lg cursor-pointer transition-all ${
+                        conv.id === currentConversationId
+                          ? 'bg-cyan-500/20 border border-cyan-500/30'
+                          : 'hover:bg-slate-800 border border-transparent'
+                      }`}
+                      onClick={() => onSelectConversation(conv.id)}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-sm font-medium text-slate-300 truncate">{conv.title}</h3>
+                          </div>
+                          <p className="text-xs text-slate-500 truncate mt-1">{conv.lastMessage}</p>
+                          <div className="flex items-center gap-2 mt-1.5 text-xs text-slate-600">
+                            <Clock className="w-3 h-3" />
+                            <span>{new Date(conv.timestamp).toLocaleDateString()}</span>
+                            <span>•</span>
+                            <span>{conv.messageCount} msgs</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onToggleStar(conv.id); }}
+                            className="p-1.5 text-slate-500 hover:text-yellow-400 transition-colors"
+                            title="Reactivate conversation"
+                          >
+                            <Star className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onDeleteConversation(conv.id); }}
+                            className="p-1.5 text-slate-500 hover:text-red-400 transition-colors"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -722,10 +804,17 @@ export default function JavariChatInterface({
       title: 'New Conversation',
       lastMessage: '',
       timestamp: new Date(),
-      messageCount: 0
+      messageCount: 0,
+      starred: true  // Auto-star new conversations as ACTIVE
     }, ...prev]);
     setCurrentConversationId(newId);
     setMessages([]);
+  };
+
+  const handleToggleStar = (id: string) => {
+    setConversations(prev => prev.map(conv => 
+      conv.id === id ? { ...conv, starred: !conv.starred } : conv
+    ));
   };
 
   const handleDeleteConversation = (id: string) => {
@@ -749,6 +838,7 @@ export default function JavariChatInterface({
         onSelectConversation={setCurrentConversationId}
         onNewConversation={handleNewConversation}
         onDeleteConversation={handleDeleteConversation}
+        onToggleStar={handleToggleStar}
         isCollapsed={leftPanelCollapsed}
         onToggleCollapse={() => setLeftPanelCollapsed(!leftPanelCollapsed)}
       />
