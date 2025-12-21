@@ -342,6 +342,12 @@ function prepareComponentCode(code: string): { code: string; name: string } {
     }
   }
   
+  // CRITICAL: Add "use client" directive for Next.js App Router
+  // Any component with event handlers or hooks needs this
+  if (!cleanCode.includes('"use client"') && !cleanCode.includes("'use client'")) {
+    cleanCode = `"use client";\n\n${cleanCode}`;
+  }
+  
   return { code: cleanCode, name: componentName };
 }
 
