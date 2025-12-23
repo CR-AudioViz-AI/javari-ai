@@ -11,11 +11,12 @@ import {
   Code, MessageSquare, History, Lightbulb, BookOpen, ChevronLeft, 
   ChevronRight, Star, Clock, FileText, Trash2, Plus, Search, Settings,
   PanelLeftClose, PanelRightClose, Cpu, Wand2, TrendingUp, HelpCircle,
-  CheckCircle
+  CheckCircle, Volume2, VolumeX
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import VoicePanel from './VoicePanel';
 
 // ============================================================================
 // PROVIDER CONFIGURATION - All 6 AI Providers
@@ -613,6 +614,7 @@ export default function JavariChatInterface({
 }: JavariChatInterfaceProps) {
   // State
   const [messages, setMessages] = useState<Message[]>([]);
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -727,7 +729,8 @@ export default function JavariChatInterface({
           if (done) break;
 
           const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
+          const lines = chunk.split('
+');
 
           for (const line of lines) {
             if (line.startsWith('data: ')) {
@@ -875,6 +878,21 @@ export default function JavariChatInterface({
             <p className="text-center text-xs text-slate-500 mt-2">
               {PROVIDER_CONFIG[selectedProvider].description}
             </p>
+          
+            {/* Voice Control */}
+            <div className="flex items-center justify-center gap-2 mt-3">
+              <button
+                onClick={() => setVoiceEnabled(!voiceEnabled)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-all ${
+                  voiceEnabled 
+                    ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' 
+                    : 'bg-slate-800 text-slate-400 border border-slate-700 hover:text-slate-300'
+                }`}
+              >
+                {voiceEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                {voiceEnabled ? 'Voice On' : 'Voice Off'}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -947,7 +965,8 @@ export default function JavariChatInterface({
                         components={{
                           code({ inline, className, children, ...props }: any) {
                             const match = /language-(\w+)/.exec(className || '');
-                            const codeString = String(children).replace(/\n$/, '');
+                            const codeString = String(children).replace(/
+$/, '');
                             
                             return !inline && match ? (
                               <div className="relative">
@@ -980,6 +999,7 @@ export default function JavariChatInterface({
                         {message.content}
                       </ReactMarkdown>
                       <ProviderBadge provider={message.provider} latency={message.latency} />
+                      {voiceEnabled && <VoicePanel text={message.content} autoPlay={true} />}
                     </div>
                   ) : (
                     <p className="whitespace-pre-wrap">{message.content}</p>
