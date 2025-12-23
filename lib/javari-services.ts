@@ -1,6 +1,6 @@
 // lib/javari-services.ts
-// Fixed version that properly handles autonomous deploy
-// Timestamp: 2025-11-30 03:15 AM EST
+// Updated: December 23, 2025 - Session-based conversations (no auth required)
+// Timestamp: 2025-12-23 02:58 PM EST
 
 import { createClient } from '@supabase/supabase-js';
 
@@ -9,9 +9,22 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+// Get or create a session ID for this browser
+function getSessionId(): string {
+  if (typeof window === 'undefined') return 'server-' + Date.now();
+  
+  let sessionId = localStorage.getItem('javari_session_id');
+  if (!sessionId) {
+    sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substring(2, 11);
+    localStorage.setItem('javari_session_id', sessionId);
+  }
+  return sessionId;
+}
+
 export interface Conversation {
   id: string;
-  user_id: string;
+  user_id?: string;
+  session_id?: string;
   title: string;
   starred: boolean;
   created_at: string;
@@ -30,15 +43,25 @@ export interface Message {
 export class ChatService {
   static async loadConversations(): Promise<Conversation[]> {
     try {
+      const sessionId = getSessionId();
+      
+      // Try to get authenticated user first
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return [];
-
-      const { data, error } = await supabase
+      
+      let query = supabase
         .from('conversations')
         .select('*')
-        .eq('user_id', user.id)
         .order('updated_at', { ascending: false })
         .limit(100);
+      
+      // Filter by user_id if logged in, otherwise by session_id
+      if (user) {
+        query = query.eq('user_id', user.id);
+      } else {
+        query = query.eq('session_id', sessionId);
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
       return data || [];
@@ -66,13 +89,14 @@ export class ChatService {
 
   static async createConversation(title: string): Promise<Conversation | null> {
     try {
+      const sessionId = getSessionId();
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return null;
 
       const { data, error } = await supabase
         .from('conversations')
         .insert({
-          user_id: user.id,
+          user_id: user?.id || null,
+          session_id: sessionId,
           title: title.substring(0, 100),
           starred: false,
         })
@@ -116,6 +140,21 @@ export class ChatService {
     } catch (error) {
       console.error('Error saving message:', error);
       return null;
+    }
+  }
+
+  static async toggleStar(conversationId: string, starred: boolean): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .from('conversations')
+        .update({ starred })
+        .eq('id', conversationId);
+
+      if (error) throw error;
+      return true;
+    } catch (error) {
+      console.error('Error toggling star:', error);
+      return false;
     }
   }
 
