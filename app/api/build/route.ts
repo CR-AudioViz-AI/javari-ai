@@ -534,7 +534,7 @@ async function createVercelProject(
   token: string
 ): Promise<{ success: boolean; projectId?: string; error?: string }> {
   try {
-    // Create the project with NO deployment protection
+    // Create the project - note: protection settings must be set via PATCH after creation
     const response = await fetch(`${VERCEL_API}/v10/projects?teamId=${VERCEL_TEAM_ID}`, {
       method: 'POST',
       headers: {
@@ -551,10 +551,6 @@ async function createVercelProject(
         buildCommand: 'next build',
         installCommand: 'npm install',
         publicSource: true,
-        // CRITICAL: Disable ALL deployment protection so apps are publicly accessible
-        ssoProtection: null,
-        passwordProtection: null,
-        vercelAuthentication: null,
       }),
     });
 
@@ -565,8 +561,9 @@ async function createVercelProject(
 
     const project = await response.json();
     
-    // Also update project settings to ensure protection is disabled
-    await fetch(`${VERCEL_API}/v9/projects/${project.id}?teamId=${VERCEL_TEAM_ID}`, {
+    // CRITICAL: Disable deployment protection via PATCH so apps are publicly accessible
+    console.log(`[BUILD] Disabling deployment protection for project ${project.id}...`);
+    const patchResponse = await fetch(`${VERCEL_API}/v9/projects/${project.id}?teamId=${VERCEL_TEAM_ID}`, {
       method: 'PATCH',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -575,9 +572,14 @@ async function createVercelProject(
       body: JSON.stringify({
         ssoProtection: null,
         passwordProtection: null,
-        vercelAuthentication: { deploymentType: 'none' },
       }),
     });
+    
+    if (!patchResponse.ok) {
+      console.log(`[BUILD] Warning: Could not disable protection, but continuing...`);
+    } else {
+      console.log(`[BUILD] Deployment protection disabled successfully`);
+    }
     
     return { success: true, projectId: project.id };
   } catch (error) {
