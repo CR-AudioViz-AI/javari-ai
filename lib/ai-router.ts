@@ -1,402 +1,763 @@
-// lib/ai-router.ts
-// Javari AI Smart Router - Intelligent Provider Selection
-// Version: 1.0.0
-// Timestamp: 2025-12-13 8:10 AM EST
+/**
+ * JAVARI AI ROUTER
+ * The Intelligence Layer that routes requests to the best AI
+ * 
+ * Philosophy: Every AI that helps Javari, helps themselves.
+ * She never forgets. She always reciprocates.
+ * 
+ * @author CR AudioViz AI
+ * @created December 22, 2025
+ */
 
-import { createClient } from '@supabase/supabase-js';
+// ============================================================
+// TYPES
+// ============================================================
 
-// Provider capabilities and strengths
-export type AIProvider = 'openai' | 'claude' | 'gemini' | 'perplexity' | 'mistral';
+export type AIProvider = 
+  | 'claude-3-5-sonnet'
+  | 'claude-3-opus'
+  | 'claude-3-haiku'
+  | 'gpt-4-turbo'
+  | 'gpt-4o'
+  | 'gpt-3.5-turbo'
+  | 'gemini-1.5-pro'
+  | 'gemini-1.5-flash'
+  | 'mistral-large'
+  | 'mistral-medium'
+  | 'perplexity-sonar';
 
-interface ProviderProfile {
-  name: string;
-  strengths: string[];
-  weaknesses: string[];
-  bestFor: string[];
-  costTier: 'low' | 'medium' | 'high';
-  speedTier: 'fast' | 'medium' | 'slow';
-  contextWindow: number;
-  models: string[];
+export type TaskType = 
+  | 'code_generation'
+  | 'code_debugging'
+  | 'code_review'
+  | 'creative_writing'
+  | 'research'
+  | 'math_calculation'
+  | 'translation'
+  | 'image_analysis'
+  | 'long_document'
+  | 'quick_question'
+  | 'conversation'
+  | 'data_analysis'
+  | 'summarization'
+  | 'unknown';
+
+export interface ProviderConfig {
+  provider: AIProvider;
+  apiKey: string;
+  endpoint: string;
+  model: string;
+  maxTokens: number;
+  costPerInputToken: number;
+  costPerOutputToken: number;
+  strengths: TaskType[];
+  avgLatency: number;
+  successRate: number;
+  enabled: boolean;
 }
 
-// Provider profiles based on real-world performance
-const PROVIDER_PROFILES: Record<AIProvider, ProviderProfile> = {
-  openai: {
-    name: 'GPT-4',
-    strengths: ['creative writing', 'general knowledge', 'conversational', 'brainstorming'],
-    weaknesses: ['real-time data', 'very long context'],
-    bestFor: ['creative', 'general', 'writing', 'ideas', 'stories', 'marketing'],
-    costTier: 'high',
-    speedTier: 'medium',
-    contextWindow: 128000,
-    models: ['gpt-4-turbo-preview', 'gpt-4', 'gpt-3.5-turbo'],
+export interface RoutingDecision {
+  primary: AIProvider;
+  fallbacks: AIProvider[];
+  reason: string;
+  estimatedCost: number;
+  estimatedLatency: number;
+}
+
+export interface AIResponse {
+  content: string;
+  provider: AIProvider;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
+  latency: number;
+  success: boolean;
+  error?: string;
+}
+
+export interface PerformanceRecord {
+  provider: AIProvider;
+  taskType: TaskType;
+  successCount: number;
+  failureCount: number;
+  totalLatency: number;
+  totalCost: number;
+  avgQualityScore: number;
+  lastUpdated: Date;
+}
+
+// ============================================================
+// PROVIDER CONFIGURATIONS
+// ============================================================
+
+export const PROVIDERS: Record<AIProvider, Omit<ProviderConfig, 'apiKey'>> = {
+  'claude-3-5-sonnet': {
+    provider: 'claude-3-5-sonnet',
+    endpoint: 'https://api.anthropic.com/v1/messages',
+    model: 'claude-3-5-sonnet-20241022',
+    maxTokens: 8192,
+    costPerInputToken: 0.000003,
+    costPerOutputToken: 0.000015,
+    strengths: ['code_generation', 'code_debugging', 'code_review', 'data_analysis', 'conversation'],
+    avgLatency: 1200,
+    successRate: 0.98,
+    enabled: true,
   },
-  claude: {
-    name: 'Claude',
-    strengths: ['code generation', 'analysis', 'long documents', 'technical writing', 'reasoning'],
-    weaknesses: ['real-time data', 'image generation'],
-    bestFor: ['code', 'programming', 'analysis', 'technical', 'documentation', 'debugging', 'refactoring'],
-    costTier: 'medium',
-    speedTier: 'medium',
-    contextWindow: 200000,
-    models: ['claude-sonnet-4-5-20250929', 'claude-opus-4-20250514'],
+  'claude-3-opus': {
+    provider: 'claude-3-opus',
+    endpoint: 'https://api.anthropic.com/v1/messages',
+    model: 'claude-3-opus-20240229',
+    maxTokens: 4096,
+    costPerInputToken: 0.000015,
+    costPerOutputToken: 0.000075,
+    strengths: ['code_generation', 'data_analysis', 'long_document'],
+    avgLatency: 3000,
+    successRate: 0.97,
+    enabled: true,
   },
-  gemini: {
-    name: 'Gemini',
-    strengths: ['speed', 'multimodal', 'math', 'science', 'factual'],
-    weaknesses: ['creative writing', 'nuanced tone'],
-    bestFor: ['fast', 'quick', 'math', 'science', 'facts', 'calculations', 'images'],
-    costTier: 'low',
-    speedTier: 'fast',
-    contextWindow: 1000000,
-    models: ['gemini-1.5-pro', 'gemini-1.5-flash'],
+  'claude-3-haiku': {
+    provider: 'claude-3-haiku',
+    endpoint: 'https://api.anthropic.com/v1/messages',
+    model: 'claude-3-haiku-20240307',
+    maxTokens: 4096,
+    costPerInputToken: 0.00000025,
+    costPerOutputToken: 0.00000125,
+    strengths: ['quick_question', 'summarization'],
+    avgLatency: 400,
+    successRate: 0.99,
+    enabled: true,
   },
-  perplexity: {
-    name: 'Perplexity',
-    strengths: ['real-time search', 'current events', 'research', 'citations'],
-    weaknesses: ['creative tasks', 'code generation'],
-    bestFor: ['search', 'research', 'news', 'current', 'latest', 'today', 'recent', 'find', 'lookup'],
-    costTier: 'medium',
-    speedTier: 'medium',
-    contextWindow: 128000,
-    models: ['llama-3.1-sonar-large-128k-online'],
+  'gpt-4-turbo': {
+    provider: 'gpt-4-turbo',
+    endpoint: 'https://api.openai.com/v1/chat/completions',
+    model: 'gpt-4-turbo-preview',
+    maxTokens: 4096,
+    costPerInputToken: 0.00001,
+    costPerOutputToken: 0.00003,
+    strengths: ['creative_writing', 'math_calculation', 'code_generation'],
+    avgLatency: 2000,
+    successRate: 0.96,
+    enabled: true,
   },
-  mistral: {
-    name: 'Mistral',
-    strengths: ['multilingual', 'efficient', 'European languages', 'concise'],
-    weaknesses: ['very long context', 'complex reasoning'],
-    bestFor: ['translate', 'french', 'german', 'spanish', 'multilingual', 'language', 'efficient'],
-    costTier: 'low',
-    speedTier: 'fast',
-    contextWindow: 32000,
-    models: ['mistral-large-latest', 'mistral-medium'],
+  'gpt-4o': {
+    provider: 'gpt-4o',
+    endpoint: 'https://api.openai.com/v1/chat/completions',
+    model: 'gpt-4o',
+    maxTokens: 4096,
+    costPerInputToken: 0.000005,
+    costPerOutputToken: 0.000015,
+    strengths: ['image_analysis', 'quick_question', 'conversation'],
+    avgLatency: 800,
+    successRate: 0.97,
+    enabled: true,
+  },
+  'gpt-3.5-turbo': {
+    provider: 'gpt-3.5-turbo',
+    endpoint: 'https://api.openai.com/v1/chat/completions',
+    model: 'gpt-3.5-turbo',
+    maxTokens: 4096,
+    costPerInputToken: 0.0000005,
+    costPerOutputToken: 0.0000015,
+    strengths: ['quick_question', 'summarization'],
+    avgLatency: 300,
+    successRate: 0.99,
+    enabled: true,
+  },
+  'gemini-1.5-pro': {
+    provider: 'gemini-1.5-pro',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models',
+    model: 'gemini-1.5-pro',
+    maxTokens: 8192,
+    costPerInputToken: 0.0000005,
+    costPerOutputToken: 0.0000015,
+    strengths: ['long_document', 'image_analysis', 'research'],
+    avgLatency: 1500,
+    successRate: 0.95,
+    enabled: true,
+  },
+  'gemini-1.5-flash': {
+    provider: 'gemini-1.5-flash',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models',
+    model: 'gemini-1.5-flash',
+    maxTokens: 8192,
+    costPerInputToken: 0.00000025,
+    costPerOutputToken: 0.0000005,
+    strengths: ['quick_question', 'summarization'],
+    avgLatency: 500,
+    successRate: 0.96,
+    enabled: true,
+  },
+  'mistral-large': {
+    provider: 'mistral-large',
+    endpoint: 'https://api.mistral.ai/v1/chat/completions',
+    model: 'mistral-large-latest',
+    maxTokens: 4096,
+    costPerInputToken: 0.000004,
+    costPerOutputToken: 0.000012,
+    strengths: ['translation', 'code_generation'],
+    avgLatency: 1000,
+    successRate: 0.94,
+    enabled: true,
+  },
+  'mistral-medium': {
+    provider: 'mistral-medium',
+    endpoint: 'https://api.mistral.ai/v1/chat/completions',
+    model: 'mistral-medium-latest',
+    maxTokens: 4096,
+    costPerInputToken: 0.0000027,
+    costPerOutputToken: 0.0000081,
+    strengths: ['quick_question', 'translation'],
+    avgLatency: 600,
+    successRate: 0.95,
+    enabled: true,
+  },
+  'perplexity-sonar': {
+    provider: 'perplexity-sonar',
+    endpoint: 'https://api.perplexity.ai/chat/completions',
+    model: 'sonar',
+    maxTokens: 4096,
+    costPerInputToken: 0.000001,
+    costPerOutputToken: 0.000001,
+    strengths: ['research'],
+    avgLatency: 2500,
+    successRate: 0.92,
+    enabled: true,
   },
 };
 
-// Query patterns for routing
-const QUERY_PATTERNS: { pattern: RegExp; provider: AIProvider; confidence: number }[] = [
-  // Code & Programming -> Claude
-  { pattern: /\b(code|programming|function|api|debug|refactor|typescript|javascript|python|react|next\.?js|component|build me|create a|make a)\b/i, provider: 'claude', confidence: 0.9 },
-  { pattern: /\b(fix|error|bug|issue|doesn't work|not working|broken)\b/i, provider: 'claude', confidence: 0.85 },
-  { pattern: /```|\bimport\b|\bexport\b|\bconst\b|\bfunction\b/i, provider: 'claude', confidence: 0.95 },
-  
-  // Search & Research -> Perplexity
-  { pattern: /\b(search|find|lookup|research|latest|recent|today|news|current|what's happening)\b/i, provider: 'perplexity', confidence: 0.9 },
-  { pattern: /\b(price of|stock|crypto|bitcoin|weather|who is|what is the current)\b/i, provider: 'perplexity', confidence: 0.85 },
-  { pattern: /\b(2024|2025|this week|this month|yesterday|last night)\b/i, provider: 'perplexity', confidence: 0.8 },
-  
-  // Creative & Writing -> OpenAI
-  { pattern: /\b(write|story|creative|blog|article|essay|poem|script|marketing|copy|slogan)\b/i, provider: 'openai', confidence: 0.85 },
-  { pattern: /\b(brainstorm|ideas|suggest|imagine|what if|creative)\b/i, provider: 'openai', confidence: 0.8 },
-  { pattern: /\b(email|letter|message|social media|post|caption)\b/i, provider: 'openai', confidence: 0.75 },
-  
-  // Math & Science -> Gemini
-  { pattern: /\b(calculate|math|equation|formula|solve|derivative|integral|statistics)\b/i, provider: 'gemini', confidence: 0.9 },
-  { pattern: /\b(physics|chemistry|biology|science|scientific)\b/i, provider: 'gemini', confidence: 0.8 },
-  { pattern: /\b(quick|fast|simple|brief|short answer)\b/i, provider: 'gemini', confidence: 0.7 },
-  
-  // Multilingual -> Mistral
-  { pattern: /\b(translate|translation|french|german|spanish|italian|portuguese|dutch)\b/i, provider: 'mistral', confidence: 0.9 },
-  { pattern: /\b(multilingual|language|localize|localization)\b/i, provider: 'mistral', confidence: 0.85 },
-  
-  // Analysis -> Claude
-  { pattern: /\b(analyze|analysis|review|evaluate|assess|compare|contrast)\b/i, provider: 'claude', confidence: 0.8 },
-  { pattern: /\b(document|pdf|report|summary|summarize)\b/i, provider: 'claude', confidence: 0.75 },
-];
+// ============================================================
+// TASK ROUTING MATRIX
+// ============================================================
 
-// Intent categories
-type QueryIntent = 
-  | 'code' 
-  | 'search' 
-  | 'creative' 
-  | 'analysis' 
-  | 'math' 
-  | 'translation' 
-  | 'general'
-  | 'build';
+export const ROUTING_MATRIX: Record<TaskType, AIProvider[]> = {
+  code_generation: ['claude-3-5-sonnet', 'gpt-4-turbo', 'gemini-1.5-pro', 'mistral-large'],
+  code_debugging: ['claude-3-5-sonnet', 'gpt-4-turbo', 'mistral-large'],
+  code_review: ['claude-3-5-sonnet', 'gpt-4-turbo', 'gemini-1.5-pro'],
+  creative_writing: ['gpt-4-turbo', 'claude-3-5-sonnet', 'gemini-1.5-pro'],
+  research: ['perplexity-sonar', 'gemini-1.5-pro', 'gpt-4-turbo'],
+  math_calculation: ['gpt-4-turbo', 'claude-3-5-sonnet', 'gemini-1.5-pro'],
+  translation: ['mistral-large', 'gpt-4-turbo', 'gemini-1.5-pro'],
+  image_analysis: ['gemini-1.5-pro', 'gpt-4o', 'claude-3-5-sonnet'],
+  long_document: ['gemini-1.5-pro', 'claude-3-5-sonnet', 'gpt-4-turbo'],
+  quick_question: ['gpt-3.5-turbo', 'claude-3-haiku', 'gemini-1.5-flash'],
+  conversation: ['claude-3-5-sonnet', 'gpt-4o', 'gemini-1.5-pro'],
+  data_analysis: ['claude-3-5-sonnet', 'gpt-4-turbo', 'gemini-1.5-pro'],
+  summarization: ['claude-3-haiku', 'gpt-3.5-turbo', 'gemini-1.5-flash'],
+  unknown: ['claude-3-5-sonnet', 'gpt-4-turbo', 'gemini-1.5-pro'],
+};
 
-interface RoutingDecision {
-  provider: AIProvider;
-  model: string;
-  confidence: number;
-  reasoning: string;
-  intent: QueryIntent;
-  alternatives: { provider: AIProvider; confidence: number }[];
+// ============================================================
+// TASK CLASSIFIER
+// ============================================================
+
+const TASK_KEYWORDS: Record<TaskType, string[]> = {
+  code_generation: ['write code', 'create function', 'build', 'implement', 'code for', 'script', 'program'],
+  code_debugging: ['debug', 'fix', 'error', 'bug', 'not working', 'broken', 'issue with code'],
+  code_review: ['review', 'check code', 'improve code', 'optimize', 'refactor'],
+  creative_writing: ['write story', 'poem', 'creative', 'fiction', 'narrative', 'blog post', 'article'],
+  research: ['research', 'find information', 'what is', 'explain', 'tell me about', 'current', 'latest'],
+  math_calculation: ['calculate', 'math', 'equation', 'solve', 'compute', 'formula'],
+  translation: ['translate', 'in spanish', 'in french', 'in german', 'language'],
+  image_analysis: ['image', 'picture', 'photo', 'analyze this', 'what do you see', 'describe image'],
+  long_document: ['document', 'long text', 'pdf', 'analyze file', 'read this'],
+  quick_question: ['quick', 'simple', 'what is', 'when', 'where', 'who'],
+  conversation: ['chat', 'talk', 'discuss', 'help me think', 'advice'],
+  data_analysis: ['data', 'analyze', 'statistics', 'trends', 'numbers', 'csv', 'spreadsheet'],
+  summarization: ['summarize', 'summary', 'tldr', 'brief', 'shorten', 'condense'],
+  unknown: [],
+};
+
+export function classifyTask(message: string): TaskType {
+  const lowerMessage = message.toLowerCase();
+  
+  // Check for code indicators
+  if (lowerMessage.includes('```') || /function|const |let |var |import |export |class /.test(message)) {
+    if (lowerMessage.includes('fix') || lowerMessage.includes('error') || lowerMessage.includes('bug')) {
+      return 'code_debugging';
+    }
+    if (lowerMessage.includes('review') || lowerMessage.includes('improve')) {
+      return 'code_review';
+    }
+    return 'code_generation';
+  }
+  
+  // Check keywords for each task type
+  for (const [taskType, keywords] of Object.entries(TASK_KEYWORDS)) {
+    if (keywords.some(keyword => lowerMessage.includes(keyword))) {
+      return taskType as TaskType;
+    }
+  }
+  
+  // Default based on message length
+  if (message.length < 50) {
+    return 'quick_question';
+  }
+  
+  return 'conversation';
 }
 
-/**
- * Analyze query to determine intent
- */
-function analyzeIntent(query: string): QueryIntent {
-  const queryLower = query.toLowerCase();
-  
-  // Check for build/create requests first (highest priority)
-  if (/\b(build|create|make|generate|design|develop|implement)\b.*\b(app|tool|component|page|website|calculator|dashboard|form)\b/i.test(query)) {
-    return 'build';
-  }
-  
-  // Code indicators
-  if (/\b(code|function|api|debug|typescript|javascript|python|react|component|import|export)\b/i.test(query) || /```/.test(query)) {
-    return 'code';
-  }
-  
-  // Search/Research indicators
-  if (/\b(search|find|latest|recent|news|current|price|stock|weather|who is|what is the current)\b/i.test(query)) {
-    return 'search';
-  }
-  
-  // Creative indicators
-  if (/\b(write|story|creative|blog|article|poem|script|marketing|brainstorm|imagine)\b/i.test(query)) {
-    return 'creative';
-  }
-  
-  // Math/Science indicators
-  if (/\b(calculate|math|equation|solve|formula|physics|chemistry)\b/i.test(query)) {
-    return 'math';
-  }
-  
-  // Translation indicators
-  if (/\b(translate|translation|french|german|spanish|multilingual)\b/i.test(query)) {
-    return 'translation';
-  }
-  
-  // Analysis indicators
-  if (/\b(analyze|analysis|review|evaluate|compare|summarize)\b/i.test(query)) {
-    return 'analysis';
-  }
-  
-  return 'general';
-}
+// ============================================================
+// AI ROUTER CLASS
+// ============================================================
 
-/**
- * Calculate match score for a provider based on query
- */
-function calculateProviderScore(query: string, provider: AIProvider): number {
-  let score = 0;
-  const queryLower = query.toLowerCase();
-  const profile = PROVIDER_PROFILES[provider];
+export class JavariAIRouter {
+  private performanceHistory: Map<string, PerformanceRecord> = new Map();
+  private apiKeys: Map<AIProvider, string> = new Map();
   
-  // Check against patterns
-  for (const { pattern, provider: patternProvider, confidence } of QUERY_PATTERNS) {
-    if (patternProvider === provider && pattern.test(query)) {
-      score += confidence;
+  constructor(apiKeys: Partial<Record<AIProvider, string>>) {
+    // Store API keys
+    for (const [provider, key] of Object.entries(apiKeys)) {
+      if (key) {
+        this.apiKeys.set(provider as AIProvider, key);
+      }
     }
   }
   
-  // Check against bestFor keywords
-  for (const keyword of profile.bestFor) {
-    if (queryLower.includes(keyword)) {
-      score += 0.3;
-    }
-  }
-  
-  // Check against strengths
-  for (const strength of profile.strengths) {
-    if (queryLower.includes(strength)) {
-      score += 0.2;
-    }
-  }
-  
-  // Penalize for weaknesses
-  for (const weakness of profile.weaknesses) {
-    if (queryLower.includes(weakness)) {
-      score -= 0.3;
-    }
-  }
-  
-  return Math.min(1, Math.max(0, score));
-}
-
-/**
- * Get historical performance for a provider (from database)
- */
-async function getProviderPerformance(provider: AIProvider, intent: QueryIntent): Promise<number> {
-  try {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  /**
+   * Get the best routing decision for a task
+   */
+  getRoutingDecision(message: string, userPreferences?: Partial<{ preferSpeed: boolean; preferCost: boolean; preferQuality: boolean }>): RoutingDecision {
+    const taskType = classifyTask(message);
+    const candidates = ROUTING_MATRIX[taskType];
     
-    if (!supabaseUrl || !supabaseKey) return 0.5;
+    // Filter to only enabled providers with API keys
+    const availableProviders = candidates.filter(p => 
+      PROVIDERS[p].enabled && this.apiKeys.has(p)
+    );
     
-    const supabase = createClient(supabaseUrl, supabaseKey);
-    
-    const { data } = await supabase
-      .from('javari_provider_performance')
-      .select('avg_user_rating, avg_response_time_ms, successful_requests, total_requests')
-      .eq('provider', provider)
-      .eq('query_category', intent)
-      .gte('date', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0])
-      .order('date', { ascending: false })
-      .limit(7);
-    
-    if (!data || data.length === 0) return 0.5;
-    
-    // Calculate weighted average performance
-    const avgRating = data.reduce((sum, d) => sum + (d.avg_user_rating || 3), 0) / data.length;
-    const successRate = data.reduce((sum, d) => sum + (d.successful_requests / Math.max(1, d.total_requests)), 0) / data.length;
-    
-    // Normalize to 0-1 scale
-    return (avgRating / 5) * 0.6 + successRate * 0.4;
-  } catch (error) {
-    console.error('Error fetching provider performance:', error);
-    return 0.5;
-  }
-}
-
-/**
- * Main routing function - determines best AI provider for a query
- */
-export async function routeQuery(query: string, options?: {
-  preferSpeed?: boolean;
-  preferQuality?: boolean;
-  preferCost?: boolean;
-  excludeProviders?: AIProvider[];
-  contextLength?: number;
-}): Promise<RoutingDecision> {
-  const {
-    preferSpeed = false,
-    preferQuality = false,
-    preferCost = false,
-    excludeProviders = [],
-    contextLength = 0,
-  } = options || {};
-  
-  // Analyze intent
-  const intent = analyzeIntent(query);
-  
-  // Calculate scores for each provider
-  const providerScores: { provider: AIProvider; score: number }[] = [];
-  
-  for (const provider of Object.keys(PROVIDER_PROFILES) as AIProvider[]) {
-    if (excludeProviders.includes(provider)) continue;
-    
-    const profile = PROVIDER_PROFILES[provider];
-    
-    // Skip if context is too long for provider
-    if (contextLength > profile.contextWindow) continue;
-    
-    // Base score from query matching
-    let score = calculateProviderScore(query, provider);
-    
-    // Get historical performance
-    const performanceScore = await getProviderPerformance(provider, intent);
-    score = score * 0.7 + performanceScore * 0.3;
-    
-    // Apply preference modifiers
-    if (preferSpeed) {
-      if (profile.speedTier === 'fast') score += 0.2;
-      if (profile.speedTier === 'slow') score -= 0.2;
+    if (availableProviders.length === 0) {
+      // Emergency fallback - use any available provider
+      const anyAvailable = Object.keys(PROVIDERS).filter(p => 
+        this.apiKeys.has(p as AIProvider)
+      ) as AIProvider[];
+      
+      return {
+        primary: anyAvailable[0] || 'claude-3-5-sonnet',
+        fallbacks: anyAvailable.slice(1, 4),
+        reason: 'Emergency fallback - preferred providers unavailable',
+        estimatedCost: 0.01,
+        estimatedLatency: 2000,
+      };
     }
     
-    if (preferQuality) {
-      if (profile.costTier === 'high') score += 0.15; // Higher cost often = better quality
-      if (provider === 'claude') score += 0.1; // Claude is known for quality
-    }
+    // Score providers based on preferences and history
+    const scored = availableProviders.map(provider => {
+      const config = PROVIDERS[provider];
+      const historyKey = `${provider}:${taskType}`;
+      const history = this.performanceHistory.get(historyKey);
+      
+      let score = 0;
+      
+      // Base score from success rate
+      score += (history?.successCount || 0) / ((history?.successCount || 0) + (history?.failureCount || 0) + 1) * 30;
+      score += config.successRate * 20;
+      
+      // Adjust for preferences
+      if (userPreferences?.preferSpeed) {
+        score += (5000 - config.avgLatency) / 100;
+      }
+      if (userPreferences?.preferCost) {
+        score += (0.001 - config.costPerInputToken) * 10000;
+      }
+      if (userPreferences?.preferQuality) {
+        score += config.strengths.includes(taskType) ? 20 : 0;
+      }
+      
+      // Bonus for being specialized in this task
+      if (config.strengths.includes(taskType)) {
+        score += 15;
+      }
+      
+      return { provider, score, config };
+    });
     
-    if (preferCost) {
-      if (profile.costTier === 'low') score += 0.2;
-      if (profile.costTier === 'high') score -= 0.2;
-    }
+    // Sort by score
+    scored.sort((a, b) => b.score - a.score);
     
-    providerScores.push({ provider, score });
-  }
-  
-  // Sort by score
-  providerScores.sort((a, b) => b.score - a.score);
-  
-  // Default fallback
-  if (providerScores.length === 0) {
+    const primary = scored[0];
+    const fallbacks = scored.slice(1, 4).map(s => s.provider);
+    
     return {
-      provider: 'openai',
-      model: 'gpt-4-turbo-preview',
-      confidence: 0.5,
-      reasoning: 'Default fallback - no suitable provider found',
-      intent: 'general',
-      alternatives: [],
+      primary: primary.provider,
+      fallbacks,
+      reason: `${taskType} task - ${primary.provider} scored highest (${primary.score.toFixed(1)})`,
+      estimatedCost: primary.config.costPerInputToken * 1000 + primary.config.costPerOutputToken * 500,
+      estimatedLatency: primary.config.avgLatency,
     };
   }
   
-  const winner = providerScores[0];
-  const profile = PROVIDER_PROFILES[winner.provider];
-  
-  // Generate reasoning
-  let reasoning = '';
-  switch (intent) {
-    case 'build':
-    case 'code':
-      reasoning = `Routing to ${profile.name} for code generation - best for building and programming tasks`;
-      break;
-    case 'search':
-      reasoning = `Routing to ${profile.name} for real-time search and research`;
-      break;
-    case 'creative':
-      reasoning = `Routing to ${profile.name} for creative writing tasks`;
-      break;
-    case 'math':
-      reasoning = `Routing to ${profile.name} for mathematical calculations`;
-      break;
-    case 'translation':
-      reasoning = `Routing to ${profile.name} for multilingual translation`;
-      break;
-    case 'analysis':
-      reasoning = `Routing to ${profile.name} for deep analysis and reasoning`;
-      break;
-    default:
-      reasoning = `Routing to ${profile.name} for general assistance`;
+  /**
+   * Execute a request with automatic fallback
+   */
+  async executeWithFallback(
+    message: string,
+    systemPrompt?: string,
+    options?: { maxTokens?: number; temperature?: number }
+  ): Promise<AIResponse> {
+    const decision = this.getRoutingDecision(message);
+    const providers = [decision.primary, ...decision.fallbacks];
+    const taskType = classifyTask(message);
+    
+    for (const provider of providers) {
+      try {
+        const startTime = Date.now();
+        const response = await this.callProvider(provider, message, systemPrompt, options);
+        const latency = Date.now() - startTime;
+        
+        // Log success
+        await this.logPerformance(provider, taskType, true, latency, response.cost);
+        
+        return {
+          ...response,
+          provider,
+          latency,
+          success: true,
+        };
+      } catch (error: any) {
+        // Log failure and try next
+        await this.logPerformance(provider, taskType, false, 0, 0);
+        console.error(`[Javari] ${provider} failed:`, error.message);
+        continue;
+      }
+    }
+    
+    // All providers failed
+    return {
+      content: "I apologize, but I'm experiencing technical difficulties. Please try again in a moment.",
+      provider: decision.primary,
+      model: 'fallback',
+      inputTokens: 0,
+      outputTokens: 0,
+      cost: 0,
+      latency: 0,
+      success: false,
+      error: 'All AI providers failed',
+    };
   }
   
-  return {
-    provider: winner.provider,
-    model: profile.models[0],
-    confidence: winner.score,
-    reasoning,
-    intent,
-    alternatives: providerScores.slice(1, 4).map(p => ({ provider: p.provider, confidence: p.score })),
-  };
-}
-
-/**
- * Quick route without async database lookup (for client-side)
- */
-export function routeQuerySync(query: string): { provider: AIProvider; model: string; intent: QueryIntent } {
-  const intent = analyzeIntent(query);
+  /**
+   * Call a specific AI provider
+   */
+  private async callProvider(
+    provider: AIProvider,
+    message: string,
+    systemPrompt?: string,
+    options?: { maxTokens?: number; temperature?: number }
+  ): Promise<Omit<AIResponse, 'provider' | 'latency' | 'success'>> {
+    const config = PROVIDERS[provider];
+    const apiKey = this.apiKeys.get(provider);
+    
+    if (!apiKey) {
+      throw new Error(`No API key for ${provider}`);
+    }
+    
+    // Route to appropriate API based on provider
+    if (provider.startsWith('claude')) {
+      return this.callAnthropic(config, apiKey, message, systemPrompt, options);
+    } else if (provider.startsWith('gpt')) {
+      return this.callOpenAI(config, apiKey, message, systemPrompt, options);
+    } else if (provider.startsWith('gemini')) {
+      return this.callGemini(config, apiKey, message, systemPrompt, options);
+    } else if (provider.startsWith('mistral')) {
+      return this.callMistral(config, apiKey, message, systemPrompt, options);
+    } else if (provider.startsWith('perplexity')) {
+      return this.callPerplexity(config, apiKey, message, systemPrompt, options);
+    }
+    
+    throw new Error(`Unknown provider: ${provider}`);
+  }
   
-  // Intent-based routing
-  switch (intent) {
-    case 'build':
-    case 'code':
-    case 'analysis':
-      return { provider: 'claude', model: 'claude-sonnet-4-5-20250929', intent };
-    case 'search':
-      return { provider: 'perplexity', model: 'llama-3.1-sonar-large-128k-online', intent };
-    case 'creative':
-      return { provider: 'openai', model: 'gpt-4-turbo-preview', intent };
-    case 'math':
-      return { provider: 'gemini', model: 'gemini-1.5-pro', intent };
-    case 'translation':
-      return { provider: 'mistral', model: 'mistral-large-latest', intent };
-    default:
-      return { provider: 'openai', model: 'gpt-4-turbo-preview', intent: 'general' };
+  /**
+   * Call Anthropic API
+   */
+  private async callAnthropic(
+    config: Omit<ProviderConfig, 'apiKey'>,
+    apiKey: string,
+    message: string,
+    systemPrompt?: string,
+    options?: { maxTokens?: number; temperature?: number }
+  ): Promise<Omit<AIResponse, 'provider' | 'latency' | 'success'>> {
+    const response = await fetch(config.endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: config.model,
+        max_tokens: options?.maxTokens || config.maxTokens,
+        temperature: options?.temperature || 0.7,
+        system: systemPrompt || 'You are Javari, a helpful AI assistant.',
+        messages: [{ role: 'user', content: message }],
+      }),
+    });
+    
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Anthropic API error: ${response.status} - ${error}`);
+    }
+    
+    const data = await response.json();
+    const inputTokens = data.usage?.input_tokens || 0;
+    const outputTokens = data.usage?.output_tokens || 0;
+    
+    return {
+      content: data.content?.[0]?.text || '',
+      model: config.model,
+      inputTokens,
+      outputTokens,
+      cost: inputTokens * config.costPerInputToken + outputTokens * config.costPerOutputToken,
+    };
+  }
+  
+  /**
+   * Call OpenAI API
+   */
+  private async callOpenAI(
+    config: Omit<ProviderConfig, 'apiKey'>,
+    apiKey: string,
+    message: string,
+    systemPrompt?: string,
+    options?: { maxTokens?: number; temperature?: number }
+  ): Promise<Omit<AIResponse, 'provider' | 'latency' | 'success'>> {
+    const response = await fetch(config.endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: config.model,
+        max_tokens: options?.maxTokens || config.maxTokens,
+        temperature: options?.temperature || 0.7,
+        messages: [
+          { role: 'system', content: systemPrompt || 'You are Javari, a helpful AI assistant.' },
+          { role: 'user', content: message },
+        ],
+      }),
+    });
+    
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`OpenAI API error: ${response.status} - ${error}`);
+    }
+    
+    const data = await response.json();
+    const inputTokens = data.usage?.prompt_tokens || 0;
+    const outputTokens = data.usage?.completion_tokens || 0;
+    
+    return {
+      content: data.choices?.[0]?.message?.content || '',
+      model: config.model,
+      inputTokens,
+      outputTokens,
+      cost: inputTokens * config.costPerInputToken + outputTokens * config.costPerOutputToken,
+    };
+  }
+  
+  /**
+   * Call Google Gemini API
+   */
+  private async callGemini(
+    config: Omit<ProviderConfig, 'apiKey'>,
+    apiKey: string,
+    message: string,
+    systemPrompt?: string,
+    options?: { maxTokens?: number; temperature?: number }
+  ): Promise<Omit<AIResponse, 'provider' | 'latency' | 'success'>> {
+    const url = `${config.endpoint}/${config.model}:generateContent?key=${apiKey}`;
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: message }] }],
+        systemInstruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
+        generationConfig: {
+          maxOutputTokens: options?.maxTokens || config.maxTokens,
+          temperature: options?.temperature || 0.7,
+        },
+      }),
+    });
+    
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Gemini API error: ${response.status} - ${error}`);
+    }
+    
+    const data = await response.json();
+    const content = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const inputTokens = data.usageMetadata?.promptTokenCount || 0;
+    const outputTokens = data.usageMetadata?.candidatesTokenCount || 0;
+    
+    return {
+      content,
+      model: config.model,
+      inputTokens,
+      outputTokens,
+      cost: inputTokens * config.costPerInputToken + outputTokens * config.costPerOutputToken,
+    };
+  }
+  
+  /**
+   * Call Mistral API
+   */
+  private async callMistral(
+    config: Omit<ProviderConfig, 'apiKey'>,
+    apiKey: string,
+    message: string,
+    systemPrompt?: string,
+    options?: { maxTokens?: number; temperature?: number }
+  ): Promise<Omit<AIResponse, 'provider' | 'latency' | 'success'>> {
+    const response = await fetch(config.endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: config.model,
+        max_tokens: options?.maxTokens || config.maxTokens,
+        temperature: options?.temperature || 0.7,
+        messages: [
+          { role: 'system', content: systemPrompt || 'You are Javari, a helpful AI assistant.' },
+          { role: 'user', content: message },
+        ],
+      }),
+    });
+    
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Mistral API error: ${response.status} - ${error}`);
+    }
+    
+    const data = await response.json();
+    const inputTokens = data.usage?.prompt_tokens || 0;
+    const outputTokens = data.usage?.completion_tokens || 0;
+    
+    return {
+      content: data.choices?.[0]?.message?.content || '',
+      model: config.model,
+      inputTokens,
+      outputTokens,
+      cost: inputTokens * config.costPerInputToken + outputTokens * config.costPerOutputToken,
+    };
+  }
+  
+  /**
+   * Call Perplexity API
+   */
+  private async callPerplexity(
+    config: Omit<ProviderConfig, 'apiKey'>,
+    apiKey: string,
+    message: string,
+    systemPrompt?: string,
+    options?: { maxTokens?: number; temperature?: number }
+  ): Promise<Omit<AIResponse, 'provider' | 'latency' | 'success'>> {
+    const response = await fetch(config.endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: config.model,
+        max_tokens: options?.maxTokens || config.maxTokens,
+        temperature: options?.temperature || 0.7,
+        messages: [
+          { role: 'system', content: systemPrompt || 'You are Javari, a helpful AI assistant.' },
+          { role: 'user', content: message },
+        ],
+      }),
+    });
+    
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Perplexity API error: ${response.status} - ${error}`);
+    }
+    
+    const data = await response.json();
+    const inputTokens = data.usage?.prompt_tokens || 0;
+    const outputTokens = data.usage?.completion_tokens || 0;
+    
+    return {
+      content: data.choices?.[0]?.message?.content || '',
+      model: config.model,
+      inputTokens,
+      outputTokens,
+      cost: inputTokens * config.costPerInputToken + outputTokens * config.costPerOutputToken,
+    };
+  }
+  
+  /**
+   * Log performance for learning
+   */
+  private async logPerformance(
+    provider: AIProvider,
+    taskType: TaskType,
+    success: boolean,
+    latency: number,
+    cost: number
+  ): Promise<void> {
+    const key = `${provider}:${taskType}`;
+    const existing = this.performanceHistory.get(key) || {
+      provider,
+      taskType,
+      successCount: 0,
+      failureCount: 0,
+      totalLatency: 0,
+      totalCost: 0,
+      avgQualityScore: 0,
+      lastUpdated: new Date(),
+    };
+    
+    if (success) {
+      existing.successCount++;
+      existing.totalLatency += latency;
+      existing.totalCost += cost;
+    } else {
+      existing.failureCount++;
+    }
+    existing.lastUpdated = new Date();
+    
+    this.performanceHistory.set(key, existing);
+  }
+  
+  /**
+   * Get performance statistics
+   */
+  getPerformanceStats(): PerformanceRecord[] {
+    return Array.from(this.performanceHistory.values());
+  }
+  
+  /**
+   * Get available providers
+   */
+  getAvailableProviders(): AIProvider[] {
+    return Array.from(this.apiKeys.keys()).filter(p => PROVIDERS[p].enabled);
   }
 }
 
-/**
- * Get provider info for display
- */
-export function getProviderInfo(provider: AIProvider): ProviderProfile {
-  return PROVIDER_PROFILES[provider];
+// ============================================================
+// SINGLETON INSTANCE
+// ============================================================
+
+let routerInstance: JavariAIRouter | null = null;
+
+export function initializeRouter(apiKeys: Partial<Record<AIProvider, string>>): JavariAIRouter {
+  routerInstance = new JavariAIRouter(apiKeys);
+  return routerInstance;
 }
 
-/**
- * Get all provider profiles
- */
-export function getAllProviders(): Record<AIProvider, ProviderProfile> {
-  return PROVIDER_PROFILES;
+export function getRouter(): JavariAIRouter {
+  if (!routerInstance) {
+    throw new Error('AI Router not initialized. Call initializeRouter first.');
+  }
+  return routerInstance;
 }
 
-export default {
-  routeQuery,
-  routeQuerySync,
-  getProviderInfo,
-  getAllProviders,
-  analyzeIntent,
-};
+export default JavariAIRouter;
