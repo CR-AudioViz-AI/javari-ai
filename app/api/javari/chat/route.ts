@@ -10,7 +10,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { JavariAIRouter, initializeRouter, classifyTask, type AIProvider } from './ai-router';
+import { JavariAIRouter, initializeRouter, classifyTask, type AIProvider } from '@/lib/ai-router';
 
 // ============================================================
 // TYPES
@@ -165,7 +165,10 @@ export async function POST(request: NextRequest): Promise<NextResponse<ChatRespo
     
     // Build system prompt
     const systemPrompt = body.systemPrompt 
-      ? `${JAVARI_SYSTEM_PROMPT}\n\nAdditional context:\n${body.systemPrompt}`
+      ? `${JAVARI_SYSTEM_PROMPT}
+
+Additional context:
+${body.systemPrompt}`
       : JAVARI_SYSTEM_PROMPT;
     
     // Execute with fallback
