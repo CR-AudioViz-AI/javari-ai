@@ -384,7 +384,7 @@ async function createGitHubRepo(
   repoName: string,
   description: string,
   token: string
-): Promise<{ success: boolean; repoUrl?: string; error?: string }> {
+): Promise<{ success: boolean; repoUrl?: string; repoId?: number; error?: string }> {
   try {
     const response = await fetch(`${GITHUB_API}/orgs/${GITHUB_ORG}/repos`, {
       method: 'POST',
@@ -410,7 +410,7 @@ async function createGitHubRepo(
     }
 
     const repo = await response.json();
-    return { success: true, repoUrl: repo.html_url };
+    return { success: true, repoUrl: repo.html_url, repoId: repo.id };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
   }
@@ -716,6 +716,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     console.log(`[BUILD] Step 6: Triggering deployment...`);
     let deploymentUrl = `https://${projectName}.vercel.app`;
     
+    // Wait 3 seconds for GitHub to fully process all files
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    console.log(`[BUILD] Waited 3s for GitHub sync...`);
+    
     try {
       const deployResponse = await fetch(
         `${VERCEL_API}/v13/deployments?teamId=${VERCEL_TEAM_ID}`,
@@ -730,9 +734,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             project: projectName,
             gitSource: {
               type: 'github',
-              org: GITHUB_ORG,
-              repo: repoName,
+              repo: `${GITHUB_ORG}/${repoName}`,
               ref: 'main',
+              repoId: repoResult.repoId,
             },
             target: 'production',
           }),
