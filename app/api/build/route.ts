@@ -65,7 +65,97 @@ interface ProjectFile {
 // PROJECT GENERATOR - Creates complete Next.js project files
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function generatePackageJson(projectName: string, description: string): string {
+function generatePackageJson(projectName: string, description: string, componentCode?: string): string {
+  // Common UI/utility libraries that might be used
+  const COMMON_DEPS: Record<string, string> = {
+    'recharts': '^2.12.7',
+    'react-hook-form': '^7.53.0',
+    '@hookform/resolvers': '^3.9.0',
+    'zod': '^3.23.8',
+    'framer-motion': '^11.11.1',
+    'lucide-react': '^0.447.0',
+    '@tanstack/react-query': '^5.56.2',
+    'axios': '^1.7.7',
+    'date-fns': '^4.1.0',
+    'lodash': '^4.17.21',
+    '@radix-ui/react-slot': '^1.1.0',
+    'class-variance-authority': '^0.7.0',
+    'clsx': '^2.1.1',
+    'tailwind-merge': '^2.5.2',
+    'chart.js': '^4.4.4',
+    'react-chartjs-2': '^5.2.0',
+    'd3': '^7.9.0',
+    'react-icons': '^5.3.0',
+  };
+  
+  // Detect which libraries are used in the code
+  const detectedDeps: Record<string, string> = {};
+  
+  if (componentCode) {
+    const codeToCheck = componentCode.toLowerCase();
+    
+    // Check for common import patterns
+    for (const [pkg, version] of Object.entries(COMMON_DEPS)) {
+      const patterns = [
+        `from '${pkg}'`,
+        `from "${pkg}"`,
+        `require('${pkg}')`,
+        `require("${pkg}")`,
+        `import { `,
+        // Also check for usage patterns
+      ];
+      
+      if (codeToCheck.includes(pkg.toLowerCase()) || 
+          componentCode.includes(`from '${pkg}'`) ||
+          componentCode.includes(`from "${pkg}"`)) {
+        detectedDeps[pkg] = version;
+      }
+    }
+    
+    // Special detection for common patterns
+    if (codeToCheck.includes('recharts') || 
+        codeToCheck.includes('piechart') || 
+        codeToCheck.includes('linechart') ||
+        codeToCheck.includes('barchart') ||
+        codeToCheck.includes('areachart')) {
+      detectedDeps['recharts'] = COMMON_DEPS['recharts'];
+    }
+    
+    if (codeToCheck.includes('useform') || 
+        codeToCheck.includes('react-hook-form')) {
+      detectedDeps['react-hook-form'] = COMMON_DEPS['react-hook-form'];
+    }
+    
+    if (codeToCheck.includes('framer-motion') || 
+        codeToCheck.includes('motion.div') ||
+        codeToCheck.includes('animatepresence')) {
+      detectedDeps['framer-motion'] = COMMON_DEPS['framer-motion'];
+    }
+    
+    if (codeToCheck.includes('lucide') ||
+        componentCode.includes('lucide-react')) {
+      detectedDeps['lucide-react'] = COMMON_DEPS['lucide-react'];
+    }
+    
+    if (codeToCheck.includes('axios')) {
+      detectedDeps['axios'] = COMMON_DEPS['axios'];
+    }
+    
+    if (codeToCheck.includes('date-fns') || 
+        codeToCheck.includes('format(') ||
+        codeToCheck.includes('parseiso')) {
+      detectedDeps['date-fns'] = COMMON_DEPS['date-fns'];
+    }
+    
+    if (codeToCheck.includes('chart.js') || 
+        codeToCheck.includes('react-chartjs')) {
+      detectedDeps['chart.js'] = COMMON_DEPS['chart.js'];
+      detectedDeps['react-chartjs-2'] = COMMON_DEPS['react-chartjs-2'];
+    }
+  }
+  
+  console.log(`[BUILD] Detected dependencies: ${Object.keys(detectedDeps).join(', ') || 'none'}`);
+  
   return JSON.stringify({
     name: projectName,
     version: "1.0.0",
@@ -78,9 +168,10 @@ function generatePackageJson(projectName: string, description: string): string {
       lint: "next lint"
     },
     dependencies: {
-      "next": "14.2.15",
+      "next": "14.2.35",
       "react": "^18.2.0",
-      "react-dom": "^18.2.0"
+      "react-dom": "^18.2.0",
+      ...detectedDeps
     },
     devDependencies: {
       "@types/node": "^20",
@@ -361,7 +452,7 @@ function generateProjectFiles(
   const sanitizedName = projectName.toLowerCase().replace(/[^a-z0-9-]/g, '-');
   
   return [
-    { path: 'package.json', content: generatePackageJson(sanitizedName, description) },
+    { path: 'package.json', content: generatePackageJson(sanitizedName, description, componentCode) },
     { path: 'tsconfig.json', content: generateTsConfig() },
     { path: 'tailwind.config.ts', content: generateTailwindConfig() },
     { path: 'postcss.config.mjs', content: generatePostCssConfig() },
