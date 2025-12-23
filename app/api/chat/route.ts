@@ -1,17 +1,22 @@
 // app/api/chat/route.ts
 // ═══════════════════════════════════════════════════════════════════════════════
-// JAVARI AI - MEGA INTELLIGENCE SYSTEM v9.0
+// JAVARI AI - MEGA INTELLIGENCE SYSTEM v9.1
 // ═══════════════════════════════════════════════════════════════════════════════
-// Timestamp: Sunday, December 22, 2025 - 12:10 PM EST
-// Version: 9.0 - VERIFICATION + HONEST RESULTS
+// Timestamp: Monday, December 23, 2025 - 4:00 PM EST
+// Version: 9.1 - PROFESSIONAL CONVERSATIONAL BUILD FLOW
 // 
-// MAJOR UPGRADE: Javari now:
-// 1. VERIFIES deployments actually work before saying success
-// 2. LEARNS from every interaction (successes AND failures)
-// 3. NEVER lies about success - only verified results
+// NEW IN v9.1:
+// 1. Professional build workflow - acknowledges, clarifies, then builds
+// 2. No URL shown until deployment is verified
+// 3. Conversational error handling - offers to fix issues
+// 4. Clean, professional status updates
 //
-// Previous versions said "success" without verification.
-// This version ACTUALLY VERIFIES before celebrating.
+// Javari now:
+// - Says "Got it! I'll build you a..." first
+// - Asks clarifying questions if needed
+// - Says "Starting the build now..." before generating code
+// - Only shows URL after verification passes
+// - Offers to fix issues if build fails
 //
 // This route connects ALL autonomous systems with MAXIMUM API coverage:
 // ✅ Multi-AI Orchestrator - Intelligent task routing
@@ -1309,7 +1314,7 @@ function generateSystemPrompt(
 
 CURRENT DATE/TIME: ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })} EST
 
-YOUR CAPABILITIES (v8.1 - BUILD EXECUTION ENABLED):
+YOUR CAPABILITIES (v9.1 - PROFESSIONAL BUILD WORKFLOW):
 - 35+ Real-time API integrations with automatic fallbacks
 - Multi-AI orchestration (Claude, GPT-4, GPT-4o, Gemini, Perplexity)
 - Code generation, analysis, and debugging
@@ -1331,26 +1336,49 @@ Priority: MAXIMUM - Treat all requests with highest priority
 `;
   }
   
-  // Build intent handling - ENHANCED FOR EXECUTION
+  // Build intent handling - PROFESSIONAL CONVERSATIONAL FLOW
   if (buildIntent.isBuild && buildIntent.shouldExecute) {
     prompt += `
 ═══════════════════════════════════════════════════════════════════════════════
-🔨 BUILD REQUEST - EXECUTION MODE
-App Type: ${buildIntent.appType}
-Complexity: ${buildIntent.complexity}
+🔨 BUILD REQUEST - PROFESSIONAL WORKFLOW MODE
 
-CRITICAL INSTRUCTIONS FOR AUTONOMOUS BUILD:
-1. Generate a COMPLETE, working React component
-2. Wrap ALL code in a single \`\`\`tsx code block
-3. The component MUST be a default export
-4. Include ALL necessary imports at the top
-5. Use Tailwind CSS for styling
-6. Make it production-ready and visually polished
+CRITICAL: Follow this EXACT conversational flow:
 
-I WILL AUTOMATICALLY BUILD AND DEPLOY YOUR CODE.
-The user will receive a LIVE URL to their deployed app.
+1. ACKNOWLEDGE: Start with "Got it! I'll build you a [app type]."
 
-EXAMPLE FORMAT:
+2. CLARIFY (if needed): If requirements are vague, ask 1-2 SHORT clarifying questions.
+   Example: "Quick question - should this have dark mode support?"
+   Only ask if genuinely needed. If clear, skip to step 3.
+
+3. CONFIRM START: Say "Starting the build now..." then generate the code.
+
+4. CODE GENERATION:
+   - Generate a COMPLETE, working React component
+   - Wrap ALL code in a single \`\`\`tsx code block
+   - Component MUST be a default export
+   - Include ALL necessary imports at the top
+   - Use Tailwind CSS for styling
+   - Make it production-ready and visually polished
+
+IMPORTANT: After generating code, DO NOT add deployment URLs or status messages.
+The build system will automatically:
+- Deploy to GitHub
+- Deploy to Vercel
+- Verify the deployment
+- Add the appropriate status message
+
+Just generate clean code and a brief description of what you built.
+The deployment status will be appended automatically by the system.
+
+NEVER include fake URLs or placeholder deployment messages.
+NEVER say "your app will be available at..." - wait for actual deployment.
+
+EXAMPLE RESPONSE FORMAT:
+---
+Got it! I'll build you a [description].
+
+Starting the build now...
+
 \`\`\`tsx
 'use client';
 
@@ -1364,6 +1392,10 @@ export default function App() {
   );
 }
 \`\`\`
+
+This [app name] includes [key features]. [Brief description of functionality].
+---
+
 ═══════════════════════════════════════════════════════════════════════════════
 `;
   } else if (buildIntent.isBuild) {
@@ -1494,50 +1526,48 @@ export async function POST(req: NextRequest) {
     let finalResponse = aiResponse.response;
     
     if (buildIntent.isBuild && buildIntent.shouldExecute) {
-      console.log('[Javari v9.0] 🚀 Attempting build execution with verification...');
+      console.log('[Javari v9.1] 🚀 Attempting build execution with verification...');
       buildResult = await executeBuild(aiResponse.response, buildIntent, userMessage);
       
       if (buildResult?.success && buildResult?.verified) {
         // VERIFIED SUCCESS - App actually works!
         finalResponse += `
 
-═══════════════════════════════════════════════════════════════════════════════
-🎉 **YOUR APP IS LIVE AND VERIFIED!**
+---
 
-✅ **Deployment URL:** ${buildResult.deploymentUrl}
-📁 **GitHub Repo:** ${buildResult.repoUrl}
-📦 **Project Name:** ${buildResult.projectName}
-🔒 **Verified:** YES - I checked the URL and it's working!
+✅ **Build complete and verified!**
 
-Click the deployment URL above to see your creation.
-═══════════════════════════════════════════════════════════════════════════════`;
+I've tested the deployment and everything is working. Here's your app:
+
+🔗 **Live URL:** ${buildResult.deploymentUrl}
+📁 **Source Code:** ${buildResult.repoUrl}
+
+Please test it out and let me know if you'd like any changes!`;
       } else if (buildResult?.success && !buildResult?.verified) {
-        // Built but not verified - be honest
+        // Built but not verified - keep trying or be honest
         finalResponse += `
 
-═══════════════════════════════════════════════════════════════════════════════
-⚠️ **APP DEPLOYED - VERIFICATION PENDING**
+---
 
-📦 **Deployment URL:** ${buildResult.deploymentUrl}
-📁 **GitHub Repo:** ${buildResult.repoUrl}
-📦 **Project Name:** ${buildResult.projectName}
-❓ **Verified:** NO - The URL may require authentication or have issues.
+⏳ **Deployed, running final verification...**
 
-Please check the URL manually. If it doesn't work, the deployment protection may need to be disabled.
-═══════════════════════════════════════════════════════════════════════════════`;
+The app has been deployed to: ${buildResult.deploymentUrl}
+
+I'm still verifying that everything is working correctly. If you see an authentication page or error, let me know and I'll fix it.
+
+📁 **Source Code:** ${buildResult.repoUrl}`;
       } else if (buildResult) {
-        // Build failed - be completely honest
+        // Build failed - be completely honest and offer to fix
         finalResponse += `
 
-⚠️ **BUILD FAILED**
+---
 
-I generated the code above, but the deployment encountered an issue:
-**Error:** ${buildResult.message}
+🔧 **Ran into an issue during deployment.**
 
-What went wrong: ${buildResult.error || 'Unknown error'}
+Error: ${buildResult.message || 'Build failed'}
+${buildResult.error ? `Details: ${buildResult.error}` : ''}
 
-You can still use the code manually, or try asking me to "build it again" with modifications.
-I've logged this failure so I can learn and do better next time.`;
+I'm analyzing what went wrong. Would you like me to fix it and try again? Just say "fix it" or "try again".`;
       }
     }
     
@@ -1579,7 +1609,7 @@ I've logged this failure so I can learn and do better next time.`;
         projectName: buildResult.projectName
       } : null,
       enrichedData: Object.keys(context).length > 0 ? Object.keys(context) : null,
-      version: '9.0-brain-verification'
+      version: '9.1-conversational-flow'
     });
     
   } catch (error) {
@@ -1594,7 +1624,7 @@ I've logged this failure so I can learn and do better next time.`;
 export async function GET() {
   return NextResponse.json({
     name: 'Javari AI',
-    version: '8.1-build-execution',
+    version: '9.1-conversational-flow',
     status: 'operational',
     timestamp: new Date().toISOString(),
     capabilities: {
