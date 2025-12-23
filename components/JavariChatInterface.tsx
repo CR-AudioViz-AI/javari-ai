@@ -11,11 +11,12 @@ import {
   Code, MessageSquare, History, Lightbulb, BookOpen, ChevronLeft, 
   ChevronRight, Star, Clock, FileText, Trash2, Plus, Search, Settings,
   PanelLeftClose, PanelRightClose, Cpu, Wand2, TrendingUp, HelpCircle,
-  CheckCircle
+  CheckCircle, Volume2, VolumeX
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import VoicePanel from './VoicePanel';
 
 // ============================================================================
 // PROVIDER CONFIGURATION - All 6 AI Providers
@@ -613,6 +614,7 @@ export default function JavariChatInterface({
 }: JavariChatInterfaceProps) {
   // State
   const [messages, setMessages] = useState<Message[]>([]);
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -876,6 +878,22 @@ export default function JavariChatInterface({
             <p className="text-center text-xs text-slate-500 mt-2">
               {PROVIDER_CONFIG[selectedProvider].description}
             </p>
+          
+            
+            {/* Voice Toggle */}
+            <div className="flex items-center justify-center mt-3">
+              <button
+                onClick={() => setVoiceEnabled(!voiceEnabled)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-all ${
+                  voiceEnabled 
+                    ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' 
+                    : 'bg-slate-800 text-slate-400 border border-slate-700 hover:text-slate-300'
+                }`}
+              >
+                {voiceEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                {voiceEnabled ? 'Voice On' : 'Voice Off'}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -982,6 +1000,7 @@ $/, '');
                         {message.content}
                       </ReactMarkdown>
                       <ProviderBadge provider={message.provider} latency={message.latency} />
+                      {voiceEnabled && <VoicePanel text={message.content} autoPlay={true} />}
                     </div>
                   ) : (
                     <p className="whitespace-pre-wrap">{message.content}</p>
@@ -1086,3 +1105,4 @@ $/, '');
     </div>
   );
 }
+
