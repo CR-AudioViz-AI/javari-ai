@@ -534,6 +534,7 @@ async function createVercelProject(
   token: string
 ): Promise<{ success: boolean; projectId?: string; error?: string }> {
   try {
+    // Create the project with NO deployment protection
     const response = await fetch(`${VERCEL_API}/v10/projects?teamId=${VERCEL_TEAM_ID}`, {
       method: 'POST',
       headers: {
@@ -550,6 +551,10 @@ async function createVercelProject(
         buildCommand: 'next build',
         installCommand: 'npm install',
         publicSource: true,
+        // CRITICAL: Disable ALL deployment protection so apps are publicly accessible
+        ssoProtection: null,
+        passwordProtection: null,
+        vercelAuthentication: null,
       }),
     });
 
@@ -559,6 +564,21 @@ async function createVercelProject(
     }
 
     const project = await response.json();
+    
+    // Also update project settings to ensure protection is disabled
+    await fetch(`${VERCEL_API}/v9/projects/${project.id}?teamId=${VERCEL_TEAM_ID}`, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        ssoProtection: null,
+        passwordProtection: null,
+        vercelAuthentication: { deploymentType: 'none' },
+      }),
+    });
+    
     return { success: true, projectId: project.id };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
@@ -569,7 +589,7 @@ async function waitForDeployment(
   projectName: string,
   token: string,
   timeoutMs: number = 120000
-): Promise<{ success: boolean; url?: string; error?: string }> {
+): Promise<{ success: boolean; url?: string; error?: string; verified?: boolean }> {
   const startTime = Date.now();
   
   while (Date.now() - startTime < timeoutMs) {
@@ -585,7 +605,33 @@ async function waitForDeployment(
         
         if (deployment) {
           if (deployment.readyState === 'READY') {
-            return { success: true, url: `https://${deployment.url}` };
+            const deploymentUrl = `https://${deployment.url}`;
+            
+            // VERIFICATION STEP: Actually fetch the deployed URL to confirm it works
+            console.log(`[BUILD] Verifying deployment at: ${deploymentUrl}`);
+            try {
+              const verifyResponse = await fetch(deploymentUrl, {
+                method: 'GET',
+                headers: { 'Accept': 'text/html' },
+              });
+              
+              if (verifyResponse.ok) {
+                const html = await verifyResponse.text();
+                // Check it's not an auth page
+                if (html.includes('Authentication Required') || html.includes('vercel-authentication')) {
+                  console.log(`[BUILD] WARNING: Deployment requires authentication!`);
+                  return { success: true, url: deploymentUrl, verified: false, error: 'Deployment requires authentication' };
+                }
+                console.log(`[BUILD] Deployment verified successfully!`);
+                return { success: true, url: deploymentUrl, verified: true };
+              } else {
+                console.log(`[BUILD] Verification failed: ${verifyResponse.status}`);
+                return { success: true, url: deploymentUrl, verified: false, error: `HTTP ${verifyResponse.status}` };
+              }
+            } catch (verifyError) {
+              console.log(`[BUILD] Verification error:`, verifyError);
+              return { success: true, url: deploymentUrl, verified: false, error: 'Could not verify' };
+            }
           }
           if (deployment.readyState === 'ERROR') {
             return { success: false, error: 'Deployment failed' };
