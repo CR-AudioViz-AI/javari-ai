@@ -1,18 +1,18 @@
 // app/api/chat/route.ts
 // ═══════════════════════════════════════════════════════════════════════════════
-// JAVARI AI - MEGA INTELLIGENCE SYSTEM v8.1
+// JAVARI AI - MEGA INTELLIGENCE SYSTEM v9.0
 // ═══════════════════════════════════════════════════════════════════════════════
-// Timestamp: Sunday, December 22, 2025 - 11:05 AM EST
-// Version: 8.1 - BUILD EXECUTION ENABLED
+// Timestamp: Sunday, December 22, 2025 - 11:55 AM EST
+// Version: 9.0 - BRAIN INTEGRATION + MULTI-AI VERIFICATION + LEARNING
 // 
-// CRITICAL FIX: Now EXECUTES builds instead of just explaining them!
-// When user asks to build something, Javari:
-// 1. Generates the code via AI
-// 2. CALLS the build pipeline API
-// 3. Returns the LIVE deployment URL
+// MAJOR UPGRADE: Javari now has a BRAIN that:
+// 1. Uses MULTIPLE AIs for code generation (best wins)
+// 2. VERIFIES deployments actually work before saying success
+// 3. LEARNS from every interaction (successes AND failures)
+// 4. NEVER lies about success - only verified results
 //
-// Previous versions detected build intent but didn't execute.
-// This version ACTUALLY BUILDS AND DEPLOYS.
+// Previous versions said "success" without verification.
+// This version ACTUALLY VERIFIES before celebrating.
 //
 // This route connects ALL autonomous systems with MAXIMUM API coverage:
 // ✅ Multi-AI Orchestrator - Intelligent task routing
@@ -22,6 +22,7 @@
 // ✅ VIP Detection - Special handling for Roy/Cindy
 // ✅ Build Intent - NOW EXECUTES BUILDS!
 // ✅ MEGA INTELLIGENCE - 35+ Real-time API sources with fallbacks
+// ✅ BRAIN - Multi-AI verification + Persistent learning
 //
 // API COVERAGE:
 // - Weather: 3 sources (wttr.in, Open-Meteo, WeatherAPI)
@@ -37,6 +38,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { javariBrain, CodeVerificationEngine, JavariLearningEngine } from '@/lib/intelligence/javari-brain';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SUPABASE CLIENT
@@ -1113,18 +1115,65 @@ async function executeBuild(
   buildIntent: BuildIntent,
   userMessage: string
 ): Promise<BuildResult | null> {
-  console.log('[Javari v8.1] 🔨 EXECUTING BUILD PIPELINE');
+  console.log('[Javari v9.0] 🔨 EXECUTING BUILD PIPELINE WITH VERIFICATION');
+  
+  const verifier = new CodeVerificationEngine();
+  const learner = new JavariLearningEngine();
   
   try {
     // Extract code from AI response
     const codeMatch = aiResponse.match(/```(?:tsx?|jsx?|javascript|typescript)?\n([\s\S]*?)```/);
     
     if (!codeMatch || !codeMatch[1]) {
-      console.log('[Javari v8.1] No code block found in AI response');
+      console.log('[Javari v9.0] No code block found in AI response');
+      
+      // Log failure to learning system
+      await learner.learn({
+        type: 'failure',
+        category: 'code_generation',
+        input: userMessage,
+        output: '',
+        context: { reason: 'no_code_block', aiResponse: aiResponse.substring(0, 500) },
+        aiProviders: ['unknown'],
+        confidence: 0,
+        verified: false,
+        learnings: ['AI response did not contain a code block']
+      });
+      
       return null;
     }
     
     const componentCode = codeMatch[1].trim();
+    
+    // STEP 1: Code review by multiple AIs
+    console.log('[Javari v9.0] Step 1: Multi-AI code review...');
+    const codeReview = await verifier.reviewCode(componentCode, userMessage);
+    const codeReviewPassed = codeReview.filter(r => r.passed).length >= codeReview.length * 0.5;
+    
+    if (!codeReviewPassed) {
+      console.log('[Javari v9.0] Code review FAILED by multiple AIs');
+      
+      await learner.learn({
+        type: 'failure',
+        category: 'code_review',
+        input: userMessage,
+        output: componentCode,
+        context: { codeReview },
+        aiProviders: codeReview.map(r => r.provider),
+        confidence: 0,
+        verified: false,
+        learnings: codeReview.filter(r => !r.passed).map(r => r.feedback)
+      });
+      
+      return {
+        success: false,
+        status: 'error',
+        message: 'Code review failed - multiple AI reviewers found issues',
+        error: codeReview.filter(r => !r.passed).map(r => r.feedback).join('; ')
+      };
+    }
+    
+    console.log('[Javari v9.0] Code review PASSED');
     
     // Generate app name from intent or user message
     let appName = buildIntent.appName || 'javari-app';
@@ -1143,10 +1192,11 @@ async function executeBuild(
     // Extract description from user message
     const description = userMessage.substring(0, 200);
     
-    console.log(`[Javari v8.1] Building: ${projectName}`);
-    console.log(`[Javari v8.1] Code length: ${componentCode.length} chars`);
+    console.log(`[Javari v9.0] Building: ${projectName}`);
+    console.log(`[Javari v9.0] Code length: ${componentCode.length} chars`);
     
-    // Call the build API
+    // STEP 2: Call the build API
+    console.log('[Javari v9.0] Step 2: Deploying to Vercel...');
     const buildResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'https://javariai.com'}/api/build`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1159,7 +1209,20 @@ async function executeBuild(
     
     if (!buildResponse.ok) {
       const errorData = await buildResponse.json().catch(() => ({}));
-      console.error('[Javari v8.1] Build API error:', errorData);
+      console.error('[Javari v9.0] Build API error:', errorData);
+      
+      await learner.learn({
+        type: 'failure',
+        category: 'deployment',
+        input: userMessage,
+        output: componentCode,
+        context: { buildError: errorData, projectName },
+        aiProviders: [],
+        confidence: 0,
+        verified: false,
+        learnings: [`Build API failed: ${errorData.message || 'Unknown error'}`]
+      });
+      
       return {
         success: false,
         status: 'error',
@@ -1169,12 +1232,113 @@ async function executeBuild(
     }
     
     const buildResult: BuildResult = await buildResponse.json();
-    console.log('[Javari v8.1] Build result:', buildResult);
+    console.log('[Javari v9.0] Build result:', buildResult);
     
-    return buildResult;
+    if (!buildResult.success || !buildResult.deploymentUrl) {
+      await learner.learn({
+        type: 'failure',
+        category: 'deployment',
+        input: userMessage,
+        output: componentCode,
+        context: { buildResult, projectName },
+        aiProviders: [],
+        confidence: 0,
+        verified: false,
+        learnings: [buildResult.message || 'Build returned unsuccessful']
+      });
+      
+      return buildResult;
+    }
+    
+    // STEP 3: VERIFY THE DEPLOYMENT ACTUALLY WORKS
+    console.log('[Javari v9.0] Step 3: Verifying deployment...');
+    
+    // Wait for deployment to complete (up to 90 seconds)
+    let verificationPassed = false;
+    let verificationAttempts = 0;
+    const maxAttempts = 18; // 18 * 5s = 90s
+    
+    while (!verificationPassed && verificationAttempts < maxAttempts) {
+      verificationAttempts++;
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      
+      console.log(`[Javari v9.0] Verification attempt ${verificationAttempts}/${maxAttempts}...`);
+      
+      const deploymentCheck = await verifier.verifyDeployment(buildResult.deploymentUrl);
+      const httpCheck = deploymentCheck.find(c => c.provider === 'HTTP Check');
+      
+      if (httpCheck?.passed) {
+        verificationPassed = true;
+        console.log('[Javari v9.0] ✅ VERIFICATION PASSED - Deployment is LIVE and WORKING');
+        
+        // Log success to learning system
+        await learner.learn({
+          type: 'success',
+          category: 'full_build',
+          input: userMessage,
+          output: componentCode,
+          context: {
+            projectName,
+            deploymentUrl: buildResult.deploymentUrl,
+            repoUrl: buildResult.repoUrl,
+            verificationAttempts,
+            codeReview
+          },
+          aiProviders: codeReview.map(r => r.provider),
+          confidence: 95,
+          verified: true,
+          learnings: ['Build and deploy completed successfully with verification']
+        });
+      }
+    }
+    
+    if (!verificationPassed) {
+      console.log('[Javari v9.0] ⚠️ VERIFICATION FAILED - Deployment may not be working');
+      
+      await learner.learn({
+        type: 'failure',
+        category: 'verification',
+        input: userMessage,
+        output: componentCode,
+        context: {
+          projectName,
+          deploymentUrl: buildResult.deploymentUrl,
+          verificationAttempts
+        },
+        aiProviders: [],
+        confidence: 30,
+        verified: false,
+        learnings: ['Build succeeded but verification failed - deployment may require authentication or have errors']
+      });
+      
+      // Return with warning
+      return {
+        ...buildResult,
+        message: 'Build deployed but verification failed - please check the URL manually',
+        verified: false
+      };
+    }
+    
+    return {
+      ...buildResult,
+      verified: true
+    };
     
   } catch (error) {
-    console.error('[Javari v8.1] Build execution error:', error);
+    console.error('[Javari v9.0] Build execution error:', error);
+    
+    await learner.learn({
+      type: 'failure',
+      category: 'exception',
+      input: userMessage,
+      output: '',
+      context: { error: error instanceof Error ? error.message : 'Unknown error' },
+      aiProviders: [],
+      confidence: 0,
+      verified: false,
+      learnings: [`Build exception: ${error instanceof Error ? error.message : 'Unknown'}`]
+    });
+    
     return {
       success: false,
       status: 'error',
@@ -1382,30 +1546,50 @@ export async function POST(req: NextRequest) {
     let finalResponse = aiResponse.response;
     
     if (buildIntent.isBuild && buildIntent.shouldExecute) {
-      console.log('[Javari v8.1] 🚀 Attempting build execution...');
+      console.log('[Javari v9.0] 🚀 Attempting build execution with verification...');
       buildResult = await executeBuild(aiResponse.response, buildIntent, userMessage);
       
-      if (buildResult?.success) {
-        // Append deployment info to response
+      if (buildResult?.success && buildResult?.verified) {
+        // VERIFIED SUCCESS - App actually works!
         finalResponse += `
 
 ═══════════════════════════════════════════════════════════════════════════════
-🎉 **YOUR APP IS LIVE!**
+🎉 **YOUR APP IS LIVE AND VERIFIED!**
 
 ✅ **Deployment URL:** ${buildResult.deploymentUrl}
 📁 **GitHub Repo:** ${buildResult.repoUrl}
 📦 **Project Name:** ${buildResult.projectName}
+🔒 **Verified:** YES - I checked the URL and it's working!
 
-Your app is being deployed and will be live in about 60 seconds!
 Click the deployment URL above to see your creation.
 ═══════════════════════════════════════════════════════════════════════════════`;
-      } else if (buildResult) {
-        // Build failed - let user know
+      } else if (buildResult?.success && !buildResult?.verified) {
+        // Built but not verified - be honest
         finalResponse += `
 
-⚠️ **Build Note:** I generated the code above, but the automatic deployment encountered an issue: ${buildResult.message}
+═══════════════════════════════════════════════════════════════════════════════
+⚠️ **APP DEPLOYED - VERIFICATION PENDING**
 
-You can still use the code manually, or try asking me to "build it again" with any modifications.`;
+📦 **Deployment URL:** ${buildResult.deploymentUrl}
+📁 **GitHub Repo:** ${buildResult.repoUrl}
+📦 **Project Name:** ${buildResult.projectName}
+❓ **Verified:** NO - The URL may require authentication or have issues.
+
+Please check the URL manually. If it doesn't work, the deployment protection may need to be disabled.
+═══════════════════════════════════════════════════════════════════════════════`;
+      } else if (buildResult) {
+        // Build failed - be completely honest
+        finalResponse += `
+
+⚠️ **BUILD FAILED**
+
+I generated the code above, but the deployment encountered an issue:
+**Error:** ${buildResult.message}
+
+What went wrong: ${buildResult.error || 'Unknown error'}
+
+You can still use the code manually, or try asking me to "build it again" with modifications.
+I've logged this failure so I can learn and do better next time.`;
       }
     }
     
@@ -1447,7 +1631,7 @@ You can still use the code manually, or try asking me to "build it again" with a
         projectName: buildResult.projectName
       } : null,
       enrichedData: Object.keys(context).length > 0 ? Object.keys(context) : null,
-      version: '8.1-build-execution'
+      version: '9.0-brain-verification'
     });
     
   } catch (error) {
