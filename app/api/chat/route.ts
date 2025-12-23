@@ -2,14 +2,13 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // JAVARI AI - MEGA INTELLIGENCE SYSTEM v9.0
 // ═══════════════════════════════════════════════════════════════════════════════
-// Timestamp: Sunday, December 22, 2025 - 11:55 AM EST
-// Version: 9.0 - BRAIN INTEGRATION + MULTI-AI VERIFICATION + LEARNING
+// Timestamp: Sunday, December 22, 2025 - 12:10 PM EST
+// Version: 9.0 - VERIFICATION + HONEST RESULTS
 // 
-// MAJOR UPGRADE: Javari now has a BRAIN that:
-// 1. Uses MULTIPLE AIs for code generation (best wins)
-// 2. VERIFIES deployments actually work before saying success
-// 3. LEARNS from every interaction (successes AND failures)
-// 4. NEVER lies about success - only verified results
+// MAJOR UPGRADE: Javari now:
+// 1. VERIFIES deployments actually work before saying success
+// 2. LEARNS from every interaction (successes AND failures)
+// 3. NEVER lies about success - only verified results
 //
 // Previous versions said "success" without verification.
 // This version ACTUALLY VERIFIES before celebrating.
@@ -22,7 +21,7 @@
 // ✅ VIP Detection - Special handling for Roy/Cindy
 // ✅ Build Intent - NOW EXECUTES BUILDS!
 // ✅ MEGA INTELLIGENCE - 35+ Real-time API sources with fallbacks
-// ✅ BRAIN - Multi-AI verification + Persistent learning
+// ✅ VERIFICATION - Checks URLs actually work before celebrating
 //
 // API COVERAGE:
 // - Weather: 3 sources (wttr.in, Open-Meteo, WeatherAPI)
@@ -38,7 +37,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { javariBrain, CodeVerificationEngine, JavariLearningEngine } from '@/lib/intelligence/javari-brain';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SUPABASE CLIENT
@@ -1117,9 +1115,6 @@ async function executeBuild(
 ): Promise<BuildResult | null> {
   console.log('[Javari v9.0] 🔨 EXECUTING BUILD PIPELINE WITH VERIFICATION');
   
-  const verifier = new CodeVerificationEngine();
-  const learner = new JavariLearningEngine();
-  
   try {
     // Extract code from AI response
     const codeMatch = aiResponse.match(/```(?:tsx?|jsx?|javascript|typescript)?\n([\s\S]*?)```/);
@@ -1127,53 +1122,13 @@ async function executeBuild(
     if (!codeMatch || !codeMatch[1]) {
       console.log('[Javari v9.0] No code block found in AI response');
       
-      // Log failure to learning system
-      await learner.learn({
-        type: 'failure',
-        category: 'code_generation',
-        input: userMessage,
-        output: '',
-        context: { reason: 'no_code_block', aiResponse: aiResponse.substring(0, 500) },
-        aiProviders: ['unknown'],
-        confidence: 0,
-        verified: false,
-        learnings: ['AI response did not contain a code block']
-      });
+      // Log failure to learning database
+      logLearning('failure', 'code_generation', userMessage, '', { reason: 'no_code_block' });
       
       return null;
     }
     
     const componentCode = codeMatch[1].trim();
-    
-    // STEP 1: Code review by multiple AIs
-    console.log('[Javari v9.0] Step 1: Multi-AI code review...');
-    const codeReview = await verifier.reviewCode(componentCode, userMessage);
-    const codeReviewPassed = codeReview.filter(r => r.passed).length >= codeReview.length * 0.5;
-    
-    if (!codeReviewPassed) {
-      console.log('[Javari v9.0] Code review FAILED by multiple AIs');
-      
-      await learner.learn({
-        type: 'failure',
-        category: 'code_review',
-        input: userMessage,
-        output: componentCode,
-        context: { codeReview },
-        aiProviders: codeReview.map(r => r.provider),
-        confidence: 0,
-        verified: false,
-        learnings: codeReview.filter(r => !r.passed).map(r => r.feedback)
-      });
-      
-      return {
-        success: false,
-        status: 'error',
-        message: 'Code review failed - multiple AI reviewers found issues',
-        error: codeReview.filter(r => !r.passed).map(r => r.feedback).join('; ')
-      };
-    }
-    
-    console.log('[Javari v9.0] Code review PASSED');
     
     // Generate app name from intent or user message
     let appName = buildIntent.appName || 'javari-app';
@@ -1195,8 +1150,8 @@ async function executeBuild(
     console.log(`[Javari v9.0] Building: ${projectName}`);
     console.log(`[Javari v9.0] Code length: ${componentCode.length} chars`);
     
-    // STEP 2: Call the build API
-    console.log('[Javari v9.0] Step 2: Deploying to Vercel...');
+    // STEP 1: Call the build API
+    console.log('[Javari v9.0] Step 1: Deploying to Vercel...');
     const buildResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'https://javariai.com'}/api/build`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1211,17 +1166,7 @@ async function executeBuild(
       const errorData = await buildResponse.json().catch(() => ({}));
       console.error('[Javari v9.0] Build API error:', errorData);
       
-      await learner.learn({
-        type: 'failure',
-        category: 'deployment',
-        input: userMessage,
-        output: componentCode,
-        context: { buildError: errorData, projectName },
-        aiProviders: [],
-        confidence: 0,
-        verified: false,
-        learnings: [`Build API failed: ${errorData.message || 'Unknown error'}`]
-      });
+      logLearning('failure', 'deployment', userMessage, componentCode, { buildError: errorData });
       
       return {
         success: false,
@@ -1235,23 +1180,12 @@ async function executeBuild(
     console.log('[Javari v9.0] Build result:', buildResult);
     
     if (!buildResult.success || !buildResult.deploymentUrl) {
-      await learner.learn({
-        type: 'failure',
-        category: 'deployment',
-        input: userMessage,
-        output: componentCode,
-        context: { buildResult, projectName },
-        aiProviders: [],
-        confidence: 0,
-        verified: false,
-        learnings: [buildResult.message || 'Build returned unsuccessful']
-      });
-      
+      logLearning('failure', 'deployment', userMessage, componentCode, { buildResult });
       return buildResult;
     }
     
-    // STEP 3: VERIFY THE DEPLOYMENT ACTUALLY WORKS
-    console.log('[Javari v9.0] Step 3: Verifying deployment...');
+    // STEP 2: VERIFY THE DEPLOYMENT ACTUALLY WORKS
+    console.log('[Javari v9.0] Step 2: Verifying deployment...');
     
     // Wait for deployment to complete (up to 90 seconds)
     let verificationPassed = false;
@@ -1264,51 +1198,48 @@ async function executeBuild(
       
       console.log(`[Javari v9.0] Verification attempt ${verificationAttempts}/${maxAttempts}...`);
       
-      const deploymentCheck = await verifier.verifyDeployment(buildResult.deploymentUrl);
-      const httpCheck = deploymentCheck.find(c => c.provider === 'HTTP Check');
-      
-      if (httpCheck?.passed) {
-        verificationPassed = true;
-        console.log('[Javari v9.0] ✅ VERIFICATION PASSED - Deployment is LIVE and WORKING');
-        
-        // Log success to learning system
-        await learner.learn({
-          type: 'success',
-          category: 'full_build',
-          input: userMessage,
-          output: componentCode,
-          context: {
-            projectName,
-            deploymentUrl: buildResult.deploymentUrl,
-            repoUrl: buildResult.repoUrl,
-            verificationAttempts,
-            codeReview
-          },
-          aiProviders: codeReview.map(r => r.provider),
-          confidence: 95,
-          verified: true,
-          learnings: ['Build and deploy completed successfully with verification']
+      try {
+        const verifyResponse = await fetch(buildResult.deploymentUrl, {
+          method: 'GET',
+          headers: { 'Accept': 'text/html' },
         });
+        
+        if (verifyResponse.ok) {
+          const html = await verifyResponse.text();
+          
+          // Check for authentication pages or errors
+          const isAuthPage = html.includes('Authentication Required') || html.includes('vercel-authentication');
+          const isErrorPage = html.includes('Application error') || html.includes('500') || html.includes('404');
+          const hasContent = html.length > 500 && (html.includes('<main') || html.includes('<div'));
+          
+          if (!isAuthPage && !isErrorPage && hasContent) {
+            verificationPassed = true;
+            console.log('[Javari v9.0] ✅ VERIFICATION PASSED - Deployment is LIVE and WORKING');
+            
+            // Log success
+            logLearning('success', 'full_build', userMessage, componentCode, {
+              projectName,
+              deploymentUrl: buildResult.deploymentUrl,
+              verificationAttempts
+            });
+          } else if (isAuthPage) {
+            console.log('[Javari v9.0] ⚠️ Auth page detected - deployment protected');
+          } else if (isErrorPage) {
+            console.log('[Javari v9.0] ⚠️ Error page detected');
+          }
+        }
+      } catch (verifyError) {
+        console.log(`[Javari v9.0] Verification fetch error:`, verifyError);
       }
     }
     
     if (!verificationPassed) {
       console.log('[Javari v9.0] ⚠️ VERIFICATION FAILED - Deployment may not be working');
       
-      await learner.learn({
-        type: 'failure',
-        category: 'verification',
-        input: userMessage,
-        output: componentCode,
-        context: {
-          projectName,
-          deploymentUrl: buildResult.deploymentUrl,
-          verificationAttempts
-        },
-        aiProviders: [],
-        confidence: 30,
-        verified: false,
-        learnings: ['Build succeeded but verification failed - deployment may require authentication or have errors']
+      logLearning('failure', 'verification', userMessage, componentCode, {
+        projectName,
+        deploymentUrl: buildResult.deploymentUrl,
+        verificationAttempts
       });
       
       // Return with warning
@@ -1327,16 +1258,8 @@ async function executeBuild(
   } catch (error) {
     console.error('[Javari v9.0] Build execution error:', error);
     
-    await learner.learn({
-      type: 'failure',
-      category: 'exception',
-      input: userMessage,
-      output: '',
-      context: { error: error instanceof Error ? error.message : 'Unknown error' },
-      aiProviders: [],
-      confidence: 0,
-      verified: false,
-      learnings: [`Build exception: ${error instanceof Error ? error.message : 'Unknown'}`]
+    logLearning('failure', 'exception', userMessage, '', { 
+      error: error instanceof Error ? error.message : 'Unknown' 
     });
     
     return {
@@ -1344,6 +1267,31 @@ async function executeBuild(
       status: 'error',
       message: error instanceof Error ? error.message : 'Build execution failed'
     };
+  }
+}
+
+// Helper to log learnings to database
+async function logLearning(
+  type: 'success' | 'failure',
+  category: string,
+  input: string,
+  output: string,
+  context: Record<string, unknown>
+): Promise<void> {
+  try {
+    await supabase.from('javari_learnings').insert({
+      entry_type: type,
+      category,
+      input_text: input.substring(0, 1000),
+      output_text: output.substring(0, 5000),
+      context,
+      confidence: type === 'success' ? 90 : 10,
+      verified: type === 'success',
+      created_at: new Date().toISOString()
+    });
+    console.log(`[Javari v9.0] Learning logged: ${type}/${category}`);
+  } catch (err) {
+    console.log('[Javari v9.0] Learning log skipped');
   }
 }
 
