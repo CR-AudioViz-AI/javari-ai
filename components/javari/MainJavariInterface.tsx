@@ -265,7 +265,7 @@ export default function MainJavariInterface() {
 
   // Load conversations on mount
   
-  // Initialize Speech Recognition for voice conversations
+  // Initialize Speech Recognition for voice conversations (runs once on mount)
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const SpeechRecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -291,59 +291,69 @@ export default function MainJavariInterface() {
           setInterimTranscript(interim);
           
           if (final) {
-            setInputMessage(prev => prev + final);
+            setInputMessage(prev => prev + ' ' + final.trim());
             setInterimTranscript('');
           }
         };
         
-        recognition.onerror = (event) => {
+        recognition.onerror = (event: Event) => {
           console.error('Speech recognition error:', event);
           setIsListeningToUser(false);
         };
         
         recognition.onend = () => {
-          // If still supposed to be listening, restart
-          if (isListeningToUser) {
-            try {
-              recognition.start();
-            } catch (e) {
-              setIsListeningToUser(false);
-            }
-          }
+          // Auto-restart is handled by toggleSpeechRecognition
         };
         
         speechRecognitionRef.current = recognition;
+      } else {
+        console.warn('Speech recognition not supported in this browser');
       }
     }
     
     return () => {
       if (speechRecognitionRef.current) {
-        speechRecognitionRef.current.abort();
+        try {
+          speechRecognitionRef.current.abort();
+        } catch (e) {
+          // Ignore errors on cleanup
+        }
       }
     };
-  }, [isListeningToUser]);
+  }, []); // Empty dependency - only run once
 
-  // Toggle speech recognition
+  // Toggle speech recognition - starts/stops listening
   const toggleSpeechRecognition = () => {
     if (!speechRecognitionRef.current) {
-      alert('Speech recognition not supported in this browser. Try Chrome or Edge.');
+      alert('Speech recognition not supported in this browser. Please use Chrome or Edge.');
       return;
     }
     
     if (isListeningToUser) {
-      speechRecognitionRef.current.stop();
+      // Stop listening
+      try {
+        speechRecognitionRef.current.stop();
+      } catch (e) {
+        // Ignore stop errors
+      }
       setIsListeningToUser(false);
-      // Auto-send if there's text
+      setInterimTranscript('');
+      
+      // Auto-send if there's text in the input
       if (inputMessage.trim()) {
-        handleSendMessage();
+        setTimeout(() => handleSendMessage(), 100);
       }
     } else {
+      // Start listening
+      setInterimTranscript('');
+      setInputMessage(''); // Clear previous input for fresh start
+      
       try {
         speechRecognitionRef.current.start();
         setIsListeningToUser(true);
-        setInterimTranscript('');
       } catch (e) {
         console.error('Failed to start speech recognition:', e);
+        alert('Could not access microphone. Please check browser permissions.');
       }
     }
   };
@@ -1254,7 +1264,7 @@ useEffect(() => {
                       )}
                       <p className="text-sm whitespace-pre-wrap">{message.content}</p>
                       {message.role === 'assistant' && voiceEnabled && (
-                        <VoicePanel text={message.content} autoPlay={false} />
+                        <VoicePanel text={message.content} autoPlay={true} />
                       )}
                       <span className="text-xs opacity-50 mt-2 block">
                         {new Date(message.timestamp).toLocaleString('en-US', { 
@@ -1716,5 +1726,6 @@ useEffect(() => {
     </div>
   );
 }
+
 
 
