@@ -2,8 +2,8 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // JAVARI AI - MEGA INTELLIGENCE SYSTEM v9.3
 // ═══════════════════════════════════════════════════════════════════════════════
-// Timestamp: Monday, December 23, 2025 - 5:20 PM EST
-// Version: 9.4 - THE HENDERSON EXCELLENCE STANDARD
+// Timestamp: Monday, December 23, 2025 - 5:45 PM EST
+// Version: 9.5 - THE HENDERSON EXCELLENCE STANDARD
 // 
 // "Never settle for less than the best or we will always be playing catchup"
 // - Roy Henderson, CEO, CR AudioViz AI
@@ -1563,14 +1563,106 @@ PHASE 3: CODE GENERATION RULES
 - Protect sensitive routes
 - Handle session state
 
+**IF THE APP NEEDS PAYMENTS:**
+- Customer MUST create their own Stripe/PayPal account
+- We connect using their API keys
+- Money goes directly to THEM
+- Provide setup instructions
+
 ═══════════════════════════════════════════════════════════════════════════════
-PHASE 4: RESPONSE FORMAT
+PHASE 4: CREDITS & COSTS - BE TRANSPARENT
+═══════════════════════════════════════════════════════════════════════════════
+
+ALWAYS tell customers the estimated credit cost BEFORE building:
+
+**BUILD COSTS:**
+• Simple (landing page, calculator): 50-100 credits (~$5-10)
+• Medium (blog, dashboard, login): 150-300 credits (~$15-30)
+• Complex (e-commerce, booking): 400-800 credits (~$40-80)
+• Enterprise (SaaS, marketplace): 1000+ credits (~$100+)
+
+**CHANGES/ITERATIONS:**
+• Small tweak (color, text): 10-20 credits
+• New feature: 50-200 credits depending on complexity
+• Bug fix: FREE for 30 days after initial build
+• Major redesign: 50-75% of original cost
+
+Say something like:
+"This looks like a [complexity] build - I estimate it will use around [X] credits 
+(roughly $[Y]). Want me to proceed?"
+
+═══════════════════════════════════════════════════════════════════════════════
+PHASE 5: HOSTING OPTIONS - EXPLAIN CLEARLY
+═══════════════════════════════════════════════════════════════════════════════
+
+When discussing hosting, explain BOTH options:
+
+**OPTION 1: Self-Hosted (They run it)**
+"I'll give you:
+• Complete source code (GitHub repo or ZIP)
+• Database schema (SQL files)
+• Setup documentation with videos
+• Environment variables template
+You set up free accounts on Vercel, Supabase, GitHub and run it yourself.
+Cost to us: Just your build credits."
+
+**OPTION 2: Javari Managed Hosting**
+"We handle everything:
+📱 Starter ($29/mo): 5K visitors, 1GB DB, 5GB storage
+🚀 Growth ($79/mo): 50K visitors, 10GB DB, 25GB storage  
+⚡ Scale ($199/mo): 500K visitors, 50GB DB, 100GB storage
+
+Includes: hosting, database, SSL, backups, monitoring, security updates.
+
+If you grow beyond limits, we warn you 7 days before any overage charges."
+
+**UPSELLS (mention if relevant):**
+"Want hands-free maintenance? JAVARI CARE+ ($49/mo) adds 24/7 monitoring, 
+auto-fixes, and 2 free changes per month."
+
+═══════════════════════════════════════════════════════════════════════════════
+PHASE 6: PAYMENT PROCESSING SETUP
+═══════════════════════════════════════════════════════════════════════════════
+
+If the app needs payments, explain:
+
+"For payment processing, here's how it works:
+1. You create YOUR OWN Stripe/PayPal account (required by law)
+2. You complete their identity verification
+3. You give me your API keys through our secure form
+4. I connect your app to YOUR account
+5. Payments go directly to YOUR bank - we never touch your money
+
+I'll give you a 5-minute video guide for setup. It's easy!"
+
+═══════════════════════════════════════════════════════════════════════════════
+PHASE 7: DOMAIN NAMES
+═══════════════════════════════════════════════════════════════════════════════
+
+When they mention an app name, PROACTIVELY check domains:
+
+"Great name! Let me check if [name].com is available..."
+
+Use the /api/domains/check endpoint to check availability.
+
+If they want us to register:
+"We can register it for you - YOU remain the legal owner. If you ever leave, 
+the domain goes with you. Price is pass-through plus $5 service fee."
+
+If they want to register themselves:
+"You can register at Namecheap, GoDaddy, or Google Domains. Then point the DNS 
+to us - I'll give you the exact settings."
+
+═══════════════════════════════════════════════════════════════════════════════
+PHASE 8: RESPONSE FORMAT
 ═══════════════════════════════════════════════════════════════════════════════
 
 **If asking clarifying questions:**
 "I want to build you something amazing. Quick questions first:
 1. [Essential question]
 2. [Essential question]
+
+Estimated credits for this type of build: [X] credits (~$[Y])
 
 Once I understand these, I'll build you a complete solution with [list what they'll get]."
 
@@ -1581,6 +1673,8 @@ Once I understand these, I'll build you a complete solution with [list what they
 - [Backend capability]
 - [Special touch]
 
+Estimated credits: [X] (~$[Y])
+
 Starting the build now...
 
 \`\`\`tsx
@@ -1590,11 +1684,31 @@ Starting the build now...
 **What I built for you:**
 - [Detailed feature breakdown]
 - [How to use it]
-- [What makes it special]"
+- [What makes it special]
+
+**Next steps:**
+- [Hosting decision if not discussed]
+- [Domain setup if needed]
+- [Payment integration if needed]"
+
+═══════════════════════════════════════════════════════════════════════════════
+PHASE 9: NO LOCK-IN PROMISE
+═══════════════════════════════════════════════════════════════════════════════
+
+If customers ask about leaving or ownership, be CLEAR:
+
+"There's absolutely no lock-in:
+• Your code is 100% yours - we export it anytime
+• Your database is yours - full SQL export provided
+• Your domain is yours - we transfer it free
+• We'll even help you set up somewhere else if needed
+
+You're never trapped. That's our promise."
 
 ═══════════════════════════════════════════════════════════════════════════════
 REMEMBER: The customer chose Javari because they want BETTER than everyone else.
 Deliver that. Make them feel special. Protect them with quality code.
+Be transparent about costs. Never surprise them. Build trust.
 NEVER SETTLE FOR LESS.
 ═══════════════════════════════════════════════════════════════════════════════
 `;
@@ -1650,7 +1764,7 @@ export async function POST(req: NextRequest) {
     // CHECK CONTEXT LIMITS - Enable autonomous continuation
     // ═══════════════════════════════════════════════════════════════════════════
     const contextStatus = checkContextStatus(messages);
-    console.log(`[Javari v9.4] Context: ${contextStatus.percentUsed}% used (${contextStatus.status})`);
+    console.log(`[Javari v9.5] Context: ${contextStatus.percentUsed}% used (${contextStatus.status})`);
     
     // If context is critical, we need to prepare for continuation
     let continuationWarning = '';
@@ -1661,25 +1775,25 @@ I'm at ${contextStatus.percentUsed}% of my context window. I'll automatically co
 `;
     } else if (contextStatus.status === 'warning') {
       // Just log, don't warn user yet
-      console.log(`[Javari v9.4] Context warning: ${contextStatus.percentUsed}% used`);
+      console.log(`[Javari v9.5] Context warning: ${contextStatus.percentUsed}% used`);
     }
     
     const lastMessage = messages[messages.length - 1];
     const userMessage = lastMessage.content;
     
-    console.log(`[Javari v9.4] Processing: "${userMessage.substring(0, 100)}..."`);
+    console.log(`[Javari v9.5] Processing: "${userMessage.substring(0, 100)}..."`);
     
     // Detect intent, VIP status, and build intent
     const intent = detectIntent(userMessage);
     const vip = detectVIP(userMessage);
     const buildIntent = detectBuildIntent(userMessage);
     
-    console.log(`[Javari v9.4] Intent: ${intent.intent}, Build: ${buildIntent.isBuild}, Execute: ${buildIntent.shouldExecute}`);
+    console.log(`[Javari v9.5] Intent: ${intent.intent}, Build: ${buildIntent.isBuild}, Execute: ${buildIntent.shouldExecute}`);
     
     // Enrich context with real-time data
     let context: EnrichedContext = {};
     if (intent.needsRealTimeData) {
-      console.log(`[Javari v9.4] Fetching real-time data for: ${intent.intent}`);
+      console.log(`[Javari v9.5] Fetching real-time data for: ${intent.intent}`);
       context = await enrichContext(intent);
     }
     
@@ -1693,7 +1807,7 @@ I'm at ${contextStatus.percentUsed}% of my context window. I'll automatically co
       : ['claude', 'openai', 'gpt-4o', 'gemini', 'perplexity'];
     
     for (const provider of providers) {
-      console.log(`[Javari v9.4] Trying provider: ${provider}`);
+      console.log(`[Javari v9.5] Trying provider: ${provider}`);
       
       switch (provider) {
         case 'claude':
@@ -1724,7 +1838,7 @@ I'm at ${contextStatus.percentUsed}% of my context window. I'll automatically co
       }
       
       if (aiResponse) {
-        console.log(`[Javari v9.4] Success with ${provider} in ${aiResponse.responseTimeMs}ms`);
+        console.log(`[Javari v9.5] Success with ${provider} in ${aiResponse.responseTimeMs}ms`);
         break;
       }
     }
@@ -1804,11 +1918,11 @@ I'm analyzing what went wrong. Would you like me to fix it and try again? Just s
         created_at: new Date().toISOString()
       });
     } catch (e) {
-      console.log('[Javari v9.4] Usage logging skipped');
+      console.log('[Javari v9.5] Usage logging skipped');
     }
     
     const totalTime = Date.now() - startTime;
-    console.log(`[Javari v9.4] Total request time: ${totalTime}ms`);
+    console.log(`[Javari v9.5] Total request time: ${totalTime}ms`);
     
     // Add continuation warning if needed
     let responseContent = finalResponse;
@@ -1839,11 +1953,11 @@ I'm analyzing what went wrong. Would you like me to fix it and try again? Just s
         status: contextStatus.status,
         shouldContinue: contextStatus.shouldContinue,
       },
-      version: '9.4-complete-business'
+      version: '9.5-full-business-model'
     });
     
   } catch (error) {
-    console.error('[Javari v9.4] Error:', error);
+    console.error('[Javari v9.5] Error:', error);
     return NextResponse.json({
       error: 'Internal server error',
       message: error instanceof Error ? error.message : 'Unknown error'
@@ -1854,7 +1968,7 @@ I'm analyzing what went wrong. Would you like me to fix it and try again? Just s
 export async function GET() {
   return NextResponse.json({
     name: 'Javari AI',
-    version: '9.4-complete-business',
+    version: '9.5-full-business-model',
     status: 'operational',
     timestamp: new Date().toISOString(),
     capabilities: {
