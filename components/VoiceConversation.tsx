@@ -3,41 +3,168 @@
 // =============================================================================
 // VOICE CONVERSATION MODE - HANDS-FREE CHAT WITH JAVARI
 // =============================================================================
-// ONE button to toggle. Then just talk naturally.
-// - You speak → your words appear on screen
-// - You pause → Javari responds (text + voice)
-// - She finishes → starts listening again automatically
-// =============================================================================
-// Updated: December 24, 2025 - 3:55 PM EST
+// ONE button. Talk naturally. She responds. Loop continues.
+// Fixed: December 24, 2025 - 4:45 PM EST
 // =============================================================================
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Mic, MicOff, Volume2, Loader2 } from 'lucide-react';
+import { Mic, MicOff, Volume2, Loader2, Square } from 'lucide-react';
 
 interface VoiceConversationProps {
   onUserMessage: (message: string) => Promise<string>;
   isProcessing?: boolean;
 }
 
-// Silence detection - how long to wait after user stops speaking
-const SILENCE_TIMEOUT_MS = 1500; // 1.5 seconds of silence = send message
-
 export default function VoiceConversation({ 
   onUserMessage,
   isProcessing = false 
 }: VoiceConversationProps) {
-  // Voice mode state
+  // State
   const [voiceModeActive, setVoiceModeActive] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [transcript, setTranscript] = useState('');
-  const [status, setStatus] = useState<string>('');
+  const [isThinking, setIsThinking] = useState(false);
+  const [displayText, setDisplayText] = useState('');
+  const [status, setStatus] = useState('');
   
-  // Refs
+  // Refs for values that need to persist across renders
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const transcriptRef = useRef(''); // Use ref to avoid stale closures
   const isProcessingRef = useRef(false);
+  const lastSpeechTimeRef = useRef(Date.now());
+
+  // Clear silence timer
+  const clearSilenceTimer = useCallback(() => {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+  }, []);
+
+  // Send message to Javari
+  const sendToJavari = useCallback(async () => {
+    const message = transcriptRef.current.trim();
+    
+    if (!message || isProcessingRef.current) {
+      return;
+    }
+    
+    console.log('Sending to Javari:', message);
+    isProcessingRef.current = true;
+    setIsThinking(true);
+    setStatus('Javari is thinking...');
+    
+    // Stop listening while processing
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch (e) {}
+    }
+    setIsListening(false);
+    
+    try {
+      // Get response from Javari
+      const response = await onUserMessage(message);
+      
+      // Clear transcript for next round
+      transcriptRef.current = '';
+      setDisplayText('');
+      
+      // Speak the response
+      if (response) {
+        await speakResponse(response);
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      setStatus('Error - try again');
+    } finally {
+      isProcessingRef.current = false;
+      setIsThinking(false);
+      
+      // Resume listening
+      if (voiceModeActive) {
+        setTimeout(() => startListening(), 500);
+      }
+    }
+  }, [onUserMessage, voiceModeActive]);
+
+  // Start silence detection timer
+  const startSilenceTimer = useCallback(() => {
+    clearSilenceTimer();
+    
+    silenceTimerRef.current = setTimeout(() => {
+      // Check if we have text and enough time has passed since last speech
+      const timeSinceLastSpeech = Date.now() - lastSpeechTimeRef.current;
+      
+      if (transcriptRef.current.trim() && timeSinceLastSpeech >= 1500) {
+        console.log('Silence detected, sending message...');
+        sendToJavari();
+      }
+    }, 2000); // 2 seconds of silence
+  }, [clearSilenceTimer, sendToJavari]);
+
+  // Speak Javari's response
+  const speakResponse = async (text: string): Promise<void> => {
+    setIsSpeaking(true);
+    setStatus('Javari is speaking...');
+    
+    try {
+      const response = await fetch('/api/voice/elevenlabs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          text: text.slice(0, 3000),
+          voice: 'javari'
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (data.success && data.audioUrl) {
+        await new Promise<void>((resolve) => {
+          const audio = new Audio(data.audioUrl);
+          audioRef.current = audio;
+          
+          audio.onended = () => {
+            setIsSpeaking(false);
+            setStatus('Listening...');
+            resolve();
+          };
+          
+          audio.onerror = () => {
+            setIsSpeaking(false);
+            resolve();
+          };
+          
+          audio.play().catch(() => {
+            setIsSpeaking(false);
+            resolve();
+          });
+        });
+      } else {
+        setIsSpeaking(false);
+      }
+    } catch (error) {
+      console.error('Speech error:', error);
+      setIsSpeaking(false);
+    }
+  };
+
+  // Start listening
+  const startListening = useCallback(() => {
+    if (!recognitionRef.current || isListening || isSpeaking || isProcessingRef.current) {
+      return;
+    }
+    
+    try {
+      recognitionRef.current.start();
+      setIsListening(true);
+      setStatus('Listening... speak now');
+      lastSpeechTimeRef.current = Date.now();
+    } catch (e) {
+      console.error('Failed to start listening:', e);
+    }
+  }, [isListening, isSpeaking]);
 
   // Initialize speech recognition
   useEffect(() => {
@@ -55,161 +182,67 @@ export default function VoiceConversation({
     recognition.lang = 'en-US';
     
     recognition.onresult = (event: SpeechRecognitionEvent) => {
-      // Clear silence timer on any speech
-      if (silenceTimerRef.current) {
-        clearTimeout(silenceTimerRef.current);
-      }
-      
-      let interimTranscript = '';
       let finalTranscript = '';
+      let interimTranscript = '';
       
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const text = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          finalTranscript += text;
+      // Process all results
+      for (let i = 0; i < event.results.length; i++) {
+        const result = event.results[i];
+        const text = result[0].transcript;
+        
+        if (result.isFinal) {
+          finalTranscript += text + ' ';
         } else {
-          interimTranscript += text;
+          interimTranscript = text;
         }
       }
       
-      // Update display
+      // Update transcript
       if (finalTranscript) {
-        setTranscript(prev => (prev + ' ' + finalTranscript).trim());
+        transcriptRef.current = finalTranscript.trim();
+        setDisplayText(finalTranscript.trim());
+        lastSpeechTimeRef.current = Date.now();
+        
+        // Start/reset silence timer when we get final text
+        startSilenceTimer();
       } else if (interimTranscript) {
-        // Show interim in different style
-        setTranscript(prev => {
-          const base = prev.split('...')[0].trim();
-          return base + (base ? ' ' : '') + interimTranscript + '...';
-        });
+        // Show interim but don't save to ref yet
+        setDisplayText(transcriptRef.current + (transcriptRef.current ? ' ' : '') + interimTranscript + '...');
+        lastSpeechTimeRef.current = Date.now();
+        
+        // Reset timer on interim results too
+        clearSilenceTimer();
       }
-      
-      // Start silence detection timer
-      silenceTimerRef.current = setTimeout(() => {
-        // User stopped speaking - send the message
-        handleSilenceDetected();
-      }, SILENCE_TIMEOUT_MS);
     };
     
     recognition.onerror = (event: Event) => {
       console.error('Speech recognition error:', event);
-      if (voiceModeActive && !isProcessingRef.current) {
-        // Try to restart
-        setTimeout(() => startListening(), 500);
+      setIsListening(false);
+      
+      // Try to restart if voice mode still active
+      if (voiceModeActive && !isProcessingRef.current && !isSpeaking) {
+        setTimeout(() => startListening(), 1000);
       }
     };
     
     recognition.onend = () => {
       setIsListening(false);
-      // Auto-restart if voice mode is still active and we're not processing
+      
+      // Auto-restart if voice mode active and not processing
       if (voiceModeActive && !isProcessingRef.current && !isSpeaking) {
-        setTimeout(() => startListening(), 300);
+        setTimeout(() => startListening(), 500);
       }
     };
     
     recognitionRef.current = recognition;
     
     return () => {
+      clearSilenceTimer();
       if (recognitionRef.current) {
         try { recognitionRef.current.abort(); } catch (e) {}
       }
-      if (silenceTimerRef.current) {
-        clearTimeout(silenceTimerRef.current);
-      }
     };
-  }, [voiceModeActive, isSpeaking]);
-
-  // Handle silence detection - user stopped speaking
-  const handleSilenceDetected = useCallback(async () => {
-    const message = transcript.replace('...', '').trim();
-    if (!message || isProcessingRef.current) return;
-    
-    isProcessingRef.current = true;
-    setStatus('Thinking...');
-    
-    // Stop listening while processing
-    try {
-      recognitionRef.current?.stop();
-    } catch (e) {}
-    setIsListening(false);
-    
-    try {
-      // Get Javari's response
-      const response = await onUserMessage(message);
-      
-      // Clear transcript for next round
-      setTranscript('');
-      
-      // Speak the response
-      if (response) {
-        await speakResponse(response);
-      }
-    } catch (error) {
-      console.error('Error getting response:', error);
-      setStatus('Error - tap to retry');
-    } finally {
-      isProcessingRef.current = false;
-      setStatus('');
-      
-      // Resume listening after Javari finishes speaking
-      if (voiceModeActive) {
-        setTimeout(() => startListening(), 500);
-      }
-    }
-  }, [transcript, onUserMessage, voiceModeActive]);
-
-  // Speak Javari's response
-  const speakResponse = async (text: string): Promise<void> => {
-    setIsSpeaking(true);
-    setStatus('Javari speaking...');
-    
-    try {
-      const response = await fetch('/api/voice/elevenlabs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          text: text.slice(0, 3000),
-          voice: 'javari'
-        }),
-      });
-      
-      const data = await response.json();
-      
-      if (data.success && data.audioUrl) {
-        await new Promise<void>((resolve, reject) => {
-          const audio = new Audio(data.audioUrl);
-          audioRef.current = audio;
-          
-          audio.onended = () => {
-            setIsSpeaking(false);
-            resolve();
-          };
-          
-          audio.onerror = () => {
-            setIsSpeaking(false);
-            reject(new Error('Audio playback failed'));
-          };
-          
-          audio.play().catch(reject);
-        });
-      }
-    } catch (error) {
-      console.error('Speech error:', error);
-      setIsSpeaking(false);
-    }
-  };
-
-  // Start listening
-  const startListening = useCallback(() => {
-    if (!recognitionRef.current || isListening || isSpeaking || isProcessingRef.current) return;
-    
-    try {
-      recognitionRef.current.start();
-      setIsListening(true);
-      setStatus('Listening...');
-    } catch (e) {
-      console.error('Failed to start listening:', e);
-    }
-  }, [isListening, isSpeaking]);
+  }, [voiceModeActive, isSpeaking, startListening, startSilenceTimer, clearSilenceTimer]);
 
   // Toggle voice mode
   const toggleVoiceMode = () => {
@@ -217,94 +250,146 @@ export default function VoiceConversation({
       // Turn OFF
       setVoiceModeActive(false);
       setIsListening(false);
-      setTranscript('');
+      setDisplayText('');
       setStatus('');
-      try { recognitionRef.current?.stop(); } catch (e) {}
+      transcriptRef.current = '';
+      clearSilenceTimer();
+      
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch (e) {}
+      }
       if (audioRef.current) {
         audioRef.current.pause();
       }
     } else {
       // Turn ON
       setVoiceModeActive(true);
-      setTranscript('');
-      setTimeout(() => startListening(), 100);
+      setDisplayText('');
+      transcriptRef.current = '';
+      setStatus('Starting...');
+      
+      // Start listening after a brief delay
+      setTimeout(() => {
+        startListening();
+      }, 300);
     }
   };
 
-  // Check for browser support
+  // Manual send button (backup)
+  const handleManualSend = () => {
+    if (transcriptRef.current.trim() && !isProcessingRef.current) {
+      clearSilenceTimer();
+      sendToJavari();
+    }
+  };
+
+  // Check browser support
   const isSupported = typeof window !== 'undefined' && 
     (window.SpeechRecognition || window.webkitSpeechRecognition);
 
   if (!isSupported) {
     return (
-      <div className="text-yellow-500 text-sm p-2">
-        Voice not supported. Use Chrome or Edge.
+      <div className="p-4 rounded-lg bg-yellow-500/20 border border-yellow-500/50 text-yellow-200">
+        <p className="font-medium">Voice chat requires Chrome or Edge browser</p>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="space-y-4">
       {/* Main toggle button */}
       <button
         onClick={toggleVoiceMode}
         disabled={isProcessing}
         className={`
-          flex items-center justify-center gap-3 
-          px-6 py-4 rounded-xl font-medium text-lg
+          w-full flex items-center justify-center gap-3 
+          px-6 py-5 rounded-xl font-semibold text-lg
           transition-all duration-300 
           ${voiceModeActive 
-            ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-lg shadow-cyan-500/30' 
-            : 'bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-600'
+            ? 'bg-gradient-to-r from-red-500 to-red-600 text-white shadow-lg shadow-red-500/30 hover:from-red-600 hover:to-red-700' 
+            : 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-lg shadow-cyan-500/30 hover:from-cyan-600 hover:to-blue-600'
           }
-          ${isListening ? 'animate-pulse' : ''}
         `}
       >
         {voiceModeActive ? (
           <>
-            {isListening ? (
-              <Mic className="w-6 h-6 text-white" />
-            ) : isSpeaking ? (
-              <Volume2 className="w-6 h-6 text-white animate-pulse" />
-            ) : (
-              <Loader2 className="w-6 h-6 text-white animate-spin" />
-            )}
-            <span>
-              {isListening ? 'Listening... (tap to stop)' : 
-               isSpeaking ? 'Javari speaking...' : 
-               'Processing...'}
-            </span>
+            <Square className="w-6 h-6" />
+            <span>Stop Voice Chat</span>
           </>
         ) : (
           <>
-            <MicOff className="w-6 h-6" />
+            <Mic className="w-6 h-6" />
             <span>Start Voice Chat</span>
           </>
         )}
       </button>
-      
-      {/* Live transcript display */}
-      {voiceModeActive && transcript && (
-        <div 
-          className="p-4 rounded-lg bg-gray-800/50 border border-cyan-500/30"
-          style={{ minHeight: '60px' }}
-        >
-          <div className="text-xs text-cyan-400 mb-1">You're saying:</div>
-          <div className="text-white text-lg">{transcript}</div>
-        </div>
-      )}
-      
-      {/* Status indicator */}
-      {voiceModeActive && status && !transcript && (
-        <div className="text-center text-cyan-400 text-sm animate-pulse">
-          {status}
+
+      {/* Active voice chat display */}
+      {voiceModeActive && (
+        <div className="space-y-3">
+          {/* Status indicator */}
+          <div className={`
+            flex items-center justify-center gap-2 py-3 px-4 rounded-lg
+            ${isListening ? 'bg-green-500/20 border border-green-500/50' : 
+              isSpeaking ? 'bg-cyan-500/20 border border-cyan-500/50' :
+              isThinking ? 'bg-yellow-500/20 border border-yellow-500/50' :
+              'bg-gray-800/50 border border-gray-600'}
+          `}>
+            {isListening && (
+              <>
+                <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse" />
+                <span className="text-green-400 font-medium">Listening... speak now</span>
+              </>
+            )}
+            {isSpeaking && (
+              <>
+                <Volume2 className="w-5 h-5 text-cyan-400 animate-pulse" />
+                <span className="text-cyan-400 font-medium">Javari is speaking...</span>
+              </>
+            )}
+            {isThinking && (
+              <>
+                <Loader2 className="w-5 h-5 text-yellow-400 animate-spin" />
+                <span className="text-yellow-400 font-medium">Javari is thinking...</span>
+              </>
+            )}
+            {!isListening && !isSpeaking && !isThinking && (
+              <span className="text-gray-400">Connecting...</span>
+            )}
+          </div>
+
+          {/* Live transcript */}
+          {displayText && (
+            <div className="p-4 rounded-lg bg-gray-800/70 border border-cyan-500/30">
+              <div className="text-xs text-cyan-400 mb-2 font-medium">You said:</div>
+              <div className="text-white text-lg leading-relaxed">{displayText}</div>
+              
+              {/* Manual send button if auto-send doesn't trigger */}
+              {!isThinking && !isSpeaking && transcriptRef.current.trim() && (
+                <button
+                  onClick={handleManualSend}
+                  className="mt-3 px-4 py-2 bg-cyan-500 hover:bg-cyan-600 text-white rounded-lg text-sm font-medium transition-colors"
+                >
+                  Send Now
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Instructions */}
+          {!displayText && isListening && (
+            <div className="text-center text-gray-400 text-sm">
+              <p>Speak naturally. Pause for 2 seconds when done.</p>
+              <p className="mt-1 text-xs">Javari will respond automatically.</p>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-// Type declarations for Web Speech API
+// Type declarations
 interface SpeechRecognitionEvent extends Event {
   results: SpeechRecognitionResultList;
   resultIndex: number;
