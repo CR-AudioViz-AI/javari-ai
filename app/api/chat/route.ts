@@ -505,6 +505,49 @@ function detectIntent(message: string): IntentResult {
     };
   }
   
+  // MOVIE/TV detection
+  if (/\b(movie|film|watch|cinema|actor|actress|tv show|series|netflix|streaming|best movie)\b/i.test(lower)) {
+    let query = 'popular';
+    const moviePatterns = [
+      /(?:movie|film|show|series)s?\s+(?:about|called|named|like)\s+([^?.!]+)/i,
+      /(?:tell me about|what is|recommend)\s+(?:the\s+)?(?:movie|film|show)\s+([^?.!]+)/i,
+      /([^?.!]+?)\s+(?:movie|film)/i
+    ];
+    for (const pattern of moviePatterns) {
+      const match = message.match(pattern);
+      if (match && match[1]) { query = match[1].trim(); break; }
+    }
+    return { intent: 'movies', confidence: 0.85, params: { query }, needsRealTimeData: true };
+  }
+  
+  // GAME detection
+  if (/\b(video game|gaming|playstation|xbox|nintendo|pc game|steam|rpg|fps|best game)\b/i.test(lower)) {
+    let query = 'popular';
+    const gamePatterns = [
+      /(?:game|games)s?\s+(?:about|called|named|like)\s+([^?.!]+)/i,
+      /([^?.!]+?)\s+(?:game|games)/i
+    ];
+    for (const pattern of gamePatterns) {
+      const match = message.match(pattern);
+      if (match && match[1]) { query = match[1].trim(); break; }
+    }
+    return { intent: 'games', confidence: 0.85, params: { query }, needsRealTimeData: true };
+  }
+  
+  // RESTAURANT/FOOD detection
+  if (/\b(restaurant|food near|eat near|best pizza|best sushi|best tacos|where to eat|dinner near)\b/i.test(lower)) {
+    let query = 'restaurant';
+    let location = 'Fort Myers, FL';
+    const foodPatterns = [/(?:best|good)\s+([^?.!]+?)\s+(?:near|in)/i, /where\s+(?:to|can)\s+(?:eat|find)\s+([^?.!]+)/i];
+    for (const pattern of foodPatterns) {
+      const match = message.match(pattern);
+      if (match && match[1]) { query = match[1].trim(); break; }
+    }
+    const locMatch = message.match(/(?:near|in|around)\s+([A-Za-z\s,]+?)(?:\?|$)/i);
+    if (locMatch && locMatch[1]) { location = locMatch[1].trim(); }
+    return { intent: 'restaurants', confidence: 0.85, params: { query, location }, needsRealTimeData: true };
+  }
+  
   // Default to chat
   return {
     intent: 'chat',
@@ -946,6 +989,41 @@ async function fetchExchangeRate(base: string): Promise<any> {
 // CONTEXT ENRICHMENT
 // ═══════════════════════════════════════════════════════════════════════════════
 
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ADDITIONAL DATA FETCHERS - Movies, Games, Restaurants
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function fetchMovies(query: string): Promise<unknown> {
+  const apiKey = process.env.TMDB_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const res = await fetch(`https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(query)}&api_key=${apiKey}`);
+    const data = await res.json();
+    return { results: data.results?.slice(0, 5).map((m: any) => ({ title: m.title, overview: m.overview?.slice(0, 150), releaseDate: m.release_date, rating: m.vote_average })), source: 'TMDb' };
+  } catch { return null; }
+}
+
+async function fetchGames(query: string): Promise<unknown> {
+  const apiKey = process.env.RAWG_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const res = await fetch(`https://api.rawg.io/api/games?key=${apiKey}&search=${encodeURIComponent(query)}&page_size=5`);
+    const data = await res.json();
+    return { results: data.results?.map((g: any) => ({ name: g.name, released: g.released, rating: g.rating, platforms: g.platforms?.slice(0,3).map((p:any)=>p.platform.name) })), source: 'RAWG' };
+  } catch { return null; }
+}
+
+async function fetchRestaurants(query: string, location: string): Promise<unknown> {
+  const apiKey = process.env.YELP_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const res = await fetch(`https://api.yelp.com/v3/businesses/search?term=${encodeURIComponent(query)}&location=${encodeURIComponent(location)}&limit=5`, { headers: { 'Authorization': `Bearer ${apiKey}` } });
+    const data = await res.json();
+    return { results: data.businesses?.map((b: any) => ({ name: b.name, rating: b.rating, price: b.price, address: b.location?.display_address?.join(', ') })), location, source: 'Yelp' };
+  } catch { return null; }
+}
+
 async function enrichContext(intent: IntentResult): Promise<EnrichedContext> {
   const context: EnrichedContext = {};
   
@@ -976,6 +1054,15 @@ async function enrichContext(intent: IntentResult): Promise<EnrichedContext> {
       break;
     case 'exchange':
       context.exchange = await fetchExchangeRate(intent.params.base);
+      break;
+    case 'movies':
+      context.movies = await fetchMovies(intent.params.query);
+      break;
+    case 'games':
+      context.games = await fetchGames(intent.params.query);
+      break;
+    case 'restaurants':
+      context.restaurants = await fetchRestaurants(intent.params.query, intent.params.location);
       break;
   }
   
@@ -1930,6 +2017,19 @@ I'm analyzing what went wrong. Would you like me to fix it and try again? Just s
       responseContent = continuationWarning + '\n\n' + finalResponse;
     }
     
+    // Log to Javari Learning System
+    try {
+      await supabase.from('javari_learning').insert({
+        user_query: userMessage.slice(0, 500),
+        query_category: intent.intent,
+        response_summary: (finalResponse || '').slice(0, 500),
+        data_sources_used: Object.keys(context).filter(k => (context as any)[k]),
+        response_time_ms: Date.now() - startTime
+      });
+    } catch (learningErr) {
+      console.error('[Learning] Log error:', learningErr);
+    }
+
     return NextResponse.json({
       content: responseContent,
       provider: aiResponse.provider,
@@ -1992,3 +2092,4 @@ export async function GET() {
     }
   });
 }
+
