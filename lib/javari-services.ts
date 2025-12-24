@@ -540,3 +540,133 @@ Open [http://localhost:3000](http://localhost:3000) to see the result.
     ];
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// AUTONOMOUS CONTINUATION METHODS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export class ProjectService {
+  // Create a new project (for autonomous work)
+  static async createProject(params: {
+    name: string;
+    goal: string;
+    sessionId?: string;
+  }): Promise<any> {
+    try {
+      const sessionId = params.sessionId || getSessionId();
+      
+      const { data, error } = await supabase
+        .from('projects')
+        .insert({
+          name: params.name,
+          goal: params.goal,
+          session_id: sessionId,
+          status: 'active',
+          progress_percent: 0,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('Error creating project:', error);
+      return null;
+    }
+  }
+
+  // Get active project for session
+  static async getActiveProject(sessionId?: string): Promise<any> {
+    try {
+      const sid = sessionId || getSessionId();
+      
+      const { data, error } = await supabase
+        .from('projects')
+        .select('*')
+        .eq('session_id', sid)
+        .eq('status', 'active')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (error) return null;
+      return data;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  // Update project progress
+  static async updateProgress(projectId: string, progress: number, currentTask?: string): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .from('projects')
+        .update({
+          progress_percent: progress,
+          current_task: currentTask,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', projectId);
+
+      if (error) throw error;
+      return true;
+    } catch (error) {
+      console.error('Error updating progress:', error);
+      return false;
+    }
+  }
+
+  // Link conversation to project
+  static async linkConversationToProject(conversationId: string, projectId: string): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .from('conversations')
+        .update({ project_id: projectId })
+        .eq('id', conversationId);
+
+      if (error) throw error;
+      return true;
+    } catch (error) {
+      console.error('Error linking conversation:', error);
+      return false;
+    }
+  }
+
+  // Create continuation conversation
+  static async createContinuation(params: {
+    projectId: string;
+    previousConversationId: string;
+    contextSummary: string;
+  }): Promise<any> {
+    try {
+      const sessionId = getSessionId();
+      
+      // Get project name
+      const { data: project } = await supabase
+        .from('projects')
+        .select('name')
+        .eq('id', params.projectId)
+        .single();
+
+      const { data, error } = await supabase
+        .from('conversations')
+        .insert({
+          session_id: sessionId,
+          title: `${project?.name || 'Project'} (continued)`,
+          project_id: params.projectId,
+          is_continuation: true,
+          previous_conversation_id: params.previousConversationId,
+          context_summary: params.contextSummary,
+          starred: true, // Auto-star continuations so they stay active
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('Error creating continuation:', error);
+      return null;
+    }
+  }
+}
