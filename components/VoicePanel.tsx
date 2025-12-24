@@ -2,7 +2,7 @@
 
 // Voice Panel Component for Javari
 // ElevenLabs Text-to-Speech Integration
-// Updated: December 22, 2025 - 11:05 PM EST
+// Updated: December 24, 2025 - Now uses Charlotte (sophisticated female voice) - 11:05 PM EST
 
 import React, { useState, useRef, useEffect } from 'react';
 
@@ -286,3 +286,4 @@ function LoadingIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+
