@@ -787,13 +787,6 @@ useEffect(() => {
         }`}
         onClick={onSelect}
       >
-      {/* Voice conversation animations */}
-      <style jsx global>{\`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.7; transform: scale(1.05); }
-        }
-      \`}</style>
 
         {/* Build status indicator */}
         <div className="flex-shrink-0">
@@ -1301,12 +1294,12 @@ useEffect(() => {
               </button>
               <button
                 onClick={toggleSpeechRecognition}
-                className="p-2 md:p-3 rounded-lg transition-all mr-2"
+                className={`p-2 md:p-3 rounded-lg transition-all mr-2 ${isListeningToUser ? 'animate-pulse' : ''}`}
                 style={{
                   backgroundColor: isListeningToUser ? 'rgba(253, 32, 29, 0.2)' : 'transparent',
                   color: isListeningToUser ? '#FD201D' : '#888',
                   border: isListeningToUser ? '1px solid rgba(253, 32, 29, 0.5)' : '1px solid #333',
-                  animation: isListeningToUser ? 'pulse 1.5s ease-in-out infinite' : 'none',
+                  animation: 'none',
                 }}
                 title={isListeningToUser ? "Stop listening (click or will auto-send)" : "Click to speak"}
               >
