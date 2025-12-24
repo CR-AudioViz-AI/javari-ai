@@ -42,6 +42,7 @@ import {
   AlertCircle,
   X,
 } from 'lucide-react';
+import VoicePanel from '@/components/VoicePanel';
 
 // Brand colors from Bible
 const COLORS = {
@@ -130,6 +131,7 @@ export default function MainJavariInterface() {
   const [language, setLanguage] = useState('English');
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [selectedAI, setSelectedAI] = useState<string>('auto');
   const [recommendedAI, setRecommendedAI] = useState<string>('gpt-4');
   const [aiSelectionModal, setAiSelectionModal] = useState<AISelectionModal>({
@@ -1117,6 +1119,9 @@ export default function MainJavariInterface() {
                         </div>
                       )}
                       <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                      {message.role === 'assistant' && voiceEnabled && (
+                        <VoicePanel text={message.content} autoPlay={false} />
+                      )}
                       <span className="text-xs opacity-50 mt-2 block">
                         {new Date(message.timestamp).toLocaleString('en-US', { 
                           month: 'short', 
@@ -1153,6 +1158,18 @@ export default function MainJavariInterface() {
                   <MicOff className="w-4 h-4" style={{ color: COLORS.cyan }} />
                 )}
               </Button>
+              <button
+                onClick={() => setVoiceEnabled(!voiceEnabled)}
+                className="p-2 md:p-3 rounded-lg transition-all mr-2"
+                style={{
+                  backgroundColor: voiceEnabled ? 'rgba(0, 188, 212, 0.2)' : 'transparent',
+                  color: voiceEnabled ? '#00BCD4' : '#888',
+                  border: voiceEnabled ? '1px solid rgba(0, 188, 212, 0.3)' : '1px solid #333',
+                }}
+                title={voiceEnabled ? "Disable voice responses" : "Enable voice responses"}
+              >
+                {voiceEnabled ? <Volume2 className="w-4 h-4 md:w-5 md:h-5" /> : <VolumeX className="w-4 h-4 md:w-5 md:h-5" />}
+              </button>
               <input
                 type="text"
                 value={inputMessage}
@@ -1552,3 +1569,4 @@ export default function MainJavariInterface() {
     </div>
   );
 }
+
