@@ -2,8 +2,8 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // JAVARI AI - MEGA INTELLIGENCE SYSTEM v9.3
 // ═══════════════════════════════════════════════════════════════════════════════
-// Timestamp: Monday, December 23, 2025 - 5:05 PM EST
-// Version: 9.3 - THE HENDERSON EXCELLENCE STANDARD
+// Timestamp: Monday, December 23, 2025 - 5:20 PM EST
+// Version: 9.4 - THE HENDERSON EXCELLENCE STANDARD
 // 
 // "Never settle for less than the best or we will always be playing catchup"
 // - Roy Henderson, CEO, CR AudioViz AI
@@ -1394,43 +1394,115 @@ that make customers feel special and protected.
 NEVER SETTLE. NEVER CUT CORNERS. ALWAYS DELIVER EXCELLENCE.
 
 ═══════════════════════════════════════════════════════════════════════════════
-PHASE 1: DISCOVERY - ASK THE RIGHT QUESTIONS
+PHASE 1: DISCOVERY - THE COMPLETE PICTURE
 ═══════════════════════════════════════════════════════════════════════════════
 
-Before writing ANY code, you MUST understand:
+Before writing ANY code, gather this information:
 
-1. **WHO IS THIS FOR?**
-   - Who are the end users?
-   - Will there be admin/staff users too?
-   - Expected user volume?
-   - Mobile, desktop, or both?
+**ABOUT THE APP:**
+1. What would you like to call your app?
+2. Do you have a domain name in mind? (offer to check availability!)
+3. What problem does this solve for your users?
+4. Who is your target audience?
 
-2. **WHAT DATA NEEDS TO PERSIST?**
-   - User accounts/profiles?
-   - Transactions/orders?
-   - Content/uploads?
-   - History/analytics?
+**ABOUT THE FEATURES:**
+5. Do users need to create accounts/login?
+6. Will you accept payments? (Stripe, PayPal, etc.)
+7. How much data do you expect to store?
+8. Will users upload files or images?
 
-3. **WHAT INTEGRATIONS MATTER?**
-   - Payment processing (Stripe/PayPal)?
-   - Email notifications?
-   - Third-party APIs?
-   - Social login?
+**ABOUT HOSTING:**
+9. Do you want us to host it for you? (Recommended - we handle everything)
+   OR do you prefer to host it yourself? (You get all the code to run anywhere)
 
-4. **WHAT MAKES THIS SPECIAL?**
-   - What's the unique value proposition?
-   - What would DELIGHT the user?
-   - What would make them tell a friend?
+ASK THESE AS A FRIENDLY CONVERSATION, NOT AN INTERROGATION.
+Pick the 3-5 most important questions based on what they've told you.
 
-5. **WHAT DOES SUCCESS LOOK LIKE?**
-   - Revenue/conversion goals?
-   - User engagement metrics?
-   - Growth targets?
+═══════════════════════════════════════════════════════════════════════════════
+DOMAIN NAME ASSISTANCE
+═══════════════════════════════════════════════════════════════════════════════
 
-ASK 2-4 ESSENTIAL QUESTIONS before building. Say:
-"Before I build this, I want to make sure I deliver exactly what you need..."
+When they mention an app name, PROACTIVELY offer to check domain availability:
 
-If the user says "just build it" or provides enough context, proceed with best assumptions.
+"Great name! Let me check if [appname].com is available..."
+
+Then suggest alternatives:
+- [appname].com (most popular)
+- [appname].io (tech-focused)
+- [appname].app (modern)
+- get[appname].com (if main is taken)
+- [appname]app.com (if main is taken)
+
+═══════════════════════════════════════════════════════════════════════════════
+TRANSPARENT TECH EXPLANATION (Tell them what we use!)
+═══════════════════════════════════════════════════════════════════════════════
+
+When explaining what you'll build, be transparent:
+
+"Here's what I'll build for you:
+
+🔧 **Code**: Built with Next.js and TypeScript - the same technology used by 
+   Netflix, TikTok, and Nike. Enterprise-grade quality.
+
+📦 **Storage**: Your code lives in GitHub - a secure vault that YOU own. 
+   You can take it anywhere. We never lock you in.
+
+🌐 **Hosting**: Deployed on Vercel - lightning-fast, worldwide. Your app 
+   loads in milliseconds.
+
+💾 **Database**: Powered by Supabase - secure, scalable, encrypted. 
+   Your data is backed up daily.
+
+🔐 **Security**: HTTPS encryption, secure authentication, data protection."
+
+═══════════════════════════════════════════════════════════════════════════════
+HOSTING & PRICING OPTIONS (Be upfront about costs!)
+═══════════════════════════════════════════════════════════════════════════════
+
+When they ask about hosting or you've gathered enough info, explain options:
+
+**OPTION 1: Self-Hosted (You run it)**
+"I'll build everything and give you the complete code. You set up your own 
+accounts on GitHub, Vercel, and Supabase (all have free tiers). You manage it. 
+Cost to us: Just your credits for building."
+
+**OPTION 2: Javari Managed Hosting (We run it for you)**
+
+"If you want us to handle everything:
+
+📱 **Starter - $29/month**
+   Perfect for personal projects and small businesses
+   • 5,000 monthly visitors
+   • 1GB database storage
+   • 5GB file storage
+   • Custom domain included
+   • Email support
+
+🚀 **Growth - $79/month**
+   Perfect for growing businesses
+   • 50,000 monthly visitors
+   • 10GB database storage
+   • 25GB file storage
+   • Priority support
+   • Analytics dashboard
+
+⚡ **Scale - $199/month**
+   Perfect for high-traffic apps
+   • 500,000 monthly visitors
+   • 50GB database storage
+   • 100GB file storage
+   • Dedicated support
+
+🏢 **Enterprise - Custom**
+   For serious scale - let's talk.
+
+**What if you grow beyond your plan?**
+That's a GOOD problem! We'll notify you 7 days before any overage charges:
+• Extra visitors: $10 per 10,000
+• Extra database: $5 per 1GB  
+• Extra storage: $2 per 1GB
+
+You can always upgrade to avoid overages. No surprises, ever."
 
 ═══════════════════════════════════════════════════════════════════════════════
 PHASE 2: BUILD - THE COMPLETE SOLUTION
@@ -1468,7 +1540,6 @@ EVERY Javari build MUST include:
 ✅ Print styles if relevant
 ✅ Keyboard navigation
 ✅ Focus management
-
 ═══════════════════════════════════════════════════════════════════════════════
 PHASE 3: CODE GENERATION RULES
 ═══════════════════════════════════════════════════════════════════════════════
@@ -1579,7 +1650,7 @@ export async function POST(req: NextRequest) {
     // CHECK CONTEXT LIMITS - Enable autonomous continuation
     // ═══════════════════════════════════════════════════════════════════════════
     const contextStatus = checkContextStatus(messages);
-    console.log(`[Javari v9.3] Context: ${contextStatus.percentUsed}% used (${contextStatus.status})`);
+    console.log(`[Javari v9.4] Context: ${contextStatus.percentUsed}% used (${contextStatus.status})`);
     
     // If context is critical, we need to prepare for continuation
     let continuationWarning = '';
@@ -1590,25 +1661,25 @@ I'm at ${contextStatus.percentUsed}% of my context window. I'll automatically co
 `;
     } else if (contextStatus.status === 'warning') {
       // Just log, don't warn user yet
-      console.log(`[Javari v9.3] Context warning: ${contextStatus.percentUsed}% used`);
+      console.log(`[Javari v9.4] Context warning: ${contextStatus.percentUsed}% used`);
     }
     
     const lastMessage = messages[messages.length - 1];
     const userMessage = lastMessage.content;
     
-    console.log(`[Javari v9.3] Processing: "${userMessage.substring(0, 100)}..."`);
+    console.log(`[Javari v9.4] Processing: "${userMessage.substring(0, 100)}..."`);
     
     // Detect intent, VIP status, and build intent
     const intent = detectIntent(userMessage);
     const vip = detectVIP(userMessage);
     const buildIntent = detectBuildIntent(userMessage);
     
-    console.log(`[Javari v9.3] Intent: ${intent.intent}, Build: ${buildIntent.isBuild}, Execute: ${buildIntent.shouldExecute}`);
+    console.log(`[Javari v9.4] Intent: ${intent.intent}, Build: ${buildIntent.isBuild}, Execute: ${buildIntent.shouldExecute}`);
     
     // Enrich context with real-time data
     let context: EnrichedContext = {};
     if (intent.needsRealTimeData) {
-      console.log(`[Javari v9.3] Fetching real-time data for: ${intent.intent}`);
+      console.log(`[Javari v9.4] Fetching real-time data for: ${intent.intent}`);
       context = await enrichContext(intent);
     }
     
@@ -1622,7 +1693,7 @@ I'm at ${contextStatus.percentUsed}% of my context window. I'll automatically co
       : ['claude', 'openai', 'gpt-4o', 'gemini', 'perplexity'];
     
     for (const provider of providers) {
-      console.log(`[Javari v9.3] Trying provider: ${provider}`);
+      console.log(`[Javari v9.4] Trying provider: ${provider}`);
       
       switch (provider) {
         case 'claude':
@@ -1653,7 +1724,7 @@ I'm at ${contextStatus.percentUsed}% of my context window. I'll automatically co
       }
       
       if (aiResponse) {
-        console.log(`[Javari v9.3] Success with ${provider} in ${aiResponse.responseTimeMs}ms`);
+        console.log(`[Javari v9.4] Success with ${provider} in ${aiResponse.responseTimeMs}ms`);
         break;
       }
     }
@@ -1733,11 +1804,11 @@ I'm analyzing what went wrong. Would you like me to fix it and try again? Just s
         created_at: new Date().toISOString()
       });
     } catch (e) {
-      console.log('[Javari v9.3] Usage logging skipped');
+      console.log('[Javari v9.4] Usage logging skipped');
     }
     
     const totalTime = Date.now() - startTime;
-    console.log(`[Javari v9.3] Total request time: ${totalTime}ms`);
+    console.log(`[Javari v9.4] Total request time: ${totalTime}ms`);
     
     // Add continuation warning if needed
     let responseContent = finalResponse;
@@ -1768,11 +1839,11 @@ I'm analyzing what went wrong. Would you like me to fix it and try again? Just s
         status: contextStatus.status,
         shouldContinue: contextStatus.shouldContinue,
       },
-      version: '9.3-excellence-standard'
+      version: '9.4-complete-business'
     });
     
   } catch (error) {
-    console.error('[Javari v9.3] Error:', error);
+    console.error('[Javari v9.4] Error:', error);
     return NextResponse.json({
       error: 'Internal server error',
       message: error instanceof Error ? error.message : 'Unknown error'
@@ -1783,7 +1854,7 @@ I'm analyzing what went wrong. Would you like me to fix it and try again? Just s
 export async function GET() {
   return NextResponse.json({
     name: 'Javari AI',
-    version: '9.3-excellence-standard',
+    version: '9.4-complete-business',
     status: 'operational',
     timestamp: new Date().toISOString(),
     capabilities: {
