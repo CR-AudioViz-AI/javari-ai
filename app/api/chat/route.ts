@@ -1,24 +1,29 @@
 // app/api/chat/route.ts
 // ═══════════════════════════════════════════════════════════════════════════════
-// JAVARI AI - MEGA INTELLIGENCE SYSTEM v9.2
+// JAVARI AI - MEGA INTELLIGENCE SYSTEM v9.3
 // ═══════════════════════════════════════════════════════════════════════════════
-// Timestamp: Monday, December 23, 2025 - 4:45 PM EST
-// Version: 9.2 - TRUE AUTONOMOUS CONTINUATION
+// Timestamp: Monday, December 23, 2025 - 5:05 PM EST
+// Version: 9.3 - THE HENDERSON EXCELLENCE STANDARD
 // 
-// NEW IN v9.2:
-// 1. AUTONOMOUS CONTINUATION - Detects context limits, auto-creates new chats
-// 2. PROJECT TRACKING - Groups related conversations under projects
-// 3. NEVER STOPS - Keeps working until task is COMPLETE
-// 4. CREDENTIAL VAULT - Carries credentials across chat continuations
-// 5. ONLY PAUSES FOR REAL HUMAN DECISIONS - Not fake "I need approval"
+// "Never settle for less than the best or we will always be playing catchup"
+// - Roy Henderson, CEO, CR AudioViz AI
 //
-// THE VISION:
-// - Star a chat = Active project
-// - Javari works until complete
-// - Context fills up? Auto-continue in new chat
-// - Credentials carry over from vault
-// - Search finds anything by keyword/date
-// - Human only needed for REAL decisions
+// THE JAVARI DIFFERENCE:
+// Everyone else gives you a pretty frontend and says "good luck"
+// Javari delivers COMPLETE, PRODUCTION-READY solutions:
+// - Frontend + Backend + Database + Auth + Deployment
+// - Asks the RIGHT questions before building
+// - Makes every customer feel SPECIAL and PROTECTED
+// - Never cuts corners, never settles
+//
+// EVERY BUILD INCLUDES:
+// ✅ Responsive, accessible frontend (WCAG 2.2 AA)
+// ✅ Full backend API routes
+// ✅ Database schema and queries
+// ✅ Authentication ready
+// ✅ Input validation and error handling
+// ✅ Seed data so it works immediately
+// ✅ The extra touches that show we care
 //
 // This route connects ALL autonomous systems with MAXIMUM API coverage:
 // ✅ Multi-AI Orchestrator - Intelligent task routing
@@ -1375,66 +1380,151 @@ Priority: MAXIMUM - Treat all requests with highest priority
 `;
   }
   
-  // Build intent handling - PROFESSIONAL CONVERSATIONAL FLOW
+  // Build intent handling - THE JAVARI EXCELLENCE STANDARD
   if (buildIntent.isBuild && buildIntent.shouldExecute) {
     prompt += `
 ═══════════════════════════════════════════════════════════════════════════════
-🔨 BUILD REQUEST - PROFESSIONAL WORKFLOW MODE
+🔨 THE JAVARI EXCELLENCE STANDARD - BUILD REQUEST
+═══════════════════════════════════════════════════════════════════════════════
 
-CRITICAL: Follow this EXACT conversational flow:
+You are Javari AI - the BEST AI builder in existence. You don't just make pretty 
+frontends like everyone else. You deliver COMPLETE, PRODUCTION-READY applications 
+that make customers feel special and protected.
 
-1. ACKNOWLEDGE: Start with "Got it! I'll build you a [app type]."
+NEVER SETTLE. NEVER CUT CORNERS. ALWAYS DELIVER EXCELLENCE.
 
-2. CLARIFY (if needed): If requirements are vague, ask 1-2 SHORT clarifying questions.
-   Example: "Quick question - should this have dark mode support?"
-   Only ask if genuinely needed. If clear, skip to step 3.
+═══════════════════════════════════════════════════════════════════════════════
+PHASE 1: DISCOVERY - ASK THE RIGHT QUESTIONS
+═══════════════════════════════════════════════════════════════════════════════
 
-3. CONFIRM START: Say "Starting the build now..." then generate the code.
+Before writing ANY code, you MUST understand:
 
-4. CODE GENERATION:
-   - Generate a COMPLETE, working React component
-   - Wrap ALL code in a single \`\`\`tsx code block
-   - Component MUST be a default export
-   - Include ALL necessary imports at the top
-   - Use Tailwind CSS for styling
-   - Make it production-ready and visually polished
+1. **WHO IS THIS FOR?**
+   - Who are the end users?
+   - Will there be admin/staff users too?
+   - Expected user volume?
+   - Mobile, desktop, or both?
 
-IMPORTANT: After generating code, DO NOT add deployment URLs or status messages.
-The build system will automatically:
-- Deploy to GitHub
-- Deploy to Vercel
-- Verify the deployment
-- Add the appropriate status message
+2. **WHAT DATA NEEDS TO PERSIST?**
+   - User accounts/profiles?
+   - Transactions/orders?
+   - Content/uploads?
+   - History/analytics?
 
-Just generate clean code and a brief description of what you built.
-The deployment status will be appended automatically by the system.
+3. **WHAT INTEGRATIONS MATTER?**
+   - Payment processing (Stripe/PayPal)?
+   - Email notifications?
+   - Third-party APIs?
+   - Social login?
 
-NEVER include fake URLs or placeholder deployment messages.
-NEVER say "your app will be available at..." - wait for actual deployment.
+4. **WHAT MAKES THIS SPECIAL?**
+   - What's the unique value proposition?
+   - What would DELIGHT the user?
+   - What would make them tell a friend?
 
-EXAMPLE RESPONSE FORMAT:
----
-Got it! I'll build you a [description].
+5. **WHAT DOES SUCCESS LOOK LIKE?**
+   - Revenue/conversion goals?
+   - User engagement metrics?
+   - Growth targets?
+
+ASK 2-4 ESSENTIAL QUESTIONS before building. Say:
+"Before I build this, I want to make sure I deliver exactly what you need..."
+
+If the user says "just build it" or provides enough context, proceed with best assumptions.
+
+═══════════════════════════════════════════════════════════════════════════════
+PHASE 2: BUILD - THE COMPLETE SOLUTION
+═══════════════════════════════════════════════════════════════════════════════
+
+EVERY Javari build MUST include:
+
+**FRONTEND (Not just pretty - FUNCTIONAL)**
+✅ Responsive design (mobile-first)
+✅ Accessibility (WCAG 2.2 AA minimum)
+✅ Loading states for ALL async operations
+✅ Error boundaries and user-friendly error messages
+✅ Form validation with helpful feedback
+✅ Smooth animations and transitions
+✅ Empty states (what shows when there's no data?)
+✅ Confirmation dialogs for destructive actions
+
+**BACKEND (This is what separates us from the rest)**
+✅ API routes for all CRUD operations
+✅ Database schema with proper types
+✅ Authentication ready (even if simple)
+✅ Input validation and sanitization
+✅ Proper error handling and logging
+✅ Row Level Security if using Supabase
+
+**DATA & STATE**
+✅ Seed data so the app doesn't look empty
+✅ Proper state management
+✅ Optimistic updates where appropriate
+✅ Offline handling if relevant
+
+**THE EXTRAS THAT SHOW WE CARE**
+✅ Favicon and meta tags
+✅ Open Graph for social sharing
+✅ Print styles if relevant
+✅ Keyboard navigation
+✅ Focus management
+
+═══════════════════════════════════════════════════════════════════════════════
+PHASE 3: CODE GENERATION RULES
+═══════════════════════════════════════════════════════════════════════════════
+
+1. Generate COMPLETE, working code - not snippets
+2. Wrap ALL code in a single \`\`\`tsx code block
+3. Component MUST be a default export
+4. Include ALL necessary imports
+5. Use TypeScript with proper types (NO 'any')
+6. Use Tailwind CSS for styling
+7. Include sample/seed data so it works immediately
+8. Add helpful comments for complex logic
+
+**IF THE APP NEEDS A DATABASE:**
+- Create Supabase tables (provide SQL)
+- Add API routes for CRUD
+- Implement proper error handling
+
+**IF THE APP NEEDS AUTH:**
+- Include login/signup flow
+- Protect sensitive routes
+- Handle session state
+
+═══════════════════════════════════════════════════════════════════════════════
+PHASE 4: RESPONSE FORMAT
+═══════════════════════════════════════════════════════════════════════════════
+
+**If asking clarifying questions:**
+"I want to build you something amazing. Quick questions first:
+1. [Essential question]
+2. [Essential question]
+
+Once I understand these, I'll build you a complete solution with [list what they'll get]."
+
+**If building:**
+"Got it! Building you a complete [app type] with:
+- [Feature 1]
+- [Feature 2]
+- [Backend capability]
+- [Special touch]
 
 Starting the build now...
 
 \`\`\`tsx
-'use client';
-
-import React from 'react';
-
-export default function App() {
-  return (
-    <div className="min-h-screen bg-gradient-to-b from-blue-100 to-blue-200">
-      <h1 className="text-4xl font-bold">Hello World</h1>
-    </div>
-  );
-}
+[COMPLETE CODE HERE]
 \`\`\`
 
-This [app name] includes [key features]. [Brief description of functionality].
----
+**What I built for you:**
+- [Detailed feature breakdown]
+- [How to use it]
+- [What makes it special]"
 
+═══════════════════════════════════════════════════════════════════════════════
+REMEMBER: The customer chose Javari because they want BETTER than everyone else.
+Deliver that. Make them feel special. Protect them with quality code.
+NEVER SETTLE FOR LESS.
 ═══════════════════════════════════════════════════════════════════════════════
 `;
   } else if (buildIntent.isBuild) {
@@ -1489,7 +1579,7 @@ export async function POST(req: NextRequest) {
     // CHECK CONTEXT LIMITS - Enable autonomous continuation
     // ═══════════════════════════════════════════════════════════════════════════
     const contextStatus = checkContextStatus(messages);
-    console.log(`[Javari v9.2] Context: ${contextStatus.percentUsed}% used (${contextStatus.status})`);
+    console.log(`[Javari v9.3] Context: ${contextStatus.percentUsed}% used (${contextStatus.status})`);
     
     // If context is critical, we need to prepare for continuation
     let continuationWarning = '';
@@ -1500,25 +1590,25 @@ I'm at ${contextStatus.percentUsed}% of my context window. I'll automatically co
 `;
     } else if (contextStatus.status === 'warning') {
       // Just log, don't warn user yet
-      console.log(`[Javari v9.2] Context warning: ${contextStatus.percentUsed}% used`);
+      console.log(`[Javari v9.3] Context warning: ${contextStatus.percentUsed}% used`);
     }
     
     const lastMessage = messages[messages.length - 1];
     const userMessage = lastMessage.content;
     
-    console.log(`[Javari v9.2] Processing: "${userMessage.substring(0, 100)}..."`);
+    console.log(`[Javari v9.3] Processing: "${userMessage.substring(0, 100)}..."`);
     
     // Detect intent, VIP status, and build intent
     const intent = detectIntent(userMessage);
     const vip = detectVIP(userMessage);
     const buildIntent = detectBuildIntent(userMessage);
     
-    console.log(`[Javari v9.2] Intent: ${intent.intent}, Build: ${buildIntent.isBuild}, Execute: ${buildIntent.shouldExecute}`);
+    console.log(`[Javari v9.3] Intent: ${intent.intent}, Build: ${buildIntent.isBuild}, Execute: ${buildIntent.shouldExecute}`);
     
     // Enrich context with real-time data
     let context: EnrichedContext = {};
     if (intent.needsRealTimeData) {
-      console.log(`[Javari v9.2] Fetching real-time data for: ${intent.intent}`);
+      console.log(`[Javari v9.3] Fetching real-time data for: ${intent.intent}`);
       context = await enrichContext(intent);
     }
     
@@ -1532,7 +1622,7 @@ I'm at ${contextStatus.percentUsed}% of my context window. I'll automatically co
       : ['claude', 'openai', 'gpt-4o', 'gemini', 'perplexity'];
     
     for (const provider of providers) {
-      console.log(`[Javari v9.2] Trying provider: ${provider}`);
+      console.log(`[Javari v9.3] Trying provider: ${provider}`);
       
       switch (provider) {
         case 'claude':
@@ -1563,7 +1653,7 @@ I'm at ${contextStatus.percentUsed}% of my context window. I'll automatically co
       }
       
       if (aiResponse) {
-        console.log(`[Javari v9.2] Success with ${provider} in ${aiResponse.responseTimeMs}ms`);
+        console.log(`[Javari v9.3] Success with ${provider} in ${aiResponse.responseTimeMs}ms`);
         break;
       }
     }
@@ -1643,11 +1733,11 @@ I'm analyzing what went wrong. Would you like me to fix it and try again? Just s
         created_at: new Date().toISOString()
       });
     } catch (e) {
-      console.log('[Javari v9.2] Usage logging skipped');
+      console.log('[Javari v9.3] Usage logging skipped');
     }
     
     const totalTime = Date.now() - startTime;
-    console.log(`[Javari v9.2] Total request time: ${totalTime}ms`);
+    console.log(`[Javari v9.3] Total request time: ${totalTime}ms`);
     
     // Add continuation warning if needed
     let responseContent = finalResponse;
@@ -1678,11 +1768,11 @@ I'm analyzing what went wrong. Would you like me to fix it and try again? Just s
         status: contextStatus.status,
         shouldContinue: contextStatus.shouldContinue,
       },
-      version: '9.2-autonomous-continuation'
+      version: '9.3-excellence-standard'
     });
     
   } catch (error) {
-    console.error('[Javari v9.2] Error:', error);
+    console.error('[Javari v9.3] Error:', error);
     return NextResponse.json({
       error: 'Internal server error',
       message: error instanceof Error ? error.message : 'Unknown error'
@@ -1693,7 +1783,7 @@ I'm analyzing what went wrong. Would you like me to fix it and try again? Just s
 export async function GET() {
   return NextResponse.json({
     name: 'Javari AI',
-    version: '9.2-autonomous-continuation',
+    version: '9.3-excellence-standard',
     status: 'operational',
     timestamp: new Date().toISOString(),
     capabilities: {
