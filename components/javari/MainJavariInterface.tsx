@@ -325,13 +325,40 @@ export default function MainJavariInterface() {
         const newConvo = await ChatService.createConversation(userMessage.substring(0, 50));
         if (newConvo) {
           convId = newConvo.id;
+          
+          // Auto-star the new conversation
+          await ChatService.toggleStar(newConvo.id, true);
+          
+          // Unstar previous conversation if exists (keep only current starred)
+          if (currentConversation?.id) {
+            await ChatService.toggleStar(currentConversation.id, false);
+          }
+          
           setCurrentConversation({
             id: newConvo.id,
             title: newConvo.title,
-            starred: false,
+            starred: true, // New conversations are starred
             messages: [],
             updated_at: newConvo.updated_at,
           });
+          
+          // Refresh conversations list in sidebar
+          const conversations = await ChatService.loadConversations();
+          if (conversations.length > 0) {
+            const projectWithConvos: Project = {
+              id: 'main',
+              name: 'My Conversations',
+              conversations: conversations.map(c => ({
+                id: c.id,
+                title: c.title,
+                starred: c.starred || false,
+                messages: [],
+                updated_at: c.updated_at,
+              })),
+              starred: false,
+            };
+            setProjects([projectWithConvos]);
+          }
         } else {
           // Guest mode - no auth, just chat without saving
           isGuest = true;
@@ -515,29 +542,59 @@ export default function MainJavariInterface() {
       );
     }
   };
-  const handleNewChat = () => {
+  const handleNewChat = async () => {
+    // Unstar current conversation before starting new one
+    if (currentConversation?.id && !currentConversation.id.startsWith('guest-')) {
+      await ChatService.toggleStar(currentConversation.id, false);
+    }
+    
     // Clear messages
     setMessages([]);
-    // Create new conversation
-    const newConversation: Conversation = {
-      id: Date.now().toString(),
-      title: 'New Chat',
-      starred: false,
-      messages: [],
-      updated_at: new Date().toISOString(),
-    };
-    setCurrentConversation(newConversation);
-    // Focus on input (optional - could add ref)
-    console.log('New chat created:', newConversation.id);
+    
+    // Reset current conversation - will be created on first message
+    setCurrentConversation(null);
+    
+    // Refresh sidebar
+    const conversations = await ChatService.loadConversations();
+    if (conversations.length > 0) {
+      const projectWithConvos: Project = {
+        id: 'main',
+        name: 'My Conversations',
+        conversations: conversations.map(c => ({
+          id: c.id,
+          title: c.title,
+          starred: c.starred || false,
+          messages: [],
+          updated_at: c.updated_at,
+        })),
+        starred: false,
+      };
+      setProjects([projectWithConvos]);
+    }
+    
+    console.log('New chat ready - conversation will be created on first message');
   };
 
   // Handle All Chats - Show list of all user's chats
-  const handleAllChats = () => {
-    // TODO: Implement chat list modal/sidebar
-    // For now, log the action
-    console.log('All Chats clicked - showing chat history');
-    // Future: Open modal with all conversations from database
-    alert('All Chats feature coming soon! This will show your complete chat history.');
+  const handleAllChats = async () => {
+    // Load all conversations from database
+    const conversations = await ChatService.loadConversations();
+    if (conversations.length > 0) {
+      const projectWithConvos: Project = {
+        id: 'main',
+        name: 'All Conversations',
+        conversations: conversations.map(c => ({
+          id: c.id,
+          title: c.title,
+          starred: c.starred || false,
+          messages: [],
+          updated_at: c.updated_at,
+        })),
+        starred: false,
+      };
+      setProjects([projectWithConvos]);
+    }
+    console.log('Loaded all chats:', conversations.length);
   };
 
   // Handle Projects - Allow project management and chat organization
@@ -733,20 +790,83 @@ export default function MainJavariInterface() {
               </div>
             </div>
 
-            {/* Starred Conversations */}
+            {/* Starred Conversations - DYNAMIC FROM DATABASE */}
             <div className="flex-1 overflow-hidden">
               <div className="p-4">
                 <div className="flex items-center gap-2 mb-3">
                   <Star className="w-4 h-4" style={{ color: COLORS.javariCyan }} fill={COLORS.javariCyan} />
-                  <span className="text-white font-medium">Starred</span>
+                  <span className="text-white font-medium">Active Chats</span>
                 </div>
-                <ScrollArea className="h-full">
+                <ScrollArea className="h-[calc(100vh-400px)]">
                   <div className="space-y-2">
-                    <Card className="p-3 cursor-pointer hover:bg-gray-800" style={{ backgroundColor: COLORS.javaribg }}>
-                      <div className="text-white text-sm font-medium">Project: CR AudioViz AI</div>
-                      <div className="text-gray-400 text-xs mt-1">- Chat: Deploy fixes</div>
-                      <div className="text-gray-400 text-xs">- Chat: Database optimization</div>
-                    </Card>
+                    {/* Current active conversation */}
+                    {currentConversation && (
+                      <Card 
+                        className="p-3 cursor-pointer border-2"
+                        style={{ backgroundColor: COLORS.javaribg, borderColor: COLORS.javariCyan }}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Star className="w-3 h-3" style={{ color: COLORS.javariCyan }} fill={COLORS.javariCyan} />
+                          <div className="text-white text-sm font-medium truncate flex-1">
+                            {currentConversation.title || 'New Chat'}
+                          </div>
+                        </div>
+                        <div className="text-gray-400 text-xs mt-1">
+                          {messages.length} messages • Active
+                        </div>
+                      </Card>
+                    )}
+                    
+                    {/* Previous starred conversations from database */}
+                    {projects.flatMap(p => p.conversations)
+                      .filter(c => c.starred && c.id !== currentConversation?.id)
+                      .slice(0, 10)
+                      .map(conv => (
+                        <Card 
+                          key={conv.id}
+                          className="p-3 cursor-pointer hover:bg-gray-800"
+                          style={{ backgroundColor: COLORS.javaribg }}
+                          onClick={async () => {
+                            // Load this conversation
+                            const msgs = await ChatService.loadMessages(conv.id);
+                            setCurrentConversation({
+                              ...conv,
+                              messages: msgs.map(m => ({
+                                id: m.id,
+                                role: m.role,
+                                content: m.content,
+                                timestamp: m.created_at,
+                                provider: m.provider,
+                              }))
+                            });
+                            setMessages(msgs.map(m => ({
+                              id: m.id,
+                              role: m.role as 'user' | 'assistant',
+                              content: m.content,
+                              timestamp: m.created_at,
+                              provider: m.provider,
+                            })));
+                          }}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Star className="w-3 h-3 text-gray-500" />
+                            <div className="text-white text-sm font-medium truncate flex-1">
+                              {conv.title}
+                            </div>
+                          </div>
+                          <div className="text-gray-400 text-xs mt-1">
+                            {new Date(conv.updated_at).toLocaleDateString()}
+                          </div>
+                        </Card>
+                      ))
+                    }
+                    
+                    {/* Show placeholder if no conversations */}
+                    {!currentConversation && projects.flatMap(p => p.conversations).filter(c => c.starred).length === 0 && (
+                      <div className="text-gray-500 text-sm text-center py-4">
+                        Start a new chat to see it here
+                      </div>
+                    )}
                   </div>
                 </ScrollArea>
               </div>
