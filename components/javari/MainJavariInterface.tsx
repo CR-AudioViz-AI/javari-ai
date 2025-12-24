@@ -64,10 +64,22 @@ interface Message {
 interface Conversation {
   id: string;
   title: string;
-  starred: boolean;
+  pinned: boolean;      // User pinned this conversation
   messages: Message[];
   project_id?: string;
   updated_at: string;
+  created_at?: string;
+  build_status?: 'success' | 'failed' | 'pending' | null;  // Track build status
+  message_count?: number;
+}
+
+// Group conversations by time period
+interface ConversationGroups {
+  pinned: Conversation[];
+  today: Conversation[];
+  yesterday: Conversation[];
+  previous7Days: Conversation[];
+  older: Conversation[];
 }
 
 interface Project {
@@ -130,54 +142,103 @@ export default function MainJavariInterface() {
   const [copiedArtifacts, setCopiedArtifacts] = useState<Record<string, boolean>>({});
   const [previewingArtifact, setPreviewingArtifact] = useState<Artifact | null>(null);
   const [artifactViewMode, setArtifactViewMode] = useState<Record<string, 'code' | 'preview'>>({});
+  
+  // NEW: Better conversation management
+  const [searchQuery, setSearchQuery] = useState('');
+  const [allConversations, setAllConversations] = useState<Conversation[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
 
-  // ADDED: Load conversations from database
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        const conversations = await ChatService.loadConversations();
-        if (conversations.length > 0) {
-          const projectWithConvos: Project = {
-            id: 'main',
-            name: 'My Conversations',
-            conversations: conversations.map(c => ({
-              id: c.id,
-              title: c.title,
-              starred: c.starred || false,
-              messages: [],
-              updated_at: c.updated_at,
-            })),
-            starred: false,
-          };
-          setProjects([projectWithConvos]);
-        }
-      } catch (error) {
-        console.error('Error loading conversations:', error);
-      }
+  // Group conversations by time period
+  const groupConversations = (convos: Conversation[]): ConversationGroups => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
+    const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    const groups: ConversationGroups = {
+      pinned: [],
+      today: [],
+      yesterday: [],
+      previous7Days: [],
+      older: [],
     };
-    loadData();
+
+    // Filter by search if query exists
+    let filtered = convos;
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = convos.filter(c => 
+        c.title.toLowerCase().includes(query)
+      );
+    }
+
+    filtered.forEach(conv => {
+      const updated = new Date(conv.updated_at);
+      
+      if (conv.pinned) {
+        groups.pinned.push(conv);
+      } else if (updated >= today) {
+        groups.today.push(conv);
+      } else if (updated >= yesterday) {
+        groups.yesterday.push(conv);
+      } else if (updated >= weekAgo) {
+        groups.previous7Days.push(conv);
+      } else {
+        groups.older.push(conv);
+      }
+    });
+
+    return groups;
+  };
+
+  const conversationGroups = groupConversations(allConversations);
+  // Load all conversations on mount and refresh
+  const loadConversations = async () => {
+    try {
+      setIsLoading(true);
+      const conversations = await ChatService.loadConversations();
+      setAllConversations(conversations.map(c => ({
+        id: c.id,
+        title: c.title,
+        pinned: c.starred || false, // Using starred as pinned
+        messages: [],
+        updated_at: c.updated_at,
+        created_at: c.created_at,
+      })));
+    } catch (error) {
+      console.error('Error loading conversations:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Load conversations on mount
+  useEffect(() => {
+    loadConversations();
   }, []);
 
-  // ADDED: Load messages when conversation changes
+  // Load messages when conversation changes
   useEffect(() => {
     const loadMsgs = async () => {
-      if (currentConversation && currentConversation.id) {
+      if (currentConversation && currentConversation.id && !currentConversation.id.startsWith('temp-')) {
         try {
           const msgs = await ChatService.loadMessages(currentConversation.id);
-          setMessages(msgs.map(m => ({
-            id: m.id,
-            role: m.role,
-            content: m.content,
-            timestamp: m.created_at,
-            provider: m.provider,
-          })));
+          if (msgs.length > 0) {
+            setMessages(msgs.map(m => ({
+              id: m.id,
+              role: m.role as 'user' | 'assistant',
+              content: m.content,
+              timestamp: m.created_at,
+              provider: m.provider,
+            })));
+          }
         } catch (error) {
           console.error('Error loading messages:', error);
         }
       }
     };
     loadMsgs();
-  }, [currentConversation]);
+  }, [currentConversation?.id]);
 
   
   // Ref for auto-scrolling messages
@@ -316,51 +377,34 @@ export default function MainJavariInterface() {
     const userMessage = inputMessage;
     setInputMessage('');
 
-    // Get or create conversation (allow guest mode)
+    // Get or create conversation
     let convId = currentConversation?.id;
     let isGuest = false;
     
-    if (!convId) {
+    if (!convId || convId.startsWith('temp-')) {
       try {
-        const newConvo = await ChatService.createConversation(userMessage.substring(0, 50));
+        // Create title from first message (first 50 chars)
+        const title = userMessage.substring(0, 50).replace(/[^\w\s]/g, '').trim() || 'New Chat';
+        const newConvo = await ChatService.createConversation(title);
+        
         if (newConvo) {
           convId = newConvo.id;
           
-          // Auto-star the new conversation
-          await ChatService.toggleStar(newConvo.id, true);
-          
-          // Unstar previous conversation if exists (keep only current starred)
-          if (currentConversation?.id) {
-            await ChatService.toggleStar(currentConversation.id, false);
-          }
-          
-          setCurrentConversation({
+          // Set as current conversation with pinned=false (not pinned by default, like Claude)
+          const newConversation: Conversation = {
             id: newConvo.id,
             title: newConvo.title,
-            starred: true, // New conversations are starred
+            pinned: false,
             messages: [],
             updated_at: newConvo.updated_at,
-          });
+          };
           
-          // Refresh conversations list in sidebar
-          const conversations = await ChatService.loadConversations();
-          if (conversations.length > 0) {
-            const projectWithConvos: Project = {
-              id: 'main',
-              name: 'My Conversations',
-              conversations: conversations.map(c => ({
-                id: c.id,
-                title: c.title,
-                starred: c.starred || false,
-                messages: [],
-                updated_at: c.updated_at,
-              })),
-              starred: false,
-            };
-            setProjects([projectWithConvos]);
-          }
+          setCurrentConversation(newConversation);
+          
+          // Add to allConversations at the top (most recent)
+          setAllConversations(prev => [newConversation, ...prev]);
         } else {
-          // Guest mode - no auth, just chat without saving
+          // Guest mode - chat without saving
           isGuest = true;
           convId = 'guest-' + Date.now();
           console.log('Running in guest mode - chat will not be saved');
@@ -542,68 +586,127 @@ export default function MainJavariInterface() {
       );
     }
   };
-  const handleNewChat = async () => {
-    // Unstar current conversation before starting new one
-    if (currentConversation?.id && !currentConversation.id.startsWith('guest-')) {
-      await ChatService.toggleStar(currentConversation.id, false);
-    }
-    
-    // Clear messages
+  
+  // Start a new chat
+  const handleNewChat = () => {
+    // Clear messages and current conversation
     setMessages([]);
-    
-    // Reset current conversation - will be created on first message
     setCurrentConversation(null);
-    
-    // Refresh sidebar
-    const conversations = await ChatService.loadConversations();
-    if (conversations.length > 0) {
-      const projectWithConvos: Project = {
-        id: 'main',
-        name: 'My Conversations',
-        conversations: conversations.map(c => ({
-          id: c.id,
-          title: c.title,
-          starred: c.starred || false,
-          messages: [],
-          updated_at: c.updated_at,
-        })),
-        starred: false,
-      };
-      setProjects([projectWithConvos]);
-    }
-    
-    console.log('New chat ready - conversation will be created on first message');
-  };
-
-  // Handle All Chats - Show list of all user's chats
-  const handleAllChats = async () => {
-    // Load all conversations from database
-    const conversations = await ChatService.loadConversations();
-    if (conversations.length > 0) {
-      const projectWithConvos: Project = {
-        id: 'main',
-        name: 'All Conversations',
-        conversations: conversations.map(c => ({
-          id: c.id,
-          title: c.title,
-          starred: c.starred || false,
-          messages: [],
-          updated_at: c.updated_at,
-        })),
-        starred: false,
-      };
-      setProjects([projectWithConvos]);
-    }
-    console.log('Loaded all chats:', conversations.length);
+    console.log('New chat ready');
   };
 
   // Handle Projects - Allow project management and chat organization
   const handleProjects = () => {
     // TODO: Implement projects modal/sidebar
-    // For now, log the action
     console.log('Projects clicked - opening project manager');
-    // Future: Open modal to create/manage projects, tag chats to projects
     alert('Projects feature coming soon! This will let you organize chats by project.');
+  };
+
+  // Select a conversation from sidebar
+  const selectConversation = async (conv: Conversation) => {
+    setCurrentConversation(conv);
+    // Messages will be loaded by useEffect
+  };
+
+  // Toggle pin status
+  const togglePin = async (convId: string, pinned: boolean) => {
+    await ChatService.toggleStar(convId, pinned);
+    setAllConversations(prev => 
+      prev.map(c => c.id === convId ? { ...c, pinned } : c)
+    );
+  };
+
+  // Delete conversation
+  const deleteConversation = async (convId: string) => {
+    if (!confirm('Delete this conversation?')) return;
+    await ChatService.deleteConversation(convId);
+    setAllConversations(prev => prev.filter(c => c.id !== convId));
+    if (currentConversation?.id === convId) {
+      setCurrentConversation(null);
+      setMessages([]);
+    }
+  };
+
+  // Conversation Item Component
+  const ConversationItem = ({ 
+    conv, 
+    isActive, 
+    onSelect, 
+    onPin, 
+    onDelete 
+  }: { 
+    conv: Conversation; 
+    isActive: boolean; 
+    onSelect: () => void; 
+    onPin: () => void; 
+    onDelete: () => void;
+  }) => {
+    const [showMenu, setShowMenu] = useState(false);
+    
+    return (
+      <div 
+        className={`group relative flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors ${
+          isActive 
+            ? 'bg-gray-700/50 border border-cyan-500/50' 
+            : 'hover:bg-gray-800/50'
+        }`}
+        onClick={onSelect}
+      >
+        {/* Build status indicator */}
+        <div className="flex-shrink-0">
+          {conv.build_status === 'success' && (
+            <Check className="w-4 h-4 text-green-500" />
+          )}
+          {conv.build_status === 'failed' && (
+            <AlertCircle className="w-4 h-4 text-red-500" />
+          )}
+          {conv.build_status === 'pending' && (
+            <div className="w-4 h-4 border-2 border-yellow-500 border-t-transparent rounded-full animate-spin" />
+          )}
+          {!conv.build_status && (
+            <MessageSquare className="w-4 h-4 text-gray-500" />
+          )}
+        </div>
+        
+        {/* Title */}
+        <div className="flex-1 min-w-0">
+          <div className="text-sm text-white truncate">{conv.title || 'New Chat'}</div>
+        </div>
+        
+        {/* Pin indicator */}
+        {conv.pinned && (
+          <Star className="w-3 h-3 flex-shrink-0" style={{ color: COLORS.javariCyan }} fill={COLORS.javariCyan} />
+        )}
+        
+        {/* Menu button - shows on hover */}
+        <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+          <DropdownMenu open={showMenu} onOpenChange={setShowMenu}>
+            <DropdownMenuTrigger asChild>
+              <button 
+                className="p-1 rounded hover:bg-gray-700"
+                onClick={(e) => { e.stopPropagation(); setShowMenu(true); }}
+              >
+                <MoreVertical className="w-4 h-4 text-gray-400" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-40">
+              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onPin(); setShowMenu(false); }}>
+                <Star className="w-4 h-4 mr-2" />
+                {conv.pinned ? 'Unpin' : 'Pin'}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem 
+                onClick={(e) => { e.stopPropagation(); onDelete(); setShowMenu(false); }}
+                className="text-red-500"
+              >
+                <X className="w-4 h-4 mr-2" />
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+    );
   };
 
   // Copy artifact to clipboard
@@ -727,7 +830,7 @@ export default function MainJavariInterface() {
 
       {/* Main 3-Column Layout */}
       <div className="flex-1 flex overflow-hidden">
-        {/* LEFT SIDEBAR */}
+        {/* LEFT SIDEBAR - CLAUDE-LIKE CONVERSATION MANAGEMENT */}
         {leftSidebarOpen && (
           <div 
             className="w-full md:w-80 md:relative absolute inset-y-0 left-0 z-40 border-r flex flex-col"
@@ -755,10 +858,10 @@ export default function MainJavariInterface() {
               </button>
             </div>
 
-            {/* Quick Actions */}
+            {/* New Chat Button */}
             <div className="p-4 border-b" style={{ borderColor: COLORS.cyan + '40' }}>
               <Button 
-                className="w-full mb-2"
+                className="w-full"
                 onClick={handleNewChat}
                 style={{ 
                   backgroundColor: COLORS.red,
@@ -768,109 +871,145 @@ export default function MainJavariInterface() {
                 <Plus className="w-4 h-4 mr-2" />
                 New Chat
               </Button>
-              <div className="grid grid-cols-2 gap-2">
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={handleAllChats}
-                  style={{ borderColor: COLORS.cyan, color: COLORS.cyan }}
-                >
-                  <MessageSquare className="w-4 h-4 mr-2" />
-                  All Chats
-                </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={handleProjects}
-                  style={{ borderColor: COLORS.cyan, color: COLORS.cyan }}
-                >
-                  <FolderKanban className="w-4 h-4 mr-2" />
-                  Projects
-                </Button>
+            </div>
+
+            {/* Search Bar */}
+            <div className="px-4 py-2">
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="Search conversations..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full px-3 py-2 pl-9 rounded-lg text-sm text-white placeholder-gray-400 focus:outline-none focus:ring-2"
+                  style={{ 
+                    backgroundColor: COLORS.javaribg, 
+                    borderColor: COLORS.cyan + '40',
+                    border: '1px solid'
+                  }}
+                />
+                <MessageSquare className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               </div>
             </div>
 
-            {/* Starred Conversations - DYNAMIC FROM DATABASE */}
-            <div className="flex-1 overflow-hidden">
-              <div className="p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <Star className="w-4 h-4" style={{ color: COLORS.javariCyan }} fill={COLORS.javariCyan} />
-                  <span className="text-white font-medium">Active Chats</span>
-                </div>
-                <ScrollArea className="h-[calc(100vh-400px)]">
-                  <div className="space-y-2">
-                    {/* Current active conversation */}
-                    {currentConversation && (
-                      <Card 
-                        className="p-3 cursor-pointer border-2"
-                        style={{ backgroundColor: COLORS.javaribg, borderColor: COLORS.javariCyan }}
-                      >
-                        <div className="flex items-center gap-2">
-                          <Star className="w-3 h-3" style={{ color: COLORS.javariCyan }} fill={COLORS.javariCyan} />
-                          <div className="text-white text-sm font-medium truncate flex-1">
-                            {currentConversation.title || 'New Chat'}
-                          </div>
-                        </div>
-                        <div className="text-gray-400 text-xs mt-1">
-                          {messages.length} messages • Active
-                        </div>
-                      </Card>
-                    )}
-                    
-                    {/* Previous starred conversations from database */}
-                    {projects.flatMap(p => p.conversations)
-                      .filter(c => c.starred && c.id !== currentConversation?.id)
-                      .slice(0, 10)
-                      .map(conv => (
-                        <Card 
-                          key={conv.id}
-                          className="p-3 cursor-pointer hover:bg-gray-800"
-                          style={{ backgroundColor: COLORS.javaribg }}
-                          onClick={async () => {
-                            // Load this conversation
-                            const msgs = await ChatService.loadMessages(conv.id);
-                            setCurrentConversation({
-                              ...conv,
-                              messages: msgs.map(m => ({
-                                id: m.id,
-                                role: m.role,
-                                content: m.content,
-                                timestamp: m.created_at,
-                                provider: m.provider,
-                              }))
-                            });
-                            setMessages(msgs.map(m => ({
-                              id: m.id,
-                              role: m.role as 'user' | 'assistant',
-                              content: m.content,
-                              timestamp: m.created_at,
-                              provider: m.provider,
-                            })));
-                          }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <Star className="w-3 h-3 text-gray-500" />
-                            <div className="text-white text-sm font-medium truncate flex-1">
-                              {conv.title}
-                            </div>
-                          </div>
-                          <div className="text-gray-400 text-xs mt-1">
-                            {new Date(conv.updated_at).toLocaleDateString()}
-                          </div>
-                        </Card>
-                      ))
-                    }
-                    
-                    {/* Show placeholder if no conversations */}
-                    {!currentConversation && projects.flatMap(p => p.conversations).filter(c => c.starred).length === 0 && (
-                      <div className="text-gray-500 text-sm text-center py-4">
-                        Start a new chat to see it here
-                      </div>
-                    )}
+            {/* Conversation List - Grouped by Time */}
+            <ScrollArea className="flex-1 px-2">
+              <div className="space-y-4 py-2">
+                
+                {/* PINNED Section */}
+                {conversationGroups.pinned.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-2 px-2 py-1">
+                      <Star className="w-3 h-3" style={{ color: COLORS.javariCyan }} fill={COLORS.javariCyan} />
+                      <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Pinned</span>
+                    </div>
+                    {conversationGroups.pinned.map(conv => (
+                      <ConversationItem 
+                        key={conv.id} 
+                        conv={conv} 
+                        isActive={currentConversation?.id === conv.id}
+                        onSelect={() => selectConversation(conv)}
+                        onPin={() => togglePin(conv.id, !conv.pinned)}
+                        onDelete={() => deleteConversation(conv.id)}
+                      />
+                    ))}
                   </div>
-                </ScrollArea>
+                )}
+
+                {/* TODAY Section */}
+                {conversationGroups.today.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-2 px-2 py-1">
+                      <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Today</span>
+                    </div>
+                    {conversationGroups.today.map(conv => (
+                      <ConversationItem 
+                        key={conv.id} 
+                        conv={conv} 
+                        isActive={currentConversation?.id === conv.id}
+                        onSelect={() => selectConversation(conv)}
+                        onPin={() => togglePin(conv.id, !conv.pinned)}
+                        onDelete={() => deleteConversation(conv.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {/* YESTERDAY Section */}
+                {conversationGroups.yesterday.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-2 px-2 py-1">
+                      <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Yesterday</span>
+                    </div>
+                    {conversationGroups.yesterday.map(conv => (
+                      <ConversationItem 
+                        key={conv.id} 
+                        conv={conv} 
+                        isActive={currentConversation?.id === conv.id}
+                        onSelect={() => selectConversation(conv)}
+                        onPin={() => togglePin(conv.id, !conv.pinned)}
+                        onDelete={() => deleteConversation(conv.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {/* PREVIOUS 7 DAYS Section */}
+                {conversationGroups.previous7Days.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-2 px-2 py-1">
+                      <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Previous 7 Days</span>
+                    </div>
+                    {conversationGroups.previous7Days.map(conv => (
+                      <ConversationItem 
+                        key={conv.id} 
+                        conv={conv} 
+                        isActive={currentConversation?.id === conv.id}
+                        onSelect={() => selectConversation(conv)}
+                        onPin={() => togglePin(conv.id, !conv.pinned)}
+                        onDelete={() => deleteConversation(conv.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {/* OLDER Section */}
+                {conversationGroups.older.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-2 px-2 py-1">
+                      <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Older</span>
+                    </div>
+                    {conversationGroups.older.map(conv => (
+                      <ConversationItem 
+                        key={conv.id} 
+                        conv={conv} 
+                        isActive={currentConversation?.id === conv.id}
+                        onSelect={() => selectConversation(conv)}
+                        onPin={() => togglePin(conv.id, !conv.pinned)}
+                        onDelete={() => deleteConversation(conv.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {/* Empty State */}
+                {allConversations.length === 0 && !isLoading && (
+                  <div className="text-center py-8">
+                    <MessageSquare className="w-12 h-12 mx-auto mb-3 text-gray-500" />
+                    <p className="text-gray-400 text-sm">No conversations yet</p>
+                    <p className="text-gray-500 text-xs mt-1">Start a new chat to begin</p>
+                  </div>
+                )}
+
+                {/* Loading State */}
+                {isLoading && (
+                  <div className="text-center py-8">
+                    <div className="animate-spin w-6 h-6 border-2 border-gray-500 border-t-cyan-400 rounded-full mx-auto"></div>
+                    <p className="text-gray-400 text-sm mt-2">Loading...</p>
+                  </div>
+                )}
               </div>
-            </div>
+            </ScrollArea>
 
             {/* User Profile Menu - Bottom Left */}
             <div className="p-4 pb-20 border-t" style={{ borderColor: COLORS.cyan + '40' }}>
