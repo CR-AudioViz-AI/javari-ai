@@ -1,5 +1,51 @@
 'use client';
 
+// Web Speech API types
+interface SpeechRecognitionEvent extends Event {
+  results: SpeechRecognitionResultList;
+  resultIndex: number;
+}
+
+interface SpeechRecognitionResultList {
+  length: number;
+  item(index: number): SpeechRecognitionResult;
+  [index: number]: SpeechRecognitionResult;
+}
+
+interface SpeechRecognitionResult {
+  isFinal: boolean;
+  length: number;
+  item(index: number): SpeechRecognitionAlternative;
+  [index: number]: SpeechRecognitionAlternative;
+}
+
+interface SpeechRecognitionAlternative {
+  transcript: string;
+  confidence: number;
+}
+
+interface SpeechRecognition extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start(): void;
+  stop(): void;
+  abort(): void;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: ((event: Event) => void) | null;
+  onend: (() => void) | null;
+  onstart: (() => void) | null;
+}
+
+declare global {
+  interface Window {
+    SpeechRecognition: new () => SpeechRecognition;
+    webkitSpeechRecognition: new () => SpeechRecognition;
+  }
+}
+
+
+
 import React, { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { ChatService } from '@/lib/javari-services';
@@ -129,9 +175,12 @@ export default function MainJavariInterface() {
   const [userPlan, setUserPlan] = useState('Pro');
   const [userName, setUserName] = useState('Roy Henderson');
   const [language, setLanguage] = useState('English');
-  const [isListening, setIsListening] = useState(false);
+  // Voice listening handled by isListeningToUser
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [isListeningToUser, setIsListeningToUser] = useState(false);
+  const [interimTranscript, setInterimTranscript] = useState('');
+  const speechRecognitionRef = useRef<SpeechRecognition | null>(null);
   const [selectedAI, setSelectedAI] = useState<string>('auto');
   const [recommendedAI, setRecommendedAI] = useState<string>('gpt-4');
   const [aiSelectionModal, setAiSelectionModal] = useState<AISelectionModal>({
@@ -215,7 +264,91 @@ export default function MainJavariInterface() {
   };
 
   // Load conversations on mount
+  
+  // Initialize Speech Recognition for voice conversations
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const SpeechRecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (SpeechRecognitionClass) {
+        const recognition = new SpeechRecognitionClass();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+        
+        recognition.onresult = (event: SpeechRecognitionEvent) => {
+          let interim = '';
+          let final = '';
+          
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              final += transcript;
+            } else {
+              interim += transcript;
+            }
+          }
+          
+          setInterimTranscript(interim);
+          
+          if (final) {
+            setInputMessage(prev => prev + final);
+            setInterimTranscript('');
+          }
+        };
+        
+        recognition.onerror = (event) => {
+          console.error('Speech recognition error:', event);
+          setIsListeningToUser(false);
+        };
+        
+        recognition.onend = () => {
+          // If still supposed to be listening, restart
+          if (isListeningToUser) {
+            try {
+              recognition.start();
+            } catch (e) {
+              setIsListeningToUser(false);
+            }
+          }
+        };
+        
+        speechRecognitionRef.current = recognition;
+      }
+    }
+    
+    return () => {
+      if (speechRecognitionRef.current) {
+        speechRecognitionRef.current.abort();
+      }
+    };
+  }, [isListeningToUser]);
+
+  // Toggle speech recognition
+  const toggleSpeechRecognition = () => {
+    if (!speechRecognitionRef.current) {
+      alert('Speech recognition not supported in this browser. Try Chrome or Edge.');
+      return;
+    }
+    
+    if (isListeningToUser) {
+      speechRecognitionRef.current.stop();
+      setIsListeningToUser(false);
+      // Auto-send if there's text
+      if (inputMessage.trim()) {
+        handleSendMessage();
+      }
+    } else {
+      try {
+        speechRecognitionRef.current.start();
+        setIsListeningToUser(true);
+        setInterimTranscript('');
+      } catch (e) {
+        console.error('Failed to start speech recognition:', e);
+      }
+    }
+  };
+
+useEffect(() => {
     loadConversations();
   }, []);
 
@@ -654,6 +787,14 @@ export default function MainJavariInterface() {
         }`}
         onClick={onSelect}
       >
+      {/* Voice conversation animations */}
+      <style jsx global>{\`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.7; transform: scale(1.05); }
+        }
+      \`}</style>
+
         {/* Build status indicator */}
         <div className="flex-shrink-0">
           {conv.build_status === 'success' && (
@@ -1145,44 +1286,57 @@ export default function MainJavariInterface() {
           <div className="p-2 md:p-4 pb-6 md:pb-24 border-t" style={{ borderColor: COLORS.cyan + '40', backgroundColor: COLORS.navy }}>
             {/* Text Input */}
             <div className="flex gap-2 mb-3">
-              <Button
-                size="icon"
-                variant="outline"
-                className="hidden md:flex"
-                style={{ borderColor: COLORS.cyan }}
-                onClick={() => setIsListening(!isListening)}
-              >
-                {isListening ? (
-                  <Mic className="w-4 h-4" style={{ color: COLORS.red }} />
-                ) : (
-                  <MicOff className="w-4 h-4" style={{ color: COLORS.cyan }} />
-                )}
-              </Button>
+              
               <button
                 onClick={() => setVoiceEnabled(!voiceEnabled)}
-                className="p-2 md:p-3 rounded-lg transition-all mr-2"
+                className="p-2 md:p-3 rounded-lg transition-all mr-1"
                 style={{
                   backgroundColor: voiceEnabled ? 'rgba(0, 188, 212, 0.2)' : 'transparent',
                   color: voiceEnabled ? '#00BCD4' : '#888',
                   border: voiceEnabled ? '1px solid rgba(0, 188, 212, 0.3)' : '1px solid #333',
                 }}
-                title={voiceEnabled ? "Disable voice responses" : "Enable voice responses"}
+                title={voiceEnabled ? "Javari voice ON" : "Javari voice OFF"}
               >
                 {voiceEnabled ? <Volume2 className="w-4 h-4 md:w-5 md:h-5" /> : <VolumeX className="w-4 h-4 md:w-5 md:h-5" />}
               </button>
-              <input
-                type="text"
-                value={inputMessage}
-                onChange={(e) => setInputMessage(e.target.value)}
+              <button
+                onClick={toggleSpeechRecognition}
+                className="p-2 md:p-3 rounded-lg transition-all mr-2"
+                style={{
+                  backgroundColor: isListeningToUser ? 'rgba(253, 32, 29, 0.2)' : 'transparent',
+                  color: isListeningToUser ? '#FD201D' : '#888',
+                  border: isListeningToUser ? '1px solid rgba(253, 32, 29, 0.5)' : '1px solid #333',
+                  animation: isListeningToUser ? 'pulse 1.5s ease-in-out infinite' : 'none',
+                }}
+                title={isListeningToUser ? "Stop listening (click or will auto-send)" : "Click to speak"}
+              >
+                {isListeningToUser ? <Mic className="w-4 h-4 md:w-5 md:h-5" /> : <MicOff className="w-4 h-4 md:w-5 md:h-5" />}
+              </button>
+              <div className="flex-1 relative">
+                {/* Live transcription display */}
+                {(isListeningToUser || interimTranscript) && (
+                  <div 
+                    className="absolute -top-8 left-0 right-0 text-xs text-cyan-400 truncate"
+                    style={{ color: '#00BCD4' }}
+                  >
+                    {isListeningToUser && <span className="animate-pulse">🎤 Listening... </span>}
+                    {interimTranscript && <span className="opacity-70">{interimTranscript}</span>}
+                  </div>
+                )}
+                <input
+                  type="text"
+                  value={inputMessage}
+                  onChange={(e) => setInputMessage(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
                 placeholder="Type your message..."
                 className="flex-1 px-3 md:px-4 py-2 md:py-3 text-sm md:text-base rounded-lg border focus:outline-none focus:ring-2"
                 style={{
-                  backgroundColor: COLORS.javaribg,
-                  borderColor: COLORS.cyan,
-                  color: 'white',
-                }}
-              />
+                    backgroundColor: COLORS.javaribg,
+                    borderColor: isListeningToUser ? '#FD201D' : COLORS.cyan,
+                    color: 'white',
+                  }}
+                />
+              </div>
               <Button
                 onClick={handleSendMessage}
                 className="px-3 md:px-4"
@@ -1569,4 +1723,5 @@ export default function MainJavariInterface() {
     </div>
   );
 }
+
 
