@@ -8,6 +8,7 @@
 
 import { useState, useEffect } from 'react';
 import {
+import LearningDashboardCard from '@/components/admin/LearningDashboardCard';
   Activity, Users, CreditCard, AlertTriangle, Server,
   Database, Zap, TrendingUp, TrendingDown, Clock,
   CheckCircle, XCircle, RefreshCw, Settings, Shield,
@@ -340,6 +341,11 @@ export default function AdminDashboard() {
                 </div>
               )}
             </div>
+
+          {/* Learning Dashboard Card */}
+          <div className="mt-6">
+            <LearningDashboardCard />
+          </div>
 
             {/* Uptime */}
             <div className="bg-gray-800/50 rounded-xl border border-gray-700 p-5">
