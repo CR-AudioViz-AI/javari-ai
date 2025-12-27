@@ -1,6 +1,7 @@
-// app/api/webhooks/paypal/route.ts
-// PayPal Webhook Handler for CR AudioViz AI
-// Timestamp: 2025-12-02
+/**
+ * PAYPAL WEBHOOK HANDLER
+ * CR AudioViz AI - Henderson Standard
+ */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
@@ -10,188 +11,182 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const PAYPAL_API_URL = process.env.PAYPAL_MODE === 'live'
-  ? 'https://api-m.paypal.com'
+const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID!;
+const PAYPAL_SECRET = process.env.PAYPAL_CLIENT_SECRET!;
+const PAYPAL_API = process.env.PAYPAL_MODE === 'live' 
+  ? 'https://api-m.paypal.com' 
   : 'https://api-m.sandbox.paypal.com';
 
-const PRODUCT_CREDITS: Record<string, { credits: number; plan: string | null }> = {
-  'P-STARTER': { credits: 100, plan: 'starter' },
-  'P-PRO': { credits: 500, plan: 'pro' },
-  'P-BUSINESS': { credits: 2000, plan: 'business' },
-  'P-ENTERPRISE': { credits: 99999, plan: 'enterprise' },
-  'CREDITS-10': { credits: 10, plan: null },
-  'CREDITS-50': { credits: 50, plan: null },
-  'CREDITS-200': { credits: 200, plan: null },
-};
-
-async function getAccessToken(): Promise<string> {
-  const auth = Buffer.from(
-    `${process.env.PAYPAL_CLIENT_ID}:${process.env.PAYPAL_CLIENT_SECRET}`
-  ).toString('base64');
-
-  const response = await fetch(`${PAYPAL_API_URL}/v1/oauth2/token`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Basic ${auth}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: 'grant_type=client_credentials',
-  });
-
-  const data = await response.json();
-  return data.access_token;
-}
-
-async function addCreditsToUser(userId: string, credits: number, plan: string | null, reference: string) {
-  const { data: current } = await supabase
-    .from('user_credits')
-    .select('balance')
-    .eq('user_id', userId)
-    .single();
-
-  const newBalance = (current?.balance || 0) + credits;
-
-  const updateData: any = { balance: newBalance, updated_at: new Date().toISOString() };
-  if (plan) {
-    updateData.plan = plan;
-    updateData.plan_credits_monthly = credits;
-  }
-
-  await supabase.from('user_credits').update(updateData).eq('user_id', userId);
-
-  await supabase.from('credit_transactions').insert({
-    user_id: userId,
-    amount: credits,
-    description: plan ? `${plan.toUpperCase()} via PayPal` : `${credits} credits via PayPal`,
-    balance_after: newBalance,
-    build_id: reference,
-  });
-
-  console.log(`PayPal: Added ${credits} credits to ${userId}. Balance: ${newBalance}`);
-}
-
-async function handlePaymentCompleted(event: any) {
-  console.log('Processing PAYMENT.CAPTURE.COMPLETED');
-  const resource = event.resource;
-  const customId = resource.custom_id;
-
-  if (!customId) return;
-
+async function verifyWebhookSignature(
+  body: string,
+  headers: Headers
+): Promise<boolean> {
   try {
-    const { userId, productId, credits } = JSON.parse(customId);
-    const config = PRODUCT_CREDITS[productId] || { credits, plan: null };
-    await addCreditsToUser(userId, config.credits, config.plan, resource.id);
+    // Get access token
+    const authResponse = await fetch(`${PAYPAL_API}/v1/oauth2/token`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${Buffer.from(`${PAYPAL_CLIENT_ID}:${PAYPAL_SECRET}`).toString('base64')}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: 'grant_type=client_credentials'
+    });
+    const { access_token } = await authResponse.json();
+
+    // Verify signature
+    const verifyResponse = await fetch(`${PAYPAL_API}/v1/notifications/verify-webhook-signature`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${access_token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        auth_algo: headers.get('paypal-auth-algo'),
+        cert_url: headers.get('paypal-cert-url'),
+        transmission_id: headers.get('paypal-transmission-id'),
+        transmission_sig: headers.get('paypal-transmission-sig'),
+        transmission_time: headers.get('paypal-transmission-time'),
+        webhook_id: process.env.PAYPAL_WEBHOOK_ID,
+        webhook_event: JSON.parse(body)
+      })
+    });
+
+    const result = await verifyResponse.json();
+    return result.verification_status === 'SUCCESS';
   } catch (error) {
-    console.error('Error processing payment:', error);
-  }
-}
-
-async function handleSubscriptionActivated(event: any) {
-  console.log('Processing BILLING.SUBSCRIPTION.ACTIVATED');
-  const resource = event.resource;
-  const customId = resource.custom_id;
-
-  if (!customId) return;
-
-  try {
-    const { userId, planId } = JSON.parse(customId);
-    const config = PRODUCT_CREDITS[planId];
-
-    if (config) {
-      await addCreditsToUser(userId, config.credits, config.plan, resource.id);
-
-      await supabase.from('subscriptions').insert({
-        user_id: userId,
-        paypal_subscription_id: resource.id,
-        plan: config.plan,
-        status: 'active',
-        credits_monthly: config.credits,
-        current_period_start: new Date().toISOString(),
-      });
-    }
-  } catch (error) {
-    console.error('Error processing subscription:', error);
-  }
-}
-
-async function handleSubscriptionPayment(event: any) {
-  console.log('Processing PAYMENT.SALE.COMPLETED');
-  const resource = event.resource;
-  const subscriptionId = resource.billing_agreement_id;
-
-  if (!subscriptionId) return;
-
-  const { data: subscription } = await supabase
-    .from('subscriptions')
-    .select('user_id, plan, credits_monthly')
-    .eq('paypal_subscription_id', subscriptionId)
-    .single();
-
-  if (subscription) {
-    await addCreditsToUser(subscription.user_id, subscription.credits_monthly, null, resource.id);
-  }
-}
-
-async function handleSubscriptionCancelled(event: any) {
-  console.log('Processing BILLING.SUBSCRIPTION.CANCELLED');
-  const resource = event.resource;
-
-  const { data: subscription } = await supabase
-    .from('subscriptions')
-    .select('user_id')
-    .eq('paypal_subscription_id', resource.id)
-    .single();
-
-  if (subscription) {
-    await supabase.from('user_credits')
-      .update({ plan: 'free', plan_credits_monthly: 0 })
-      .eq('user_id', subscription.user_id);
-
-    await supabase.from('subscriptions')
-      .update({ status: 'cancelled' })
-      .eq('paypal_subscription_id', resource.id);
+    console.error('PayPal verification error:', error);
+    return false;
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const eventType = body.event_type;
-
-    console.log('PayPal webhook:', eventType);
-
-    switch (eventType) {
-      case 'PAYMENT.CAPTURE.COMPLETED':
-        await handlePaymentCompleted(body);
-        break;
-      case 'BILLING.SUBSCRIPTION.ACTIVATED':
-        await handleSubscriptionActivated(body);
-        break;
-      case 'PAYMENT.SALE.COMPLETED':
-        await handleSubscriptionPayment(body);
-        break;
-      case 'BILLING.SUBSCRIPTION.CANCELLED':
-      case 'BILLING.SUBSCRIPTION.SUSPENDED':
-        await handleSubscriptionCancelled(body);
-        break;
-      default:
-        console.log(`Unhandled: ${eventType}`);
+    const body = await request.text();
+    
+    // Verify signature in production
+    if (process.env.PAYPAL_MODE === 'live') {
+      const isValid = await verifyWebhookSignature(body, request.headers);
+      if (!isValid) {
+        return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
+      }
     }
 
-    await supabase.from('webhook_events').insert({
-      stripe_event_id: `paypal_${body.id}`,
-      event_type: eventType,
-      processed: true,
-      payload: body,
+    const event = JSON.parse(body);
+    console.log(`Processing PayPal event: ${event.event_type}`);
+
+    switch (event.event_type) {
+      case 'PAYMENT.CAPTURE.COMPLETED': {
+        await handlePaymentCompleted(event.resource);
+        break;
+      }
+
+      case 'BILLING.SUBSCRIPTION.ACTIVATED': {
+        await handleSubscriptionActivated(event.resource);
+        break;
+      }
+
+      case 'BILLING.SUBSCRIPTION.CANCELLED': {
+        await handleSubscriptionCancelled(event.resource);
+        break;
+      }
+
+      case 'PAYMENT.CAPTURE.REFUNDED': {
+        await handleRefund(event.resource);
+        break;
+      }
+    }
+
+    // Log webhook
+    await supabase.from('webhook_logs').insert({
+      provider: 'paypal',
+      event_type: event.event_type,
+      event_id: event.id,
+      payload: event.resource,
+      processed_at: new Date().toISOString()
     });
 
     return NextResponse.json({ received: true });
-  } catch (error: any) {
+
+  } catch (error) {
     console.error('PayPal webhook error:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: 'Webhook processing failed' }, { status: 500 });
   }
 }
 
-export async function GET() {
-  return NextResponse.json({ status: 'PayPal webhook ready' });
+async function handlePaymentCompleted(resource: any) {
+  const customRef = resource.custom_id || resource.invoice_id;
+  
+  // Parse user ID and credits from custom reference
+  // Format: "user_xxx_credits_100"
+  const match = customRef?.match(/user_(\w+)_credits_(\d+)/);
+  if (match) {
+    const userId = match[1];
+    const credits = parseInt(match[2]);
+
+    const { data: user } = await supabase
+      .from('users')
+      .select('id, credits_balance')
+      .eq('id', userId)
+      .single();
+
+    if (user) {
+      await supabase
+        .from('users')
+        .update({ credits_balance: user.credits_balance + credits })
+        .eq('id', userId);
+
+      await supabase.from('credit_transactions').insert({
+        user_id: userId,
+        amount: credits,
+        type: 'purchase',
+        action: 'paypal_payment',
+        balance_before: user.credits_balance,
+        balance_after: user.credits_balance + credits
+      });
+    }
+  }
+}
+
+async function handleSubscriptionActivated(resource: any) {
+  const subscriberId = resource.subscriber?.payer_id;
+  const planId = resource.plan_id;
+  
+  let tier = 'starter';
+  if (planId?.includes('pro')) tier = 'pro';
+  else if (planId?.includes('enterprise')) tier = 'enterprise';
+
+  await supabase
+    .from('users')
+    .update({
+      subscription_tier: tier,
+      subscription_status: 'active',
+      paypal_subscription_id: resource.id
+    })
+    .eq('paypal_payer_id', subscriberId);
+}
+
+async function handleSubscriptionCancelled(resource: any) {
+  await supabase
+    .from('users')
+    .update({
+      subscription_tier: 'free',
+      subscription_status: 'cancelled'
+    })
+    .eq('paypal_subscription_id', resource.id);
+}
+
+async function handleRefund(resource: any) {
+  // Similar to Stripe refund handling
+  const amount = parseFloat(resource.amount?.value || '0');
+  const creditsToRemove = Math.floor(amount * 10);
+  
+  // Log for manual review
+  await supabase.from('tickets').insert({
+    type: 'billing',
+    priority: 'medium',
+    status: 'open',
+    subject: 'PayPal Refund Processed',
+    description: `Refund of $${amount} processed. Credits adjustment: ${creditsToRemove}`,
+    auto_created: true
+  });
 }
