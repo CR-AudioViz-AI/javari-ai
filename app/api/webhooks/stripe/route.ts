@@ -1,272 +1,224 @@
-import { NextRequest, NextResponse } from 'next/server';
-import Stripe from 'stripe';
-import { createClient } from '@supabase/supabase-js';
+/**
+ * STRIPE WEBHOOK HANDLER
+ * CR AudioViz AI - Henderson Standard
+ * 
+ * Handles all Stripe events:
+ * - Successful payments → Add credits
+ * - Subscription changes → Update tier
+ * - Failed payments → Notify user
+ * - Refunds → Adjust credits
+ */
 
-// Initialize Stripe
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+import Stripe from 'stripe';
+
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2024-12-18.acacia',
+  apiVersion: '2023-10-16',
 });
 
-// Initialize Supabase with service role for admin operations
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-// Credit amounts for one-time purchases
-const CREDIT_AMOUNTS: Record<string, number> = {
-  'price_1SZxfq7YeQ1dZTUvuspvv7io': 10,    // 10 Credit Pack
-  'price_1SZxg37YeQ1dZTUv5L4OQlei': 50,    // 50 Credit Pack
-  'price_1SZxgE7YeQ1dZTUvLC8r8X8u': 200,   // 200 Credit Pack
-  'price_1SLZoF7YeQ1dZTUvp4n7ZlMt': 100,   // JavariAI 100 credits
-  'price_1SLZoM7YeQ1dZTUvMmg4fx91': 500,   // JavariAI 500 credits
+const WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET!;
+
+// Credit packages
+const CREDIT_PACKAGES: Record<string, number> = {
+  'price_credits_100': 100,
+  'price_credits_500': 500,
+  'price_credits_1000': 1000,
+  'price_credits_5000': 5000,
 };
 
-// Subscription tier mapping
-const SUBSCRIPTION_TIERS: Record<string, string> = {
-  'price_1SZxfD7YeQ1dZTUvujSxg2DV': 'starter',
-  'price_1SZxfM7YeQ1dZTUv3jK4awd0': 'pro',
-  'price_1SZxfU7YeQ1dZTUvN07nxBW1': 'business',
-  'price_1SZxfd7YeQ1dZTUv8IEjsDh5': 'enterprise',
-  'price_1SLZoA7YeQ1dZTUvTGlVh51G': 'basic',
-};
-
-// Monthly credits per subscription tier
-const TIER_CREDITS: Record<string, number> = {
+// Subscription tiers and their monthly credits
+const SUBSCRIPTION_CREDITS: Record<string, number> = {
+  'free': 10,
   'starter': 100,
   'pro': 500,
-  'business': 2000,
-  'enterprise': 10000,
-  'basic': 100,
+  'enterprise': 2000,
 };
 
 export async function POST(request: NextRequest) {
-  const body = await request.text();
-  const signature = request.headers.get('stripe-signature');
-
-  if (!signature) {
-    console.error('Missing Stripe signature');
-    return NextResponse.json({ error: 'Missing signature' }, { status: 400 });
-  }
-
-  let event: Stripe.Event;
-
   try {
-    event = stripe.webhooks.constructEvent(
-      body,
-      signature,
-      process.env.STRIPE_WEBHOOK_SECRET!
-    );
-  } catch (err) {
-    console.error('Webhook signature verification failed:', err);
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
-  }
+    const body = await request.text();
+    const signature = request.headers.get('stripe-signature')!;
 
-  console.log(`[Stripe Webhook] Event received: ${event.type}`);
+    let event: Stripe.Event;
+    try {
+      event = stripe.webhooks.constructEvent(body, signature, WEBHOOK_SECRET);
+    } catch (err) {
+      console.error('Webhook signature verification failed:', err);
+      return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
+    }
 
-  try {
+    console.log(`Processing Stripe event: ${event.type}`);
+
     switch (event.type) {
-      case 'checkout.session.completed':
-        await handleCheckoutComplete(event.data.object as Stripe.Checkout.Session);
+      case 'checkout.session.completed': {
+        const session = event.data.object as Stripe.Checkout.Session;
+        await handleCheckoutComplete(session);
         break;
+      }
 
       case 'customer.subscription.created':
-      case 'customer.subscription.updated':
-        await handleSubscriptionUpdate(event.data.object as Stripe.Subscription);
+      case 'customer.subscription.updated': {
+        const subscription = event.data.object as Stripe.Subscription;
+        await handleSubscriptionChange(subscription);
         break;
+      }
 
-      case 'customer.subscription.deleted':
-        await handleSubscriptionCanceled(event.data.object as Stripe.Subscription);
+      case 'customer.subscription.deleted': {
+        const subscription = event.data.object as Stripe.Subscription;
+        await handleSubscriptionCancelled(subscription);
         break;
+      }
 
-      case 'invoice.paid':
-        await handleInvoicePaid(event.data.object as Stripe.Invoice);
+      case 'invoice.payment_succeeded': {
+        const invoice = event.data.object as Stripe.Invoice;
+        await handleInvoicePaid(invoice);
         break;
+      }
 
-      case 'invoice.payment_failed':
-        await handlePaymentFailed(event.data.object as Stripe.Invoice);
+      case 'invoice.payment_failed': {
+        const invoice = event.data.object as Stripe.Invoice;
+        await handlePaymentFailed(invoice);
         break;
+      }
 
-      case 'payment_intent.succeeded':
-        await handlePaymentSucceeded(event.data.object as Stripe.PaymentIntent);
+      case 'charge.refunded': {
+        const charge = event.data.object as Stripe.Charge;
+        await handleRefund(charge);
         break;
+      }
 
       default:
-        console.log(`[Stripe Webhook] Unhandled event type: ${event.type}`);
+        console.log(`Unhandled event type: ${event.type}`);
     }
+
+    // Log webhook event
+    await supabase.from('webhook_logs').insert({
+      provider: 'stripe',
+      event_type: event.type,
+      event_id: event.id,
+      payload: event.data.object,
+      processed_at: new Date().toISOString()
+    });
 
     return NextResponse.json({ received: true });
 
   } catch (error) {
-    console.error('[Stripe Webhook] Error processing event:', error);
-    return NextResponse.json(
-      { error: 'Webhook processing failed' },
-      { status: 500 }
-    );
+    console.error('Stripe webhook error:', error);
+    return NextResponse.json({ error: 'Webhook processing failed' }, { status: 500 });
   }
 }
 
 async function handleCheckoutComplete(session: Stripe.Checkout.Session) {
-  console.log('[Stripe] Checkout completed:', session.id);
-
-  const customerEmail = session.customer_details?.email;
   const customerId = session.customer as string;
-  const userId = session.metadata?.userId;
-
-  if (!customerEmail && !userId) {
-    console.error('[Stripe] No customer email or userId found');
-    return;
-  }
-
-  // Find or create user
-  let user;
-  if (userId) {
-    const { data } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', userId)
-      .single();
-    user = data;
-  } else if (customerEmail) {
-    const { data } = await supabase
-      .from('users')
-      .select('*')
-      .eq('email', customerEmail)
-      .single();
-    user = data;
-  }
-
-  // Update user with Stripe customer ID
-  if (user && customerId) {
-    await supabase
-      .from('users')
-      .update({ 
-        stripe_customer_id: customerId,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', user.id);
-  }
-
-  // Handle one-time payment (credit purchase)
-  if (session.mode === 'payment') {
-    const lineItems = await stripe.checkout.sessions.listLineItems(session.id);
-    
-    for (const item of lineItems.data) {
-      const priceId = item.price?.id;
-      if (priceId && CREDIT_AMOUNTS[priceId]) {
-        const credits = CREDIT_AMOUNTS[priceId];
-        await addCreditsToUser(user?.id || userId, credits, 'purchase', session.id);
-        console.log(`[Stripe] Added ${credits} credits for user ${user?.id || userId}`);
-      }
-    }
-  }
-
-  // Log the transaction
-  await logTransaction({
-    user_id: user?.id || userId,
-    stripe_session_id: session.id,
-    stripe_customer_id: customerId,
-    amount: session.amount_total || 0,
-    currency: session.currency || 'usd',
-    status: 'completed',
-    type: session.mode === 'subscription' ? 'subscription' : 'one_time',
-    metadata: session.metadata,
-  });
-}
-
-async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
-  console.log('[Stripe] Subscription updated:', subscription.id);
-
-  const customerId = subscription.customer as string;
-  const priceId = subscription.items.data[0]?.price.id;
-  const tier = SUBSCRIPTION_TIERS[priceId] || 'free';
-
+  const metadata = session.metadata || {};
+  
   // Find user by Stripe customer ID
   const { data: user } = await supabase
     .from('users')
-    .select('*')
+    .select('id, credits_balance')
     .eq('stripe_customer_id', customerId)
     .single();
 
   if (!user) {
-    console.error('[Stripe] User not found for customer:', customerId);
+    console.error('User not found for customer:', customerId);
     return;
   }
 
-  // Update user subscription
+  // Check if this was a credit purchase
+  if (metadata.type === 'credits') {
+    const credits = parseInt(metadata.credits || '0');
+    if (credits > 0) {
+      await supabase
+        .from('users')
+        .update({ credits_balance: user.credits_balance + credits })
+        .eq('id', user.id);
+
+      await supabase.from('credit_transactions').insert({
+        user_id: user.id,
+        amount: credits,
+        type: 'purchase',
+        action: 'stripe_checkout',
+        balance_before: user.credits_balance,
+        balance_after: user.credits_balance + credits
+      });
+    }
+  }
+}
+
+async function handleSubscriptionChange(subscription: Stripe.Subscription) {
+  const customerId = subscription.customer as string;
+  const priceId = subscription.items.data[0]?.price.id;
+  
+  // Determine tier from price
+  let tier = 'free';
+  if (priceId?.includes('starter')) tier = 'starter';
+  else if (priceId?.includes('pro')) tier = 'pro';
+  else if (priceId?.includes('enterprise')) tier = 'enterprise';
+
   await supabase
     .from('users')
     .update({
       subscription_tier: tier,
       subscription_status: subscription.status,
-      stripe_subscription_id: subscription.id,
-      subscription_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
-      updated_at: new Date().toISOString(),
+      subscription_id: subscription.id,
+      subscription_ends_at: new Date(subscription.current_period_end * 1000).toISOString()
     })
-    .eq('id', user.id);
-
-  // Grant monthly credits for new/renewed subscription
-  if (subscription.status === 'active' && TIER_CREDITS[tier]) {
-    await addCreditsToUser(user.id, TIER_CREDITS[tier], 'subscription', subscription.id);
-    console.log(`[Stripe] Granted ${TIER_CREDITS[tier]} monthly credits for ${tier} tier`);
-  }
+    .eq('stripe_customer_id', customerId);
 }
 
-async function handleSubscriptionCanceled(subscription: Stripe.Subscription) {
-  console.log('[Stripe] Subscription canceled:', subscription.id);
-
+async function handleSubscriptionCancelled(subscription: Stripe.Subscription) {
   const customerId = subscription.customer as string;
-
-  // Find and update user
-  const { data: user } = await supabase
+  
+  await supabase
     .from('users')
-    .select('id')
-    .eq('stripe_customer_id', customerId)
-    .single();
-
-  if (user) {
-    await supabase
-      .from('users')
-      .update({
-        subscription_tier: 'free',
-        subscription_status: 'canceled',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', user.id);
-  }
+    .update({
+      subscription_tier: 'free',
+      subscription_status: 'cancelled',
+      subscription_ends_at: new Date(subscription.current_period_end * 1000).toISOString()
+    })
+    .eq('stripe_customer_id', customerId);
 }
 
 async function handleInvoicePaid(invoice: Stripe.Invoice) {
-  console.log('[Stripe] Invoice paid:', invoice.id);
+  const customerId = invoice.customer as string;
+  
+  // Add monthly credits for subscription
+  const { data: user } = await supabase
+    .from('users')
+    .select('id, subscription_tier, credits_balance')
+    .eq('stripe_customer_id', customerId)
+    .single();
 
-  // For recurring subscription payments, grant monthly credits
-  if (invoice.subscription) {
-    const subscription = await stripe.subscriptions.retrieve(invoice.subscription as string);
-    const priceId = subscription.items.data[0]?.price.id;
-    const tier = SUBSCRIPTION_TIERS[priceId];
-
-    if (tier && TIER_CREDITS[tier]) {
-      const customerId = invoice.customer as string;
-      const { data: user } = await supabase
+  if (user && user.subscription_tier !== 'free') {
+    const monthlyCredits = SUBSCRIPTION_CREDITS[user.subscription_tier] || 0;
+    if (monthlyCredits > 0) {
+      await supabase
         .from('users')
-        .select('id')
-        .eq('stripe_customer_id', customerId)
-        .single();
+        .update({ credits_balance: user.credits_balance + monthlyCredits })
+        .eq('id', user.id);
 
-      if (user) {
-        await addCreditsToUser(user.id, TIER_CREDITS[tier], 'subscription_renewal', invoice.id);
-        console.log(`[Stripe] Renewed ${TIER_CREDITS[tier]} credits for user ${user.id}`);
-      }
+      await supabase.from('credit_transactions').insert({
+        user_id: user.id,
+        amount: monthlyCredits,
+        type: 'subscription',
+        action: `monthly_${user.subscription_tier}`,
+        balance_before: user.credits_balance,
+        balance_after: user.credits_balance + monthlyCredits
+      });
     }
   }
 }
 
 async function handlePaymentFailed(invoice: Stripe.Invoice) {
-  console.log('[Stripe] Payment failed:', invoice.id);
-
   const customerId = invoice.customer as string;
-
-  // Find user and update status
+  
+  // Log failed payment and notify user
   const { data: user } = await supabase
     .from('users')
     .select('id, email')
@@ -274,90 +226,47 @@ async function handlePaymentFailed(invoice: Stripe.Invoice) {
     .single();
 
   if (user) {
-    await supabase
-      .from('users')
-      .update({
-        subscription_status: 'past_due',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', user.id);
-
-    // Log failed payment for follow-up
-    await supabase.from('payment_events').insert({
+    // Create support ticket
+    await supabase.from('tickets').insert({
       user_id: user.id,
-      event_type: 'payment_failed',
-      stripe_invoice_id: invoice.id,
-      amount: invoice.amount_due,
-      created_at: new Date().toISOString(),
+      type: 'billing',
+      priority: 'high',
+      status: 'open',
+      subject: 'Payment Failed',
+      description: `Payment failed for invoice ${invoice.id}. Amount: $${(invoice.amount_due / 100).toFixed(2)}`,
+      auto_created: true
     });
   }
 }
 
-async function handlePaymentSucceeded(paymentIntent: Stripe.PaymentIntent) {
-  console.log('[Stripe] Payment succeeded:', paymentIntent.id);
-}
-
-async function addCreditsToUser(
-  userId: string | undefined,
-  credits: number,
-  source: string,
-  referenceId: string
-) {
-  if (!userId) return;
-
+async function handleRefund(charge: Stripe.Charge) {
+  const customerId = charge.customer as string;
+  const refundAmount = charge.amount_refunded / 100;
+  
+  // Calculate credits to remove (approximate)
+  const creditsToRemove = Math.floor(refundAmount * 10); // $1 = 10 credits
+  
   const { data: user } = await supabase
     .from('users')
-    .select('credits')
-    .eq('id', userId)
+    .select('id, credits_balance')
+    .eq('stripe_customer_id', customerId)
     .single();
 
-  const currentCredits = user?.credits || 0;
-  const newCredits = currentCredits + credits;
+  if (user && creditsToRemove > 0) {
+    const newBalance = Math.max(0, user.credits_balance - creditsToRemove);
+    
+    await supabase
+      .from('users')
+      .update({ credits_balance: newBalance })
+      .eq('id', user.id);
 
-  await supabase
-    .from('users')
-    .update({ 
-      credits: newCredits,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', userId);
-
-  await supabase.from('credit_transactions').insert({
-    user_id: userId,
-    amount: credits,
-    balance_after: newCredits,
-    type: 'credit',
-    source: source,
-    reference_id: referenceId,
-    created_at: new Date().toISOString(),
-  });
-}
-
-async function logTransaction(data: {
-  user_id?: string;
-  stripe_session_id: string;
-  stripe_customer_id: string;
-  amount: number;
-  currency: string;
-  status: string;
-  type: string;
-  metadata?: Stripe.Metadata | null;
-}) {
-  try {
-    await supabase.from('transactions').insert({
-      ...data,
-      metadata: data.metadata || {},
-      created_at: new Date().toISOString(),
+    await supabase.from('credit_transactions').insert({
+      user_id: user.id,
+      amount: -creditsToRemove,
+      type: 'refund_adjustment',
+      action: 'stripe_refund',
+      balance_before: user.credits_balance,
+      balance_after: newBalance
     });
-  } catch (error) {
-    console.error('[Stripe] Failed to log transaction:', error);
   }
-}
-
-export async function GET() {
-  return NextResponse.json({
-    status: 'ok',
-    message: 'Stripe webhook endpoint is active',
-    timestamp: new Date().toISOString(),
-  });
 }
