@@ -1,9 +1,10 @@
 // app/api/chat/route.ts
-// Javari AI Chat API with System Prompt Injection + RAG
+// Javari AI Chat API with System Prompt Injection + RAG + OpenRouter
 // Updated: December 29, 2025
 // 
 // This API injects the knowledge base into EVERY AI call
 // ensuring consistent behavior across all providers
+// Now with OpenRouter for 500+ model access!
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
@@ -22,7 +23,7 @@ interface ChatMessage {
 
 interface ChatRequest {
   messages: ChatMessage[];
-  provider?: 'openai' | 'anthropic' | 'gemini' | 'groq' | 'auto';
+  provider?: 'openai' | 'anthropic' | 'gemini' | 'groq' | 'openrouter' | 'auto';
   model?: string;
   userId?: string;
   sessionId?: string;
@@ -208,8 +209,56 @@ async function callGemini(
   return data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated.';
 }
 
+// ============================================
+// NEW: OpenRouter - Access 500+ Models
+// ============================================
+
+async function callOpenRouter(
+  systemPrompt: string,
+  messages: ChatMessage[],
+  model: string = 'deepseek/deepseek-chat' // FREE by default!
+): Promise<string> {
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://javariai.com',
+      'X-Title': 'Javari AI',
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        ...messages,
+      ],
+      max_tokens: 4096,
+      temperature: 0.7,
+    }),
+  });
+  
+  const data = await response.json();
+  
+  // Log usage for tracking
+  if (data.usage) {
+    console.log(`[OpenRouter] Model: ${model}, Tokens: ${data.usage.total_tokens}, Cost: $${data.usage.cost || 0}`);
+  }
+  
+  return data.choices?.[0]?.message?.content || 'No response generated.';
+}
+
+// OpenRouter FREE models list
+const OPENROUTER_FREE_MODELS = [
+  'deepseek/deepseek-chat',           // DeepSeek V3 - excellent general purpose
+  'deepseek/deepseek-r1:free',        // DeepSeek R1 - reasoning
+  'meta-llama/llama-3.1-8b-instruct:free',  // Llama 3.1 8B
+  'mistralai/mistral-7b-instruct:free',     // Mistral 7B
+  'google/gemma-2-9b-it:free',        // Google Gemma 2
+  'qwen/qwen-2-7b-instruct:free',     // Qwen 2 7B
+];
+
 // Auto-select best provider based on query
-function selectProvider(query: string): 'openai' | 'anthropic' | 'groq' | 'gemini' {
+function selectProvider(query: string): 'openai' | 'anthropic' | 'groq' | 'gemini' | 'openrouter' {
   const lowerQuery = query.toLowerCase();
   
   // Use Claude for complex reasoning, code, and long-form content
@@ -225,8 +274,13 @@ function selectProvider(query: string): 'openai' | 'anthropic' | 'groq' | 'gemin
   }
   
   // Use Groq for quick, simple queries (fastest + FREE)
-  if (query.length < 200 && !lowerQuery.includes('complex')) {
+  if (query.length < 100 && !lowerQuery.includes('complex')) {
     return 'groq';
+  }
+  
+  // Use OpenRouter/DeepSeek for medium complexity (FREE + good quality)
+  if (query.length < 300) {
+    return 'openrouter';
   }
   
   // Default to OpenAI for balanced performance
@@ -251,160 +305,149 @@ async function saveToMemory(
       session_id: sessionId,
       role,
       content,
-      ai_provider: provider,
+      provider,
       model,
+      timestamp: new Date().toISOString(),
     });
   } catch (err) {
-    console.error('Error saving to memory:', err);
-    // Non-blocking - don't fail the request if memory save fails
+    console.error('Memory save error:', err);
   }
 }
 
 // ============================================
-// MAIN API HANDLER
+// MAIN HANDLER
 // ============================================
 
-export async function POST(request: NextRequest) {
+export async function GET() {
+  // Health check endpoint
+  try {
+    const { data: prompts } = await supabase
+      .from('javari_system_prompts')
+      .select('name, priority')
+      .eq('is_active', true)
+      .order('priority');
+    
+    const systemPrompt = await getSystemPrompt();
+    
+    return NextResponse.json({
+      status: 'healthy',
+      database: prompts ? 'connected' : 'error',
+      activePrompts: prompts?.length || 0,
+      promptNames: prompts?.map(p => p.name) || [],
+      totalPromptLength: systemPrompt.length,
+      providers: ['openai', 'anthropic', 'groq', 'gemini', 'openrouter'],
+      openrouterFreeModels: OPENROUTER_FREE_MODELS,
+      timestamp: new Date().toISOString(),
+      version: '2.1.0-openrouter',
+    });
+  } catch (error) {
+    return NextResponse.json({
+      status: 'error',
+      database: 'error',
+      error: String(error),
+      timestamp: new Date().toISOString(),
+      version: '2.1.0-openrouter',
+    });
+  }
+}
+
+export async function POST(req: NextRequest) {
   const startTime = Date.now();
   
   try {
-    const body: ChatRequest = await request.json();
-    const {
-      messages,
-      provider = 'auto',
-      model,
+    const body: ChatRequest = await req.json();
+    const { 
+      messages, 
+      provider: requestedProvider = 'auto',
+      model: requestedModel,
       userId,
       sessionId = crypto.randomUUID(),
       includeRag = true,
     } = body;
     
+    // Validate
     if (!messages || messages.length === 0) {
       return NextResponse.json(
-        { error: 'Messages are required' },
+        { error: 'Messages array required' },
         { status: 400 }
       );
     }
     
-    // Get the last user message for RAG query
-    const lastUserMessage = messages.filter(m => m.role === 'user').pop();
-    const query = lastUserMessage?.content || '';
+    // Get user's latest message for provider selection
+    const userMessage = messages[messages.length - 1]?.content || '';
     
-    // ============================================
-    // STEP 1: Get System Prompt (Always injected)
-    // ============================================
-    let systemPrompt = await getSystemPrompt();
+    // Select provider
+    const provider = requestedProvider === 'auto' 
+      ? selectProvider(userMessage)
+      : requestedProvider;
     
-    // ============================================
-    // STEP 2: Get RAG Context (If enabled)
-    // ============================================
-    if (includeRag && query) {
-      const ragContext = await getRelevantKnowledge(query);
+    // Get system prompt from database
+    const systemPrompt = await getSystemPrompt();
+    
+    // Optionally add RAG context
+    let enhancedPrompt = systemPrompt;
+    if (includeRag && userMessage.length > 10) {
+      const ragContext = await getRelevantKnowledge(userMessage);
       if (ragContext) {
-        systemPrompt += ragContext;
+        enhancedPrompt += ragContext;
       }
     }
     
-    // ============================================
-    // STEP 3: Add timestamp instruction
-    // ============================================
-    const now = new Date().toLocaleString('en-US', {
-      timeZone: 'America/New_York',
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    });
-    systemPrompt += `\n\nCurrent timestamp: ${now} EST\nAlways include this timestamp at the start of your responses.`;
+    // Add timestamp instruction
+    enhancedPrompt += `\n\nIMPORTANT: Begin your response with the current timestamp in Eastern Time format: "Day, Month Date, Year at HH:MM AM/PM EST"`;
     
-    // ============================================
-    // STEP 4: Select provider and call AI
-    // ============================================
-    const selectedProvider = provider === 'auto' ? selectProvider(query) : provider;
+    // Call selected provider
     let response: string;
-    let usedModel: string;
+    let modelUsed: string;
     
-    switch (selectedProvider) {
+    switch (provider) {
       case 'anthropic':
-        usedModel = model || 'claude-sonnet-4-20250514';
-        response = await callAnthropic(systemPrompt, messages, usedModel);
+        modelUsed = requestedModel || 'claude-sonnet-4-20250514';
+        response = await callAnthropic(enhancedPrompt, messages, modelUsed);
         break;
       case 'groq':
-        usedModel = model || 'llama-3.1-70b-versatile';
-        response = await callGroq(systemPrompt, messages, usedModel);
+        modelUsed = requestedModel || 'llama-3.1-70b-versatile';
+        response = await callGroq(enhancedPrompt, messages, modelUsed);
         break;
       case 'gemini':
-        usedModel = model || 'gemini-1.5-flash';
-        response = await callGemini(systemPrompt, messages, usedModel);
+        modelUsed = requestedModel || 'gemini-1.5-flash';
+        response = await callGemini(enhancedPrompt, messages, modelUsed);
+        break;
+      case 'openrouter':
+        modelUsed = requestedModel || 'deepseek/deepseek-chat';
+        response = await callOpenRouter(enhancedPrompt, messages, modelUsed);
         break;
       case 'openai':
       default:
-        usedModel = model || 'gpt-4o-mini';
-        response = await callOpenAI(systemPrompt, messages, usedModel);
+        modelUsed = requestedModel || 'gpt-4o-mini';
+        response = await callOpenAI(enhancedPrompt, messages, modelUsed);
         break;
     }
     
-    // ============================================
-    // STEP 5: Save to conversation memory
-    // ============================================
-    if (lastUserMessage) {
-      await saveToMemory(userId || null, sessionId, 'user', query, selectedProvider, usedModel);
-    }
-    await saveToMemory(userId || null, sessionId, 'assistant', response, selectedProvider, usedModel);
+    // Save to memory
+    await saveToMemory(userId || null, sessionId, 'user', userMessage, provider, modelUsed);
+    await saveToMemory(userId || null, sessionId, 'assistant', response, provider, modelUsed);
     
-    // ============================================
-    // STEP 6: Return response
-    // ============================================
     const processingTime = Date.now() - startTime;
     
     return NextResponse.json({
       response,
-      provider: selectedProvider,
-      model: usedModel,
+      provider,
+      model: modelUsed,
       sessionId,
       processingTime,
       ragEnabled: includeRag,
-      systemPromptLength: systemPrompt.length,
+      systemPromptLength: enhancedPrompt.length,
     });
     
   } catch (error) {
-    console.error('Chat API error:', error);
+    console.error('Chat API Error:', error);
     return NextResponse.json(
       { 
-        error: 'Failed to process chat request',
-        details: error instanceof Error ? error.message : 'Unknown error'
+        error: 'Internal server error',
+        details: String(error),
       },
       { status: 500 }
     );
-  }
-}
-
-// Health check endpoint
-export async function GET() {
-  try {
-    // Test database connection and get prompt stats
-    const { data: prompts, error } = await supabase
-      .from('javari_system_prompts')
-      .select('name, is_active')
-      .eq('is_active', true);
-    
-    const { data: promptLength } = await supabase.rpc('get_system_prompt');
-    
-    return NextResponse.json({
-      status: 'healthy',
-      database: error ? 'error' : 'connected',
-      activePrompts: prompts?.length || 0,
-      promptNames: prompts?.map(p => p.name) || [],
-      totalPromptLength: promptLength?.length || 0,
-      timestamp: new Date().toISOString(),
-      version: '2.0.0-knowledge-system',
-    });
-  } catch (err) {
-    return NextResponse.json({
-      status: 'unhealthy',
-      error: err instanceof Error ? err.message : 'Unknown error',
-    }, { status: 500 });
   }
 }
