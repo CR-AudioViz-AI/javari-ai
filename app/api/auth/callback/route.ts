@@ -1,22 +1,95 @@
-import { createClient } from '@supabase/supabase-js';
-import { NextRequest, NextResponse } from 'next/server';
+// app/api/auth/callback/route.ts (modified section for welcome email)
+// ═══════════════════════════════════════════════════════════════════════════════
+// AUTH CALLBACK WITH WELCOME EMAIL TRIGGER
+// ═══════════════════════════════════════════════════════════════════════════════
+// Monday, December 30, 2025, 2:34 PM EST
+// Sends welcome email on first-time user signup
+// ═══════════════════════════════════════════════════════════════════════════════
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kteobfyferrukqeolofj.supabase.co';
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt0ZW9iZnlmZXJydWtxZW9sb2ZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIxOTcyNjYsImV4cCI6MjA3NzU1NzI2Nn0.uy-jlF_z6qVb8qogsNyGDLHqT4HhmdRhLrW7zPv3qhY';
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 export async function GET(request: NextRequest) {
-  const requestUrl = new URL(request.url);
-  const code = requestUrl.searchParams.get('code');
-  const redirectTo = requestUrl.searchParams.get('redirect_to') || '/';
+  const { searchParams } = new URL(request.url);
+  const code = searchParams.get('code');
+  const next = searchParams.get('next') || '/dashboard';
 
-  if (code) {
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (error) {
-      console.error('Auth callback error:', error);
-      return NextResponse.redirect(new URL(`/?error=${encodeURIComponent(error.message)}`, requestUrl.origin));
-    }
+  if (!code) {
+    return NextResponse.redirect(new URL('/auth/error', request.url));
   }
 
-  return NextResponse.redirect(new URL(redirectTo, requestUrl.origin));
+  try {
+    // Exchange code for session
+    const { data: authData, error: authError } = await supabase.auth.exchangeCodeForSession(code);
+    
+    if (authError || !authData.user) {
+      console.error('Auth error:', authError);
+      return NextResponse.redirect(new URL('/auth/error', request.url));
+    }
+
+    const user = authData.user;
+
+    // Check if this is a new user (first sign-in)
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('id, welcome_email_sent')
+      .eq('id', user.id)
+      .single();
+
+    // If new user or welcome email not sent, send it
+    if (!existingUser || !existingUser.welcome_email_sent) {
+      // Send welcome email
+      try {
+        await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/notifications/user-email`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'welcome',
+            to: user.email,
+            data: {
+              name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'there'
+            }
+          })
+        });
+
+        // Mark welcome email as sent
+        await supabase
+          .from('users')
+          .upsert({
+            id: user.id,
+            email: user.email,
+            welcome_email_sent: true,
+            created_at: new Date().toISOString()
+          }, { onConflict: 'id' });
+
+        console.log(`Welcome email sent to ${user.email}`);
+      } catch (emailError) {
+        console.error('Failed to send welcome email:', emailError);
+        // Don't fail the auth flow for email errors
+      }
+
+      // Initialize credits for new user (50 free credits)
+      await supabase
+        .from('user_credits')
+        .upsert({
+          user_id: user.id,
+          balance: 50,
+          lifetime_earned: 50,
+          subscription_tier: 'free',
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id' });
+    }
+
+    // Redirect to dashboard or specified next URL
+    return NextResponse.redirect(new URL(next, request.url));
+
+  } catch (error) {
+    console.error('Callback error:', error);
+    return NextResponse.redirect(new URL('/auth/error', request.url));
+  }
 }
