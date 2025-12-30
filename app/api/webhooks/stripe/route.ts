@@ -34,10 +34,11 @@ const CREDIT_PACKAGES: Record<string, number> = {
 
 // Subscription tiers and their monthly credits
 const SUBSCRIPTION_CREDITS: Record<string, number> = {
-  'free': 10,
-  'starter': 100,
-  'pro': 500,
-  'enterprise': 2000,
+  // Henderson Bible v1.1 Pricing
+  'free': 50,  // 50 credits (expire monthly)
+  'starter': 500,  // $9/mo = 500 credits (never expire)
+  'pro': 2000,  // $29/mo = 2,000 credits (never expire)
+  'business': 10000,  // $99/mo = 10,000 credits (never expire)
 };
 
 export async function POST(request: NextRequest) {
