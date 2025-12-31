@@ -1,6 +1,7 @@
 // app/api/chat/route.ts
 // Javari AI Chat API with System Prompt Injection + RAG + OpenRouter
-// Updated: December 29, 2025
+// Updated: December 31, 2025 11:30 AM EST
+// Fixed: Proper error handling for all AI providers
 // 
 // This API injects the knowledge base into EVERY AI call
 // ensuring consistent behavior across all providers
@@ -23,7 +24,7 @@ interface ChatMessage {
 
 interface ChatRequest {
   messages: ChatMessage[];
-  provider?: 'openai' | 'anthropic' | 'gemini' | 'groq' | 'openrouter' | 'auto';
+  provider?: 'openai' | 'anthropic' | 'gemini' | 'groq' | 'openrouter' | 'perplexity' | 'auto';
   model?: string;
   userId?: string;
   sessionId?: string;
@@ -99,7 +100,7 @@ async function getRelevantKnowledge(query: string, maxChunks: number = 3): Promi
 }
 
 // ============================================
-// AI PROVIDER CALLS
+// AI PROVIDER CALLS - WITH PROPER ERROR HANDLING
 // ============================================
 
 async function callOpenAI(
@@ -107,25 +108,53 @@ async function callOpenAI(
   messages: ChatMessage[],
   model: string = 'gpt-4o-mini'
 ): Promise<string> {
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        ...messages,
-      ],
-      max_tokens: 4096,
-      temperature: 0.7,
-    }),
-  });
-  
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content || 'No response generated.';
+  try {
+    if (!process.env.OPENAI_API_KEY) {
+      console.error('[OpenAI] API key not configured');
+      return '[OpenAI Error] API key not configured. Please check Vercel environment variables.';
+    }
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...messages,
+        ],
+        max_tokens: 4096,
+        temperature: 0.7,
+      }),
+    });
+    
+    const data = await response.json();
+    
+    // Check for API errors
+    if (data.error) {
+      console.error('[OpenAI] API Error:', data.error);
+      return `[OpenAI Error] ${data.error.message || 'Unknown error'}`;
+    }
+    
+    if (!response.ok) {
+      console.error('[OpenAI] HTTP Error:', response.status, data);
+      return `[OpenAI Error] HTTP ${response.status}: ${data.error?.message || 'Request failed'}`;
+    }
+    
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) {
+      console.error('[OpenAI] Empty response:', data);
+      return '[OpenAI Error] Empty response received. Check API key and quota.';
+    }
+    
+    return content;
+  } catch (err) {
+    console.error('[OpenAI] Exception:', err);
+    return `[OpenAI Error] ${err instanceof Error ? err.message : 'Unknown error'}`;
+  }
 }
 
 async function callAnthropic(
@@ -133,26 +162,54 @@ async function callAnthropic(
   messages: ChatMessage[],
   model: string = 'claude-sonnet-4-20250514'
 ): Promise<string> {
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': process.env.ANTHROPIC_API_KEY!,
-      'anthropic-version': '2023-06-01',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: 4096,
-      system: systemPrompt,
-      messages: messages.map(m => ({
-        role: m.role as 'user' | 'assistant',
-        content: m.content,
-      })),
-    }),
-  });
-  
-  const data = await response.json();
-  return data.content?.[0]?.text || 'No response generated.';
+  try {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      console.error('[Anthropic] API key not configured');
+      return '[Anthropic Error] API key not configured. Please check Vercel environment variables.';
+    }
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': process.env.ANTHROPIC_API_KEY!,
+        'anthropic-version': '2023-06-01',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 4096,
+        system: systemPrompt,
+        messages: messages.map(m => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+        })),
+      }),
+    });
+    
+    const data = await response.json();
+    
+    // Check for API errors
+    if (data.error) {
+      console.error('[Anthropic] API Error:', data.error);
+      return `[Anthropic Error] ${data.error.message || 'Unknown error'}`;
+    }
+    
+    if (!response.ok) {
+      console.error('[Anthropic] HTTP Error:', response.status, data);
+      return `[Anthropic Error] HTTP ${response.status}: ${data.error?.message || 'Request failed'}`;
+    }
+    
+    const content = data.content?.[0]?.text;
+    if (!content) {
+      console.error('[Anthropic] Empty response:', data);
+      return '[Anthropic Error] Empty response received. Check API key and quota.';
+    }
+    
+    return content;
+  } catch (err) {
+    console.error('[Anthropic] Exception:', err);
+    return `[Anthropic Error] ${err instanceof Error ? err.message : 'Unknown error'}`;
+  }
 }
 
 async function callGroq(
@@ -160,25 +217,53 @@ async function callGroq(
   messages: ChatMessage[],
   model: string = 'llama-3.1-70b-versatile'
 ): Promise<string> {
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        ...messages,
-      ],
-      max_tokens: 4096,
-      temperature: 0.7,
-    }),
-  });
-  
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content || 'No response generated.';
+  try {
+    if (!process.env.GROQ_API_KEY) {
+      console.error('[Groq] API key not configured');
+      return '[Groq Error] API key not configured. Please check Vercel environment variables.';
+    }
+
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...messages,
+        ],
+        max_tokens: 4096,
+        temperature: 0.7,
+      }),
+    });
+    
+    const data = await response.json();
+    
+    // Check for API errors
+    if (data.error) {
+      console.error('[Groq] API Error:', data.error);
+      return `[Groq Error] ${data.error.message || 'Unknown error'}`;
+    }
+    
+    if (!response.ok) {
+      console.error('[Groq] HTTP Error:', response.status, data);
+      return `[Groq Error] HTTP ${response.status}: ${data.error?.message || 'Request failed'}`;
+    }
+    
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) {
+      console.error('[Groq] Empty response:', data);
+      return '[Groq Error] Empty response received. Check API key and quota.';
+    }
+    
+    return content;
+  } catch (err) {
+    console.error('[Groq] Exception:', err);
+    return `[Groq Error] ${err instanceof Error ? err.message : 'Unknown error'}`;
+  }
 }
 
 async function callGemini(
@@ -186,31 +271,59 @@ async function callGemini(
   messages: ChatMessage[],
   model: string = 'gemini-1.5-flash'
 ): Promise<string> {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemPrompt }] },
-        contents: messages.map(m => ({
-          role: m.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: m.content }],
-        })),
-        generationConfig: {
-          maxOutputTokens: 4096,
-          temperature: 0.7,
-        },
-      }),
+  try {
+    if (!process.env.GOOGLE_API_KEY) {
+      console.error('[Gemini] API key not configured');
+      return '[Gemini Error] API key not configured. Please check Vercel environment variables.';
     }
-  );
-  
-  const data = await response.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated.';
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          contents: messages.map(m => ({
+            role: m.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: m.content }],
+          })),
+          generationConfig: {
+            maxOutputTokens: 4096,
+            temperature: 0.7,
+          },
+        }),
+      }
+    );
+    
+    const data = await response.json();
+    
+    // Check for API errors
+    if (data.error) {
+      console.error('[Gemini] API Error:', data.error);
+      return `[Gemini Error] ${data.error.message || 'Unknown error'}`;
+    }
+    
+    if (!response.ok) {
+      console.error('[Gemini] HTTP Error:', response.status, data);
+      return `[Gemini Error] HTTP ${response.status}: ${data.error?.message || 'Request failed'}`;
+    }
+    
+    const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!content) {
+      console.error('[Gemini] Empty response:', data);
+      return '[Gemini Error] Empty response received. Check API key and quota.';
+    }
+    
+    return content;
+  } catch (err) {
+    console.error('[Gemini] Exception:', err);
+    return `[Gemini Error] ${err instanceof Error ? err.message : 'Unknown error'}`;
+  }
 }
 
 // ============================================
-// NEW: OpenRouter - Access 500+ Models
+// OpenRouter - Access 500+ Models
 // ============================================
 
 async function callOpenRouter(
@@ -218,33 +331,118 @@ async function callOpenRouter(
   messages: ChatMessage[],
   model: string = 'deepseek/deepseek-chat' // FREE by default!
 ): Promise<string> {
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://javariai.com',
-      'X-Title': 'Javari AI',
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        ...messages,
-      ],
-      max_tokens: 4096,
-      temperature: 0.7,
-    }),
-  });
-  
-  const data = await response.json();
-  
-  // Log usage for tracking
-  if (data.usage) {
-    console.log(`[OpenRouter] Model: ${model}, Tokens: ${data.usage.total_tokens}, Cost: $${data.usage.cost || 0}`);
+  try {
+    if (!process.env.OPENROUTER_API_KEY) {
+      console.error('[OpenRouter] API key not configured');
+      return '[OpenRouter Error] API key not configured. Please check Vercel environment variables.';
+    }
+
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://javariai.com',
+        'X-Title': 'Javari AI',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...messages,
+        ],
+        max_tokens: 4096,
+        temperature: 0.7,
+      }),
+    });
+    
+    const data = await response.json();
+    
+    // Log usage for tracking
+    if (data.usage) {
+      console.log(`[OpenRouter] Model: ${model}, Tokens: ${data.usage.total_tokens}, Cost: $${data.usage.cost || 0}`);
+    }
+    
+    // Check for API errors
+    if (data.error) {
+      console.error('[OpenRouter] API Error:', data.error);
+      return `[OpenRouter Error] ${data.error.message || 'Unknown error'}`;
+    }
+    
+    if (!response.ok) {
+      console.error('[OpenRouter] HTTP Error:', response.status, data);
+      return `[OpenRouter Error] HTTP ${response.status}: ${data.error?.message || 'Request failed'}`;
+    }
+    
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) {
+      console.error('[OpenRouter] Empty response:', data);
+      return '[OpenRouter Error] Empty response received.';
+    }
+    
+    return content;
+  } catch (err) {
+    console.error('[OpenRouter] Exception:', err);
+    return `[OpenRouter Error] ${err instanceof Error ? err.message : 'Unknown error'}`;
   }
-  
-  return data.choices?.[0]?.message?.content || 'No response generated.';
+}
+
+// ============================================
+// Perplexity - Real-time web search
+// ============================================
+
+async function callPerplexity(
+  systemPrompt: string,
+  messages: ChatMessage[],
+  model: string = 'llama-3.1-sonar-small-128k-online'
+): Promise<string> {
+  try {
+    if (!process.env.PERPLEXITY_API_KEY) {
+      console.error('[Perplexity] API key not configured');
+      return '[Perplexity Error] API key not configured. Please check Vercel environment variables.';
+    }
+
+    const response = await fetch('https://api.perplexity.ai/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.PERPLEXITY_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...messages,
+        ],
+        max_tokens: 4096,
+        temperature: 0.7,
+      }),
+    });
+    
+    const data = await response.json();
+    
+    // Check for API errors
+    if (data.error) {
+      console.error('[Perplexity] API Error:', data.error);
+      return `[Perplexity Error] ${data.error.message || 'Unknown error'}`;
+    }
+    
+    if (!response.ok) {
+      console.error('[Perplexity] HTTP Error:', response.status, data);
+      return `[Perplexity Error] HTTP ${response.status}: ${data.error?.message || 'Request failed'}`;
+    }
+    
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) {
+      console.error('[Perplexity] Empty response:', data);
+      return '[Perplexity Error] Empty response received. Check API key and quota.';
+    }
+    
+    return content;
+  } catch (err) {
+    console.error('[Perplexity] Exception:', err);
+    return `[Perplexity Error] ${err instanceof Error ? err.message : 'Unknown error'}`;
+  }
 }
 
 // OpenRouter FREE models list
@@ -258,7 +456,7 @@ const OPENROUTER_FREE_MODELS = [
 ];
 
 // Auto-select best provider based on query
-function selectProvider(query: string): 'openai' | 'anthropic' | 'groq' | 'gemini' | 'openrouter' {
+function selectProvider(query: string): 'openai' | 'anthropic' | 'groq' | 'gemini' | 'openrouter' | 'perplexity' {
   const lowerQuery = query.toLowerCase();
   
   // Use Claude for complex reasoning, code, and long-form content
@@ -273,18 +471,18 @@ function selectProvider(query: string): 'openai' | 'anthropic' | 'groq' | 'gemin
     return 'anthropic';
   }
   
-  // Use Groq for quick, simple queries (fastest + FREE)
-  if (query.length < 100 && !lowerQuery.includes('complex')) {
-    return 'groq';
+  // Use Perplexity for web search / current events
+  if (
+    lowerQuery.includes('search') ||
+    lowerQuery.includes('latest') ||
+    lowerQuery.includes('news') ||
+    lowerQuery.includes('current')
+  ) {
+    return 'perplexity';
   }
   
-  // Use OpenRouter/DeepSeek for medium complexity (FREE + good quality)
-  if (query.length < 300) {
-    return 'openrouter';
-  }
-  
-  // Default to OpenAI for balanced performance
-  return 'openai';
+  // Default to OpenRouter (DeepSeek) - FREE, fast, and reliable
+  return 'openrouter';
 }
 
 // ============================================
@@ -300,7 +498,7 @@ async function saveToMemory(
   model: string
 ): Promise<void> {
   try {
-    await supabase.from('javari_conversation_memory').insert({
+    await supabase.from('javari_conversations').insert({
       user_id: userId,
       session_id: sessionId,
       role,
@@ -329,16 +527,27 @@ export async function GET() {
     
     const systemPrompt = await getSystemPrompt();
     
+    // Check API key configuration
+    const apiKeyStatus = {
+      openai: !!process.env.OPENAI_API_KEY,
+      anthropic: !!process.env.ANTHROPIC_API_KEY,
+      groq: !!process.env.GROQ_API_KEY,
+      gemini: !!process.env.GOOGLE_API_KEY,
+      openrouter: !!process.env.OPENROUTER_API_KEY,
+      perplexity: !!process.env.PERPLEXITY_API_KEY,
+    };
+    
     return NextResponse.json({
       status: 'healthy',
       database: prompts ? 'connected' : 'error',
       activePrompts: prompts?.length || 0,
       promptNames: prompts?.map(p => p.name) || [],
       totalPromptLength: systemPrompt.length,
-      providers: ['openai', 'anthropic', 'groq', 'gemini', 'openrouter'],
+      providers: ['openai', 'anthropic', 'groq', 'gemini', 'openrouter', 'perplexity'],
+      apiKeyStatus,
       openrouterFreeModels: OPENROUTER_FREE_MODELS,
       timestamp: new Date().toISOString(),
-      version: '2.1.0-openrouter',
+      version: '2.2.0-error-handling',
     });
   } catch (error) {
     return NextResponse.json({
@@ -346,7 +555,7 @@ export async function GET() {
       database: 'error',
       error: String(error),
       timestamp: new Date().toISOString(),
-      version: '2.1.0-openrouter',
+      version: '2.2.0-error-handling',
     });
   }
 }
@@ -417,16 +626,26 @@ export async function POST(req: NextRequest) {
         modelUsed = requestedModel || 'deepseek/deepseek-chat';
         response = await callOpenRouter(enhancedPrompt, messages, modelUsed);
         break;
+      case 'perplexity':
+        modelUsed = requestedModel || 'llama-3.1-sonar-small-128k-online';
+        response = await callPerplexity(enhancedPrompt, messages, modelUsed);
+        break;
       case 'openai':
-      default:
         modelUsed = requestedModel || 'gpt-4o-mini';
         response = await callOpenAI(enhancedPrompt, messages, modelUsed);
         break;
+      default:
+        // Default to OpenRouter (FREE DeepSeek) since it's reliable
+        modelUsed = requestedModel || 'deepseek/deepseek-chat';
+        response = await callOpenRouter(enhancedPrompt, messages, modelUsed);
+        break;
     }
     
-    // Save to memory
-    await saveToMemory(userId || null, sessionId, 'user', userMessage, provider, modelUsed);
-    await saveToMemory(userId || null, sessionId, 'assistant', response, provider, modelUsed);
+    // Save to memory (don't save error messages)
+    if (!response.startsWith('[')) {
+      await saveToMemory(userId || null, sessionId, 'user', userMessage, provider, modelUsed);
+      await saveToMemory(userId || null, sessionId, 'assistant', response, provider, modelUsed);
+    }
     
     const processingTime = Date.now() - startTime;
     
