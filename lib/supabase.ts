@@ -3,6 +3,7 @@
 // Centralized database connection for all apps
 // Dependency-free version (only requires @supabase/supabase-js)
 // ============================================================================
+// Fixed: Dec 31, 2025 7:50 PM EST - Added createServerClient alias
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
@@ -35,7 +36,7 @@ export function createSupabaseBrowserClient(): SupabaseClient {
   return browserClient;
 }
 
-// Server client for API routes
+// Server client for API routes (with service role key for full access)
 export function createSupabaseServerClient(): SupabaseClient {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!serviceKey) {
@@ -44,5 +45,10 @@ export function createSupabaseServerClient(): SupabaseClient {
   }
   return createClient(SUPABASE_URL, serviceKey);
 }
+
+// ALIASES for backward compatibility with existing code
+// These are the names used in many API routes
+export const createServerClient = createSupabaseServerClient;
+export const createBrowserClient = createSupabaseBrowserClient;
 
 export { SUPABASE_URL, SUPABASE_ANON_KEY };
