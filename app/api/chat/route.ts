@@ -215,7 +215,7 @@ async function callAnthropic(
 async function callGroq(
   systemPrompt: string,
   messages: ChatMessage[],
-  model: string = 'llama-3.1-70b-versatile'
+  model: string = 'llama-3.3-70b-versatile'
 ): Promise<string> {
   try {
     if (!process.env.GROQ_API_KEY) {
@@ -394,7 +394,7 @@ async function callOpenRouter(
 async function callPerplexity(
   systemPrompt: string,
   messages: ChatMessage[],
-  model: string = 'llama-3.1-sonar-small-128k-online'
+  model: string = 'sonar'
 ): Promise<string> {
   try {
     if (!process.env.PERPLEXITY_API_KEY) {
@@ -615,7 +615,7 @@ export async function POST(req: NextRequest) {
         response = await callAnthropic(enhancedPrompt, messages, modelUsed);
         break;
       case 'groq':
-        modelUsed = requestedModel || 'llama-3.1-70b-versatile';
+        modelUsed = requestedModel || 'llama-3.3-70b-versatile';
         response = await callGroq(enhancedPrompt, messages, modelUsed);
         break;
       case 'gemini':
@@ -627,7 +627,7 @@ export async function POST(req: NextRequest) {
         response = await callOpenRouter(enhancedPrompt, messages, modelUsed);
         break;
       case 'perplexity':
-        modelUsed = requestedModel || 'llama-3.1-sonar-small-128k-online';
+        modelUsed = requestedModel || 'sonar';
         response = await callPerplexity(enhancedPrompt, messages, modelUsed);
         break;
       case 'openai':
