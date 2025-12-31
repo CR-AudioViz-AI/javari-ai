@@ -269,7 +269,7 @@ async function callGroq(
 async function callGemini(
   systemPrompt: string,
   messages: ChatMessage[],
-  model: string = 'gemini-1.5-flash'
+  model: string = 'gemini-2.0-flash-exp'
 ): Promise<string> {
   try {
     if (!process.env.GOOGLE_API_KEY) {
@@ -619,7 +619,7 @@ export async function POST(req: NextRequest) {
         response = await callGroq(enhancedPrompt, messages, modelUsed);
         break;
       case 'gemini':
-        modelUsed = requestedModel || 'gemini-1.5-flash';
+        modelUsed = requestedModel || 'gemini-2.0-flash-exp';
         response = await callGemini(enhancedPrompt, messages, modelUsed);
         break;
       case 'openrouter':
