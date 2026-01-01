@@ -1,4 +1,29 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "fluid": true,
+  "regions": ["iad1", "sfo1"],
+  "functions": {
+    "app/api/**/*.ts": {
+      "memory": 1024,
+      "maxDuration": 30
+    },
+    "app/api/chat/**/*.ts": {
+      "memory": 3008,
+      "maxDuration": 120
+    },
+    "app/api/ai/**/*.ts": {
+      "memory": 3008,
+      "maxDuration": 120
+    },
+    "app/api/javari/**/*.ts": {
+      "memory": 2048,
+      "maxDuration": 60
+    },
+    "app/api/cron/**/*.ts": {
+      "memory": 1024,
+      "maxDuration": 300
+    }
+  },
   "crons": [
     {
       "path": "/api/cron/web-crawl",
@@ -19,6 +44,21 @@
     {
       "path": "/api/cron/continuous-learning",
       "schedule": "0 */4 * * *"
+    },
+    {
+      "path": "/api/cron/warmup",
+      "schedule": "*/3 * * * *"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/api/chat/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        }
+      ]
     }
   ]
 }
