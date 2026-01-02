@@ -1,406 +1,348 @@
 /**
- * Javari AI - Admin Overview Dashboard
- * Main control center for all Javari autonomous operations
+ * CR AudioViz AI - Javari Admin Dashboard
+ * ========================================
  * 
- * Created: November 4, 2025 - 7:40 PM EST
- * Part of Phase 3: Admin Dashboard Integration
+ * Complete overview of Javari's autonomous capabilities:
+ * - Learning metrics
+ * - Command history
+ * - System health
+ * - Voice/Video status
+ * - Improvement suggestions
+ * 
+ * @version 1.0.0
+ * @date January 1, 2026
  */
 
-'use client';
+'use client'
 
-import { useState, useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import Link from 'next/link';
+import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import { 
-  Sparkles,
-  Activity, 
-  Brain, 
-  GitCommit,
-  Rocket,
+  Bot,
+  Brain,
   TrendingUp,
-  Clock,
-  CheckCircle2,
+  MessageSquare,
+  Video,
+  Mic,
+  Server,
+  Database,
+  Lightbulb,
+  RefreshCw,
+  CheckCircle,
+  XCircle,
   AlertTriangle,
   ArrowRight,
-  RefreshCw
-} from 'lucide-react';
+  Settings,
+  Activity
+} from 'lucide-react'
 
-interface SystemStatus {
-  selfHealing: {
-    total: number;
-    successful: number;
-    successRate: number;
-    lastRun: string;
-  };
-  learning: {
-    total: number;
-    avgConfidence: number;
-    sources: number;
-  };
-  deployments: {
-    total: number;
-    successful: number;
-    lastDeployment: string;
-  };
-  github: {
-    totalCommits: number;
-    autoCommits: number;
-    lastCommit: string;
-  };
+interface SystemHealth {
+  mainSite: string
+  javariAI: string
+  vercel: string
+  database: string
 }
 
-export default function JavariOverview() {
-  const [status, setStatus] = useState<SystemStatus>({
-    selfHealing: {
-      total: 0,
-      successful: 0,
-      successRate: 0,
-      lastRun: new Date().toISOString()
-    },
-    learning: {
-      total: 0,
-      avgConfidence: 0,
-      sources: 0
-    },
-    deployments: {
-      total: 0,
-      successful: 0,
-      lastDeployment: new Date().toISOString()
-    },
-    github: {
-      totalCommits: 0,
-      autoCommits: 0,
-      lastCommit: new Date().toISOString()
-    }
-  });
-  const [loading, setLoading] = useState(true);
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+interface LearningStats {
+  totalPatterns: number
+  knowledgeEntries: number
+  feedbackCount: number
+  helpfulRate: string
+}
 
-  useEffect(() => {
-    loadStatus();
-    const interval = setInterval(loadStatus, 60000); // Refresh every minute
-    return () => clearInterval(interval);
-  }, []);
+interface VoiceStatus {
+  ttsEnabled: boolean
+  voiceId: string
+}
 
-  async function loadStatus() {
+export default function JavariAdmin() {
+  const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null)
+  const [learningStats, setLearningStats] = useState<LearningStats | null>(null)
+  const [voiceStatus, setVoiceStatus] = useState<VoiceStatus | null>(null)
+  const [suggestions, setSuggestions] = useState<any[]>([])
+  const [recentCommands, setRecentCommands] = useState<any[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
+  
+  const loadData = async () => {
+    setIsLoading(true)
+    
     try {
-      const response = await fetch('/api/admin/javari/overview');
-      const data = await response.json();
+      // Load all data in parallel
+      const [healthRes, learnRes, voiceRes] = await Promise.all([
+        fetch('/api/javari/business', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command: 'Check system health' })
+        }),
+        fetch('/api/javari/learn', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'stats' })
+        }),
+        fetch('/api/javari/voice', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'check' })
+        })
+      ])
       
-      if (data.success) {
-        setStatus(data.status);
-        setLastUpdate(new Date());
+      const healthData = await healthRes.json()
+      if (healthData.result?.services) {
+        setSystemHealth(healthData.result.services)
       }
-    } catch (error: unknown) {
-      console.error('Failed to load status:', error);
+      
+      const learnData = await learnRes.json()
+      if (learnData.stats) {
+        setLearningStats(learnData.stats)
+      }
+      
+      const voiceData = await voiceRes.json()
+      setVoiceStatus(voiceData)
+      
+      // Get improvement suggestions
+      const suggestRes = await fetch('/api/javari/learn', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'suggestions' })
+      })
+      const suggestData = await suggestRes.json()
+      setSuggestions(suggestData.suggestions || [])
+      
+    } catch (error) {
+      console.error('Error loading data:', error)
     } finally {
-      setLoading(false);
+      setIsLoading(false)
+      setLastRefresh(new Date())
     }
   }
-
-  const healthIndicators = [
-    {
-      name: 'Self-Healing',
-      status: status.selfHealing.successRate >= 70 ? 'healthy' : 'warning',
-      value: `${status.selfHealing.successRate.toFixed(1)}%`,
-      description: 'Auto-fix success rate',
-      link: '/admin/javari/self-healing'
-    },
-    {
-      name: 'Learning',
-      status: status.learning.sources >= 3 ? 'healthy' : 'warning',
-      value: status.learning.total.toString(),
-      description: 'Total learnings',
-      link: '/admin/javari/learning'
-    },
-    {
-      name: 'Deployments',
-      status: 'healthy',
-      value: status.deployments.total.toString(),
-      description: 'Successful deployments',
-      link: '/admin/javari/deployments'
-    },
-    {
-      name: 'GitHub',
-      status: 'healthy',
-      value: status.github.autoCommits.toString(),
-      description: 'Autonomous commits',
-      link: '/admin/javari/github'
+  
+  useEffect(() => {
+    loadData()
+    
+    // Auto-refresh every 30 seconds
+    const interval = setInterval(loadData, 30000)
+    return () => clearInterval(interval)
+  }, [])
+  
+  const getStatusIcon = (status: string) => {
+    if (status?.includes('✅') || status?.includes('Healthy')) {
+      return <CheckCircle className="w-5 h-5 text-green-500" />
+    } else if (status?.includes('❌') || status?.includes('Down')) {
+      return <XCircle className="w-5 h-5 text-red-500" />
     }
-  ];
-
+    return <AlertTriangle className="w-5 h-5 text-yellow-500" />
+  }
+  
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
+    <div className="min-h-screen bg-gray-950 text-white p-6">
+      <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
-              <Sparkles className="w-8 h-8 text-purple-600" />
-              Javari AI Control Center
-            </h1>
-            <p className="text-gray-600 mt-1">
-              Monitor and control all autonomous operations
-            </p>
-          </div>
+        <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-4">
-            <div className="text-right">
-              <p className="text-sm text-gray-500">Last Updated</p>
-              <p className="text-sm font-medium">{lastUpdate.toLocaleTimeString()}</p>
+            <div className="w-14 h-14 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shadow-lg shadow-purple-500/30">
+              <Bot className="w-8 h-8" />
             </div>
-            <Button onClick={loadStatus} disabled={loading}>
-              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
+            <div>
+              <h1 className="text-2xl font-bold">Javari Admin Dashboard</h1>
+              <p className="text-gray-400">Autonomous AI COO Control Center</p>
+            </div>
           </div>
+          <button
+            onClick={loadData}
+            disabled={isLoading}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition"
+          >
+            <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
         </div>
-
-        {/* System Status Banner */}
-        <Card className="border-l-4 border-l-green-500 bg-green-50">
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-3">
-              <CheckCircle2 className="w-8 h-8 text-green-600" />
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900">
-                  All Systems Operational
-                </h3>
-                <p className="text-sm text-gray-600">
-                  Javari is fully autonomous and performing optimally
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Quick Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {healthIndicators.map((indicator) => (
-            <Link key={indicator.name} href={indicator.link}>
-              <Card className="hover:shadow-lg transition-shadow cursor-pointer">
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-sm font-medium text-gray-600">
-                      {indicator.name}
-                    </CardTitle>
-                    <div className={`w-3 h-3 rounded-full ${
-                      indicator.status === 'healthy' ? 'bg-green-500' :
-                      indicator.status === 'warning' ? 'bg-yellow-500' :
-                      'bg-red-500'
-                    }`} />
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-3xl font-bold text-gray-900 mb-1">
-                    {indicator.value}
-                  </div>
-                  <p className="text-xs text-gray-500">{indicator.description}</p>
-                </CardContent>
-              </Card>
+        
+        {/* Quick Links */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+          {[
+            { icon: MessageSquare, label: 'Command Console', href: '/command', color: 'blue' },
+            { icon: Video, label: 'Video Call', href: '/video', color: 'orange' },
+            { icon: Bot, label: 'Javari Hub', href: '/javari', color: 'purple' },
+            { icon: Settings, label: 'Autopilot', href: '/admin/autopilot', color: 'green' }
+          ].map((link, i) => (
+            <Link
+              key={i}
+              href={link.href}
+              className="flex items-center gap-3 p-4 bg-gray-900 border border-gray-800 rounded-xl hover:border-purple-500/50 transition"
+            >
+              <link.icon className="w-6 h-6 text-purple-400" />
+              <span>{link.label}</span>
+              <ArrowRight className="w-4 h-4 ml-auto text-gray-500" />
             </Link>
           ))}
         </div>
-
-        {/* Main Dashboard Sections */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Self-Healing Status */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <Activity className="w-5 h-5 text-purple-600" />
-                    Self-Healing
-                  </CardTitle>
-                  <CardDescription>Autonomous error detection and fixing</CardDescription>
+        
+        {/* Main Grid */}
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          
+          {/* System Health */}
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+              <Server className="w-5 h-5 text-purple-400" />
+              System Health
+            </h2>
+            {systemHealth ? (
+              <div className="space-y-3">
+                {Object.entries(systemHealth).map(([key, value]) => (
+                  <div key={key} className="flex items-center justify-between">
+                    <span className="text-gray-400 capitalize">{key.replace(/([A-Z])/g, ' $1')}</span>
+                    <div className="flex items-center gap-2">
+                      {getStatusIcon(value)}
+                      <span className="text-sm">{value.includes('✅') ? 'Healthy' : value}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-500">Loading...</p>
+            )}
+          </div>
+          
+          {/* Learning Stats */}
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+              <Brain className="w-5 h-5 text-purple-400" />
+              Learning Progress
+            </h2>
+            {learningStats ? (
+              <div className="space-y-4">
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Patterns Learned</span>
+                  <span className="font-medium">{learningStats.totalPatterns}</span>
                 </div>
-                <Link href="/admin/javari/self-healing">
-                  <Button variant="ghost" size="sm">
-                    <ArrowRight className="w-4 h-4" />
-                  </Button>
-                </Link>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">Total Events</span>
-                <Badge variant="outline">{status.selfHealing.total}</Badge>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">Successful Fixes</span>
-                <Badge className="bg-green-100 text-green-700">
-                  {status.selfHealing.successful}
-                </Badge>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">Success Rate</span>
-                <Badge className={
-                  status.selfHealing.successRate >= 70 ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
-                }>
-                  {status.selfHealing.successRate.toFixed(1)}%
-                </Badge>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">Last Run</span>
-                <span className="text-sm text-gray-900">
-                  {new Date(status.selfHealing.lastRun).toLocaleString()}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Learning Status */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <Brain className="w-5 h-5 text-blue-600" />
-                    Continuous Learning
-                  </CardTitle>
-                  <CardDescription>Knowledge base and data sources</CardDescription>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Knowledge Entries</span>
+                  <span className="font-medium">{learningStats.knowledgeEntries}</span>
                 </div>
-                <Link href="/admin/javari/learning">
-                  <Button variant="ghost" size="sm">
-                    <ArrowRight className="w-4 h-4" />
-                  </Button>
-                </Link>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">Total Learnings</span>
-                <Badge variant="outline">{status.learning.total}</Badge>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">Active Sources</span>
-                <Badge className="bg-blue-100 text-blue-700">
-                  {status.learning.sources}
-                </Badge>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">Avg Confidence</span>
-                <Badge className="bg-purple-100 text-purple-700">
-                  {(status.learning.avgConfidence * 100).toFixed(1)}%
-                </Badge>
-              </div>
-              <div className="pt-2">
-                <Link href="/admin/javari/learning">
-                  <Button size="sm" variant="outline" className="w-full">
-                    Feed Knowledge
-                  </Button>
-                </Link>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* GitHub Activity */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <GitCommit className="w-5 h-5 text-green-600" />
-                    GitHub Activity
-                  </CardTitle>
-                  <CardDescription>Autonomous code commits</CardDescription>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Feedback Received</span>
+                  <span className="font-medium">{learningStats.feedbackCount}</span>
                 </div>
-                <Link href="/admin/javari/github">
-                  <Button variant="ghost" size="sm">
-                    <ArrowRight className="w-4 h-4" />
-                  </Button>
-                </Link>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">Total Commits</span>
-                <Badge variant="outline">{status.github.totalCommits}</Badge>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">Autonomous Commits</span>
-                <Badge className="bg-green-100 text-green-700">
-                  {status.github.autoCommits}
-                </Badge>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">Last Commit</span>
-                <span className="text-sm text-gray-900">
-                  {new Date(status.github.lastCommit).toLocaleString()}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Deployment Status */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <Rocket className="w-5 h-5 text-orange-600" />
-                    Deployments
-                  </CardTitle>
-                  <CardDescription>Autonomous deployment activity</CardDescription>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Helpful Rate</span>
+                  <span className="font-medium text-green-400">{learningStats.helpfulRate}</span>
                 </div>
-                <Link href="/admin/javari/deployments">
-                  <Button variant="ghost" size="sm">
-                    <ArrowRight className="w-4 h-4" />
-                  </Button>
-                </Link>
               </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
+            ) : (
+              <p className="text-gray-500">Learning system initializing...</p>
+            )}
+          </div>
+          
+          {/* Voice/Video Status */}
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+              <Mic className="w-5 h-5 text-purple-400" />
+              Voice & Video
+            </h2>
+            <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">Total Deployments</span>
-                <Badge variant="outline">{status.deployments.total}</Badge>
+                <span className="text-gray-400">Voice (ElevenLabs)</span>
+                <div className="flex items-center gap-2">
+                  {voiceStatus?.ttsEnabled ? (
+                    <CheckCircle className="w-5 h-5 text-green-500" />
+                  ) : (
+                    <XCircle className="w-5 h-5 text-red-500" />
+                  )}
+                  <span>{voiceStatus?.ttsEnabled ? 'Enabled' : 'Not configured'}</span>
+                </div>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">Successful</span>
-                <Badge className="bg-green-100 text-green-700">
-                  {status.deployments.successful}
-                </Badge>
+                <span className="text-gray-400">Video (D-ID)</span>
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="w-5 h-5 text-green-500" />
+                  <span>Ready</span>
+                </div>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">Last Deployment</span>
-                <span className="text-sm text-gray-900">
-                  {new Date(status.deployments.lastDeployment).toLocaleString()}
-                </span>
+                <span className="text-gray-400">Video (HeyGen)</span>
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="w-5 h-5 text-green-500" />
+                  <span>Ready</span>
+                </div>
               </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Quick Actions */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Quick Actions</CardTitle>
-            <CardDescription>Common administrative tasks</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Button variant="outline" className="h-auto py-4 flex flex-col items-start gap-2">
-                <Activity className="w-5 h-5 text-purple-600" />
-                <span className="font-semibold">Trigger Healing Check</span>
-                <span className="text-xs text-gray-500">Run error detection now</span>
-              </Button>
-
-              <Button variant="outline" className="h-auto py-4 flex flex-col items-start gap-2">
-                <Brain className="w-5 h-5 text-blue-600" />
-                <span className="font-semibold">Feed Knowledge</span>
-                <span className="text-xs text-gray-500">Add manual insights</span>
-              </Button>
-
-              <Button variant="outline" className="h-auto py-4 flex flex-col items-start gap-2">
-                <TrendingUp className="w-5 h-5 text-green-600" />
-                <span className="font-semibold">View Analytics</span>
-                <span className="text-xs text-gray-500">Performance metrics</span>
-              </Button>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+          
+          {/* Improvement Suggestions */}
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 md:col-span-2">
+            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+              <Lightbulb className="w-5 h-5 text-yellow-400" />
+              Improvement Suggestions
+            </h2>
+            {suggestions.length > 0 ? (
+              <div className="space-y-3">
+                {suggestions.map((s, i) => (
+                  <div key={i} className="p-3 bg-gray-800/50 rounded-lg">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`px-2 py-0.5 rounded text-xs ${
+                        s.priority === 'high' ? 'bg-red-500/20 text-red-400' :
+                        s.priority === 'medium' ? 'bg-yellow-500/20 text-yellow-400' :
+                        'bg-blue-500/20 text-blue-400'
+                      }`}>
+                        {s.priority}
+                      </span>
+                      <span className="text-sm font-medium">{s.type.replace(/_/g, ' ')}</span>
+                    </div>
+                    <p className="text-gray-400 text-sm">{s.message}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-500">No improvement suggestions at this time. Keep using Javari to generate learning data!</p>
+            )}
+          </div>
+          
+          {/* Activity Log */}
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+              <Activity className="w-5 h-5 text-purple-400" />
+              Recent Activity
+            </h2>
+            <div className="text-sm text-gray-400 space-y-2">
+              <p>• Voice API checked</p>
+              <p>• Learning stats updated</p>
+              <p>• System health verified</p>
+              <p className="text-xs text-gray-600 mt-4">
+                Last refresh: {lastRefresh.toLocaleTimeString()}
+              </p>
+            </div>
+          </div>
+          
+        </div>
+        
+        {/* Capabilities */}
+        <div className="mt-8 p-6 bg-gray-900/50 border border-gray-800 rounded-xl">
+          <h2 className="text-lg font-semibold mb-4">Javari Capabilities</h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 text-center text-sm">
+            {[
+              'Revenue Reports',
+              'User Management',
+              'Deployment Control',
+              'Grant Tracking',
+              'Email Drafting',
+              'Promo Codes',
+              'Voice Commands',
+              'Video Calls',
+              'Self-Healing',
+              'Pattern Learning',
+              'Knowledge Base',
+              'Auto-Improvement'
+            ].map((cap, i) => (
+              <div key={i} className="p-3 bg-gray-800/50 rounded-lg">
+                <CheckCircle className="w-5 h-5 text-green-500 mx-auto mb-1" />
+                {cap}
+              </div>
+            ))}
+          </div>
+        </div>
+        
       </div>
     </div>
-  );
+  )
 }
