@@ -1,7 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "fluid": true,
-  "regions": ["iad1", "sfo1"],
+  "regions": [
+    "iad1",
+    "sfo1"
+  ],
   "functions": {
     "app/api/**/*.ts": {
       "memory": 1024,
@@ -26,28 +29,20 @@
   },
   "crons": [
     {
-      "path": "/api/cron/web-crawl",
+      "path": "/api/cron/scheduled-commands",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/system-health",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/lead-scoring",
       "schedule": "0 6 * * *"
     },
     {
-      "path": "/api/javari/learn-from-docs",
-      "schedule": "0 */4 * * *"
-    },
-    {
-      "path": "/api/javari/health",
+      "path": "/api/cron/alerts-check",
       "schedule": "*/30 * * * *"
-    },
-    {
-      "path": "/api/cron/self-healing",
-      "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/cron/continuous-learning",
-      "schedule": "0 */4 * * *"
-    },
-    {
-      "path": "/api/cron/warmup",
-      "schedule": "*/3 * * * *"
     }
   ],
   "headers": [
