@@ -1,400 +1,375 @@
-// app/command/page.tsx
-// ═══════════════════════════════════════════════════════════════════════════════
-// JAVARI AI - COMMAND CENTER
-// ═══════════════════════════════════════════════════════════════════════════════
-// Timestamp: Saturday, December 13, 2025 - 8:30 PM EST
-// Version: 1.0 - SYSTEM OPERATIONS CONTROL PANEL
-// ═══════════════════════════════════════════════════════════════════════════════
+/**
+ * CR AudioViz AI - Javari Command Console
+ * ========================================
+ * 
+ * Talk to Javari and she runs the business.
+ * Your AI COO that never sleeps.
+ * 
+ * @version 1.0.0
+ * @date January 1, 2026
+ */
 
-'use client';
+'use client'
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect } from 'react'
+import { 
+  Send, 
+  Sparkles,
+  Mic,
+  MicOff,
+  Bot,
+  User,
+  Loader2,
+  CheckCircle,
+  XCircle,
+  Clock,
+  TrendingUp,
+  DollarSign,
+  Users,
+  Server,
+  FileText
+} from 'lucide-react'
 
-interface SystemStatus {
-  name: string;
-  endpoint: string;
-  status: 'online' | 'offline' | 'checking';
-  latency?: number;
-  details?: string;
+interface Message {
+  id: string
+  role: 'user' | 'javari'
+  content: string
+  result?: any
+  timestamp: Date
+  processing?: boolean
 }
 
-interface ProjectHealth {
-  name: string;
-  overall: string;
-  github: { status: string; lastCommit: string };
-  vercel?: { status: string; url?: string };
-}
+const QUICK_COMMANDS = [
+  { icon: TrendingUp, label: 'Revenue Report', command: 'Run a revenue report for the last 30 days' },
+  { icon: Users, label: 'User Signups', command: 'Show me user signups this week' },
+  { icon: Server, label: 'System Health', command: 'Check system health' },
+  { icon: DollarSign, label: 'Grant Status', command: 'What is our grant application status?' },
+  { icon: FileText, label: 'Failed Builds', command: 'Show me all failed deployments' },
+]
 
-interface Plugin {
-  id: string;
-  name: string;
-  category: string;
-  enabled: boolean;
-}
-
-export default function CommandCenter() {
-  const [systems, setSystems] = useState<SystemStatus[]>([
-    { name: 'Chat Engine', endpoint: '/api/chat', status: 'checking' },
-    { name: 'Streaming', endpoint: '/api/chat/stream', status: 'checking' },
-    { name: 'Tools Engine', endpoint: '/api/tools/execute', status: 'checking' },
-    { name: 'Self-Healing', endpoint: '/api/autonomous/heal', status: 'checking' },
-    { name: 'Intelligence', endpoint: '/api/intelligence/proactive', status: 'checking' },
-    { name: 'Agent Mode', endpoint: '/api/agent/execute', status: 'checking' },
-    { name: 'Cron System', endpoint: '/api/cron', status: 'checking' },
-    { name: 'GitHub Webhook', endpoint: '/api/webhooks/github', status: 'checking' },
-    { name: 'Vercel Webhook', endpoint: '/api/webhooks/vercel', status: 'checking' },
-    { name: 'Vision AI', endpoint: '/api/vision/analyze', status: 'checking' },
-    { name: 'Voice Synth', endpoint: '/api/voice/synthesize', status: 'checking' },
-    { name: 'Memory System', endpoint: '/api/memory', status: 'checking' },
-    { name: 'Email Alerts', endpoint: '/api/notifications/email', status: 'checking' },
-    { name: 'Analytics', endpoint: '/api/analytics/dashboard', status: 'checking' },
-    { name: 'Plugins', endpoint: '/api/plugins', status: 'checking' },
-    { name: 'Orchestrator', endpoint: '/api/projects/orchestrate', status: 'checking' },
-  ]);
-
-  const [projects, setProjects] = useState<ProjectHealth[]>([]);
-  const [plugins, setPlugins] = useState<Plugin[]>([]);
-  const [healthScore, setHealthScore] = useState<number>(0);
-  const [projectCount, setProjectCount] = useState<number>(0);
-  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [commandInput, setCommandInput] = useState('');
-  const [commandOutput, setCommandOutput] = useState<string[]>([]);
-  const [isExecuting, setIsExecuting] = useState(false);
-
-  const checkSystems = useCallback(async () => {
-    setIsRefreshing(true);
-    const updatedSystems = await Promise.all(
-      systems.map(async (system) => {
-        const start = Date.now();
-        try {
-          const res = await fetch(system.endpoint, { method: 'GET' });
-          const latency = Date.now() - start;
-          if (res.ok) {
-            const data = await res.json();
-            return {
-              ...system,
-              status: 'online' as const,
-              latency,
-              details: data.name || data.status || 'OK'
-            };
-          }
-          return { ...system, status: 'offline' as const, latency };
-        } catch {
-          return { ...system, status: 'offline' as const, latency: Date.now() - start };
-        }
-      })
-    );
-    setSystems(updatedSystems);
-
-    // Fetch health score
-    try {
-      const healthRes = await fetch('/api/analytics/dashboard?section=health');
-      const healthData = await healthRes.json();
-      setHealthScore(healthData.data?.score || 0);
-    } catch {
-      setHealthScore(0);
+export default function CommandConsole() {
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      id: 'welcome',
+      role: 'javari',
+      content: "Hello Roy! I'm Javari, your AI COO. I'm here to run the business with you. Tell me anything - run reports, check status, fix issues, analyze data. What would you like me to do?",
+      timestamp: new Date()
     }
-
-    // Fetch projects
-    try {
-      const projRes = await fetch('/api/projects/orchestrate?action=health');
-      const projData = await projRes.json();
-      setProjects(projData.projects?.slice(0, 10) || []);
-      setProjectCount(projData.summary?.total || 0);
-    } catch {
-      setProjects([]);
-    }
-
-    // Fetch plugins
-    try {
-      const plugRes = await fetch('/api/plugins');
-      const plugData = await plugRes.json();
-      setPlugins(plugData.plugins || []);
-    } catch {
-      setPlugins([]);
-    }
-
-    setLastRefresh(new Date());
-    setIsRefreshing(false);
-  }, []);
-
+  ])
+  const [input, setInput] = useState('')
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [isListening, setIsListening] = useState(false)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+  
   useEffect(() => {
-    checkSystems();
-    const interval = setInterval(checkSystems, 60000);
-    return () => clearInterval(interval);
-  }, [checkSystems]);
-
-  const executeCommand = async (cmd: string) => {
-    setIsExecuting(true);
-    const log = (msg: string) => setCommandOutput(prev => [...prev, `> ${msg}`]);
+    scrollToBottom()
+  }, [messages])
+  
+  const executeCommand = async (command: string) => {
+    if (!command.trim() || isProcessing) return
     
-    log(`Executing: ${cmd}`);
+    const userMessage: Message = {
+      id: `user_${Date.now()}`,
+      role: 'user',
+      content: command,
+      timestamp: new Date()
+    }
+    
+    const processingMessage: Message = {
+      id: `javari_${Date.now()}`,
+      role: 'javari',
+      content: 'Processing your command...',
+      timestamp: new Date(),
+      processing: true
+    }
+    
+    setMessages(prev => [...prev, userMessage, processingMessage])
+    setInput('')
+    setIsProcessing(true)
     
     try {
-      if (cmd.startsWith('heal')) {
-        log('Triggering self-healing scan...');
-        const res = await fetch('/api/autonomous/heal', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ scanAll: true })
-        });
-        const data = await res.json();
-        log(`Result: ${JSON.stringify(data, null, 2)}`);
-      } else if (cmd.startsWith('chat ')) {
-        const message = cmd.replace('chat ', '');
-        log(`Sending to Javari: "${message}"`);
-        const res = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: [{ role: 'user', content: message }] })
-        });
-        const data = await res.json();
-        log(`Javari: ${data.content || data.error}`);
-      } else if (cmd.startsWith('tool ')) {
-        const parts = cmd.replace('tool ', '').split(' ');
-        const toolName = parts[0];
-        log(`Executing tool: ${toolName}`);
-        const res = await fetch('/api/tools/execute', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tool: toolName, parameters: {} })
-        });
-        const data = await res.json();
-        log(`Result: ${JSON.stringify(data, null, 2).slice(0, 500)}`);
-      } else if (cmd === 'status') {
-        log('Refreshing system status...');
-        await checkSystems();
-        log('Status refreshed.');
-      } else if (cmd === 'help') {
-        log('Available commands:');
-        log('  heal          - Trigger self-healing scan');
-        log('  chat <msg>    - Send message to Javari');
-        log('  tool <name>   - Execute a tool');
-        log('  status        - Refresh system status');
-        log('  clear         - Clear command output');
-        log('  help          - Show this help');
-      } else if (cmd === 'clear') {
-        setCommandOutput([]);
+      const response = await fetch('/api/javari/business', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command, userId: 'roy' })
+      })
+      
+      const data = await response.json()
+      
+      // Generate natural language response
+      let responseText = ''
+      if (data.success) {
+        responseText = formatResult(data.result, command)
       } else {
-        log(`Unknown command: ${cmd}. Type "help" for available commands.`);
+        responseText = `I encountered an issue: ${data.error}. Let me try a different approach or please rephrase your request.`
       }
+      
+      setMessages(prev => prev.map(m => 
+        m.id === processingMessage.id 
+          ? { ...m, content: responseText, result: data.result, processing: false }
+          : m
+      ))
+      
     } catch (error) {
-      log(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setMessages(prev => prev.map(m => 
+        m.id === processingMessage.id 
+          ? { ...m, content: 'I had trouble processing that. Please try again.', processing: false }
+          : m
+      ))
+    } finally {
+      setIsProcessing(false)
     }
+  }
+  
+  const formatResult = (result: any, command: string): string => {
+    if (!result) return "I've processed your request."
     
-    setIsExecuting(false);
-  };
+    switch (result.type) {
+      case 'revenue_report':
+        return `📊 **Revenue Report (${result.period})**
 
-  const handleCommand = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (commandInput.trim() && !isExecuting) {
-      executeCommand(commandInput.trim().toLowerCase());
-      setCommandInput('');
+💳 Subscriptions: ${result.subscriptions.count} active ($${result.subscriptions.revenue.toLocaleString()})
+🎫 Credit Sales: ${result.credits.purchases} purchases ($${result.credits.revenue.toLocaleString()})
+💰 **Total Revenue: $${result.totalRevenue.toLocaleString()}**
+
+Need me to break this down further or compare to previous periods?`
+
+      case 'user_report':
+        const tierBreakdown = Object.entries(result.byTier || {})
+          .map(([tier, count]) => `  • ${tier}: ${count}`)
+          .join('\n')
+        return `👥 **User Report (${result.period})**
+
+New signups: **${result.newUsers}** users
+
+By subscription tier:
+${tierBreakdown || '  No tier data available'}
+
+Want me to analyze conversion rates or user behavior?`
+
+      case 'deployment_report':
+        return `🚀 **Deployment Status**
+
+✅ Ready: ${result.stats.ready}
+❌ Failed: ${result.stats.error}
+🔄 Building: ${result.stats.building}
+
+${result.stats.error > 0 ? `\nFailed deployments need attention. Say "fix the broken builds" and I'll start the self-healing process.` : 'All systems looking good!'}`
+
+      case 'failed_deployments':
+        if (result.count === 0) {
+          return "✅ Great news! No failed deployments found. All systems are healthy."
+        }
+        const failed = result.deployments.slice(0, 5)
+          .map((d: any) => `  • ${d.project}`)
+          .join('\n')
+        return `⚠️ Found **${result.count}** failed deployments:
+
+${failed}
+
+Say "fix the broken builds" and I'll initiate self-healing.`
+
+      case 'heal_initiated':
+        return `🔧 **Self-Healing Started**
+
+I've initiated the autonomous healing process. Here's what's happening:
+- Analyzing failed builds
+- Diagnosing errors with AI
+- Generating fixes
+- Pushing to GitHub
+- Verifying deployments
+
+Check the Autopilot dashboard for real-time progress.`
+
+      case 'grant_status':
+        const submitted = result.grants.map((g: any) => 
+          `  ✅ ${g.name}: ${g.amount} - ${g.status}`
+        ).join('\n')
+        const upcoming = result.upcoming.slice(0, 3).map((g: any) =>
+          `  📋 ${g.name}: ${g.amount} (${g.deadline})`
+        ).join('\n')
+        return `📝 **Grant Status**
+
+**Submitted:**
+${submitted}
+
+**Upcoming Opportunities:**
+${upcoming}
+
+Want me to prepare materials for the next application?`
+
+      case 'system_health':
+        const services = Object.entries(result.services)
+          .map(([name, status]) => `  ${status === 'healthy' ? '✅' : '⚠️'} ${name}: ${status}`)
+          .join('\n')
+        return `🏥 **System Health Check**
+
+${services}
+
+All core systems operational. Anything specific you want me to investigate?`
+
+      case 'current_pricing':
+        return `💵 **Current Pricing**
+
+Subscription Plans:
+  • Starter: $9/mo (500 credits)
+  • Creator: $19/mo (1,500 credits)
+  • Pro: $29/mo (5,000 credits)
+  • Studio: $49/mo (15,000 credits)
+  • Enterprise: $99/mo (50,000 credits)
+  • Agency: $199/mo (unlimited)
+
+Want me to change any pricing? Just tell me what to adjust.`
+
+      case 'pricing_change_requested':
+        return `⚠️ **Pricing Change Requested**
+
+Plan: ${result.plan}
+New Price: $${result.newPrice}
+Status: Pending your approval
+
+This change requires your confirmation before I execute it. Reply "approve" to proceed.`
+
+      default:
+        return `I've processed your request. Here's what I found:\n\n${JSON.stringify(result, null, 2)}`
     }
-  };
-
-  const onlineCount = systems.filter(s => s.status === 'online').length;
-  const totalSystems = systems.length;
-
+  }
+  
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      executeCommand(input)
+    }
+  }
+  
   return (
-    <div className="min-h-screen bg-black text-green-400 font-mono">
+    <div className="min-h-screen bg-gray-950 text-white flex flex-col">
       {/* Header */}
-      <header className="border-b border-green-900 p-4">
-        <div className="flex items-center justify-between max-w-7xl mx-auto">
-          <div className="flex items-center gap-4">
-            <div className="text-2xl">⚡</div>
-            <div>
-              <h1 className="text-xl font-bold text-green-300">JAVARI COMMAND CENTER</h1>
-              <p className="text-xs text-green-600">CR AudioViz AI • System Operations</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-6 text-sm">
-            <div>
-              <span className="text-green-600">HEALTH:</span>
-              <span className={`ml-2 ${healthScore >= 80 ? 'text-green-400' : healthScore >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>
-                {healthScore}/100
-              </span>
+      <div className="border-b border-gray-800 px-6 py-4">
+        <div className="max-w-4xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+              <Bot className="w-6 h-6" />
             </div>
             <div>
-              <span className="text-green-600">SYSTEMS:</span>
-              <span className="ml-2">{onlineCount}/{totalSystems}</span>
-            </div>
-            <div>
-              <span className="text-green-600">PROJECTS:</span>
-              <span className="ml-2">{projectCount}</span>
-            </div>
-            <button
-              onClick={checkSystems}
-              disabled={isRefreshing}
-              className="px-3 py-1 border border-green-700 hover:bg-green-900/50 transition disabled:opacity-50"
-            >
-              {isRefreshing ? '⟳ SCANNING...' : '⟳ REFRESH'}
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <div className="max-w-7xl mx-auto p-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Systems Panel */}
-        <div className="lg:col-span-2 border border-green-900 rounded">
-          <div className="border-b border-green-900 p-3 flex justify-between items-center">
-            <h2 className="text-green-300">█ SYSTEM STATUS</h2>
-            <span className="text-xs text-green-600">Last: {lastRefresh.toLocaleTimeString()}</span>
-          </div>
-          <div className="p-3 grid grid-cols-2 md:grid-cols-4 gap-2 max-h-80 overflow-y-auto">
-            {systems.map((system, i) => (
-              <div
-                key={i}
-                className={`p-2 border rounded text-xs ${
-                  system.status === 'online' ? 'border-green-700 bg-green-900/20' :
-                  system.status === 'offline' ? 'border-red-700 bg-red-900/20' :
-                  'border-yellow-700 bg-yellow-900/20'
-                }`}
-              >
-                <div className="flex items-center gap-1 mb-1">
-                  <span className={`w-2 h-2 rounded-full ${
-                    system.status === 'online' ? 'bg-green-400 animate-pulse' :
-                    system.status === 'offline' ? 'bg-red-400' :
-                    'bg-yellow-400 animate-pulse'
-                  }`}></span>
-                  <span className="font-bold truncate">{system.name}</span>
-                </div>
-                <div className="text-green-600 truncate">
-                  {system.status === 'checking' ? 'Checking...' : 
-                   system.latency ? `${system.latency}ms` : 'N/A'}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Quick Stats */}
-        <div className="border border-green-900 rounded">
-          <div className="border-b border-green-900 p-3">
-            <h2 className="text-green-300">█ QUICK STATS</h2>
-          </div>
-          <div className="p-3 space-y-3">
-            <div className="flex justify-between border-b border-green-900/50 pb-2">
-              <span className="text-green-600">Systems Online</span>
-              <span>{onlineCount}/{totalSystems}</span>
-            </div>
-            <div className="flex justify-between border-b border-green-900/50 pb-2">
-              <span className="text-green-600">Health Score</span>
-              <span className={healthScore >= 80 ? 'text-green-400' : 'text-yellow-400'}>{healthScore}%</span>
-            </div>
-            <div className="flex justify-between border-b border-green-900/50 pb-2">
-              <span className="text-green-600">Projects</span>
-              <span>{projectCount}</span>
-            </div>
-            <div className="flex justify-between border-b border-green-900/50 pb-2">
-              <span className="text-green-600">Plugins</span>
-              <span>{plugins.length}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-green-600">Uptime</span>
-              <span className="text-green-400">OPERATIONAL</span>
+              <h1 className="text-xl font-bold">Javari Command Console</h1>
+              <p className="text-sm text-gray-400">Your AI COO • Always On</p>
             </div>
           </div>
-        </div>
-
-        {/* Projects Panel */}
-        <div className="lg:col-span-2 border border-green-900 rounded">
-          <div className="border-b border-green-900 p-3">
-            <h2 className="text-green-300">█ PROJECT HEALTH ({projects.length} shown)</h2>
-          </div>
-          <div className="p-3 max-h-48 overflow-y-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-green-600 border-b border-green-900">
-                  <th className="text-left pb-2">PROJECT</th>
-                  <th className="text-left pb-2">GITHUB</th>
-                  <th className="text-left pb-2">VERCEL</th>
-                  <th className="text-left pb-2">STATUS</th>
-                </tr>
-              </thead>
-              <tbody>
-                {projects.map((proj, i) => (
-                  <tr key={i} className="border-b border-green-900/30">
-                    <td className="py-1 truncate max-w-32">{proj.name}</td>
-                    <td className={proj.github.status === 'healthy' ? 'text-green-400' : 'text-yellow-400'}>
-                      {proj.github.lastCommit || '---'}
-                    </td>
-                    <td className={proj.vercel?.status === 'ready' ? 'text-green-400' : 'text-yellow-400'}>
-                      {proj.vercel?.status || 'N/A'}
-                    </td>
-                    <td className={`font-bold ${
-                      proj.overall === 'healthy' ? 'text-green-400' :
-                      proj.overall === 'warning' ? 'text-yellow-400' : 'text-red-400'
-                    }`}>
-                      {proj.overall.toUpperCase()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Plugins Panel */}
-        <div className="border border-green-900 rounded">
-          <div className="border-b border-green-900 p-3">
-            <h2 className="text-green-300">█ PLUGINS</h2>
-          </div>
-          <div className="p-3 space-y-2 max-h-48 overflow-y-auto">
-            {plugins.map((plugin, i) => (
-              <div key={i} className="flex items-center justify-between text-xs border-b border-green-900/30 pb-1">
-                <div>
-                  <span className="text-green-300">{plugin.name}</span>
-                  <span className="ml-2 text-green-700">[{plugin.category}]</span>
-                </div>
-                <span className={plugin.enabled ? 'text-green-400' : 'text-red-400'}>
-                  {plugin.enabled ? 'ON' : 'OFF'}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Command Terminal */}
-        <div className="lg:col-span-3 border border-green-900 rounded">
-          <div className="border-b border-green-900 p-3">
-            <h2 className="text-green-300">█ COMMAND TERMINAL</h2>
-          </div>
-          <div className="p-3">
-            <div className="bg-black border border-green-900 rounded p-3 h-48 overflow-y-auto mb-3 text-xs">
-              <div className="text-green-600 mb-2">Javari Command Center v1.0 - Type "help" for commands</div>
-              {commandOutput.map((line, i) => (
-                <div key={i} className="whitespace-pre-wrap">{line}</div>
-              ))}
-              {isExecuting && <div className="animate-pulse">Processing...</div>}
-            </div>
-            <form onSubmit={handleCommand} className="flex gap-2">
-              <span className="text-green-600 py-2">$</span>
-              <input
-                type="text"
-                value={commandInput}
-                onChange={(e) => setCommandInput(e.target.value)}
-                placeholder="Enter command..."
-                disabled={isExecuting}
-                className="flex-1 bg-black border border-green-700 rounded px-3 py-2 text-green-400 focus:outline-none focus:border-green-500 disabled:opacity-50"
-              />
-              <button
-                type="submit"
-                disabled={isExecuting}
-                className="px-4 py-2 border border-green-700 hover:bg-green-900/50 transition disabled:opacity-50"
-              >
-                EXEC
-              </button>
-            </form>
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1 text-green-400 text-sm">
+              <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+              Online
+            </span>
           </div>
         </div>
       </div>
-
-      {/* Footer */}
-      <footer className="border-t border-green-900 p-4 mt-4 text-center text-xs text-green-700">
-        JAVARI AI v6.0 • ULTIMATE POWER MODE • © 2025 CR AudioViz AI LLC
-      </footer>
+      
+      {/* Quick Commands */}
+      <div className="border-b border-gray-800 px-6 py-3 overflow-x-auto">
+        <div className="max-w-4xl mx-auto flex gap-2">
+          {QUICK_COMMANDS.map((cmd, i) => (
+            <button
+              key={i}
+              onClick={() => executeCommand(cmd.command)}
+              disabled={isProcessing}
+              className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-full text-sm whitespace-nowrap transition disabled:opacity-50"
+            >
+              <cmd.icon className="w-4 h-4 text-purple-400" />
+              {cmd.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-6 py-4">
+        <div className="max-w-4xl mx-auto space-y-4">
+          {messages.map((message) => (
+            <div
+              key={message.id}
+              className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            >
+              {message.role === 'javari' && (
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center flex-shrink-0">
+                  <Bot className="w-5 h-5" />
+                </div>
+              )}
+              <div
+                className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+                  message.role === 'user'
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-gray-800 text-gray-100'
+                }`}
+              >
+                {message.processing ? (
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Processing...</span>
+                  </div>
+                ) : (
+                  <div className="whitespace-pre-wrap">{message.content}</div>
+                )}
+                <div className="text-xs opacity-50 mt-1">
+                  {message.timestamp.toLocaleTimeString()}
+                </div>
+              </div>
+              {message.role === 'user' && (
+                <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center flex-shrink-0">
+                  <User className="w-5 h-5" />
+                </div>
+              )}
+            </div>
+          ))}
+          <div ref={messagesEndRef} />
+        </div>
+      </div>
+      
+      {/* Input */}
+      <div className="border-t border-gray-800 px-6 py-4">
+        <div className="max-w-4xl mx-auto flex gap-3">
+          <div className="flex-1 relative">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Tell Javari what to do..."
+              disabled={isProcessing}
+              className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl focus:outline-none focus:border-purple-500 disabled:opacity-50"
+            />
+            <Sparkles className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-purple-400" />
+          </div>
+          <button
+            onClick={() => executeCommand(input)}
+            disabled={!input.trim() || isProcessing}
+            className="px-4 py-3 bg-purple-600 hover:bg-purple-500 rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isProcessing ? (
+              <Loader2 className="w-5 h-5 animate-spin" />
+            ) : (
+              <Send className="w-5 h-5" />
+            )}
+          </button>
+          <button
+            onClick={() => setIsListening(!isListening)}
+            className={`px-4 py-3 rounded-xl transition ${
+              isListening 
+                ? 'bg-red-600 hover:bg-red-500' 
+                : 'bg-gray-700 hover:bg-gray-600'
+            }`}
+          >
+            {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+          </button>
+        </div>
+        <p className="text-center text-xs text-gray-500 mt-2">
+          Press Enter to send • Javari can run reports, fix builds, manage pricing, and more
+        </p>
+      </div>
     </div>
-  );
+  )
 }
