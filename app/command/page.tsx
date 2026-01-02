@@ -1,17 +1,17 @@
 /**
- * CR AudioViz AI - Javari Command Console
- * ========================================
+ * CR AudioViz AI - Javari Command Console v2
+ * ==========================================
  * 
- * Talk to Javari and she runs the business.
+ * Talk to Javari via text OR voice.
  * Your AI COO that never sleeps.
  * 
- * @version 1.0.0
+ * @version 2.0.0
  * @date January 1, 2026
  */
 
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { 
   Send, 
   Sparkles,
@@ -20,14 +20,16 @@ import {
   Bot,
   User,
   Loader2,
-  CheckCircle,
-  XCircle,
-  Clock,
+  Volume2,
+  VolumeX,
   TrendingUp,
   DollarSign,
   Users,
   Server,
-  FileText
+  FileText,
+  Wrench,
+  Mail,
+  Tag
 } from 'lucide-react'
 
 interface Message {
@@ -37,14 +39,18 @@ interface Message {
   result?: any
   timestamp: Date
   processing?: boolean
+  audioUrl?: string
 }
 
 const QUICK_COMMANDS = [
-  { icon: TrendingUp, label: 'Revenue Report', command: 'Run a revenue report for the last 30 days' },
-  { icon: Users, label: 'User Signups', command: 'Show me user signups this week' },
-  { icon: Server, label: 'System Health', command: 'Check system health' },
-  { icon: DollarSign, label: 'Grant Status', command: 'What is our grant application status?' },
-  { icon: FileText, label: 'Failed Builds', command: 'Show me all failed deployments' },
+  { icon: TrendingUp, label: 'Revenue', command: 'Run a revenue report' },
+  { icon: Users, label: 'Users', command: 'Show user signups this week' },
+  { icon: Server, label: 'Health', command: 'Check system health' },
+  { icon: DollarSign, label: 'Grants', command: 'Check grant status' },
+  { icon: Wrench, label: 'Fix Builds', command: 'Fix the broken builds' },
+  { icon: Mail, label: 'Draft Email', command: 'Draft a welcome email for new users' },
+  { icon: Tag, label: 'Promo Code', command: 'Create a 20% discount code' },
+  { icon: FileText, label: 'Failed Deploys', command: 'Show failed deployments' },
 ]
 
 export default function CommandConsole() {
@@ -52,14 +58,47 @@ export default function CommandConsole() {
     {
       id: 'welcome',
       role: 'javari',
-      content: "Hello Roy! I'm Javari, your AI COO. I'm here to run the business with you. Tell me anything - run reports, check status, fix issues, analyze data. What would you like me to do?",
+      content: "Hello Roy! I'm Javari, your AI COO. I can run reports, manage users, fix deployments, and handle business operations. Try saying or typing a command, or use the quick buttons above!",
       timestamp: new Date()
     }
   ])
   const [input, setInput] = useState('')
   const [isProcessing, setIsProcessing] = useState(false)
   const [isListening, setIsListening] = useState(false)
+  const [voiceEnabled, setVoiceEnabled] = useState(true)
+  const [speechSupported, setSpeechSupported] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const recognitionRef = useRef<any>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  
+  // Check for speech recognition support
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+      setSpeechSupported(!!SpeechRecognition)
+      
+      if (SpeechRecognition) {
+        recognitionRef.current = new SpeechRecognition()
+        recognitionRef.current.continuous = false
+        recognitionRef.current.interimResults = false
+        recognitionRef.current.lang = 'en-US'
+        
+        recognitionRef.current.onresult = (event: any) => {
+          const transcript = event.results[0][0].transcript
+          setInput(transcript)
+          executeCommand(transcript)
+        }
+        
+        recognitionRef.current.onend = () => {
+          setIsListening(false)
+        }
+        
+        recognitionRef.current.onerror = () => {
+          setIsListening(false)
+        }
+      }
+    }
+  }, [])
   
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -68,6 +107,27 @@ export default function CommandConsole() {
   useEffect(() => {
     scrollToBottom()
   }, [messages])
+  
+  const playAudio = async (base64Audio: string) => {
+    if (!voiceEnabled) return
+    
+    try {
+      const audioBlob = new Blob(
+        [Uint8Array.from(atob(base64Audio), c => c.charCodeAt(0))],
+        { type: 'audio/mpeg' }
+      )
+      const audioUrl = URL.createObjectURL(audioBlob)
+      
+      if (audioRef.current) {
+        audioRef.current.pause()
+      }
+      
+      audioRef.current = new Audio(audioUrl)
+      await audioRef.current.play()
+    } catch (error) {
+      console.error('Audio playback error:', error)
+    }
+  }
   
   const executeCommand = async (command: string) => {
     if (!command.trim() || isProcessing) return
@@ -82,7 +142,7 @@ export default function CommandConsole() {
     const processingMessage: Message = {
       id: `javari_${Date.now()}`,
       role: 'javari',
-      content: 'Processing your command...',
+      content: 'Processing...',
       timestamp: new Date(),
       processing: true
     }
@@ -92,25 +152,24 @@ export default function CommandConsole() {
     setIsProcessing(true)
     
     try {
-      const response = await fetch('/api/javari/business', {
+      // Use voice API for audio response
+      const response = await fetch('/api/javari/voice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command, userId: 'roy' })
+        body: JSON.stringify({ transcript: command })
       })
       
       const data = await response.json()
       
-      // Generate natural language response
-      let responseText = ''
-      if (data.success) {
-        responseText = formatResult(data.result, command)
-      } else {
-        responseText = `I encountered an issue: ${data.error}. Let me try a different approach or please rephrase your request.`
+      // Format the response text with markdown-like styling
+      let responseText = data.response || 'Command processed.'
+      if (data.success && data.audio) {
+        playAudio(data.audio)
       }
       
       setMessages(prev => prev.map(m => 
         m.id === processingMessage.id 
-          ? { ...m, content: responseText, result: data.result, processing: false }
+          ? { ...m, content: responseText, processing: false, audioUrl: data.audio ? 'has-audio' : undefined }
           : m
       ))
       
@@ -125,117 +184,15 @@ export default function CommandConsole() {
     }
   }
   
-  const formatResult = (result: any, command: string): string => {
-    if (!result) return "I've processed your request."
+  const toggleListening = () => {
+    if (!speechSupported || !recognitionRef.current) return
     
-    switch (result.type) {
-      case 'revenue_report':
-        return `📊 **Revenue Report (${result.period})**
-
-💳 Subscriptions: ${result.subscriptions.count} active ($${result.subscriptions.revenue.toLocaleString()})
-🎫 Credit Sales: ${result.credits.purchases} purchases ($${result.credits.revenue.toLocaleString()})
-💰 **Total Revenue: $${result.totalRevenue.toLocaleString()}**
-
-Need me to break this down further or compare to previous periods?`
-
-      case 'user_report':
-        const tierBreakdown = Object.entries(result.byTier || {})
-          .map(([tier, count]) => `  • ${tier}: ${count}`)
-          .join('\n')
-        return `👥 **User Report (${result.period})**
-
-New signups: **${result.newUsers}** users
-
-By subscription tier:
-${tierBreakdown || '  No tier data available'}
-
-Want me to analyze conversion rates or user behavior?`
-
-      case 'deployment_report':
-        return `🚀 **Deployment Status**
-
-✅ Ready: ${result.stats.ready}
-❌ Failed: ${result.stats.error}
-🔄 Building: ${result.stats.building}
-
-${result.stats.error > 0 ? `\nFailed deployments need attention. Say "fix the broken builds" and I'll start the self-healing process.` : 'All systems looking good!'}`
-
-      case 'failed_deployments':
-        if (result.count === 0) {
-          return "✅ Great news! No failed deployments found. All systems are healthy."
-        }
-        const failed = result.deployments.slice(0, 5)
-          .map((d: any) => `  • ${d.project}`)
-          .join('\n')
-        return `⚠️ Found **${result.count}** failed deployments:
-
-${failed}
-
-Say "fix the broken builds" and I'll initiate self-healing.`
-
-      case 'heal_initiated':
-        return `🔧 **Self-Healing Started**
-
-I've initiated the autonomous healing process. Here's what's happening:
-- Analyzing failed builds
-- Diagnosing errors with AI
-- Generating fixes
-- Pushing to GitHub
-- Verifying deployments
-
-Check the Autopilot dashboard for real-time progress.`
-
-      case 'grant_status':
-        const submitted = result.grants.map((g: any) => 
-          `  ✅ ${g.name}: ${g.amount} - ${g.status}`
-        ).join('\n')
-        const upcoming = result.upcoming.slice(0, 3).map((g: any) =>
-          `  📋 ${g.name}: ${g.amount} (${g.deadline})`
-        ).join('\n')
-        return `📝 **Grant Status**
-
-**Submitted:**
-${submitted}
-
-**Upcoming Opportunities:**
-${upcoming}
-
-Want me to prepare materials for the next application?`
-
-      case 'system_health':
-        const services = Object.entries(result.services)
-          .map(([name, status]) => `  ${status === 'healthy' ? '✅' : '⚠️'} ${name}: ${status}`)
-          .join('\n')
-        return `🏥 **System Health Check**
-
-${services}
-
-All core systems operational. Anything specific you want me to investigate?`
-
-      case 'current_pricing':
-        return `💵 **Current Pricing**
-
-Subscription Plans:
-  • Starter: $9/mo (500 credits)
-  • Creator: $19/mo (1,500 credits)
-  • Pro: $29/mo (5,000 credits)
-  • Studio: $49/mo (15,000 credits)
-  • Enterprise: $99/mo (50,000 credits)
-  • Agency: $199/mo (unlimited)
-
-Want me to change any pricing? Just tell me what to adjust.`
-
-      case 'pricing_change_requested':
-        return `⚠️ **Pricing Change Requested**
-
-Plan: ${result.plan}
-New Price: $${result.newPrice}
-Status: Pending your approval
-
-This change requires your confirmation before I execute it. Reply "approve" to proceed.`
-
-      default:
-        return `I've processed your request. Here's what I found:\n\n${JSON.stringify(result, null, 2)}`
+    if (isListening) {
+      recognitionRef.current.stop()
+      setIsListening(false)
+    } else {
+      recognitionRef.current.start()
+      setIsListening(true)
     }
   }
   
@@ -252,15 +209,22 @@ This change requires your confirmation before I execute it. Reply "approve" to p
       <div className="border-b border-gray-800 px-6 py-4">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
-              <Bot className="w-6 h-6" />
+            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shadow-lg shadow-purple-500/20">
+              <Bot className="w-7 h-7" />
             </div>
             <div>
               <h1 className="text-xl font-bold">Javari Command Console</h1>
-              <p className="text-sm text-gray-400">Your AI COO • Always On</p>
+              <p className="text-sm text-gray-400">Your AI COO • Always On • Voice Enabled</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setVoiceEnabled(!voiceEnabled)}
+              className={`p-2 rounded-lg transition ${voiceEnabled ? 'bg-purple-500/20 text-purple-400' : 'bg-gray-800 text-gray-500'}`}
+              title={voiceEnabled ? 'Voice responses on' : 'Voice responses off'}
+            >
+              {voiceEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+            </button>
             <span className="flex items-center gap-1 text-green-400 text-sm">
               <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
               Online
@@ -295,8 +259,8 @@ This change requires your confirmation before I execute it. Reply "approve" to p
               className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               {message.role === 'javari' && (
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center flex-shrink-0">
-                  <Bot className="w-5 h-5" />
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-purple-500/20">
+                  <Bot className="w-6 h-6" />
                 </div>
               )}
               <div
@@ -309,18 +273,26 @@ This change requires your confirmation before I execute it. Reply "approve" to p
                 {message.processing ? (
                   <div className="flex items-center gap-2">
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Processing...</span>
+                    <span>Processing your command...</span>
                   </div>
                 ) : (
-                  <div className="whitespace-pre-wrap">{message.content}</div>
+                  <>
+                    <div className="whitespace-pre-wrap">{message.content}</div>
+                    {message.audioUrl && voiceEnabled && (
+                      <div className="flex items-center gap-1 mt-2 text-xs text-purple-300">
+                        <Volume2 className="w-3 h-3" />
+                        <span>Voice response played</span>
+                      </div>
+                    )}
+                  </>
                 )}
                 <div className="text-xs opacity-50 mt-1">
                   {message.timestamp.toLocaleTimeString()}
                 </div>
               </div>
               {message.role === 'user' && (
-                <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center flex-shrink-0">
-                  <User className="w-5 h-5" />
+                <div className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center flex-shrink-0">
+                  <User className="w-6 h-6" />
                 </div>
               )}
             </div>
@@ -328,6 +300,21 @@ This change requires your confirmation before I execute it. Reply "approve" to p
           <div ref={messagesEndRef} />
         </div>
       </div>
+      
+      {/* Voice indicator */}
+      {isListening && (
+        <div className="px-6 py-2 bg-purple-600/20 border-t border-purple-500/30">
+          <div className="max-w-4xl mx-auto flex items-center justify-center gap-2 text-purple-300">
+            <div className="flex gap-1">
+              <span className="w-1 h-4 bg-purple-400 rounded animate-pulse" style={{ animationDelay: '0ms' }} />
+              <span className="w-1 h-6 bg-purple-400 rounded animate-pulse" style={{ animationDelay: '150ms' }} />
+              <span className="w-1 h-4 bg-purple-400 rounded animate-pulse" style={{ animationDelay: '300ms' }} />
+              <span className="w-1 h-5 bg-purple-400 rounded animate-pulse" style={{ animationDelay: '450ms' }} />
+            </div>
+            <span>Listening... speak your command</span>
+          </div>
+        </div>
+      )}
       
       {/* Input */}
       <div className="border-t border-gray-800 px-6 py-4">
@@ -339,7 +326,7 @@ This change requires your confirmation before I execute it. Reply "approve" to p
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Tell Javari what to do..."
-              disabled={isProcessing}
+              disabled={isProcessing || isListening}
               className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl focus:outline-none focus:border-purple-500 disabled:opacity-50"
             />
             <Sparkles className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-purple-400" />
@@ -355,19 +342,22 @@ This change requires your confirmation before I execute it. Reply "approve" to p
               <Send className="w-5 h-5" />
             )}
           </button>
-          <button
-            onClick={() => setIsListening(!isListening)}
-            className={`px-4 py-3 rounded-xl transition ${
-              isListening 
-                ? 'bg-red-600 hover:bg-red-500' 
-                : 'bg-gray-700 hover:bg-gray-600'
-            }`}
-          >
-            {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-          </button>
+          {speechSupported && (
+            <button
+              onClick={toggleListening}
+              disabled={isProcessing}
+              className={`px-4 py-3 rounded-xl transition ${
+                isListening 
+                  ? 'bg-red-600 hover:bg-red-500 animate-pulse' 
+                  : 'bg-gray-700 hover:bg-gray-600'
+              }`}
+            >
+              {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+            </button>
+          )}
         </div>
         <p className="text-center text-xs text-gray-500 mt-2">
-          Press Enter to send • Javari can run reports, fix builds, manage pricing, and more
+          Press Enter to send • Click mic to speak • Javari responds with voice
         </p>
       </div>
     </div>
