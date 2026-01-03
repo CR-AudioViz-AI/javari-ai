@@ -29,6 +29,10 @@
   },
   "crons": [
     {
+      "path": "/api/cron/ecosystem-health",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/self-healing",
       "schedule": "*/5 * * * *"
     },
