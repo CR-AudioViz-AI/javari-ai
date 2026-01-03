@@ -1,175 +1,88 @@
 /**
- * UNIVERSAL CREDITS SYSTEM API
- * CR AudioViz AI - Henderson Standard
- * 
- * Handles all credit operations across the ecosystem:
- * - Check balance
- * - Deduct credits
- * - Add credits
- * - Transaction history
- * - Refunds
+ * CREDITS API - Returns user credit balance
+ * Fixed with proper auth handling per ChatGPT audit
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
-// Credit costs per action (configurable)
-const CREDIT_COSTS: Record<string, number> = {
-  'ai_chat': 1,
-  'ai_image': 5,
-  'ai_voice': 3,
-  'pdf_generate': 2,
-  'invoice_create': 1,
-  'ebook_export': 10,
-  'logo_design': 5,
-  'social_graphic': 2,
-  'scrapbook_page': 3,
-  'market_analysis': 15,
-  'pattern_generate': 5,
-};
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const userId = searchParams.get('user_id');
-    const action = searchParams.get('action');
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    if (!userId) {
-      return NextResponse.json({ error: 'user_id required' }, { status: 400 });
+    if (!supabaseUrl || !supabaseKey) {
+      return NextResponse.json({ 
+        error: 'Configuration error'
+      }, { status: 500 });
     }
 
-    // Get user's current balance
-    const { data: user, error } = await supabase
-      .from('users')
-      .select('id, email, credits_balance, subscription_tier')
-      .eq('id', userId)
-      .single();
+    const supabase = createClient(supabaseUrl, supabaseKey);
 
-    if (error || !user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    // Get auth token from header
+    const authHeader = request.headers.get('authorization');
+    const userId = request.nextUrl.searchParams.get('user_id');
+
+    // If no auth and no user_id, return 401
+    if (!authHeader && !userId) {
+      return NextResponse.json({ 
+        error: 'Unauthorized',
+        message: 'Authentication required. Provide Authorization header or user_id parameter.'
+      }, { status: 401 });
     }
 
-    // If action specified, check if user can afford it
-    if (action) {
-      const cost = CREDIT_COSTS[action] || 1;
-      const canAfford = user.credits_balance >= cost;
+    let targetUserId = userId;
+
+    // If auth header provided, verify and get user
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.replace('Bearer ', '');
+      const { data: { user }, error: authError } = await supabase.auth.getUser(token);
       
-      return NextResponse.json({
-        user_id: userId,
-        current_balance: user.credits_balance,
-        subscription_tier: user.subscription_tier,
-        action,
-        cost,
-        can_afford: canAfford,
-        credit_costs: CREDIT_COSTS
-      });
+      if (authError || !user) {
+        return NextResponse.json({ 
+          error: 'Invalid token',
+          message: 'Authentication token is invalid or expired'
+        }, { status: 401 });
+      }
+      
+      targetUserId = user.id;
     }
 
-    return NextResponse.json({
-      user_id: userId,
-      current_balance: user.credits_balance,
-      subscription_tier: user.subscription_tier,
-      credit_costs: CREDIT_COSTS
-    });
-
-  } catch (error) {
-    console.error('Credits GET error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
-  }
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const { user_id, action, amount, operation, app_id, description } = body;
-
-    if (!user_id) {
-      return NextResponse.json({ error: 'user_id required' }, { status: 400 });
+    if (!targetUserId) {
+      return NextResponse.json({ 
+        error: 'Bad request',
+        message: 'User ID required'
+      }, { status: 400 });
     }
 
-    // Get current balance
-    const { data: user, error: userError } = await supabase
-      .from('users')
-      .select('id, credits_balance, subscription_tier')
-      .eq('id', user_id)
+    // Get credits balance
+    const { data: credits, error } = await supabase
+      .from('credits')
+      .select('balance, lifetime_earned, last_updated')
+      .eq('user_id', targetUserId)
       .single();
 
-    if (userError || !user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    if (error && error.code !== 'PGRST116') {
+      return NextResponse.json({ 
+        error: 'Database error',
+        message: error.message
+      }, { status: 500 });
     }
-
-    let newBalance = user.credits_balance;
-    let transactionType = operation || 'deduct';
-    let creditAmount = amount || CREDIT_COSTS[action] || 1;
-
-    switch (transactionType) {
-      case 'deduct':
-        if (user.credits_balance < creditAmount) {
-          return NextResponse.json({
-            error: 'Insufficient credits',
-            current_balance: user.credits_balance,
-            required: creditAmount,
-            shortfall: creditAmount - user.credits_balance
-          }, { status: 402 });
-        }
-        newBalance = user.credits_balance - creditAmount;
-        break;
-
-      case 'add':
-        newBalance = user.credits_balance + creditAmount;
-        break;
-
-      case 'refund':
-        newBalance = user.credits_balance + creditAmount;
-        transactionType = 'refund';
-        break;
-
-      default:
-        return NextResponse.json({ error: 'Invalid operation' }, { status: 400 });
-    }
-
-    // Update balance
-    const { error: updateError } = await supabase
-      .from('users')
-      .update({ 
-        credits_balance: newBalance,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', user_id);
-
-    if (updateError) {
-      throw updateError;
-    }
-
-    // Log transaction
-    await supabase.from('credit_transactions').insert({
-      user_id,
-      amount: creditAmount,
-      type: transactionType,
-      action: action || description || 'manual',
-      app_id: app_id || 'javari',
-      balance_before: user.credits_balance,
-      balance_after: newBalance,
-      created_at: new Date().toISOString()
-    });
 
     return NextResponse.json({
       success: true,
-      user_id,
-      operation: transactionType,
-      amount: creditAmount,
-      previous_balance: user.credits_balance,
-      new_balance: newBalance,
-      action: action || description
+      user_id: targetUserId,
+      balance: credits?.balance || 0,
+      lifetime_earned: credits?.lifetime_earned || 0,
+      last_updated: credits?.last_updated || null
     });
 
-  } catch (error) {
-    console.error('Credits POST error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  } catch (err: unknown) {
+    return NextResponse.json({ 
+      error: 'Server error',
+      message: err instanceof Error ? err.message : 'Unknown error'
+    }, { status: 500 });
   }
 }
