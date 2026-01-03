@@ -1,190 +1,223 @@
 /**
- * JAVARI AI - Setup Autonomous Tables API
- * 
- * One-time setup endpoint to create the database tables needed
- * for the 24x7x365 autonomous monitoring system.
- * 
- * Endpoint: POST /api/setup/autonomous-tables
- * 
- * Created: January 3, 2026
+ * DATABASE SETUP ENDPOINT
+ * Creates autonomous monitoring tables if they don't exist
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-
-// Force dynamic - prevents static generation
-export const dynamic = 'force-dynamic';
 import { createClient } from '@supabase/supabase-js';
 
-export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-// Tables to create
-const TABLES = {
-  javari_ecosystem_health: `
-    CREATE TABLE IF NOT EXISTS javari_ecosystem_health (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      total_projects INTEGER NOT NULL,
-      healthy INTEGER NOT NULL DEFAULT 0,
-      degraded INTEGER NOT NULL DEFAULT 0,
-      down INTEGER NOT NULL DEFAULT 0,
-      building INTEGER NOT NULL DEFAULT 0,
-      alerts_sent INTEGER NOT NULL DEFAULT 0,
-      rollbacks_performed INTEGER NOT NULL DEFAULT 0,
-      duration_ms INTEGER,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `,
-  javari_alerts: `
-    CREATE TABLE IF NOT EXISTS javari_alerts (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      alert_id TEXT NOT NULL,
-      severity TEXT NOT NULL,
-      title TEXT NOT NULL,
-      message TEXT NOT NULL,
-      source TEXT NOT NULL,
-      project_id TEXT,
-      project_name TEXT,
-      metadata JSONB,
-      acknowledged BOOLEAN DEFAULT FALSE,
-      acknowledged_at TIMESTAMPTZ,
-      acknowledged_by TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `,
-  javari_healing_history: `
-    CREATE TABLE IF NOT EXISTS javari_healing_history (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      error_type TEXT,
-      error_message TEXT,
-      detection_method TEXT,
-      fix_attempted BOOLEAN DEFAULT FALSE,
-      fix_applied BOOLEAN DEFAULT FALSE,
-      fix_result JSONB,
-      confidence_score INTEGER,
-      project_name TEXT,
-      triggered_at TIMESTAMPTZ DEFAULT NOW(),
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      status TEXT,
-      errors_found INTEGER DEFAULT 0,
-      errors_fixed INTEGER DEFAULT 0,
-      errors_failed INTEGER DEFAULT 0,
-      run_time_ms INTEGER,
-      results JSONB
-    )
-  `,
-  javari_manual_review: `
-    CREATE TABLE IF NOT EXISTS javari_manual_review (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      error_type TEXT NOT NULL,
-      error_message TEXT NOT NULL,
-      diagnosis TEXT,
-      confidence INTEGER,
-      fix_strategy TEXT,
-      requires_manual_review BOOLEAN DEFAULT TRUE,
-      reviewed BOOLEAN DEFAULT FALSE,
-      reviewed_at TIMESTAMPTZ,
-      reviewed_by TEXT,
-      resolution TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `,
-  javari_learning_patterns: `
-    CREATE TABLE IF NOT EXISTS javari_learning_patterns (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      error_signature TEXT NOT NULL,
-      error_category TEXT,
-      successful_fix TEXT,
-      fix_confidence INTEGER,
-      occurrences INTEGER DEFAULT 1,
-      last_occurrence TIMESTAMPTZ DEFAULT NOW(),
-      auto_fixable BOOLEAN DEFAULT FALSE,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `,
-};
-
-export async function POST(request: NextRequest) {
-  // Verify Roy-only access
-  const authHeader = request.headers.get('x-admin-key');
-  if (authHeader !== process.env.ADMIN_SECRET) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl || !supabaseServiceKey) {
-    return NextResponse.json({ 
-      error: 'Missing Supabase credentials' 
-    }, { status: 500 });
-  }
-
-  const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-    db: { schema: 'public' },
-  });
-
-  const results: Record<string, { created: boolean; error?: string }> = {};
-
-  // Test connection by checking if we can query
-  for (const [tableName, createSQL] of Object.entries(TABLES)) {
-    try {
-      // Try to query the table first
-      const { error: queryError } = await supabase
-        .from(tableName)
-        .select('*')
-        .limit(1);
-
-      if (queryError && queryError.code === 'PGRST116') {
-        // Table doesn't exist, need to create it
-        // Note: We can't run raw SQL via REST API, so we'll use a workaround
-        // by inserting a test record which will fail if table doesn't exist
-        results[tableName] = {
-          created: false,
-          error: `Table needs to be created via Supabase Dashboard. SQL: ${createSQL.substring(0, 100)}...`,
-        };
-      } else if (queryError) {
-        results[tableName] = {
-          created: false,
-          error: queryError.message,
-        };
-      } else {
-        results[tableName] = { created: true };
-      }
-    } catch (error) {
-      results[tableName] = {
-        created: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      };
-    }
-  }
-
-  // Check which tables need to be created
-  const needsCreation = Object.entries(results)
-    .filter(([_, v]) => !v.created)
-    .map(([k, _]) => k);
-
-  return NextResponse.json({
-    success: true,
-    message: needsCreation.length > 0 
-      ? 'Some tables need to be created via Supabase Dashboard'
-      : 'All tables exist and are ready',
-    results,
-    migration_sql: needsCreation.length > 0 
-      ? Object.entries(TABLES)
-          .filter(([name]) => needsCreation.includes(name))
-          .map(([name, sql]) => `-- ${name}\n${sql.trim()};`)
-          .join('\n\n')
-      : null,
-  });
-}
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 export async function GET(request: NextRequest) {
-  // Return migration SQL for manual execution
-  return NextResponse.json({
-    message: 'Use POST to check/create tables, or copy this SQL to Supabase Dashboard',
-    sql: Object.entries(TABLES)
-      .map(([name, sql]) => `-- ${name}\n${sql.trim()};`)
-      .join('\n\n'),
-  });
+  const results: string[] = [];
+  
+  try {
+    // Create autonomous_jobs table
+    const { error: jobsError } = await supabase.rpc('exec_sql', {
+      sql: `
+        CREATE TABLE IF NOT EXISTS autonomous_jobs (
+          job_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          name TEXT NOT NULL UNIQUE,
+          description TEXT,
+          schedule TEXT NOT NULL DEFAULT '*/5 * * * *',
+          job_type TEXT NOT NULL DEFAULT 'health_check',
+          target_url TEXT,
+          enabled BOOLEAN DEFAULT true,
+          last_run_at TIMESTAMPTZ,
+          next_run_at TIMESTAMPTZ,
+          timeout_ms INTEGER DEFAULT 30000,
+          max_retries INTEGER DEFAULT 3,
+          priority INTEGER DEFAULT 5,
+          config JSONB DEFAULT '{}'::jsonb,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `
+    });
+    
+    if (jobsError) {
+      // Try direct insert to test if table exists
+      const { error: testError } = await supabase
+        .from('autonomous_jobs')
+        .select('count')
+        .limit(1);
+      
+      if (testError) {
+        results.push(`autonomous_jobs: ERROR - ${testError.message}`);
+      } else {
+        results.push('autonomous_jobs: EXISTS');
+      }
+    } else {
+      results.push('autonomous_jobs: CREATED');
+    }
+    
+    // Create autonomous_runs table
+    const { error: runsError } = await supabase.rpc('exec_sql', {
+      sql: `
+        CREATE TABLE IF NOT EXISTS autonomous_runs (
+          run_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          job_id UUID,
+          job_name TEXT,
+          started_at TIMESTAMPTZ DEFAULT NOW(),
+          completed_at TIMESTAMPTZ,
+          duration_ms INTEGER,
+          status TEXT NOT NULL DEFAULT 'running',
+          issues_detected_count INTEGER DEFAULT 0,
+          fixes_applied_count INTEGER DEFAULT 0,
+          verification_passed BOOLEAN,
+          logs_json JSONB DEFAULT '[]'::jsonb,
+          metrics JSONB DEFAULT '{}'::jsonb,
+          error_message TEXT,
+          region TEXT,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `
+    });
+    
+    if (runsError) {
+      const { error: testError } = await supabase
+        .from('autonomous_runs')
+        .select('count')
+        .limit(1);
+      
+      if (testError) {
+        results.push(`autonomous_runs: ERROR - ${testError.message}`);
+      } else {
+        results.push('autonomous_runs: EXISTS');
+      }
+    } else {
+      results.push('autonomous_runs: CREATED');
+    }
+    
+    // Create autonomous_actions table
+    const { error: actionsError } = await supabase.rpc('exec_sql', {
+      sql: `
+        CREATE TABLE IF NOT EXISTS autonomous_actions (
+          action_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          run_id UUID,
+          action_type TEXT NOT NULL,
+          target TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          before_state JSONB,
+          after_state JSONB,
+          evidence_json JSONB,
+          verification_passed BOOLEAN,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          completed_at TIMESTAMPTZ
+        );
+      `
+    });
+    
+    if (actionsError) {
+      const { error: testError } = await supabase
+        .from('autonomous_actions')
+        .select('count')
+        .limit(1);
+      
+      if (testError) {
+        results.push(`autonomous_actions: ERROR - ${testError.message}`);
+      } else {
+        results.push('autonomous_actions: EXISTS');
+      }
+    } else {
+      results.push('autonomous_actions: CREATED');
+    }
+    
+    // Create autonomous_alerts table
+    const { error: alertsError } = await supabase.rpc('exec_sql', {
+      sql: `
+        CREATE TABLE IF NOT EXISTS autonomous_alerts (
+          alert_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          run_id UUID,
+          severity TEXT NOT NULL DEFAULT 'info',
+          category TEXT NOT NULL DEFAULT 'system',
+          title TEXT NOT NULL,
+          message TEXT NOT NULL,
+          channels JSONB DEFAULT '[]'::jsonb,
+          delivery_status TEXT DEFAULT 'pending',
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `
+    });
+    
+    if (alertsError) {
+      const { error: testError } = await supabase
+        .from('autonomous_alerts')
+        .select('count')
+        .limit(1);
+      
+      if (testError) {
+        results.push(`autonomous_alerts: ERROR - ${testError.message}`);
+      } else {
+        results.push('autonomous_alerts: EXISTS');
+      }
+    } else {
+      results.push('autonomous_alerts: CREATED');
+    }
+    
+    // Create autonomous_heartbeats table
+    const { error: hbError } = await supabase.rpc('exec_sql', {
+      sql: `
+        CREATE TABLE IF NOT EXISTS autonomous_heartbeats (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          timestamp TIMESTAMPTZ DEFAULT NOW(),
+          region TEXT,
+          status TEXT DEFAULT 'alive',
+          metrics JSONB DEFAULT '{}'::jsonb
+        );
+      `
+    });
+    
+    if (hbError) {
+      const { error: testError } = await supabase
+        .from('autonomous_heartbeats')
+        .select('count')
+        .limit(1);
+      
+      if (testError) {
+        results.push(`autonomous_heartbeats: ERROR - ${testError.message}`);
+      } else {
+        results.push('autonomous_heartbeats: EXISTS');
+      }
+    } else {
+      results.push('autonomous_heartbeats: CREATED');
+    }
+    
+    // Seed default jobs
+    const defaultJobs = [
+      { name: 'health_check', description: 'Check critical endpoints', schedule: '*/5 * * * *', job_type: 'health_check', priority: 1, config: { endpoints: ['/api/health', '/'] } },
+      { name: 'self_healing', description: 'Auto-fix issues', schedule: '*/5 * * * *', job_type: 'self_healing', priority: 1, config: { auto_rollback: true } }
+    ];
+    
+    for (const job of defaultJobs) {
+      const { error: insertError } = await supabase
+        .from('autonomous_jobs')
+        .upsert(job, { onConflict: 'name' });
+      
+      if (insertError) {
+        results.push(`Job ${job.name}: ERROR - ${insertError.message}`);
+      } else {
+        results.push(`Job ${job.name}: SEEDED`);
+      }
+    }
+    
+    return NextResponse.json({
+      status: 'success',
+      timestamp: new Date().toISOString(),
+      results
+    });
+    
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return NextResponse.json({
+      status: 'error',
+      message: errorMessage,
+      results
+    }, { status: 500 });
+  }
 }
