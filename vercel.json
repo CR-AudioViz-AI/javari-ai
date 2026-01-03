@@ -29,6 +29,14 @@
   },
   "crons": [
     {
+      "path": "/api/cron/self-healing",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/continuous-learng",
+      "schedule": "0 */4 * * *"
+    },
+    {
       "path": "/api/cron/scheduled-commands",
       "schedule": "*/15 * * * *"
     },
