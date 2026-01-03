@@ -7,6 +7,9 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { NextRequest, NextResponse } from 'next/server';
+
+// Force dynamic rendering since we use request.url
+export const dynamic = 'force-dynamic';
 import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
 
@@ -103,3 +106,4 @@ export async function GET(request: NextRequest) {
     }, { status: 500 });
   }
 }
+
