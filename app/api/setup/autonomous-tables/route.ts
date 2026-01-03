@@ -10,6 +10,9 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+
+// Force dynamic - prevents static generation
+export const dynamic = 'force-dynamic';
 import { createClient } from '@supabase/supabase-js';
 
 export const runtime = 'nodejs';
