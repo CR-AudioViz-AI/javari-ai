@@ -1,6 +1,6 @@
 /**
- * DATABASE SETUP via Direct PostgreSQL
- * Creates autonomous tables using pg library
+ * DATABASE SETUP - Direct PostgreSQL Connection
+ * Creates autonomous tables for Javari AI
  */
 
 import { NextResponse } from 'next/server';
@@ -12,7 +12,6 @@ export const maxDuration = 60;
 export async function GET() {
   const results: string[] = [];
   
-  // Get DATABASE_URL from env
   const databaseUrl = process.env.DATABASE_URL;
   
   if (!databaseUrl) {
@@ -24,15 +23,15 @@ export async function GET() {
   
   const pool = new Pool({
     connectionString: databaseUrl,
-    ssl: { rejectUnauthorized: false }
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
   });
   
   try {
     const client = await pool.connect();
     results.push('Connected to database');
     
-    // Create autonomous_jobs
-    await client.query(`
+    // Create tables
+    await client.query(\`
       CREATE TABLE IF NOT EXISTS public.autonomous_jobs (
         job_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         name TEXT NOT NULL UNIQUE,
@@ -46,11 +45,10 @@ export async function GET() {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
-    `);
+    \`);
     results.push('autonomous_jobs: CREATED');
     
-    // Create autonomous_runs
-    await client.query(`
+    await client.query(\`
       CREATE TABLE IF NOT EXISTS public.autonomous_runs (
         run_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         job_id UUID,
@@ -68,11 +66,10 @@ export async function GET() {
         region TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
-    `);
+    \`);
     results.push('autonomous_runs: CREATED');
     
-    // Create autonomous_actions
-    await client.query(`
+    await client.query(\`
       CREATE TABLE IF NOT EXISTS public.autonomous_actions (
         action_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         run_id UUID,
@@ -83,11 +80,10 @@ export async function GET() {
         verification_passed BOOLEAN,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
-    `);
+    \`);
     results.push('autonomous_actions: CREATED');
     
-    // Create autonomous_alerts
-    await client.query(`
+    await client.query(\`
       CREATE TABLE IF NOT EXISTS public.autonomous_alerts (
         alert_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         run_id UUID,
@@ -97,11 +93,10 @@ export async function GET() {
         delivery_status TEXT DEFAULT 'pending',
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
-    `);
+    \`);
     results.push('autonomous_alerts: CREATED');
     
-    // Create autonomous_heartbeats
-    await client.query(`
+    await client.query(\`
       CREATE TABLE IF NOT EXISTS public.autonomous_heartbeats (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         timestamp TIMESTAMPTZ DEFAULT NOW(),
@@ -109,24 +104,24 @@ export async function GET() {
         status TEXT DEFAULT 'alive',
         metrics JSONB DEFAULT '{}'::jsonb
       );
-    `);
+    \`);
     results.push('autonomous_heartbeats: CREATED');
     
     // Create indexes
-    await client.query(`
+    await client.query(\`
       CREATE INDEX IF NOT EXISTS idx_autonomous_runs_started ON public.autonomous_runs(started_at DESC);
       CREATE INDEX IF NOT EXISTS idx_autonomous_heartbeats_ts ON public.autonomous_heartbeats(timestamp DESC);
-    `);
+    \`);
     results.push('Indexes: CREATED');
     
     // Seed default jobs
-    await client.query(`
+    await client.query(\`
       INSERT INTO public.autonomous_jobs (name, description, schedule, job_type, priority, config)
       VALUES 
         ('health_check', 'Check critical endpoints', '*/5 * * * *', 'health_check', 1, '{"endpoints": ["/api/health", "/"]}'),
         ('self_healing', 'Auto-fix issues', '*/5 * * * *', 'self_healing', 1, '{"auto_rollback": true}')
       ON CONFLICT (name) DO UPDATE SET updated_at = NOW();
-    `);
+    \`);
     results.push('Default jobs: SEEDED');
     
     client.release();
