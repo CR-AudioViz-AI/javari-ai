@@ -33,7 +33,7 @@
       "schedule": "*/5 * * * *"
     },
     {
-      "path": "/api/cron/continuous-learng",
+      "path": "/api/cron/continuous-learning",
       "schedule": "0 */4 * * *"
     },
     {
