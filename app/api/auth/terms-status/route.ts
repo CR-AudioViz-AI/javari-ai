@@ -2,11 +2,15 @@
 // TERMS STATUS API - CHECK IF USER ACCEPTED TERMS
 // =============================================================================
 // Tuesday, December 16, 2025 - 11:52 PM EST
+// Fixed: January 3, 2026 - Added dynamic export for cookies() usage
 // =============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
+
+// Force dynamic rendering since we use cookies()
+export const dynamic = 'force-dynamic';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || '',
@@ -58,25 +62,25 @@ export async function GET(request: NextRequest) {
     if (acceptance) {
       return NextResponse.json({
         accepted: true,
-        version: acceptance.version,
+        currentVersion: CURRENT_TERMS_VERSION,
         acceptedAt: acceptance.accepted_at,
-        currentVersion: CURRENT_TERMS_VERSION
+        userId: user.id
       });
     }
 
     return NextResponse.json({
       accepted: false,
       currentVersion: CURRENT_TERMS_VERSION,
-      message: 'Terms acceptance required'
+      message: 'Terms not yet accepted',
+      userId: user.id
     });
 
   } catch (error) {
     console.error('[Terms Status] Error:', error);
-    // Return accepted: true on error to not block users if table doesn't exist
     return NextResponse.json({
-      accepted: true,
+      accepted: false,
       currentVersion: CURRENT_TERMS_VERSION,
-      fallback: true
-    });
+      error: 'Failed to check terms status'
+    }, { status: 500 });
   }
 }
