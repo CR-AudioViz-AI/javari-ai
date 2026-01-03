@@ -4,6 +4,9 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+
+// Force dynamic - prevents static generation errors
+export const dynamic = 'force-dynamic';
 import { createClient } from '@supabase/supabase-js';
 import { getProviderManager } from '@/lib/provider-manager';
 import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
