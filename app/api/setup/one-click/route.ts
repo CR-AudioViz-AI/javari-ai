@@ -10,6 +10,9 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+
+// Force dynamic - prevents static generation DB connection errors
+export const dynamic = 'force-dynamic';
 import { Pool } from 'pg';
 
 export const runtime = 'nodejs';
