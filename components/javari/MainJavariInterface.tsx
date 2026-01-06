@@ -132,6 +132,59 @@ function generateOperatorResponse(docs: { name: string; content: string }[]): st
 }
 
 // =============================================================================
+// OPERATOR MODE: Question Response (NO CITATIONS)
+// =============================================================================
+function generateOperatorQuestionResponse(question: string, docs: { name: string; content: string }[]): string {
+  const timestamp = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }) + ' EST';
+  const q = question.toLowerCase();
+  
+  // Determine response type based on question
+  let output = `## 🎯 OPERATOR RESPONSE\n`;
+  output += `**Timestamp:** ${timestamp}\n`;
+  output += `**Mode:** OPERATOR (Citations Disabled)\n\n`;
+  
+  if (/status|progress|checklist|how.*going/i.test(q)) {
+    output += `### Current Execution Status\n\n`;
+    output += `| Status | Count |\n|--------|-------|\n`;
+    output += `| 🟢 Complete | 0 |\n`;
+    output += `| 🟡 In Progress | 0 |\n`;
+    output += `| 🔴 Not Started | All |\n\n`;
+    output += `**Next Action:** Execute Task Batch #1\n\n`;
+  } else if (/ticket|task|what.*do|next/i.test(q)) {
+    output += `### Next Tasks\n\n`;
+    output += `Refer to the **TASK BATCH #1** issued above.\n\n`;
+    output += `Execute tickets in order. Submit proof for each before marking complete.\n\n`;
+  } else if (/proof|evidence|verify/i.test(q)) {
+    output += `### Proof Requirements\n\n`;
+    output += `Every ticket requires:\n`;
+    output += `1. **PR link** - Merged pull request\n`;
+    output += `2. **Deploy URL** - Live URL\n`;
+    output += `3. **Verification** - Steps + output\n`;
+    output += `4. **Rollback** - git revert command\n\n`;
+    output += `**Submit proof to mark ticket complete.**\n\n`;
+  } else if (/report|readiness|launch/i.test(q)) {
+    output += `### Readiness Report\n\n`;
+    output += `**Status:** 🔴 NOT READY\n\n`;
+    output += `**Reason:** Outstanding tickets require completion and proof.\n\n`;
+    output += `Complete all P0 tickets with proof before requesting launch approval.\n\n`;
+  } else {
+    // Generic operator response
+    output += `### Operator Guidance\n\n`;
+    output += `I'm in **Operator Mode** managing spec execution.\n\n`;
+    output += `Available commands:\n`;
+    output += `- "status" - View execution progress\n`;
+    output += `- "next task" - See next action items\n`;
+    output += `- "proof requirements" - View what's needed\n`;
+    output += `- "readiness report" - Check launch status\n\n`;
+    output += `**Documents loaded:** ${docs.length}\n\n`;
+  }
+  
+  output += `---\n*Operator Mode Active | Citations Disabled | Proof Required*`;
+  
+  return output;
+}
+
+// =============================================================================
 // BRAND COLORS
 // =============================================================================
 const COLORS = {
@@ -249,6 +302,7 @@ export function MainJavariInterface() {
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStarred, setFilterStarred] = useState(false);
+  const [canonicalSpecsLoaded, setCanonicalSpecsLoaded] = useState(false); // Track canonical docs
   
   // Mock conversations for demo
   const [conversations, setConversations] = useState<Conversation[]>([
@@ -320,10 +374,28 @@ export function MainJavariInterface() {
       }
     }
     
-    // Check for spec documents and trigger Operator Mode
+    // OPERATOR MODE HARD GATE: Check for canonical spec documents
     if (operatorMode && processedDocs.length > 0) {
-      const hasSpecs = processedDocs.some(d => isSpecDocument(d.name, d.content));
-      if (hasSpecs) {
+      // Detect canonical spec docs by filename
+      const CANONICAL_PATTERNS = [
+        /JAVARI_P0_FIX_SPEC/i,
+        /JAVARI_CONTROL_PLANE/i,
+        /JAVARI_OPERATOR/i,
+        /P0.*SPEC/i,
+        /CONTROL.*PLANE/i,
+        /OPERATOR.*KICKOFF/i
+      ];
+      
+      const hasCanonicalSpecs = processedDocs.some(d => 
+        CANONICAL_PATTERNS.some(pattern => pattern.test(d.name)) ||
+        isSpecDocument(d.name, d.content)
+      );
+      
+      if (hasCanonicalSpecs) {
+        // SET FLAG: This bypasses citations pipeline in sendMessage
+        setCanonicalSpecsLoaded(true);
+        
+        // Generate and display Operator Output immediately
         const operatorOutput = generateOperatorResponse(processedDocs);
         setMessages(prev => [...prev, {
           id: `msg_operator_${Date.now()}`,
@@ -340,7 +412,7 @@ export function MainJavariInterface() {
   };
 
   // =============================================================================
-  // CHAT HANDLER
+  // CHAT HANDLER - WITH OPERATOR MODE BYPASS
   // =============================================================================
   const sendMessage = async () => {
     if (!input.trim() || isLoading) return;
@@ -358,6 +430,35 @@ export function MainJavariInterface() {
     setIsLoading(true);
 
     try {
+      // =========================================================================
+      // OPERATOR MODE HARD GATE: BYPASS ALL CITATIONS WHEN CANONICAL SPECS LOADED
+      // =========================================================================
+      if (operatorMode && canonicalSpecsLoaded) {
+        // DO NOT run citation search
+        // DO NOT generate "Based on your documents..."
+        // Instead, generate Operator response for the question
+        
+        const readyDocs = documents.filter(d => d.status === 'ready');
+        const operatorAnswer = generateOperatorQuestionResponse(question, readyDocs);
+        
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        setMessages(prev => [...prev, {
+          id: `msg_${Date.now()}`,
+          role: 'assistant',
+          content: operatorAnswer,
+          // NO CITATIONS - explicitly undefined
+          timestamp: new Date()
+        }]);
+        
+        setIsLoading(false);
+        return; // EXIT EARLY - do not run citations pipeline
+      }
+      // =========================================================================
+      // END OPERATOR MODE BYPASS
+      // =========================================================================
+
+      // Normal citations pipeline (only runs when NOT in Operator Mode with specs)
       const readyDocs = documents.filter(d => d.status === 'ready');
       const questionWords = question.toLowerCase()
         .split(/\s+/)
@@ -735,7 +836,10 @@ export function MainJavariInterface() {
           
           {/* Operator Mode Toggle */}
           <button
-            onClick={() => setOperatorMode(!operatorMode)}
+            onClick={() => {
+              setOperatorMode(!operatorMode);
+              if (operatorMode) setCanonicalSpecsLoaded(false); // Reset when turning off
+            }}
             className={`mt-3 px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
               operatorMode 
                 ? 'bg-yellow-500/20 text-yellow-400 ring-1 ring-yellow-500/50' 
@@ -745,6 +849,14 @@ export function MainJavariInterface() {
             <Zap className="w-3 h-3" />
             Operator Mode {operatorMode ? 'ON' : 'OFF'}
           </button>
+          
+          {/* Citations Disabled Badge - shows when Operator Mode active with specs */}
+          {operatorMode && canonicalSpecsLoaded && (
+            <div className="mt-2 px-2 py-1 rounded bg-red-500/20 text-red-400 text-xs flex items-center gap-1">
+              <X className="w-3 h-3" />
+              Citations Disabled
+            </div>
+          )}
         </div>
 
         {/* Documents Section */}
