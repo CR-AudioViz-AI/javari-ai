@@ -459,7 +459,7 @@ export function MainJavariInterface() {
       );
       
       if (hasCanonicalSpecs) {
-        // SET FLAG: This bypasses citations pipeline in sendMessage
+        // SET FLAG: This enables operator intent routing in sendMessage
         setCanonicalSpecsLoaded(true);
         
         // Generate and display Operator Output immediately
@@ -470,6 +470,13 @@ export function MainJavariInterface() {
           content: operatorOutput,
           timestamp: new Date()
         }]);
+        
+        // AUTO-CLEAR docs after Operator output (specs were processed)
+        // This prevents the citations pipeline from seeing stale docs
+        if (DOCS_AUTO_CLEAR_AFTER_SEND) {
+          setDocuments([]);
+          setIsDragging(false);
+        }
       }
     }
   };
