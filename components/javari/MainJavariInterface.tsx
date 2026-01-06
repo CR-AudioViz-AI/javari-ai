@@ -550,14 +550,29 @@ export function MainJavariInterface() {
     ));
   };
 
+  // =============================================================================
+  // NEW CHAT - MUST RESET ALL STATE
+  // =============================================================================
   const startNewChat = () => {
+    // Reset conversation
     setCurrentConversationId(null);
+    
+    // Reset messages
     setMessages([{
       id: 'welcome',
       role: 'assistant',
       content: `Starting a new conversation! How can I help you?`,
       timestamp: new Date()
     }]);
+    
+    // CRITICAL: Reset ALL document state
+    setDocuments([]);                    // Clear uploaded files
+    setCanonicalSpecsLoaded(false);      // Reset spec detection
+    
+    // Reset any input state
+    setInput('');
+    setIsLoading(false);
+    setIsDragging(false);
   };
 
   const readyDocsCount = documents.filter(d => d.status === 'ready').length;
