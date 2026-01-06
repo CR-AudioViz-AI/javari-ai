@@ -1,15 +1,21 @@
 'use client';
 
 /**
- * JAVARI AI - Proper Interface Layout
- * ===================================
+ * JAVARI AI - Proper Interface Layout + OPERATOR MODE
+ * ====================================================
  * Layout:
  * - LEFT SIDEBAR: Javari logo top-left, starred chats, all chats, projects
  * - CENTER: Chat messages
  * - RIGHT SIDEBAR: Javari avatar top, documents below
  * - BOTTOM: AI provider selector buttons under chat input
  * 
- * @version 3.0.0
+ * OPERATOR MODE:
+ * - Detects spec documents automatically
+ * - Generates tickets instead of summaries
+ * - Issues task batches to AI agents
+ * - Enforces proof requirements
+ * 
+ * @version 4.0.0
  * @date January 5, 2026
  */
 
@@ -19,8 +25,111 @@ import {
   Upload, File, X, Check, AlertCircle, Loader2, Send, Bot, User, 
   FileText, Image as ImageIcon, FileSpreadsheet, ChevronLeft, ChevronRight,
   Trash2, Plus, Star, MessageSquare, FolderKanban, Clock, Search,
-  Download, MoreVertical, Sparkles
+  Download, MoreVertical, Sparkles, Settings, Zap
 } from 'lucide-react';
+
+// =============================================================================
+// OPERATOR MODE LOGIC (Inline to avoid import issues)
+// =============================================================================
+const SPEC_KEYWORDS = ['SPEC', 'PROOF', 'CONTROL', 'P0', 'TICKET', 'OPERATOR', 'ACCEPTANCE', 'CRITERIA'];
+
+function isSpecDocument(filename: string, content: string): boolean {
+  const specPatterns = [/spec/i, /proof/i, /control/i, /ticket/i, /operator/i, /p0/i];
+  for (const pattern of specPatterns) {
+    if (pattern.test(filename)) return true;
+  }
+  let keywordCount = 0;
+  const upper = content.toUpperCase();
+  for (const kw of SPEC_KEYWORDS) {
+    if (upper.includes(kw)) keywordCount++;
+    if (keywordCount >= 3) return true;
+  }
+  return false;
+}
+
+function generateOperatorResponse(docs: { name: string; content: string }[]): string {
+  const timestamp = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }) + ' EST';
+  const specDocs = docs.filter(d => isSpecDocument(d.name, d.content));
+  
+  let output = `# 🎯 JAVARI OPERATOR MODE ACTIVATED\n`;
+  output += `**Timestamp:** ${timestamp}\n`;
+  output += `**Mode:** OPERATOR\n`;
+  output += `**Status:** EXECUTING\n\n---\n\n`;
+  
+  // Documents detected
+  output += `## 📄 DOCUMENTS DETECTED\n\n`;
+  output += `| # | Filename | Status |\n|---|----------|--------|\n`;
+  docs.forEach((d, i) => {
+    const isSpec = specDocs.includes(d);
+    output += `| ${i + 1} | ${d.name} | ${isSpec ? '✅ SPEC' : '📄 Doc'} |\n`;
+  });
+  output += `\n---\n\n`;
+  
+  // Extract tickets from spec content
+  const allContent = specDocs.map(d => d.content).join('\n\n');
+  const tickets: { id: string; title: string; priority: string }[] = [];
+  
+  // Look for bullet points and numbered items
+  const lines = allContent.split('\n');
+  let ticketNum = 1;
+  for (const line of lines) {
+    if (/^\s*[-*]\s+\[?\s*[xX ]?\s*\]?\s*(.{10,100})/.test(line) || 
+        /^\s*\d+\.\s+(.{10,100})/.test(line)) {
+      const match = line.match(/^\s*[-*\d.]+\s*\[?\s*[xX ]?\s*\]?\s*(.+)$/);
+      if (match && match[1].trim().length > 10) {
+        const title = match[1].trim().slice(0, 80);
+        const priority = /p0|critical|must|blocker/i.test(title) ? 'P0' : 
+                        /p1|should|important/i.test(title) ? 'P1' : 'P2';
+        tickets.push({ id: `TICKET-${String(ticketNum).padStart(3, '0')}`, title, priority });
+        ticketNum++;
+        if (ticketNum > 15) break; // Limit to 15 tickets
+      }
+    }
+  }
+  
+  // Tickets section
+  output += `## 🎫 P0 TICKET LIST\n\n`;
+  if (tickets.length > 0) {
+    for (const t of tickets) {
+      output += `### ${t.id}: ${t.title}\n`;
+      output += `**Priority:** ${t.priority}\n`;
+      output += `**Assigned To:** Claude\n`;
+      output += `**Status:** 🔴 NOT STARTED\n\n`;
+      output += `**Proof Required:**\n- [ ] PR link\n- [ ] Deployment URL\n- [ ] Verification output\n- [ ] Rollback command\n\n---\n\n`;
+    }
+  } else {
+    output += `*No specific tickets extracted. Review documents manually.*\n\n`;
+  }
+  
+  // Task batch
+  output += `## 📋 TASK BATCH #1 - CLAUDE\n\n`;
+  output += `**Issued:** ${timestamp}\n`;
+  output += `**Due:** IMMEDIATE\n\n`;
+  output += `### Assigned Tickets\n`;
+  tickets.slice(0, 5).forEach((t, i) => {
+    output += `${i + 1}. **${t.id}:** ${t.title.slice(0, 50)}...\n`;
+  });
+  output += `\n### Proof Submission\n\`\`\`\nPR: [GitHub URL]\nDeploy: [Staging URL]\nVerify: [Steps + Output]\nRollback: git revert [SHA]\n\`\`\`\n\n---\n\n`;
+  
+  // Checklist
+  output += `## ✅ CHECKLIST\n\n`;
+  output += `| # | Ticket | Status | Proof |\n|---|--------|--------|-------|\n`;
+  tickets.forEach((t, i) => {
+    output += `| ${i + 1} | ${t.id} | 🔴 | ❌ |\n`;
+  });
+  output += `\n**Complete:** 0/${tickets.length}\n\n`;
+  
+  // Proof requirements
+  output += `## 🔒 PROOF REQUIREMENTS (ENFORCED)\n\n`;
+  output += `1. **PR link** - Merged pull request\n`;
+  output += `2. **Deploy URL** - Live staging/production URL\n`;
+  output += `3. **Verification** - Steps executed + actual output\n`;
+  output += `4. **Rollback** - git revert [SHA] command\n\n`;
+  output += `**NO EXCEPTIONS. NO "CLOSE ENOUGH". NO TRUST-BASED COMPLETION.**\n\n---\n\n`;
+  output += `*Javari Operator Mode v1.0 | Proof-enforced execution*`;
+  
+  return output;
+}
 
 // =============================================================================
 // BRAND COLORS
@@ -149,6 +258,7 @@ export function MainJavariInterface() {
     { id: '4', title: 'Marketing Strategy', starred: false, messages: [], updated_at: new Date(Date.now() - 259200000).toISOString(), message_count: 6 },
   ]);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
+  const [operatorMode, setOperatorMode] = useState(true); // Default ON for Roy
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -185,6 +295,8 @@ export function MainJavariInterface() {
   };
 
   const processFiles = async (files: File[]) => {
+    const processedDocs: { name: string; content: string }[] = [];
+    
     for (const file of files) {
       const id = `doc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       
@@ -200,10 +312,25 @@ export function MainJavariInterface() {
         setDocuments(prev => prev.map(d => 
           d.id === id ? { ...d, content, status: 'ready', progress: 100 } : d
         ));
+        processedDocs.push({ name: file.name, content });
       } catch (err: any) {
         setDocuments(prev => prev.map(d => 
           d.id === id ? { ...d, status: 'error', progress: 100, error: err.message } : d
         ));
+      }
+    }
+    
+    // Check for spec documents and trigger Operator Mode
+    if (operatorMode && processedDocs.length > 0) {
+      const hasSpecs = processedDocs.some(d => isSpecDocument(d.name, d.content));
+      if (hasSpecs) {
+        const operatorOutput = generateOperatorResponse(processedDocs);
+        setMessages(prev => [...prev, {
+          id: `msg_operator_${Date.now()}`,
+          role: 'assistant',
+          content: operatorOutput,
+          timestamp: new Date()
+        }]);
       }
     }
   };
@@ -605,6 +732,19 @@ export function MainJavariInterface() {
           <p className="text-xs mt-1" style={{ color: COLORS.cyan }}>
             Using: {AI_PROVIDERS.find(p => p.id === selectedProvider)?.name}
           </p>
+          
+          {/* Operator Mode Toggle */}
+          <button
+            onClick={() => setOperatorMode(!operatorMode)}
+            className={`mt-3 px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
+              operatorMode 
+                ? 'bg-yellow-500/20 text-yellow-400 ring-1 ring-yellow-500/50' 
+                : 'bg-white/5 text-gray-400 hover:text-white'
+            }`}
+          >
+            <Zap className="w-3 h-3" />
+            Operator Mode {operatorMode ? 'ON' : 'OFF'}
+          </button>
         </div>
 
         {/* Documents Section */}
