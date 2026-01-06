@@ -31,7 +31,25 @@ import {
 // =============================================================================
 // OPERATOR MODE LOGIC (Inline to avoid import issues)
 // =============================================================================
+
+// Feature flag: Auto-clear docs after processing
+const DOCS_AUTO_CLEAR_AFTER_SEND = true;
+
 const SPEC_KEYWORDS = ['SPEC', 'PROOF', 'CONTROL', 'P0', 'TICKET', 'OPERATOR', 'ACCEPTANCE', 'CRITERIA'];
+
+// =============================================================================
+// OPERATOR INTENT DETECTION - Routes operator vs normal requests
+// =============================================================================
+function detectOperatorIntent(input: string): boolean {
+  const q = input.toLowerCase().trim();
+  const triggers = [
+    'status', 'next task', 'proof', 'readiness', 'report', 'ticket', 'p0',
+    'deploy', 'pr ', 'pull request', 'rollback', 'checklist', 'operator',
+    'execution', 'task batch', 'batch #', 'what tickets', 'show tickets',
+    'verification', 'blocker', 'blockers', 'sprint', 'milestone'
+  ];
+  return triggers.some(t => q.includes(t));
+}
 
 function isSpecDocument(filename: string, content: string): boolean {
   const specPatterns = [/spec/i, /proof/i, /control/i, /ticket/i, /operator/i, /p0/i];
@@ -304,13 +322,8 @@ export function MainJavariInterface() {
   const [filterStarred, setFilterStarred] = useState(false);
   const [canonicalSpecsLoaded, setCanonicalSpecsLoaded] = useState(false); // Track canonical docs
   
-  // Mock conversations for demo
-  const [conversations, setConversations] = useState<Conversation[]>([
-    { id: '1', title: 'Project Planning Discussion', starred: true, messages: [], updated_at: new Date().toISOString(), message_count: 12 },
-    { id: '2', title: 'Code Review - API Routes', starred: true, messages: [], updated_at: new Date(Date.now() - 86400000).toISOString(), message_count: 8 },
-    { id: '3', title: 'Database Schema Design', starred: false, messages: [], updated_at: new Date(Date.now() - 172800000).toISOString(), message_count: 15 },
-    { id: '4', title: 'Marketing Strategy', starred: false, messages: [], updated_at: new Date(Date.now() - 259200000).toISOString(), message_count: 6 },
-  ]);
+  // Conversations state - starts empty, builds as user creates chats
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [operatorMode, setOperatorMode] = useState(true); // Default ON for Roy
   
@@ -431,12 +444,14 @@ export function MainJavariInterface() {
 
     try {
       // =========================================================================
-      // OPERATOR MODE HARD GATE: BYPASS ALL CITATIONS WHEN CANONICAL SPECS LOADED
+      // OPERATOR MODE ROUTER: Only intercept if OPERATOR INTENT detected
       // =========================================================================
-      if (operatorMode && canonicalSpecsLoaded) {
+      const operatorIntent = detectOperatorIntent(question);
+      
+      if (operatorMode && canonicalSpecsLoaded && operatorIntent) {
+        // User asked an operator-related question (status, tickets, proof, etc.)
         // DO NOT run citation search
-        // DO NOT generate "Based on your documents..."
-        // Instead, generate Operator response for the question
+        // Generate Operator response
         
         const readyDocs = documents.filter(d => d.status === 'ready');
         const operatorAnswer = generateOperatorQuestionResponse(question, readyDocs);
@@ -451,14 +466,22 @@ export function MainJavariInterface() {
           timestamp: new Date()
         }]);
         
+        // Auto-clear docs after processing (if enabled)
+        if (DOCS_AUTO_CLEAR_AFTER_SEND) {
+          setDocuments([]);
+          setIsDragging(false);
+        }
+        
         setIsLoading(false);
         return; // EXIT EARLY - do not run citations pipeline
       }
       // =========================================================================
-      // END OPERATOR MODE BYPASS
+      // END OPERATOR MODE ROUTER
+      // If operatorMode is ON but user asked non-operator question,
+      // fall through to normal citations pipeline below
       // =========================================================================
 
-      // Normal citations pipeline (only runs when NOT in Operator Mode with specs)
+      // Normal citations pipeline (runs for normal questions even with Operator Mode ON)
       const readyDocs = documents.filter(d => d.status === 'ready');
       const questionWords = question.toLowerCase()
         .split(/\s+/)
@@ -551,11 +574,74 @@ export function MainJavariInterface() {
   };
 
   // =============================================================================
-  // NEW CHAT - MUST RESET ALL STATE
+  // CHAT MANAGEMENT - Save, Load, New Chat
   // =============================================================================
+  
+  // Save current conversation to the list
+  const saveCurrentConversation = () => {
+    if (messages.length <= 1) return; // Don't save if only welcome message
+    
+    // Generate title from first user message
+    const firstUserMsg = messages.find(m => m.role === 'user');
+    const title = firstUserMsg 
+      ? firstUserMsg.content.slice(0, 40) + (firstUserMsg.content.length > 40 ? '...' : '')
+      : 'New Conversation';
+    
+    const convId = currentConversationId || `conv_${Date.now()}`;
+    
+    setConversations(prev => {
+      // Check if this conversation already exists
+      const existingIdx = prev.findIndex(c => c.id === convId);
+      const updatedConv: Conversation = {
+        id: convId,
+        title,
+        starred: existingIdx >= 0 ? prev[existingIdx].starred : false,
+        messages: messages,
+        updated_at: new Date().toISOString(),
+        message_count: messages.length
+      };
+      
+      if (existingIdx >= 0) {
+        // Update existing
+        const newList = [...prev];
+        newList[existingIdx] = updatedConv;
+        return newList;
+      } else {
+        // Add new at top
+        return [updatedConv, ...prev];
+      }
+    });
+    
+    return convId;
+  };
+  
+  // Load a conversation
+  const loadConversation = (convId: string) => {
+    const conv = conversations.find(c => c.id === convId);
+    if (conv && conv.messages.length > 0) {
+      // Save current first if it has content
+      if (messages.length > 1 && currentConversationId !== convId) {
+        saveCurrentConversation();
+      }
+      
+      setCurrentConversationId(convId);
+      setMessages(conv.messages);
+      // Clear docs when switching conversations
+      setDocuments([]);
+      setCanonicalSpecsLoaded(false);
+    }
+  };
+  
+  // Start new chat
   const startNewChat = () => {
-    // Reset conversation
-    setCurrentConversationId(null);
+    // Save current conversation if it has content
+    if (messages.length > 1) {
+      saveCurrentConversation();
+    }
+    
+    // Create new conversation ID
+    const newConvId = `conv_${Date.now()}`;
+    setCurrentConversationId(newConvId);
     
     // Reset messages
     setMessages([{
@@ -566,14 +652,24 @@ export function MainJavariInterface() {
     }]);
     
     // CRITICAL: Reset ALL document state
-    setDocuments([]);                    // Clear uploaded files
-    setCanonicalSpecsLoaded(false);      // Reset spec detection
+    setDocuments([]);
+    setCanonicalSpecsLoaded(false);
     
     // Reset any input state
     setInput('');
     setIsLoading(false);
     setIsDragging(false);
   };
+  
+  // Auto-save conversation when messages change (debounced effect)
+  useEffect(() => {
+    if (messages.length > 1 && currentConversationId) {
+      const timer = setTimeout(() => {
+        saveCurrentConversation();
+      }, 1000); // Save 1 second after last message change
+      return () => clearTimeout(timer);
+    }
+  }, [messages]);
 
   const readyDocsCount = documents.filter(d => d.status === 'ready').length;
 
@@ -672,10 +768,15 @@ export function MainJavariInterface() {
 
         {/* Conversations List */}
         <div className="flex-1 overflow-y-auto px-4 space-y-1">
+          {filteredConversations.length === 0 && (
+            <div className="text-center py-8 text-gray-500 text-sm">
+              No conversations yet.<br/>Start chatting to create one!
+            </div>
+          )}
           {filteredConversations.map(conv => (
             <div
               key={conv.id}
-              onClick={() => setCurrentConversationId(conv.id)}
+              onClick={() => loadConversation(conv.id)}
               className={`group p-3 rounded-lg cursor-pointer transition-all relative ${
                 currentConversationId === conv.id 
                   ? 'bg-cyan-500/20 border border-cyan-500/50' 
@@ -865,11 +966,18 @@ export function MainJavariInterface() {
             Operator Mode {operatorMode ? 'ON' : 'OFF'}
           </button>
           
+          {/* Operator Mode Hint */}
+          {operatorMode && (
+            <p className="mt-2 text-xs text-gray-500 text-center px-2">
+              Routes operator commands only.<br/>Normal questions still work.
+            </p>
+          )}
+          
           {/* Citations Disabled Badge - shows when Operator Mode active with specs */}
           {operatorMode && canonicalSpecsLoaded && (
             <div className="mt-2 px-2 py-1 rounded bg-red-500/20 text-red-400 text-xs flex items-center gap-1">
               <X className="w-3 h-3" />
-              Citations Disabled
+              Specs Loaded • Operator Ready
             </div>
           )}
         </div>
