@@ -538,8 +538,132 @@ export function MainJavariInterface() {
       }
       // =========================================================================
       // END OPERATOR MODE ROUTER
-      // If operatorMode is ON but user asked non-operator question,
-      // fall through to normal citations pipeline below
+      // =========================================================================
+
+      // =========================================================================
+      // SUMMARIZE INTENT ROUTER: Real AI summarization
+      // =========================================================================
+      const summaryTriggers = ['summarize', 'summary', 'overview', 'tl;dr', 'tldr', 
+                               'executive summary', 'bullet summary', 'summarise'];
+      const isSummaryIntent = summaryTriggers.some(t => 
+        question.toLowerCase().includes(t) || question.toLowerCase() === t
+      );
+      
+      const readyDocsForSummary = documents.filter(d => d.status === 'ready');
+      
+      if (isSummaryIntent) {
+        // Check if docs are uploaded
+        if (readyDocsForSummary.length === 0) {
+          setMessages(prev => [...prev, {
+            id: `msg_${Date.now()}`,
+            role: 'assistant',
+            content: `📄 **No documents uploaded.**\n\nUpload documents using the panel on the right, then type "summarize" to get an AI-powered summary.`,
+            timestamp: new Date()
+          }]);
+          setIsLoading(false);
+          return;
+        }
+        
+        // Call the summarize API
+        try {
+          const docsPayload = readyDocsForSummary.map(d => ({
+            name: d.name,
+            content: d.content,
+            type: d.type
+          }));
+          
+          // Map provider selector to API provider
+          const providerMap: Record<string, string> = {
+            'auto': 'auto',
+            'claude': 'anthropic',
+            'gpt4': 'openai',
+            'gemini': 'openai', // fallback
+            'perplexity': 'openai', // fallback
+            'mistral': 'openai', // fallback
+            'llama': 'openai', // fallback
+            'cohere': 'openai', // fallback
+          };
+          
+          const response = await fetch('/api/javari/summarize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              documents: docsPayload,
+              provider: providerMap[selectedProvider] || 'auto'
+            })
+          });
+          
+          const result = await response.json();
+          
+          if (result.success && result.summary) {
+            const timestamp = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }) + ' EST';
+            
+            // Format the summary nicely
+            let summaryText = `# 📊 Document Summary\n`;
+            summaryText += `**Generated:** ${timestamp}\n`;
+            summaryText += `**Documents:** ${readyDocsForSummary.length}\n`;
+            summaryText += `**Provider:** ${result.provider || 'AI'}\n\n`;
+            summaryText += `---\n\n`;
+            summaryText += `## ✅ EXECUTIVE SUMMARY\n\n${result.summary.executive}\n\n`;
+            
+            if (result.summary.keyPoints?.length > 0) {
+              summaryText += `## 🔑 KEY POINTS\n\n`;
+              result.summary.keyPoints.forEach((point: string) => {
+                summaryText += `- ${point}\n`;
+              });
+              summaryText += `\n`;
+            }
+            
+            if (result.summary.actionItems?.length > 0 && 
+                !result.summary.actionItems[0]?.toLowerCase().includes('no specific')) {
+              summaryText += `## 📌 ACTION ITEMS\n\n`;
+              result.summary.actionItems.forEach((item: string) => {
+                summaryText += `- ${item}\n`;
+              });
+              summaryText += `\n`;
+            }
+            
+            summaryText += `## 📄 DOCUMENTS ANALYZED\n\n`;
+            readyDocsForSummary.forEach((doc, i) => {
+              summaryText += `${i + 1}. **${doc.name}** (${(doc.size / 1024).toFixed(1)} KB)\n`;
+            });
+            
+            setMessages(prev => [...prev, {
+              id: `msg_${Date.now()}`,
+              role: 'assistant',
+              content: summaryText,
+              timestamp: new Date()
+            }]);
+          } else {
+            // API returned error
+            setMessages(prev => [...prev, {
+              id: `msg_${Date.now()}`,
+              role: 'assistant',
+              content: `⚠️ **Summary Generation Failed**\n\n${result.error || 'Unknown error'}\n\nPlease try again or contact support if the issue persists.`,
+              timestamp: new Date()
+            }]);
+          }
+        } catch (apiErr: any) {
+          // Network or other error
+          setMessages(prev => [...prev, {
+            id: `msg_${Date.now()}`,
+            role: 'assistant',
+            content: `⚠️ **API Error**\n\n${apiErr.message || 'Failed to connect to summarization service.'}\n\nPlease check your connection and try again.`,
+            timestamp: new Date()
+          }]);
+        }
+        
+        // Auto-clear docs after successful summary
+        if (DOCS_AUTO_CLEAR_AFTER_SEND) {
+          setDocuments([]);
+          setIsDragging(false);
+        }
+        
+        setIsLoading(false);
+        return; // EXIT - do not fall through to citations
+      }
+      // =========================================================================
+      // END SUMMARIZE INTENT ROUTER
       // =========================================================================
 
       // Normal citations pipeline (runs for normal questions even with Operator Mode ON)
