@@ -551,18 +551,9 @@ export function MainJavariInterface() {
       
       const readyDocsForSummary = documents.filter(d => d.status === 'ready');
       
-      // DEBUG: Log intent detection
-      console.log('[JAVARI DEBUG] Question:', question);
-      console.log('[JAVARI DEBUG] isSummaryIntent:', isSummaryIntent);
-      console.log('[JAVARI DEBUG] readyDocsForSummary:', readyDocsForSummary.length);
-      console.log('[JAVARI DEBUG] operatorMode:', operatorMode);
-      console.log('[JAVARI DEBUG] canonicalSpecsLoaded:', canonicalSpecsLoaded);
-      
       if (isSummaryIntent) {
-        console.log('[JAVARI DEBUG] ✅ Entering summary handler');
         // Check if docs are uploaded
         if (readyDocsForSummary.length === 0) {
-          console.log('[JAVARI DEBUG] ❌ No docs - showing message');
           setMessages(prev => [...prev, {
             id: `msg_${Date.now()}`,
             role: 'assistant',
@@ -573,7 +564,6 @@ export function MainJavariInterface() {
           return;
         }
         
-        console.log('[JAVARI DEBUG] ✅ Calling summarize API with', readyDocsForSummary.length, 'docs');
         // Call the summarize API
         try {
           const docsPayload = readyDocsForSummary.map(d => ({
