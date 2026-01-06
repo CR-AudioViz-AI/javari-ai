@@ -1,8 +1,8 @@
 'use client';
 
 /**
- * JAVARI AI - Proper Interface Layout + OPERATOR MODE
- * ====================================================
+ * JAVARI AI - Proper Interface Layout + OPERATOR MODE + PASTE-TO-DOCS
+ * ====================================================================
  * Layout:
  * - LEFT SIDEBAR: Javari logo top-left, starred chats, all chats, projects
  * - CENTER: Chat messages
@@ -15,8 +15,14 @@
  * - Issues task batches to AI agents
  * - Enforces proof requirements
  * 
- * @version 4.0.0
- * @date January 5, 2026
+ * PASTE-TO-DOCS (P0 UX FIX):
+ * - Detects pasted virtual documents in chat input
+ * - Pattern: FILE X — filename.md followed by content
+ * - Treats pasted docs exactly like uploaded files
+ * - Auto-clears after successful processing
+ * 
+ * @version 4.1.0
+ * @date January 6, 2026
  */
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
@@ -25,17 +31,149 @@ import {
   Upload, File, X, Check, AlertCircle, Loader2, Send, Bot, User, 
   FileText, Image as ImageIcon, FileSpreadsheet, ChevronLeft, ChevronRight,
   Trash2, Plus, Star, MessageSquare, FolderKanban, Clock, Search,
-  Download, MoreVertical, Sparkles, Settings, Zap
+  Download, MoreVertical, Sparkles, Settings, Zap, Clipboard
 } from 'lucide-react';
+
+// =============================================================================
+// FEATURE FLAGS
+// =============================================================================
+
+// Auto-clear docs after processing
+const DOCS_AUTO_CLEAR_AFTER_SEND = true;
+
+// P0 UX FIX: Enable paste-to-docs feature
+const TEXT_DOCS_ENABLED = true;
 
 // =============================================================================
 // OPERATOR MODE LOGIC (Inline to avoid import issues)
 // =============================================================================
 
-// Feature flag: Auto-clear docs after processing
-const DOCS_AUTO_CLEAR_AFTER_SEND = true;
-
 const SPEC_KEYWORDS = ['SPEC', 'PROOF', 'CONTROL', 'P0', 'TICKET', 'OPERATOR', 'ACCEPTANCE', 'CRITERIA'];
+
+// =============================================================================
+// PASTE-TO-DOCS: Virtual Document Parser
+// =============================================================================
+
+interface VirtualDocument {
+  name: string;
+  content: string;
+  type: string;
+  size: number;
+}
+
+/**
+ * parseVirtualDocs - Detects and extracts pasted document packs from input text
+ * 
+ * Pattern: FILE X — filename.md
+ *          ...content...
+ *          FILE Y — anotherfile.md
+ *          ...more content...
+ * 
+ * @param text - Raw input text that may contain pasted document packs
+ * @returns { docs: VirtualDocument[], cleanedText: string, hasVirtualDocs: boolean }
+ */
+function parseVirtualDocs(text: string): { 
+  docs: VirtualDocument[]; 
+  cleanedText: string; 
+  hasVirtualDocs: boolean;
+} {
+  if (!TEXT_DOCS_ENABLED) {
+    return { docs: [], cleanedText: text, hasVirtualDocs: false };
+  }
+
+  // Pattern matches: FILE X — filename.ext followed by content until next FILE or end
+  // Handles various dash characters (—, -, –)
+  const pattern = /^FILE\s+\d+\s*[—\-–]\s*(.+?)\n([\s\S]*?)(?=\nFILE\s+\d+\s*[—\-–]|$)/gm;
+  
+  const docs: VirtualDocument[] = [];
+  let match;
+  let lastIndex = 0;
+  let cleanedParts: string[] = [];
+  let textCopy = text;
+  
+  // Also try to detect the simpler pattern without "FILE X —" prefix
+  // e.g., just "--- filename.md ---" or similar markers
+  const altPattern = /^---\s*(.+?\.(?:md|txt|json|yaml|yml|ts|tsx|js|jsx))\s*---\n([\s\S]*?)(?=\n---\s*\S+\.\S+\s*---|$)/gm;
+  
+  // Check for FILE X — pattern first
+  while ((match = pattern.exec(text)) !== null) {
+    const filename = match[1].trim();
+    const content = match[2].trim();
+    
+    if (content.length > 0) {
+      docs.push({
+        name: filename,
+        content: content,
+        type: getFileType(filename),
+        size: new Blob([content]).size
+      });
+    }
+  }
+  
+  // If no FILE X — pattern found, try alt pattern
+  if (docs.length === 0) {
+    while ((match = altPattern.exec(text)) !== null) {
+      const filename = match[1].trim();
+      const content = match[2].trim();
+      
+      if (content.length > 0) {
+        docs.push({
+          name: filename,
+          content: content,
+          type: getFileType(filename),
+          size: new Blob([content]).size
+        });
+      }
+    }
+  }
+  
+  // Clean the text by removing the document blocks
+  if (docs.length > 0) {
+    // Remove all FILE X — ... blocks from the original text
+    let cleaned = text;
+    
+    // Remove FILE X — pattern blocks
+    cleaned = cleaned.replace(/FILE\s+\d+\s*[—\-–]\s*.+?\n[\s\S]*?(?=\nFILE\s+\d+\s*[—\-–]|$)/g, '');
+    
+    // Remove alt pattern blocks
+    cleaned = cleaned.replace(/---\s*.+?\.(?:md|txt|json|yaml|yml|ts|tsx|js|jsx)\s*---\n[\s\S]*?(?=\n---\s*\S+\.\S+\s*---|$)/g, '');
+    
+    // Clean up extra whitespace
+    cleaned = cleaned.trim();
+    
+    return {
+      docs,
+      cleanedText: cleaned,
+      hasVirtualDocs: true
+    };
+  }
+  
+  return { docs: [], cleanedText: text, hasVirtualDocs: false };
+}
+
+/**
+ * getFileType - Determine MIME type from filename extension
+ */
+function getFileType(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() || '';
+  const typeMap: Record<string, string> = {
+    'md': 'text/markdown',
+    'txt': 'text/plain',
+    'json': 'application/json',
+    'yaml': 'text/yaml',
+    'yml': 'text/yaml',
+    'ts': 'text/typescript',
+    'tsx': 'text/typescript',
+    'js': 'text/javascript',
+    'jsx': 'text/javascript',
+    'html': 'text/html',
+    'css': 'text/css',
+    'py': 'text/python',
+    'csv': 'text/csv',
+    'xml': 'text/xml',
+  };
+  return typeMap[ext] || 'text/plain';
+}
 
 // =============================================================================
 // OPERATOR INTENT DETECTION - Routes operator vs normal requests
@@ -226,6 +364,7 @@ interface StoredDocument {
   progress: number;
   error?: string;
   uploadedAt: Date;
+  isVirtual?: boolean; // P0 UX FIX: Flag for pasted documents
 }
 
 interface Citation {
@@ -248,6 +387,7 @@ interface DocManifest {
   size: number;
   type: string;
   uploadedAt: string;
+  isVirtual?: boolean; // P0 UX FIX: Track if doc was pasted
 }
 
 interface Conversation {
@@ -323,7 +463,7 @@ export function MainJavariInterface() {
     {
       id: 'welcome',
       role: 'assistant',
-      content: `Hi! I'm Javari, your AI assistant. Upload documents on the right, and I'll help you analyze them with citations. What would you like to work on?`,
+      content: `Hi! I'm Javari, your AI assistant. Upload documents on the right, or paste document packs directly into chat. I'll help you analyze them with citations. What would you like to work on?`,
       timestamp: new Date()
     }
   ]);
@@ -481,25 +621,92 @@ export function MainJavariInterface() {
     }
   };
 
+  // =============================================================================
+  // P0 UX FIX: Process Virtual Documents from Pasted Text
+  // =============================================================================
+  const processVirtualDocs = (virtualDocs: VirtualDocument[]): StoredDocument[] => {
+    const now = new Date();
+    return virtualDocs.map((vDoc, idx) => ({
+      id: `vdoc_${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 8)}`,
+      name: vDoc.name,
+      content: vDoc.content,
+      size: vDoc.size,
+      type: vDoc.type,
+      status: 'ready' as const,
+      progress: 100,
+      uploadedAt: now,
+      isVirtual: true // Mark as pasted, not uploaded
+    }));
+  };
+
   const removeDocument = (id: string) => {
     setDocuments(prev => prev.filter(d => d.id !== id));
   };
 
   // =============================================================================
-  // CHAT HANDLER - WITH OPERATOR MODE BYPASS
+  // CHAT HANDLER - WITH OPERATOR MODE BYPASS + PASTE-TO-DOCS
   // =============================================================================
   const sendMessage = async () => {
     if (!input.trim() || isLoading) return;
 
+    // =========================================================================
+    // P0 UX FIX: Detect and process pasted virtual documents BEFORE routing
+    // =========================================================================
+    let messageText = input.trim();
+    let virtualDocsProcessed: StoredDocument[] = [];
+    
+    if (TEXT_DOCS_ENABLED) {
+      const { docs, cleanedText, hasVirtualDocs } = parseVirtualDocs(messageText);
+      
+      if (hasVirtualDocs && docs.length > 0) {
+        // Convert virtual docs to StoredDocuments and add to documents state
+        virtualDocsProcessed = processVirtualDocs(docs);
+        
+        // Add virtual docs to document state immediately
+        setDocuments(prev => [...prev, ...virtualDocsProcessed]);
+        
+        // Show confirmation message
+        setMessages(prev => [...prev, {
+          id: `msg_vdoc_detect_${Date.now()}`,
+          role: 'assistant',
+          content: `✅ **Detected ${docs.length} pasted document(s):**\n\n` +
+            docs.map((d, i) => `${i + 1}. **${d.name}** (${(d.size / 1024).toFixed(1)} KB)`).join('\n') +
+            `\n\nYou can now ask questions, summarize, or run operator tasks.`,
+          timestamp: new Date()
+        }]);
+        
+        // Use cleaned text (without document blocks) for the actual message
+        messageText = cleanedText;
+        
+        // Check for spec documents in pasted content
+        if (operatorMode) {
+          const hasSpecs = docs.some(d => isSpecDocument(d.name, d.content));
+          if (hasSpecs) {
+            setCanonicalSpecsLoaded(true);
+          }
+        }
+        
+        // If the cleaned text is empty, user just pasted docs - don't send empty message
+        if (!messageText.trim()) {
+          setInput('');
+          setIsLoading(false);
+          return;
+        }
+      }
+    }
+    // =========================================================================
+    // END P0 UX FIX: Paste-to-Docs Detection
+    // =========================================================================
+
     const userMessage: Message = {
       id: `msg_${Date.now()}`,
       role: 'user',
-      content: input.trim(),
+      content: messageText, // Use cleaned text, not raw input with doc blocks
       timestamp: new Date()
     };
 
     setMessages(prev => [...prev, userMessage]);
-    const question = input.trim();
+    const question = messageText;
     setInput('');
     setIsLoading(true);
 
@@ -557,7 +764,7 @@ export function MainJavariInterface() {
           setMessages(prev => [...prev, {
             id: `msg_${Date.now()}`,
             role: 'assistant',
-            content: `📄 **No documents uploaded.**\n\nUpload documents using the panel on the right, then type "summarize" to get an AI-powered summary.`,
+            content: `📄 **No documents uploaded.**\n\nUpload documents using the panel on the right, or paste document packs directly into chat, then type "summarize" to get an AI-powered summary.`,
             timestamp: new Date()
           }]);
           setIsLoading(false);
@@ -601,7 +808,13 @@ export function MainJavariInterface() {
             // Format the summary nicely
             let summaryText = `# 📊 Document Summary\n`;
             summaryText += `**Generated:** ${timestamp}\n`;
-            summaryText += `**Documents:** ${readyDocsForSummary.length}\n`;
+            summaryText += `**Documents:** ${readyDocsForSummary.length}`;
+            // P0 UX FIX: Note if any docs were pasted
+            const virtualCount = readyDocsForSummary.filter(d => d.isVirtual).length;
+            if (virtualCount > 0) {
+              summaryText += ` (${virtualCount} pasted)`;
+            }
+            summaryText += `\n`;
             summaryText += `**Provider:** ${result.provider || 'AI'}\n\n`;
             summaryText += `---\n\n`;
             summaryText += `## ✅ EXECUTIVE SUMMARY\n\n${result.summary.executive}\n\n`;
@@ -625,7 +838,8 @@ export function MainJavariInterface() {
             
             summaryText += `## 📄 DOCUMENTS ANALYZED\n\n`;
             readyDocsForSummary.forEach((doc, i) => {
-              summaryText += `${i + 1}. **${doc.name}** (${(doc.size / 1024).toFixed(1)} KB)\n`;
+              const virtualBadge = doc.isVirtual ? ' 📋' : '';
+              summaryText += `${i + 1}. **${doc.name}**${virtualBadge} (${(doc.size / 1024).toFixed(1)} KB)\n`;
             });
             
             setMessages(prev => [...prev, {
@@ -697,7 +911,7 @@ export function MainJavariInterface() {
 
       let answer: string;
       if (readyDocs.length === 0) {
-        answer = `Upload documents using the panel on the right, and I'll search through them to answer your questions with citations.`;
+        answer = `Upload documents using the panel on the right, or paste document packs directly into chat. I'll search through them to answer your questions with citations.`;
       } else if (citations.length > 0) {
         answer = `Based on your ${readyDocs.length} document(s), I found ${citations.length} relevant section(s). See citations below.`;
       } else {
@@ -783,13 +997,15 @@ export function MainJavariInterface() {
     const now = new Date().toISOString();
     
     // Create doc manifest from current documents (metadata only, no content)
+    // P0 UX FIX: Include isVirtual flag in manifest
     const docManifest: DocManifest[] = documents
       .filter(d => d.status === 'ready')
       .map(d => ({
         name: d.name,
         size: d.size,
         type: d.type,
-        uploadedAt: d.uploadedAt.toISOString()
+        uploadedAt: d.uploadedAt.toISOString(),
+        isVirtual: d.isVirtual || false
       }));
     
     setConversations(prev => {
@@ -899,122 +1115,125 @@ export function MainJavariInterface() {
         style={{ borderColor: COLORS.cyan + '30' }}
       >
         {/* Logo Section */}
-        <div className="p-4 border-b flex items-center gap-3" style={{ borderColor: COLORS.cyan + '30' }}>
-          <Image
-            src="/javariailogo.png"
-            alt="Javari AI"
-            width={48}
-            height={48}
-            className="rounded-lg"
-          />
-          <div>
-            <h1 className="text-white font-bold text-lg">Javari AI</h1>
-            <p className="text-xs" style={{ color: COLORS.cyan }}>Your AI Assistant</p>
+        <div className="p-4 border-b" style={{ borderColor: COLORS.cyan + '30' }}>
+          <div className="flex items-center gap-3">
+            <Image
+              src="/logos/javarilogo.png"
+              alt="Javari Logo"
+              width={40}
+              height={40}
+              className="rounded-lg"
+            />
+            <div>
+              <h1 className="text-white font-bold text-lg">Javari</h1>
+              <p className="text-xs text-gray-400">AI Assistant</p>
+            </div>
           </div>
         </div>
 
         {/* New Chat Button */}
-        <div className="p-4 border-b" style={{ borderColor: COLORS.cyan + '30' }}>
-          <button
+        <div className="p-4">
+          <button 
             onClick={startNewChat}
-            className="w-full py-2.5 rounded-lg font-medium flex items-center justify-center gap-2 transition-all hover:opacity-90"
-            style={{ backgroundColor: COLORS.red, color: 'white' }}
+            className="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-white transition-all hover:opacity-90"
+            style={{ backgroundColor: COLORS.cyan }}
           >
             <Plus className="w-4 h-4" />
             New Chat
           </button>
-          
-          {/* Quick Actions */}
-          <div className="grid grid-cols-2 gap-2 mt-3">
-            <button className="px-3 py-2 rounded-lg text-sm flex items-center justify-center gap-1.5 border transition-all hover:bg-white/5"
-              style={{ borderColor: COLORS.cyan, color: COLORS.cyan }}>
-              <MessageSquare className="w-4 h-4" />
-              All Chats
-            </button>
-            <button className="px-3 py-2 rounded-lg text-sm flex items-center justify-center gap-1.5 border transition-all hover:bg-white/5"
-              style={{ borderColor: COLORS.cyan, color: COLORS.cyan }}>
-              <FolderKanban className="w-4 h-4" />
-              Projects
-            </button>
-          </div>
         </div>
 
-        {/* Search & Filter */}
-        <div className="p-4 space-y-3">
+        {/* Search */}
+        <div className="px-4 pb-4">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
               type="text"
-              placeholder="Search conversations..."
+              placeholder="Search chats..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-white/5 border border-white/10 rounded-lg pl-10 pr-4 py-2 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-cyan-500"
+              className="w-full bg-white/5 border border-white/10 rounded-lg pl-10 pr-4 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500"
             />
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setFilterStarred(!filterStarred)}
-              className={`flex-1 px-3 py-1.5 rounded-lg text-sm flex items-center justify-center gap-1.5 transition-all ${
-                filterStarred ? 'text-yellow-400 bg-yellow-500/20' : 'text-gray-400 hover:text-white bg-white/5'
-              }`}
-            >
-              <Star className="w-3.5 h-3.5" fill={filterStarred ? 'currentColor' : 'none'} />
-              Starred
-            </button>
-            <button
-              className="flex-1 px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-white bg-white/5 flex items-center justify-center gap-1.5 transition-all"
-            >
-              <Clock className="w-3.5 h-3.5" />
-              Recent
-            </button>
           </div>
         </div>
 
-        {/* Starred Section */}
-        {filteredConversations.filter(c => c.starred).length > 0 && (
-          <div className="px-4 pb-2">
-            <h3 className="text-xs font-semibold text-yellow-400 flex items-center gap-1.5 mb-2">
-              <Star className="w-3 h-3" fill="currentColor" />
-              STARRED
-            </h3>
-          </div>
-        )}
+        {/* Filter Tabs */}
+        <div className="px-4 pb-3 flex gap-2">
+          <button
+            onClick={() => setFilterStarred(false)}
+            className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              !filterStarred ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-gray-400'
+            }`}
+          >
+            <MessageSquare className="w-3 h-3 inline mr-1" />
+            All
+          </button>
+          <button
+            onClick={() => setFilterStarred(true)}
+            className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              filterStarred ? 'bg-yellow-500/20 text-yellow-400' : 'bg-white/5 text-gray-400'
+            }`}
+          >
+            <Star className="w-3 h-3 inline mr-1" />
+            Starred
+          </button>
+        </div>
 
         {/* Conversations List */}
-        <div className="flex-1 overflow-y-auto px-4 space-y-1">
-          {filteredConversations.length === 0 && (
-            <div className="text-center py-8 text-gray-500 text-sm">
-              No conversations yet.<br/>Start chatting to create one!
+        <div className="flex-1 overflow-y-auto px-2">
+          {filteredConversations.length === 0 ? (
+            <div className="p-4 text-center text-gray-500 text-sm">
+              {filterStarred ? 'No starred chats' : 'No conversations yet'}
             </div>
+          ) : (
+            filteredConversations.map(conv => (
+              <div
+                key={conv.id}
+                onClick={() => loadConversation(conv.id)}
+                className={`p-3 rounded-lg mb-1 cursor-pointer group transition-all ${
+                  currentConversationId === conv.id
+                    ? 'bg-cyan-500/20'
+                    : 'hover:bg-white/5'
+                }`}
+              >
+                <div className="flex items-start gap-2">
+                  <MessageSquare className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-white truncate">{conv.title}</p>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); toggleStarred(conv.id); }}
+                        className="opacity-0 group-hover:opacity-100 p-1 hover:bg-white/10 rounded"
+                      >
+                        <Star className={`w-3 h-3 ${conv.starred ? 'text-yellow-400 fill-yellow-400' : 'text-gray-400'}`} />
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <Clock className="w-3 h-3 text-gray-500" />
+                      <span className="text-xs text-gray-500">{formatDate(conv.updated_at)}</span>
+                      <span className="text-xs text-gray-600">•</span>
+                      <span className="text-xs text-gray-500">{conv.message_count} msgs</span>
+                      {/* P0 UX FIX: Show badge if conversation had pasted docs */}
+                      {conv.docManifest?.some(d => d.isVirtual) && (
+                        <>
+                          <span className="text-xs text-gray-600">•</span>
+                          <Clipboard className="w-3 h-3 text-cyan-400" title="Had pasted docs" />
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))
           )}
-          {filteredConversations.map(conv => (
-            <div
-              key={conv.id}
-              onClick={() => loadConversation(conv.id)}
-              className={`group p-3 rounded-lg cursor-pointer transition-all relative ${
-                currentConversationId === conv.id 
-                  ? 'bg-cyan-500/20 border border-cyan-500/50' 
-                  : 'hover:bg-white/5 border border-transparent'
-              }`}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <h4 className="text-white text-sm font-medium truncate flex-1">{conv.title}</h4>
-                <button
-                  onClick={(e) => { e.stopPropagation(); toggleStarred(conv.id); }}
-                  className={`p-1 rounded transition-all ${
-                    conv.starred ? 'text-yellow-400' : 'text-gray-500 opacity-0 group-hover:opacity-100'
-                  }`}
-                >
-                  <Star className="w-3.5 h-3.5" fill={conv.starred ? 'currentColor' : 'none'} />
-                </button>
-              </div>
-              <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
-                <span>{conv.message_count} messages</span>
-                <span>•</span>
-                <span>{formatDate(conv.updated_at)}</span>
-              </div>
-            </div>
-          ))}
+        </div>
+
+        {/* Settings */}
+        <div className="p-4 border-t" style={{ borderColor: COLORS.cyan + '30' }}>
+          <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-all">
+            <Settings className="w-4 h-4" />
+            <span className="text-sm">Settings</span>
+          </button>
         </div>
       </div>
 
@@ -1027,58 +1246,67 @@ export function MainJavariInterface() {
         {leftSidebarOpen ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
       </button>
 
-      {/* ============== CENTER - CHAT ============== */}
+      {/* ============== MAIN CONTENT ============== */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-6">
-          <div className="max-w-3xl mx-auto space-y-4">
-            {messages.map(message => (
-              <div
-                key={message.id}
-                className={`flex gap-3 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}
-              >
+          <div className="max-w-4xl mx-auto space-y-6">
+            {messages.map(msg => (
+              <div key={msg.id} className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                {/* Avatar */}
                 <div className={`
-                  w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0
-                  ${message.role === 'user' ? 'bg-purple-500/30' : 'bg-cyan-500/30'}
+                  w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0
+                  ${msg.role === 'user' ? 'bg-cyan-500/20' : 'bg-purple-500/20'}
                 `}>
-                  {message.role === 'user' 
-                    ? <User className="w-4 h-4 text-purple-400" /> 
-                    : <Bot className="w-4 h-4 text-cyan-400" />}
+                  {msg.role === 'user' 
+                    ? <User className="w-5 h-5" style={{ color: COLORS.cyan }} />
+                    : <Bot className="w-5 h-5 text-purple-400" />
+                  }
                 </div>
-                <div className={`
-                  max-w-[80%] p-4 rounded-2xl
-                  ${message.role === 'user' 
-                    ? 'bg-purple-500/20 text-white rounded-tr-sm' 
-                    : 'bg-white/10 text-gray-100 rounded-tl-sm'}
-                `}>
-                  <div className="whitespace-pre-wrap text-sm">{message.content}</div>
-                  
+
+                {/* Message Content */}
+                <div className={`max-w-[80%] ${msg.role === 'user' ? 'text-right' : ''}`}>
+                  <div className={`
+                    inline-block px-4 py-3 rounded-2xl text-sm
+                    ${msg.role === 'user' 
+                      ? 'bg-cyan-500/20 text-white rounded-br-none' 
+                      : 'bg-white/5 text-gray-200 rounded-bl-none'}
+                  `}>
+                    <div className="whitespace-pre-wrap">{msg.content}</div>
+                  </div>
+
                   {/* Citations */}
-                  {message.citations && message.citations.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-white/10">
-                      <p className="text-xs font-medium mb-2" style={{ color: COLORS.cyan }}>
-                        📚 Citations ({message.citations.length})
-                      </p>
-                      {message.citations.map((citation, i) => (
-                        <div key={i} className="text-xs bg-black/30 p-2.5 rounded-lg mt-2">
-                          <span className="font-medium" style={{ color: COLORS.cyan }}>{citation.documentName}</span>
-                          <p className="text-gray-400 italic mt-1">"{citation.snippet}"</p>
+                  {msg.citations && msg.citations.length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      <p className="text-xs text-gray-500 uppercase tracking-wide">Sources</p>
+                      {msg.citations.map((cite, idx) => (
+                        <div 
+                          key={idx}
+                          className="bg-white/5 rounded-lg p-3 text-left"
+                        >
+                          <div className="flex items-center gap-2 mb-1">
+                            <FileText className="w-3 h-3" style={{ color: COLORS.cyan }} />
+                            <span className="text-xs font-medium text-cyan-400">{cite.documentName}</span>
+                          </div>
+                          <p className="text-xs text-gray-400 line-clamp-2">{cite.snippet}</p>
                         </div>
                       ))}
                     </div>
                   )}
+
+                  <p className="text-xs text-gray-600 mt-1">
+                    {msg.timestamp.toLocaleTimeString()}
+                  </p>
                 </div>
               </div>
             ))}
-            
             {isLoading && (
-              <div className="flex gap-3">
-                <div className="w-8 h-8 rounded-lg bg-cyan-500/30 flex items-center justify-center">
-                  <Bot className="w-4 h-4 text-cyan-400" />
+              <div className="flex gap-4">
+                <div className="w-10 h-10 rounded-full bg-purple-500/20 flex items-center justify-center">
+                  <Loader2 className="w-5 h-5 text-purple-400 animate-spin" />
                 </div>
-                <div className="bg-white/10 px-4 py-3 rounded-2xl rounded-tl-sm flex items-center gap-2">
-                  <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
-                  <span className="text-sm text-gray-400">Searching documents...</span>
+                <div className="bg-white/5 rounded-2xl rounded-bl-none px-4 py-3">
+                  <p className="text-sm text-gray-400">Thinking...</p>
                 </div>
               </div>
             )}
@@ -1086,16 +1314,15 @@ export function MainJavariInterface() {
           </div>
         </div>
 
-        {/* Input Area with Provider Buttons */}
-        <div className="p-4 border-t" style={{ borderColor: COLORS.cyan + '30' }}>
-          <div className="max-w-3xl mx-auto">
-            {/* Input */}
-            <div className="flex gap-2 mb-3">
+        {/* Input Area */}
+        <div className="border-t p-4" style={{ borderColor: COLORS.cyan + '30' }}>
+          <div className="max-w-4xl mx-auto space-y-3">
+            <div className="flex gap-3">
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Ask about your documents..."
+                placeholder="Ask about your documents, or paste FILE X — blocks..."
                 className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-500 resize-none focus:outline-none focus:border-cyan-500"
                 rows={1}
               />
@@ -1203,6 +1430,13 @@ export function MainJavariInterface() {
               <FileText className="w-4 h-4" style={{ color: COLORS.cyan }} />
               Documents ({readyDocsCount})
             </h3>
+            {/* P0 UX FIX: Hint about pasting docs */}
+            {TEXT_DOCS_ENABLED && readyDocsCount === 0 && (
+              <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
+                <Clipboard className="w-3 h-3" />
+                Paste FILE blocks in chat
+              </p>
+            )}
           </div>
 
           {/* Upload Zone */}
@@ -1249,7 +1483,13 @@ export function MainJavariInterface() {
                   }
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-white truncate">{doc.name}</p>
+                  <p className="text-sm text-white truncate flex items-center gap-1">
+                    {doc.name}
+                    {/* P0 UX FIX: Badge for pasted docs */}
+                    {doc.isVirtual && (
+                      <Clipboard className="w-3 h-3 text-cyan-400 flex-shrink-0" title="Pasted document" />
+                    )}
+                  </p>
                   <p className="text-xs text-gray-500">{(doc.size/1024).toFixed(1)} KB</p>
                 </div>
                 <button
