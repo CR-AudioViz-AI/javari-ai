@@ -242,14 +242,30 @@ interface Message {
   timestamp: Date;
 }
 
+// Document manifest for audit (no file content, just metadata)
+interface DocManifest {
+  name: string;
+  size: number;
+  type: string;
+  uploadedAt: string;
+}
+
 interface Conversation {
   id: string;
   title: string;
   starred: boolean;
   messages: Message[];
   updated_at: string;
+  created_at: string;
   message_count: number;
+  // Audit metadata
+  operatorMode: boolean;
+  canonicalSpecsLoaded: boolean;
+  docManifest: DocManifest[]; // What docs were loaded (metadata only)
 }
+
+// localStorage key for persistence
+const STORAGE_KEY = 'javari_conversations_v1';
 
 interface AIProvider {
   id: string;
@@ -320,15 +336,53 @@ export function MainJavariInterface() {
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStarred, setFilterStarred] = useState(false);
-  const [canonicalSpecsLoaded, setCanonicalSpecsLoaded] = useState(false); // Track canonical docs
+  const [canonicalSpecsLoaded, setCanonicalSpecsLoaded] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false); // Track if localStorage loaded
   
-  // Conversations state - starts empty, builds as user creates chats
+  // Conversations state - hydrated from localStorage
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [operatorMode, setOperatorMode] = useState(true); // Default ON for Roy
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // =============================================================================
+  // LOCALSTORAGE PERSISTENCE
+  // =============================================================================
+  
+  // Hydrate from localStorage on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        // Restore conversations with proper Date objects
+        const restored = parsed.map((conv: any) => ({
+          ...conv,
+          messages: conv.messages.map((msg: any) => ({
+            ...msg,
+            timestamp: new Date(msg.timestamp)
+          }))
+        }));
+        setConversations(restored);
+      }
+    } catch (err) {
+      console.error('Failed to load conversations from localStorage:', err);
+    }
+    setIsHydrated(true);
+  }, []);
+  
+  // Save to localStorage whenever conversations change (after hydration)
+  useEffect(() => {
+    if (isHydrated && conversations.length > 0) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
+      } catch (err) {
+        console.error('Failed to save conversations to localStorage:', err);
+      }
+    }
+  }, [conversations, isHydrated]);
 
   // Auto-scroll
   useEffect(() => {
@@ -528,7 +582,14 @@ export function MainJavariInterface() {
         citations: citations.length > 0 ? citations : undefined,
         timestamp: new Date()
       }]);
+      
+      // Auto-clear docs after successful processing (normal mode)
+      if (DOCS_AUTO_CLEAR_AFTER_SEND && readyDocs.length > 0) {
+        setDocuments([]);
+        setIsDragging(false);
+      }
     } catch (err: any) {
+      // On error, do NOT clear docs - user may want to retry
       setMessages(prev => [...prev, {
         id: `msg_${Date.now()}`,
         role: 'assistant',
@@ -577,7 +638,7 @@ export function MainJavariInterface() {
   // CHAT MANAGEMENT - Save, Load, New Chat
   // =============================================================================
   
-  // Save current conversation to the list
+  // Save current conversation to the list (with audit metadata)
   const saveCurrentConversation = () => {
     if (messages.length <= 1) return; // Don't save if only welcome message
     
@@ -588,17 +649,35 @@ export function MainJavariInterface() {
       : 'New Conversation';
     
     const convId = currentConversationId || `conv_${Date.now()}`;
+    const now = new Date().toISOString();
+    
+    // Create doc manifest from current documents (metadata only, no content)
+    const docManifest: DocManifest[] = documents
+      .filter(d => d.status === 'ready')
+      .map(d => ({
+        name: d.name,
+        size: d.size,
+        type: d.type,
+        uploadedAt: d.uploadedAt.toISOString()
+      }));
     
     setConversations(prev => {
       // Check if this conversation already exists
       const existingIdx = prev.findIndex(c => c.id === convId);
+      const existingConv = existingIdx >= 0 ? prev[existingIdx] : null;
+      
       const updatedConv: Conversation = {
         id: convId,
         title,
-        starred: existingIdx >= 0 ? prev[existingIdx].starred : false,
+        starred: existingConv?.starred || false,
         messages: messages,
-        updated_at: new Date().toISOString(),
-        message_count: messages.length
+        updated_at: now,
+        created_at: existingConv?.created_at || now,
+        message_count: messages.length,
+        // Audit metadata
+        operatorMode: operatorMode,
+        canonicalSpecsLoaded: canonicalSpecsLoaded,
+        docManifest: docManifest.length > 0 ? docManifest : (existingConv?.docManifest || [])
       };
       
       if (existingIdx >= 0) {
@@ -615,7 +694,7 @@ export function MainJavariInterface() {
     return convId;
   };
   
-  // Load a conversation
+  // Load a conversation (restore audit state)
   const loadConversation = (convId: string) => {
     const conv = conversations.find(c => c.id === convId);
     if (conv && conv.messages.length > 0) {
@@ -626,9 +705,13 @@ export function MainJavariInterface() {
       
       setCurrentConversationId(convId);
       setMessages(conv.messages);
-      // Clear docs when switching conversations
+      
+      // CRITICAL: Clear docs when switching conversations (no document leakage)
       setDocuments([]);
-      setCanonicalSpecsLoaded(false);
+      
+      // Restore audit state from conversation
+      if (conv.operatorMode !== undefined) setOperatorMode(conv.operatorMode);
+      if (conv.canonicalSpecsLoaded !== undefined) setCanonicalSpecsLoaded(conv.canonicalSpecsLoaded);
     }
   };
   
