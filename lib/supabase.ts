@@ -1,11 +1,20 @@
-// ============================================================================
-// UNIVERSAL SUPABASE CLIENT - CR AUDIOVIZ AI ECOSYSTEM
-// Centralized database connection for all apps
-// Dependency-free version (only requires @supabase/supabase-js)
-// ============================================================================
-// Fixed: Dec 31, 2025 7:50 PM EST - Added createServerClient alias
+/**
+ * CR AudioViz AI - Supabase Client
+ * =================================
+ * 
+ * Universal database client for CR AudioViz AI apps.
+ * For authentication, credits, and central services, use:
+ * 
+ *   import { CentralServices, CentralAuth, CentralCredits } from './central-services';
+ * 
+ * This client is for app-specific database operations only.
+ * Auth, payments, and credits should ALWAYS go through central services.
+ */
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+
+// Re-export admin utilities from central services
+export { isAdmin, shouldChargeCredits, ADMIN_EMAILS, CentralServices } from './central-services';
 
 // Centralized Supabase configuration
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kteobfyferrukqeolofj.supabase.co';
@@ -36,7 +45,7 @@ export function createSupabaseBrowserClient(): SupabaseClient {
   return browserClient;
 }
 
-// Server client for API routes (with service role key for full access)
+// Server client for API routes
 export function createSupabaseServerClient(): SupabaseClient {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!serviceKey) {
@@ -46,9 +55,5 @@ export function createSupabaseServerClient(): SupabaseClient {
   return createClient(SUPABASE_URL, serviceKey);
 }
 
-// ALIASES for backward compatibility with existing code
-// These are the names used in many API routes
-export const createServerClient = createSupabaseServerClient;
-export const createBrowserClient = createSupabaseBrowserClient;
-
 export { SUPABASE_URL, SUPABASE_ANON_KEY };
+export default supabase;
