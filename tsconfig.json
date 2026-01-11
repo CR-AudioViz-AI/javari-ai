@@ -1,0 +1,70 @@
+{
+  "compilerOptions": {
+    // Target modern JavaScript for optimal performance
+    "target": "ES2022",
+    
+    // Include DOM types and latest ECMAScript features
+    "lib": ["dom", "dom.iterable", "esnext"],
+    
+    // Allow JavaScript files (for gradual TypeScript adoption)
+    "allowJs": true,
+    
+    // Skip type checking of declaration files for faster builds
+    "skipLibCheck": true,
+    
+    // Enable all strict type-checking options (Henderson Standard)
+    "strict": true,
+    
+    // Don't emit JavaScript files (Next.js handles compilation)
+    "noEmit": true,
+    
+    // Enable CommonJS/ES Module interoperability
+    "esModuleInterop": true,
+    
+    // Use modern ES modules
+    "module": "esnext",
+    
+    // Use bundler module resolution (optimized for Next.js 14)
+    "moduleResolution": "bundler",
+    
+    // Allow importing JSON files as modules
+    "resolveJsonModule": true,
+    
+    // Ensure each file is treated as a separate module
+    "isolatedModules": true,
+    
+    // Preserve JSX for Next.js to transform (CRITICAL for React components)
+    "jsx": "preserve",
+    
+    // Enable incremental compilation for faster rebuilds
+    "incremental": true,
+    
+    // Next.js TypeScript plugin for enhanced type checking
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    
+    // Base URL for absolute imports
+    "baseUrl": ".",
+    
+    // Path aliases for cleaner imports (@/lib/utils instead of ../../lib/utils)
+    "paths": {
+      "@/*": ["./*"]
+    }
+  },
+  
+  // Files to include in compilation
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts"
+  ],
+  
+  // Files to exclude from compilation
+  "exclude": [
+    "node_modules"
+  ]
+}
