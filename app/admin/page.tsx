@@ -38,6 +38,7 @@ interface RecentError {
   id: string;
   type: string;
   message: string;
+  error_type?: string;
   severity: string;
   created_at: string;
 }
