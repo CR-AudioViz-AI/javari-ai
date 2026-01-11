@@ -729,8 +729,7 @@ export default function JavariChatInterface({
           if (done) break;
 
           const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('
-');
+          const lines = chunk.split('\n');
 
           for (const line of lines) {
             if (line.startsWith('data: ')) {
@@ -966,8 +965,7 @@ export default function JavariChatInterface({
                         components={{
                           code({ inline, className, children, ...props }: any) {
                             const match = /language-(\w+)/.exec(className || '');
-                            const codeString = String(children).replace(/
-$/, '');
+                            const codeString = String(children).replace(/\n$/, '');
                             
                             return !inline && match ? (
                               <div className="relative">

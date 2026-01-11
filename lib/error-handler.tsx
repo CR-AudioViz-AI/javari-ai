@@ -309,7 +309,7 @@ export const handleError = (error: unknown, context?: Partial<ErrorContext>) => 
 /**
  * Safe async wrapper
  */
-export const safeAsync = <T>(
+export const safeAsync = <T,>(
   fn: () => Promise<T>,
   context?: Partial<ErrorContext>,
   fallback?: T
@@ -320,7 +320,7 @@ export const safeAsync = <T>(
 /**
  * Safe sync wrapper
  */
-export const safe = <T>(
+export const safe = <T,>(
   fn: () => T,
   context?: Partial<ErrorContext>,
   fallback?: T
@@ -331,7 +331,7 @@ export const safe = <T>(
 /**
  * Try-catch wrapper
  */
-export const tryCatch = <T>(
+export const tryCatch = <T,>(
   fn: () => T,
   errorHandler: (error: unknown) => T,
   context?: Partial<ErrorContext>
