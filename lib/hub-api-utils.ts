@@ -7,9 +7,19 @@
  * @date 2026-01-11
  */
 
+// ============ RESPONSE TYPE ============
+export interface APIResult {
+  success: boolean;
+  source: string;
+  data?: any;
+  error?: string;
+  cached?: boolean;
+  latency_ms?: number;
+}
 
 // ============ WEATHER APIS (5 Sources) ============
 
+export async function getWeather(location: string): Promise<APIResult> {
 export async function getWeather(location: string): Promise<APIResult> {
   const start = Date.now();
   
