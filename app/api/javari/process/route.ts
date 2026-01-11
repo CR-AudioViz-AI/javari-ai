@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PDFExtract } from 'pdf.js-extract';
 
 export async function POST(req: NextRequest) {
   try {
@@ -7,21 +6,14 @@ export async function POST(req: NextRequest) {
 
     let content = '';
 
-    // PDF extraction
+    // For PDFs, inform user to use Claude/ChatGPT for now
+    // We'll add PDF processing later with proper dependencies
     if (type === 'application/pdf') {
-      const response = await fetch(url);
-      const buffer = await response.arrayBuffer();
-      
-      const pdfExtract = new PDFExtract();
-      const data = await pdfExtract.extractBuffer(Buffer.from(buffer));
-      
-      content = data.pages
-        .map(page => page.content.map(item => item.str).join(' '))
-        .join('\n\n');
+      content = `PDF file: ${name}\n\nNote: PDF text extraction coming soon. For now, please describe the contents or use Claude/ChatGPT for PDF analysis.`;
     }
     
     // Text files
-    else if (type.startsWith('text/') || type.includes('markdown')) {
+    else if (type.startsWith('text/') || type.includes('markdown') || type.includes('javascript') || type.includes('typescript')) {
       const response = await fetch(url);
       content = await response.text();
     }
@@ -71,6 +63,11 @@ export async function POST(req: NextRequest) {
     else if (type.includes('json') || type.includes('csv')) {
       const response = await fetch(url);
       content = await response.text();
+    }
+    
+    // Other files
+    else {
+      content = `File: ${name} (${type})\n\nFile uploaded successfully. Contents available for download.`;
     }
 
     return NextResponse.json({ 
