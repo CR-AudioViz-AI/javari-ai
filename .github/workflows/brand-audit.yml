@@ -1,0 +1,299 @@
+# =============================================================================
+# CR AudioViz AI - Brand Audit GitHub Action
+# =============================================================================
+# Runs automated brand + copy + flow audit on pull requests and manual dispatch
+#
+# Triggers:
+#   - Pull requests to main/develop branches
+#   - Manual workflow dispatch
+#
+# Artifacts:
+#   - brand-audit-results.json
+#   - BRAND_AUDIT_REPORT_*.md
+#   - Screenshots (desktop + mobile)
+# =============================================================================
+
+name: Brand + Copy + Flow Audit
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+      - master
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
+      - 'LICENSE'
+  
+  workflow_dispatch:
+    inputs:
+      site_url:
+        description: 'Site URL to audit (default: https://craudiovizai.com)'
+        required: false
+        default: 'https://craudiovizai.com'
+      max_depth:
+        description: 'Maximum crawl depth'
+        required: false
+        default: '3'
+      max_pages:
+        description: 'Maximum pages to audit'
+        required: false
+        default: '100'
+
+# Cancel in-progress runs for the same branch
+concurrency:
+  group: brand-audit-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+  # Default site URL - can be overridden by workflow_dispatch input
+  SITE_URL: ${{ github.event.inputs.site_url || 'https://craudiovizai.com' }}
+  MAX_DEPTH: ${{ github.event.inputs.max_depth || '3' }}
+  MAX_PAGES: ${{ github.event.inputs.max_pages || '100' }}
+
+jobs:
+  brand-audit:
+    name: Run Brand Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # =========================================================================
+      # SETUP
+      # =========================================================================
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: |
+          npm ci --silent 2>/dev/null || npm install --silent
+          echo "Dependencies installed successfully"
+
+      - name: 🎭 Install Playwright browsers
+        run: |
+          npx playwright install chromium --with-deps
+          echo "Playwright Chromium installed"
+
+      # =========================================================================
+      # AUDIT
+      # =========================================================================
+      - name: 🔍 Run Brand + Copy + Flow Audit
+        id: audit
+        env:
+          CI: 'true'
+          SITE_URL: ${{ env.SITE_URL }}
+          MAX_DEPTH: ${{ env.MAX_DEPTH }}
+          MAX_PAGES: ${{ env.MAX_PAGES }}
+          # Optional: Test user credentials (set in repo secrets)
+          TEST_USER_EMAIL: ${{ secrets.TEST_USER_EMAIL }}
+          TEST_USER_PASS: ${{ secrets.TEST_USER_PASS }}
+        run: |
+          echo "=============================================="
+          echo "CR AudioViz AI - Brand Audit"
+          echo "=============================================="
+          echo "Site URL: $SITE_URL"
+          echo "Max Depth: $MAX_DEPTH"
+          echo "Max Pages: $MAX_PAGES"
+          echo "=============================================="
+          
+          # Create output directories
+          mkdir -p evidence/brand-audit/screenshots
+          mkdir -p reports
+          
+          # Run audit
+          node scripts/audit-brand-e2e.js || echo "AUDIT_EXIT_CODE=$?" >> $GITHUB_OUTPUT
+
+      # =========================================================================
+      # RESULTS PROCESSING
+      # =========================================================================
+      - name: 📊 Parse audit results
+        id: results
+        if: always()
+        run: |
+          if [ -f "evidence/brand-audit/brand-audit-results.json" ]; then
+            # Extract summary metrics using Node.js for reliable JSON parsing
+            node -e "
+              const fs = require('fs');
+              const results = JSON.parse(fs.readFileSync('evidence/brand-audit/brand-audit-results.json', 'utf-8'));
+              const s = results.summary;
+              
+              console.log('PAGES_AUDITED=' + s.pagesAudited);
+              console.log('PASSED_PAGES=' + s.passedPages);
+              console.log('FAILED_PAGES=' + s.failedPages);
+              console.log('WARNINGS=' + s.warnings);
+              console.log('ERRORS=' + s.errors);
+              console.log('DEPRECATED_TOKENS=' + s.deprecatedTokensFound);
+              console.log('MISSING_META=' + s.missingMeta);
+              console.log('E2E_PASSED=' + s.e2eFlowsPassed);
+              console.log('E2E_FAILED=' + s.e2eFlowsFailed);
+              
+              // Determine overall status
+              const hasIssues = s.failedPages > 0 || s.deprecatedTokensFound > 0 || s.e2eFlowsFailed > 0;
+              console.log('HAS_ISSUES=' + hasIssues);
+            " >> $GITHUB_OUTPUT
+          else
+            echo "PAGES_AUDITED=0" >> $GITHUB_OUTPUT
+            echo "HAS_ISSUES=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 📝 Generate PR comment summary
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            
+            let summary = '## 🔍 Brand Audit Results\n\n';
+            
+            try {
+              const results = JSON.parse(fs.readFileSync('evidence/brand-audit/brand-audit-results.json', 'utf-8'));
+              const s = results.summary;
+              
+              // Status badge
+              const hasIssues = s.failedPages > 0 || s.deprecatedTokensFound > 0 || s.e2eFlowsFailed > 0;
+              summary += hasIssues 
+                ? '⚠️ **Audit completed with issues**\n\n'
+                : '✅ **Audit passed**\n\n';
+              
+              // Summary table
+              summary += '| Metric | Value |\n';
+              summary += '|--------|-------|\n';
+              summary += `| Pages Audited | ${s.pagesAudited} |\n`;
+              summary += `| ✅ Passed | ${s.passedPages} |\n`;
+              summary += `| ❌ Failed | ${s.failedPages} |\n`;
+              summary += `| ⚠️ Warnings | ${s.warnings} |\n`;
+              summary += `| 🏷️ Deprecated Tokens | ${s.deprecatedTokensFound} |\n`;
+              summary += `| 📝 Missing Meta | ${s.missingMeta} |\n`;
+              summary += `| 🔄 E2E Flows Passed | ${s.e2eFlowsPassed} |\n`;
+              summary += `| 🔄 E2E Flows Failed | ${s.e2eFlowsFailed} |\n\n`;
+              
+              // Brand issues
+              if (results.brandIssues && results.brandIssues.length > 0) {
+                summary += '### 🏷️ Deprecated Brand Tokens Found\n\n';
+                for (const issue of results.brandIssues.slice(0, 5)) {
+                  summary += `- \`${issue.tokens.join('`, `')}\` on ${issue.url}\n`;
+                }
+                if (results.brandIssues.length > 5) {
+                  summary += `- ... and ${results.brandIssues.length - 5} more\n`;
+                }
+                summary += '\n';
+              }
+              
+              // E2E results
+              if (results.e2eResults && results.e2eResults.length > 0) {
+                summary += '### 🔄 E2E Flow Results\n\n';
+                for (const flow of results.e2eResults) {
+                  const emoji = flow.status === 'passed' ? '✅' : flow.status === 'failed' ? '❌' : '⏭️';
+                  summary += `- ${emoji} **${flow.name}**: ${flow.status}\n`;
+                }
+                summary += '\n';
+              }
+              
+              summary += '---\n';
+              summary += `*Audit run: ${results.metadata.auditDateET}*\n`;
+              summary += '*See artifacts for full report and screenshots*';
+              
+            } catch (err) {
+              summary += '❌ Failed to parse audit results\n\n';
+              summary += `Error: ${err.message}`;
+            }
+            
+            // Post or update comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const botComment = comments.find(c => 
+              c.user.type === 'Bot' && c.body.includes('Brand Audit Results')
+            );
+            
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: summary
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: summary
+              });
+            }
+
+      # =========================================================================
+      # ARTIFACTS
+      # =========================================================================
+      - name: 📤 Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: brand-audit-report
+          path: |
+            reports/BRAND_AUDIT_REPORT_*.md
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: 📤 Upload audit JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: brand-audit-json
+          path: |
+            evidence/brand-audit/brand-audit-results.json
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: 📤 Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: brand-audit-screenshots
+          path: |
+            evidence/brand-audit/screenshots/
+          retention-days: 14
+          if-no-files-found: warn
+
+      # =========================================================================
+      # STATUS CHECK
+      # =========================================================================
+      - name: 🚦 Check audit status
+        if: always()
+        run: |
+          if [ -f "evidence/brand-audit/brand-audit-results.json" ]; then
+            # Check for critical issues
+            DEPRECATED=$(node -e "
+              const r = require('./evidence/brand-audit/brand-audit-results.json');
+              console.log(r.summary.deprecatedTokensFound);
+            ")
+            FAILED=$(node -e "
+              const r = require('./evidence/brand-audit/brand-audit-results.json');
+              console.log(r.summary.failedPages);
+            ")
+            
+            echo "Deprecated tokens: $DEPRECATED"
+            echo "Failed pages: $FAILED"
+            
+            if [ "$DEPRECATED" -gt "0" ]; then
+              echo "::warning::Found $DEPRECATED deprecated brand tokens - please update to Javari branding"
+            fi
+            
+            if [ "$FAILED" -gt "0" ]; then
+              echo "::warning::$FAILED pages failed audit checks"
+            fi
+          fi
+          
+          echo "Brand audit complete"
