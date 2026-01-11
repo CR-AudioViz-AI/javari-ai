@@ -39,9 +39,26 @@ interface RecentError {
   type: string;
   message: string;
   error_type?: string;
+  pattern_key?: string;
   severity: string;
   created_at: string;
+  // Additional fields from error_patterns table
+  pattern_id?: string;
+  occurrence_count?: number;
+  first_seen?: string;
+  last_seen?: string;
+  frequency_per_hour?: number;
+  suggested_fixes?: Array<{
+    fix_id: string;
+    title: string;
+    description: string;
+    confidence: number;
+    auto_applicable: boolean;
+  }>;
+  auto_heal_available?: boolean;
+  status?: 'active' | 'resolved' | 'ignored';
 }
+
 
 export default function AdminDashboard() {
   const [health, setHealth] = useState<SystemHealth | null>(null);
