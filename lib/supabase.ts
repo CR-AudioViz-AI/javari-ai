@@ -55,5 +55,8 @@ export function createSupabaseServerClient(): SupabaseClient {
   return createClient(SUPABASE_URL, serviceKey);
 }
 
+// Alias for backward compatibility with API routes
+export const createServerClient = createSupabaseServerClient;
+
 export { SUPABASE_URL, SUPABASE_ANON_KEY };
 export default supabase;
