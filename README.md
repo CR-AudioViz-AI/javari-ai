@@ -1,30 +1,99 @@
 # Javari AI
 
-> **Your Story. Our Design.** - The Autonomous AI Assistant for CR AudioViz AI
+**AI-powered assistant platform for CR AudioViz AI ecosystem**
 
-## 🚀 Version 4.0 - Multi-AI Integration (December 11, 2025)
+## What It Actually Does
 
-Javari AI now supports **5 AI providers** with intelligent routing:
+- Chat interface with AI (Claude, GPT-4, Gemini)
+- File upload and processing
+- Document search across platform documentation
+- Multi-AI model selection
+- Code generation assistance
 
-| Provider | Best For | Status |
-|----------|----------|--------|
-| Claude 3.5 Sonnet | Coding, Analysis | ✅ Active |
-| GPT-4 Turbo | Creative, General | ✅ Active |
-| Gemini 1.5 Pro | Multimodal, Fast | ✅ Active |
-| Mistral Large | Multilingual, Quick | ✅ Active |
-| Perplexity Sonar | Search, Current Info | ✅ Active |
+## Current Status
+
+✅ **Working:**
+- User authentication (Supabase)
+- Chat interface
+- AI model selection
+- Basic file upload UI
+
+⚠️ **In Progress:**
+- File processing backend
+- Documentation ingestion
+- Advanced features
+
+❌ **Planned:**
+- Voice input/output
+- Visual avatar
+- Autonomous app building
+
+## Tech Stack
+
+- Next.js 14
+- TypeScript
+- Tailwind CSS
+- Supabase (auth + database)
+- Anthropic API (Claude)
+- OpenAI API (GPT-4)
+- Google AI API (Gemini)
+
+## Setup
+
+```bash
+npm install
+npm run dev
+```
+
+Required environment variables:
+```
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+ANTHROPIC_API_KEY=
+OPENAI_API_KEY=
+GOOGLE_API_KEY=
+```
 
 ## Features
 
-- **Intelligent Routing**: Automatically selects the best AI for each task
-- **Fallback Chain**: Claude → OpenAI → Gemini → Mistral
-- **Cost Tracking**: Per-request cost and token usage
-- **Self-Healing**: Automatic error detection and fixing
-- **Continuous Learning**: Improves from every interaction
+### Chat Interface
+- Select AI model (Claude Sonnet 4.5, GPT-4, Gemini)
+- Conversation history
+- Markdown rendering
+- Code syntax highlighting
 
-## Quick Start
+### File Upload
+- Drag and drop interface
+- Supports: PDF, DOCX, images, text files
+- File size limit: 10MB
 
-Visit [javariai.com](https://javariai.com) or [craudiovizai.com](https://craudiovizai.com)
+### Documentation Search
+- Search across platform docs
+- Semantic search (planned)
+- Source attribution
 
----
-*Last Updated: December 11, 2025 - 1:28 PM EST - Mistral integration complete*
+## Roadmap
+
+**Week 1:**
+- Complete file processing
+- Add documentation ingestion
+- Test all features
+
+**Week 2-4:**
+- Voice features
+- Enhanced UI
+- Performance optimization
+
+## Known Issues
+
+- File processing incomplete
+- Documentation ingestion not active
+- Some TypeScript errors in development
+
+## License
+
+Proprietary - CR AudioViz AI, LLC
+
+## Contact
+
+For questions: support@craudiovizai.com
