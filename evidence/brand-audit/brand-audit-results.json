@@ -1,0 +1,111 @@
+{
+  "metadata": {
+    "siteUrl": "https://javariai.com",
+    "auditDate": "2026-01-11T03:02:12Z",
+    "auditDateET": "1/10/2026, 10:02:12 PM EST",
+    "version": "1.1.0",
+    "method": "Vercel web_fetch API"
+  },
+  "summary": {
+    "totalPages": 1,
+    "pagesAudited": 1,
+    "passedPages": 1,
+    "failedPages": 0,
+    "warnings": 2,
+    "errors": 0,
+    "deprecatedTokensFound": 0,
+    "missingMeta": 0,
+    "duplicateTitles": [],
+    "duplicateDescriptions": []
+  },
+  "pages": [
+    {
+      "url": "https://javariai.com",
+      "status": 200,
+      "title": "Javari AI - Your AI Business Partner | CR AudioViz AI",
+      "titleLength": 51,
+      "titleValid": true,
+      "metaDescription": "Javari AI is your autonomous business partner. Use voice commands, video calls, and natural language to manage revenue, users, deployments, and more. Start free today.",
+      "descriptionLength": 168,
+      "descriptionValid": false,
+      "canonical": "https://javariai.com",
+      "ogTitle": "Javari AI - Your AI Business Partner",
+      "ogDescription": "Run your business with voice commands. Javari AI manages revenue, users, deployments, and more autonomously.",
+      "ogImage": "https://javariai.com/og-image.png",
+      "twitterCard": "summary_large_image",
+      "twitterCreator": "@craudiovizai",
+      "author": "CR AudioViz AI, LLC",
+      "creator": "CR AudioViz AI, LLC",
+      "publisher": "CR AudioViz AI, LLC",
+      "robots": "index, follow",
+      "structuredData": {
+        "type": "SoftwareApplication",
+        "name": "Javari AI",
+        "applicationCategory": "BusinessApplication",
+        "operatingSystem": "Web",
+        "priceStarting": "$0",
+        "ratingValue": "4.9",
+        "ratingCount": "150"
+      },
+      "brandChecks": {
+        "headerPresent": true,
+        "footerPresent": false,
+        "logoPresent": true,
+        "logoAlt": "Javari Logo",
+        "brandNameInTitle": true,
+        "companyInAuthor": true,
+        "deprecatedTokens": []
+      },
+      "copyChecks": {
+        "titleValid": true,
+        "descriptionValid": false,
+        "descriptionIssue": "Length 168 exceeds recommended max of 160"
+      },
+      "accessibilityChecks": {
+        "hasLangAttribute": true,
+        "langValue": "en",
+        "hasViewportMeta": true,
+        "imagesHaveAlt": true
+      },
+      "techStack": {
+        "framework": "Next.js 14",
+        "deployment": "Vercel",
+        "cache": "HIT",
+        "cdn": "Cloudflare"
+      },
+      "errors": [],
+      "warnings": [
+        "Meta description (168 chars) exceeds recommended 160 char limit",
+        "Footer element not detected in HTML"
+      ]
+    }
+  ],
+  "brandIssues": [],
+  "recommendations": [
+    {
+      "priority": "LOW",
+      "issue": "Meta description slightly over recommended length",
+      "current": "168 characters",
+      "recommended": "120-160 characters",
+      "action": "Trim meta description by 8 characters for optimal search display"
+    },
+    {
+      "priority": "LOW",
+      "issue": "Footer element not detected",
+      "note": "May be rendered client-side or using different semantic markup",
+      "action": "Verify footer uses <footer> tag or role='contentinfo' for accessibility"
+    }
+  ],
+  "brandCompliance": {
+    "score": 95,
+    "status": "EXCELLENT",
+    "details": {
+      "brandNameConsistency": "PASS - 'Javari AI' and 'CR AudioViz AI' used correctly",
+      "deprecatedBranding": "PASS - No deprecated 'Crav' tokens found",
+      "logoPresence": "PASS - Logo present with proper alt text",
+      "metaComplete": "PASS - All required meta tags present",
+      "structuredData": "PASS - Valid schema.org markup",
+      "socialCards": "PASS - OpenGraph and Twitter cards configured"
+    }
+  }
+}
