@@ -91,7 +91,7 @@ export async function GET(req: NextRequest) {
       // Attempt auto-fix if confidence is high enough
       if (diagnosis.confidence >= 80 && diagnosis.autoFixable) {
         console.log('Attempting auto-fix...')
-        const fixResult = await selfHealing.attemptFix(error, diagnosis)
+        const fixResult = await selfHealing.executeAutoFix(error, diagnosis)
         
         if (fixResult.success) {
           fixed++
