@@ -538,6 +538,19 @@ export class ProviderManager {
       console.error('Failed to log performance:', error);
     }
   }
+
+  // [FEATURE_FAST_STUBS] Auto-generated stub to unblock build
+  // Replace with real implementation
+  async getAllProviderStatus(): Promise<Record<string, any>> {
+    const enabled = (process.env.FEATURE_FAST_STUBS ?? "1") !== "0";
+    if (!enabled) {
+      throw new Error("ProviderManager.getAllProviderStatus stub disabled via FEATURE_FAST_STUBS=0");
+    }
+    
+    // Return empty provider status map as safe default
+    return {};
+  }
+
 }
 
 // ================================================================
