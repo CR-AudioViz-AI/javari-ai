@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
     // Initialize autonomous systems
     const github = new AutonomousGitHub({
       token: process.env.GITHUB_TOKEN!,
-      owner: 'CR-AudioViz-AI',
+      org: 'CR-AudioViz-AI',
       repo: 'crav-javari'
     })
 
