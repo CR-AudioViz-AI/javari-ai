@@ -735,7 +735,7 @@ export async function PUT(request: NextRequest) {
         enhancement_id: enhancementId,
         action: 'comment_added',
         actor_type: author_type || 'user',
-        actor_id,
+        actor_id: author_id,
         actor_name: author_name || 'User'
       });
       
