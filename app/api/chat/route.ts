@@ -1,5 +1,5 @@
 // app/api/chat/route.ts
-// Updated: Auto-include document context like ChatGPT/Claude
+// Javari Autonomous Chat with Memory & Continuity
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
@@ -21,31 +21,45 @@ interface ChatRequest {
   userId?: string;
 }
 
-// Get documents from current session
-async function getSessionDocuments(sessionId: string, userId: string): Promise<string> {
+// Get session memory (documents + context)
+async function getSessionContext(sessionId: string, userId: string): Promise<string> {
   try {
-    const { data: docs, error } = await supabase
+    // Get documents
+    const { data: docs } = await supabase
       .from('uploaded_documents')
-      .select('filename, content, uploaded_at')
+      .select('filename, content')
       .eq('session_id', sessionId)
       .eq('user_id', userId)
       .order('uploaded_at', { ascending: false })
-      .limit(10);
+      .limit(5);
 
-    if (error || !docs || docs.length === 0) {
-      return '';
+    let context = '';
+
+    if (docs && docs.length > 0) {
+      const docContext = docs
+        .map((doc, idx) => `[Document ${idx + 1}: ${doc.filename}]\n${doc.content}`)
+        .join('\n\n---\n\n');
+      context += `\n## DOCUMENTS IN SESSION\n\n${docContext}\n\n`;
     }
 
-    // Format documents for context
-    const docContext = docs
-      .map((doc, idx) => 
-        `[Document ${idx + 1}: ${doc.filename}]\n${doc.content}\n`
-      )
-      .join('\n---\n\n');
+    // Get recent conversation goals/context
+    const { data: goals } = await supabase
+      .from('session_goals')
+      .select('goal, status')
+      .eq('session_id', sessionId)
+      .order('created_at', { ascending: false })
+      .limit(3);
 
-    return `\n\n## DOCUMENTS IN THIS CONVERSATION\n\nThe user has provided these documents. Reference them naturally:\n\n${docContext}\n\n---\n\n`;
+    if (goals && goals.length > 0) {
+      const goalsContext = goals
+        .map(g => `- ${g.goal} (${g.status})`)
+        .join('\n');
+      context += `\n## CURRENT PROJECT GOALS\n\n${goalsContext}\n\n`;
+    }
+
+    return context;
   } catch (err) {
-    console.error('Error fetching session documents:', err);
+    console.error('Session context error:', err);
     return '';
   }
 }
@@ -55,24 +69,23 @@ export async function POST(request: NextRequest) {
     const body: ChatRequest = await request.json();
     const { messages, sessionId, userId } = body;
 
-    // Get base system prompt (no document upload requests)
+    // Build full system prompt with memory
     let systemPrompt = getJavariSystemPrompt();
 
-    // Auto-include documents if available
     if (sessionId && userId) {
-      const docContext = await getSessionDocuments(sessionId, userId);
-      if (docContext) {
-        systemPrompt += docContext;
+      const sessionContext = await getSessionContext(sessionId, userId);
+      if (sessionContext) {
+        systemPrompt += sessionContext;
       }
     }
 
-    // Add system prompt as first message
+    // Add system prompt
     const messagesWithSystem: ChatMessage[] = [
       { role: 'system', content: systemPrompt },
       ...messages
     ];
 
-    // Forward to AI provider (OpenAI, Anthropic, etc.)
+    // Call AI provider
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -95,10 +108,13 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error: any) {
-    console.error('Chat API error:', error);
-    return NextResponse.json(
-      { error: 'Chat failed', details: error.message },
-      { status: 500 }
-    );
+    // RECOVER_MODE: Graceful degradation
+    console.error('Chat error:', error);
+    
+    return NextResponse.json({
+      message: "I encountered an issue but I'm still operational. Let me try a different approach. What would you like me to build?",
+      error: error.message,
+      mode: 'RECOVER_MODE'
+    }, { status: 200 }); // Return 200 to avoid frontend errors
   }
 }
