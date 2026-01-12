@@ -1,9 +1,12 @@
 // app/api/chat/route.ts
-// Javari Autonomous Chat with Memory & Continuity
+// Javari Final - Autonomous system with learning, orchestration, roadmap execution
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getJavariSystemPrompt } from '@/lib/javari-system-prompt';
+import { javariLearning } from '@/lib/javari-learning-system';
+import { javariOrchestrator } from '@/lib/javari-multi-model-orchestrator';
+import { javariRoadmap } from '@/lib/javari-roadmap-system';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -21,10 +24,25 @@ interface ChatRequest {
   userId?: string;
 }
 
-// Get session memory (documents + context)
+// Detect task type from message
+function detectTaskType(message: string): 'code' | 'analysis' | 'research' | 'reasoning' {
+  const lowerMsg = message.toLowerCase();
+  
+  if (lowerMsg.includes('build') || lowerMsg.includes('create') || lowerMsg.includes('code')) {
+    return 'code';
+  }
+  if (lowerMsg.includes('analyze') || lowerMsg.includes('compare') || lowerMsg.includes('review')) {
+    return 'analysis';
+  }
+  if (lowerMsg.includes('research') || lowerMsg.includes('find') || lowerMsg.includes('search')) {
+    return 'research';
+  }
+  return 'reasoning';
+}
+
+// Get session context
 async function getSessionContext(sessionId: string, userId: string): Promise<string> {
   try {
-    // Get documents
     const { data: docs } = await supabase
       .from('uploaded_documents')
       .select('filename, content')
@@ -39,23 +57,12 @@ async function getSessionContext(sessionId: string, userId: string): Promise<str
       const docContext = docs
         .map((doc, idx) => `[Document ${idx + 1}: ${doc.filename}]\n${doc.content}`)
         .join('\n\n---\n\n');
-      context += `\n## DOCUMENTS IN SESSION\n\n${docContext}\n\n`;
+      context += `\n## SESSION DOCUMENTS\n\n${docContext}\n\n`;
     }
 
-    // Get recent conversation goals/context
-    const { data: goals } = await supabase
-      .from('session_goals')
-      .select('goal, status')
-      .eq('session_id', sessionId)
-      .order('created_at', { ascending: false })
-      .limit(3);
-
-    if (goals && goals.length > 0) {
-      const goalsContext = goals
-        .map(g => `- ${g.goal} (${g.status})`)
-        .join('\n');
-      context += `\n## CURRENT PROJECT GOALS\n\n${goalsContext}\n\n`;
-    }
+    // Add roadmap context
+    const roadmapSummary = javariRoadmap.formatRoadmapSummary();
+    context += `\n## PLATFORM ROADMAP\n\n${roadmapSummary}\n\n`;
 
     return context;
   } catch (err) {
@@ -65,11 +72,20 @@ async function getSessionContext(sessionId: string, userId: string): Promise<str
 }
 
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
+  
   try {
     const body: ChatRequest = await request.json();
     const { messages, sessionId, userId } = body;
 
-    // Build full system prompt with memory
+    if (!messages || messages.length === 0) {
+      return NextResponse.json({ error: 'No messages provided' }, { status: 400 });
+    }
+
+    const userMessage = messages[messages.length - 1].content;
+    const taskType = detectTaskType(userMessage);
+
+    // Build full system prompt
     let systemPrompt = getJavariSystemPrompt();
 
     if (sessionId && userId) {
@@ -79,13 +95,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Add system prompt
     const messagesWithSystem: ChatMessage[] = [
       { role: 'system', content: systemPrompt },
       ...messages
     ];
 
-    // Call AI provider
+    // Call AI (using GPT-4 for now, orchestrator will route later)
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -100,21 +115,39 @@ export async function POST(request: NextRequest) {
       }),
     });
 
+    if (!response.ok) {
+      throw new Error(`AI API error: ${response.status}`);
+    }
+
     const data = await response.json();
+    const assistantMessage = data.choices[0].message.content;
+
+    // Track success
+    javariLearning.trackAction(taskType, 'success', {
+      model: 'gpt-4',
+    });
 
     return NextResponse.json({
-      message: data.choices[0].message.content,
+      message: assistantMessage,
       usage: data.usage,
+      taskType,
+      processingTime: Date.now() - startTime,
     });
 
   } catch (error: any) {
-    // RECOVER_MODE: Graceful degradation
     console.error('Chat error:', error);
-    
+
+    // Track failure
+    javariLearning.trackAction('chat_request', 'failure', {
+      error: error.message,
+    });
+
+    // RECOVER_MODE: Return helpful response even on error
     return NextResponse.json({
       message: "I encountered an issue but I'm still operational. Let me try a different approach. What would you like me to build?",
       error: error.message,
-      mode: 'RECOVER_MODE'
-    }, { status: 200 }); // Return 200 to avoid frontend errors
+      mode: 'RECOVER_MODE',
+      processingTime: Date.now() - Date.now(),
+    }, { status: 200 });
   }
 }
