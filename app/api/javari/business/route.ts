@@ -675,7 +675,7 @@ async function executeSupportCommand(cmd: BusinessCommand): Promise<any> {
       .order('created_at', { ascending: false })
       .limit(20)
     
-    const avgRating = feedback?.reduce((sum, f) => sum + (f.rating || 0), 0) / (feedback?.length || 1)
+    const avgRating = (feedback ?? []).reduce((sum, f) => sum + (f.rating || 0), 0) / (feedback?.length || 1)
     
     return {
       type: 'feedback_summary',
