@@ -4,7 +4,7 @@ import { AutonomousGitHub } from '@/lib/autonomous/autonomous-github'
 import { AutonomousVercel } from '@/lib/autonomous/autonomous-deploy'
 import { createClient } from '@/lib/supabase/server'
 
-/**
+/**,
  * JAVARI AI - SELF-HEALING CRON JOB
  * 
  * Runs every 5 minutes to:
@@ -36,14 +36,15 @@ export async function GET(req: NextRequest) {
     // Initialize autonomous systems
     const github = new AutonomousGitHub({
       token: process.env.GITHUB_TOKEN!,
-      owner: 'CR-AudioViz-AI',
+      org: 'CR-AudioViz-AI',
       repo: 'crav-javari'
     })
 
     const vercel = new AutonomousVercel({
       token: process.env.VERCEL_TOKEN!,
       teamId: process.env.VERCEL_TEAM_ID!,
-      projectName: 'crav-javari'
+      projectId: process.env.VERCEL_PROJECT_ID || 'prj_crav-javari',
+      repoId: parseInt(process.env.VERCEL_REPO_ID || '0', 10)
     })
 
     const selfHealing = new SelfHealingSystem({
@@ -90,7 +91,7 @@ export async function GET(req: NextRequest) {
       // Attempt auto-fix if confidence is high enough
       if (diagnosis.confidence >= 80 && diagnosis.autoFixable) {
         console.log('Attempting auto-fix...')
-        const fixResult = await selfHealing.attemptFix(error, diagnosis)
+        const fixResult = await selfHealing.executeAutoFix(error, diagnosis)
         
         if (fixResult.success) {
           fixed++

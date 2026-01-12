@@ -243,7 +243,6 @@ export async function POST(request: NextRequest) {
         manual_insights: body.manual_insights,
         created_at: new Date().toISOString()
       })
-      .catch(err => console.warn('⚠️ Could not store learning log:', err.message))
 
     console.log('✅ Javari AI: Analysis complete')
     console.log(`   Generated ${analysis.picks.length} picks`)
