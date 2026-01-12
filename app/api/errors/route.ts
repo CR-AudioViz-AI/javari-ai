@@ -287,7 +287,7 @@ async function fetchWithRetry(url, options, retries = 3) {
       e.error_message.toLowerCase().includes('openai') ||
       e.error_message.toLowerCase().includes('anthropic') ||
       e.error_message.toLowerCase().includes('model') ||
-      e.error_code?.startsWith('insufficient_quota') ?? false,
+      (e.error_code?.startsWith('insufficient_quota') ?? false),
     fixes: [
       {
         title: 'Switch to Fallback AI Provider',
