@@ -710,20 +710,25 @@ export async function PUT(request: NextRequest) {
       if (error) throw error;
       
       // Update comment count
-      await supabase.rpc('increment_comment_count', { p_enhancement_id: enhancementId }).catch(() => {
-        // Manual update if function doesn't exist
-        supabase
-          .from('enhancement_requests')
-          .select('comment_count')
-          .eq('id', enhancementId)
-          .single()
-          .then(({ data }) => {
-            supabase
+      {
+        const { error } = await supabase.rpc('increment_comment_count', { p_enhancement_id: enhancementId });
+        
+        if (error) {
+          // Manual update if function doesn't exist
+          const { data: current } = await supabase
+            .from('enhancement_requests')
+            .select('comment_count')
+            .eq('id', enhancementId)
+            .single();
+          
+          if (current) {
+            await supabase
               .from('enhancement_requests')
-              .update({ comment_count: (data?.comment_count || 0) + 1 })
+              .update({ comment_count: (current.comment_count || 0) + 1 })
               .eq('id', enhancementId);
-          });
-      });
+          }
+        }
+      }
       
       // Log activity
       await supabase.from('enhancement_activity').insert({
