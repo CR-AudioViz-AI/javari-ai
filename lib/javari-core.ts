@@ -1,11 +1,12 @@
 // lib/javari-core.ts
-// JAVARI CORE BOUNDARY - Single entry point for all requests
-// v12.0 - Full autonomous system
+// JAVARI CORE BOUNDARY - v12.1 with Tool Access
+// Single entry point for all requests with GitHub read capability
 
 import { javariLearning } from './javari-learning-system';
 import { javariOrchestrator } from './javari-multi-model-orchestrator';
 import { javariRoadmap } from './javari-roadmap-system';
 import { getGuardrails, isActionAllowed } from './javari-guardrails';
+import { toolRegistry } from './javari-tools-init'; // Import initialized registry
 
 // Core request/response types
 export interface JavariRequest {
@@ -23,6 +24,7 @@ export interface JavariResponse {
   actions?: string[];
   reasoning?: string;
   nextSteps?: string[];
+  toolsUsed?: string[];
 }
 
 export type JavariMode = 'BUILD' | 'ANALYZE' | 'EXECUTE' | 'RECOVER';
@@ -158,6 +160,21 @@ async function executeWithHealing<T>(
   throw lastError || new Error('All attempts failed');
 }
 
+// Detect if user is asking for repo structure
+function needsRepoAccess(message: string): boolean {
+  const keywords = [
+    'repo tree',
+    'repository structure',
+    'list files',
+    'show files',
+    'file structure',
+    'project structure',
+    'paste tree',
+  ];
+  
+  return keywords.some(kw => message.toLowerCase().includes(kw));
+}
+
 // JAVARI CORE
 export class JavariCore {
   private modeEngine = new ModeEngine();
@@ -165,8 +182,24 @@ export class JavariCore {
   async invoke(request: JavariRequest): Promise<JavariResponse> {
     const startTime = Date.now();
     const userMessage = request.messages[request.messages.length - 1].content;
+    const toolsUsed: string[] = [];
     
     try {
+      // Check if user needs repo access
+      if (needsRepoAccess(userMessage)) {
+        const repoAccess = await this.handleRepoAccess(userMessage);
+        if (repoAccess) {
+          toolsUsed.push('github_read');
+          return {
+            message: repoAccess,
+            mode: 'EXECUTE',
+            cost: 0,
+            model: 'tool',
+            toolsUsed,
+          };
+        }
+      }
+      
       // 1. Check memory first
       const memoryResult = await checkMemory(userMessage);
       if (memoryResult) {
@@ -209,14 +242,13 @@ export class JavariCore {
         model: modelChoice.model,
       });
       
-      const processingTime = Date.now() - startTime;
-      
       return {
         message: result,
         mode,
         cost: modelChoice.cost,
         model: modelChoice.model,
         reasoning: modelChoice.rationale,
+        toolsUsed,
       };
       
     } catch (error: any) {
@@ -231,8 +263,69 @@ export class JavariCore {
         cost: 0,
         model: 'recovery',
         reasoning: 'Graceful degradation after failure',
+        toolsUsed,
       };
     }
+  }
+  
+  private async handleRepoAccess(message: string): Promise<string | null> {
+    // Check if GitHub tool is available
+    const tools = toolRegistry.listTools();
+    const githubTool = tools.find(t => t.name === 'github_read');
+    
+    if (!githubTool?.enabled) {
+      return 'I can access the repository directly, but the GitHub Read Tool is currently disabled. ' +
+             'To enable it:\n' +
+             '1. Set FEATURE_GITHUB_READ=1 in Vercel environment variables\n' +
+             '2. Set GITHUB_READ_TOKEN with a read-only token\n' +
+             '3. Redeploy the application\n\n' +
+             'Would you like to paste the repo tree manually, or should I guide you through enabling the tool?';
+    }
+    
+    // Fetch repo tree
+    const result = await toolRegistry.executeTool('github_read', {
+      action: 'listRepoTree',
+    });
+    
+    if (!result.success) {
+      return `I attempted to read the repository but encountered an error: ${result.error}\n\n` +
+             'Would you like to paste the repo tree manually?';
+    }
+    
+    // Format tree for display
+    const tree = result.data as Array<{ path: string; type: string }>;
+    const formatted = this.formatRepoTree(tree);
+    
+    return `I've read the repository structure:\n\n${formatted}\n\n` +
+           `Total: ${tree.length} items. What would you like to work on?`;
+  }
+  
+  private formatRepoTree(tree: Array<{ path: string; type: string }>): string {
+    // Group by top-level directories
+    const dirs = new Set<string>();
+    const files: string[] = [];
+    
+    tree.forEach(node => {
+      const parts = node.path.split('/');
+      if (parts.length === 1) {
+        files.push(node.path);
+      } else {
+        dirs.add(parts[0]);
+      }
+    });
+    
+    let output = 'Key directories:\n';
+    Array.from(dirs).sort().forEach(dir => {
+      const count = tree.filter(n => n.path.startsWith(dir + '/')).length;
+      output += `  📁 ${dir}/ (${count} items)\n`;
+    });
+    
+    output += '\nRoot files:\n';
+    files.sort().forEach(file => {
+      output += `  📄 ${file}\n`;
+    });
+    
+    return output;
   }
   
   private estimateComplexity(message: string): 'low' | 'medium' | 'high' {
