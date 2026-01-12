@@ -428,12 +428,11 @@ export async function POST(request: NextRequest) {
           response.stored = true;
           
           // Update pattern statistics
+          // Pattern tracking is optional, don't fail if RPC doesn't exist
           await supabase.rpc('increment_error_pattern', {
             p_pattern_id: patternId,
             p_error_type: body.error_type,
             p_pattern_key: detected?.pattern_key || 'unknown'
-          }).catch(() => {
-            // Pattern tracking is optional, don't fail if RPC doesn't exist
           });
         }
       } catch {
