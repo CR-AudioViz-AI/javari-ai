@@ -4,7 +4,7 @@ import { AutonomousGitHub } from '@/lib/autonomous/autonomous-github'
 import { AutonomousVercel } from '@/lib/autonomous/autonomous-deploy'
 import { createClient } from '@/lib/supabase/server'
 
-/**
+/**,
  * JAVARI AI - SELF-HEALING CRON JOB
  * 
  * Runs every 5 minutes to:
@@ -43,7 +43,8 @@ export async function GET(req: NextRequest) {
     const vercel = new AutonomousVercel({
       token: process.env.VERCEL_TOKEN!,
       teamId: process.env.VERCEL_TEAM_ID!,
-      projectId: process.env.VERCEL_PROJECT_ID || 'prj_crav-javari'
+      projectId: process.env.VERCEL_PROJECT_ID || 'prj_crav-javari',
+      repoId: parseInt(process.env.VERCEL_REPO_ID || '0', 10)
     })
 
     const selfHealing = new SelfHealingSystem({
