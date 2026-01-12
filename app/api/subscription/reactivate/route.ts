@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
       event_type: 'reactivated',
       subscription_id: subscription.id,
       created_at: new Date().toISOString()
-    }).catch(() => {});
+    });
 
     return NextResponse.json({
       success: true,

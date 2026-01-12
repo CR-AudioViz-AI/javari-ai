@@ -337,7 +337,7 @@ export async function POST(request: NextRequest) {
       tokens_used: result.tokensUsed,
       duration_ms: result.duration,
       created_at: new Date().toISOString()
-    }).catch(() => {});
+    });
     
     return NextResponse.json(result);
     

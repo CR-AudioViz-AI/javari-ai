@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
         cancel_at: new Date(subscription.current_period_end * 1000).toISOString()
       },
       created_at: new Date().toISOString()
-    }).catch(() => {}); // Don't fail if logging fails
+    }); // Don't fail if logging fails
 
     // Send cancellation email
     try {

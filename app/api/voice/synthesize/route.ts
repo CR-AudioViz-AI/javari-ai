@@ -223,7 +223,7 @@ export async function POST(request: NextRequest) {
       format,
       streaming: stream,
       created_at: new Date().toISOString()
-    }).catch(() => {});
+    });
     
     if (stream) {
       // Return streaming audio

@@ -161,7 +161,7 @@ function findBestResponse(message: string): { response: string; confidence: numb
       return {
         response: data.answer,
         confidence: data.confidence,
-        needsHuman: data.needsHuman || false
+        needsHuman: ('needsHuman' in data ? data.needsHuman : false) || false
       }
     }
   }

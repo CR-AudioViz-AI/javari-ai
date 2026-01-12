@@ -200,7 +200,7 @@ export async function POST(request: NextRequest) {
 
     // Calculate time to resolve if already resolved
     let timeToResolve = null;
-    if (status === 'resolved' || (fixResult?.success && fixResult.confidence && fixResult.confidence >= 90)) {
+    if (fixResult?.success && fixResult.confidence && fixResult.confidence >= 90) {
       timeToResolve = 0; // Immediate resolution
       
       // Update incident to resolved

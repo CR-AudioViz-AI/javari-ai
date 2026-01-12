@@ -134,11 +134,11 @@ async function analyzeTextFile(filename: string, content: string): Promise<FileA
   else if (lineCount > 200) complexity = 'moderate';
   
   // Simple error detection for code files
-  const hasErrors = language && (
+  const hasErrors = language ? (
     content.includes('SyntaxError') ||
     content.includes('TypeError') ||
     content.includes('ReferenceError')
-  );
+  ) : undefined;
   
   // Generate suggestions
   const suggestions: string[] = [];

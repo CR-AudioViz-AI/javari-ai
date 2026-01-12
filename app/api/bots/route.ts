@@ -155,7 +155,7 @@ async function runBot(botId: string): Promise<BotRun> {
     verified: true,
     verified_by: 'bot-manager',
     tags: ['bots', run.status]
-  }).catch(() => {});
+  });
 
   return run;
 }

@@ -902,22 +902,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     console.log(`[BUILD] ═══════════════════════════════════════════════════════════`);
     
     // Log to database (async, don't wait)
-    supabase.from('build_logs').insert({
-      build_id: buildId,
-      user_id: userId,
-      conversation_id: conversationId,
-      app_name: appName,
-      repo_name: repoName,
-      repo_url: repoResult.repoUrl,
-      deployment_url: deploymentUrl,
-      status: 'deploying',
-      build_time_ms: latency,
-      created_at: new Date().toISOString(),
-    }).then(() => {
-      console.log('[BUILD] Build logged to database');
-    }).catch((dbError) => {
-      console.error('[BUILD] Failed to log build:', dbError);
-    });
+    (async () => {
+      try {
+        await supabase.from('build_logs').insert({
+          build_id: buildId,
+          user_id: userId,
+          conversation_id: conversationId,
+          app_name: appName,
+          repo_name: repoName,
+          repo_url: repoResult.repoUrl,
+          deployment_url: deploymentUrl,
+          status: 'deploying',
+          build_time_ms: latency,
+          created_at: new Date().toISOString(),
+        });
+        console.log('[BUILD] Build logged to database');
+      } catch (dbError) {
+        console.error('[BUILD] Failed to log build:', dbError);
+      }
+    })();
     
     return NextResponse.json({
       success: true,

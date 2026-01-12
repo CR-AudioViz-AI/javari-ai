@@ -306,7 +306,7 @@ async function sendNotification(
       subject: template.subject,
       success,
       created_at: new Date().toISOString()
-    }).catch(() => {});
+    });
     
     return { success };
   } catch (error) {

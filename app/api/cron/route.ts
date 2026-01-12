@@ -212,23 +212,27 @@ async function runDailyHealthReport(): Promise<CronResult> {
       healingSuccess: healingLogs?.filter(h => h.status === 'healed').length || 0
     };
     
-    // Store report
-    await supabase.from('daily_reports').insert({
-      report_date: report.date,
-      metrics: report,
-      created_at: new Date().toISOString()
-    }).catch(() => {
-      // Table might not exist, log to suggestions instead
-      return supabase.from('proactive_suggestions').insert({
-        suggestion_id: `report_${Date.now()}`,
-        type: 'insight',
-        priority: 'low',
-        title: `Daily Report: ${report.date}`,
-        description: `${report.conversations} conversations, ${report.totalRequests} requests, ${report.errors} errors`,
-        metadata: report,
+    // Store report (with fallback if table doesn't exist)
+    {
+      const { error } = await supabase.from('daily_reports').insert({
+        report_date: report.date,
+        metrics: report,
         created_at: new Date().toISOString()
       });
-    });
+      
+      if (error) {
+        // Table might not exist, log to suggestions instead
+        await supabase.from('proactive_suggestions').insert({
+          suggestion_id: `report_${Date.now()}`,
+          type: 'insight',
+          priority: 'low',
+          title: `Daily Report: ${report.date}`,
+          description: `${report.conversations} conversations, ${report.totalRequests} requests, ${report.errors} errors`,
+          metadata: report,
+          created_at: new Date().toISOString()
+        });
+      }
+    }
     
     return {
       success: true,

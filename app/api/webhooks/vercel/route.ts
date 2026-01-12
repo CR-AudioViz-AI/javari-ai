@@ -54,7 +54,7 @@ async function handleDeploymentCreated(payload: any): Promise<{ action: string; 
     status: 'building',
     payload_preview: JSON.stringify(payload).slice(0, 1000),
     created_at: new Date().toISOString()
-  }).catch(() => {});
+  });
   
   console.log(`[Vercel Webhook] Deployment created: ${deployment?.url}`);
   
@@ -80,7 +80,7 @@ async function handleDeploymentSucceeded(payload: any): Promise<{ action: string
     status: 'ready',
     payload_preview: JSON.stringify(payload).slice(0, 1000),
     created_at: new Date().toISOString()
-  }).catch(() => {});
+  });
   
   // Update app registry if exists
   await supabase
@@ -91,7 +91,7 @@ async function handleDeploymentSucceeded(payload: any): Promise<{ action: string
       production_url: `https://${deployment?.url}`
     })
     .eq('app_name', project?.name || deployment?.name)
-    .catch(() => {});
+    ;
   
   console.log(`[Vercel Webhook] Deployment succeeded: ${deployment?.url}`);
   
@@ -117,7 +117,7 @@ async function handleDeploymentFailed(payload: any): Promise<{ action: string; d
     status: 'error',
     payload_preview: JSON.stringify(payload).slice(0, 1000),
     created_at: new Date().toISOString()
-  }).catch(() => {});
+  });
   
   // Create high-priority suggestion
   await supabase.from('proactive_suggestions').insert({
@@ -189,7 +189,7 @@ async function handleDeploymentCanceled(payload: any): Promise<{ action: string;
     status: 'canceled',
     payload_preview: JSON.stringify(payload).slice(0, 1000),
     created_at: new Date().toISOString()
-  }).catch(() => {});
+  });
   
   console.log(`[Vercel Webhook] Deployment canceled: ${project?.name || deployment?.name}`);
   

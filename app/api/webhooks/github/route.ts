@@ -54,7 +54,7 @@ async function handlePush(payload: any): Promise<{ action: string; details: any 
     pusher: pusher?.name,
     payload_preview: JSON.stringify(payload).slice(0, 1000),
     created_at: new Date().toISOString()
-  }).catch(() => {});
+  });
   
   // Analyze commits for potential issues
   const commitMessages = commits?.map((c: any) => c.message).join('\n') || '';
@@ -101,7 +101,7 @@ async function handlePullRequest(payload: any): Promise<{ action: string; detail
     pr_title: pull_request.title,
     payload_preview: JSON.stringify(payload).slice(0, 1000),
     created_at: new Date().toISOString()
-  }).catch(() => {});
+  });
   
   // For opened PRs, we could auto-review
   if (action === 'opened' || action === 'synchronize') {
@@ -147,7 +147,7 @@ async function handleWorkflowRun(payload: any): Promise<{ action: string; detail
     workflow_conclusion: workflow_run.conclusion,
     payload_preview: JSON.stringify(payload).slice(0, 1000),
     created_at: new Date().toISOString()
-  }).catch(() => {});
+  });
   
   // If workflow failed, trigger self-healing analysis
   if (action === 'completed' && workflow_run.conclusion === 'failure') {
@@ -194,7 +194,7 @@ async function handleIssue(payload: any): Promise<{ action: string; details: any
     issue_title: issue.title,
     payload_preview: JSON.stringify(payload).slice(0, 1000),
     created_at: new Date().toISOString()
-  }).catch(() => {});
+  });
   
   // For new issues, analyze and suggest triage
   if (action === 'opened') {

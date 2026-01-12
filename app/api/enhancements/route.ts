@@ -602,21 +602,24 @@ export async function PUT(request: NextRequest) {
           const increment = vote_type === 'up' ? -1 : 0;
           const decrement = vote_type === 'down' ? -1 : 0;
           
-          await supabase.rpc('increment_enhancement_votes', {
-            p_enhancement_id: enhancementId,
-            p_upvote_change: increment,
-            p_downvote_change: decrement
-          }).catch(() => {
-            // Manual update if function doesn't exist
-            supabase
-              .from('enhancement_requests')
-              .update({
-                upvotes: supabase.rpc('greatest', { a: 0, b: `upvotes + ${increment}` }),
-                downvotes: supabase.rpc('greatest', { a: 0, b: `downvotes + ${decrement}` })
-              })
-              .eq('id', enhancementId);
-          });
-          
+          {
+            const { error } = await supabase.rpc('increment_enhancement_votes', {
+              p_enhancement_id: enhancementId,
+              p_upvote_change: increment,
+              p_downvote_change: decrement
+            });
+            
+            if (error) {
+              // Manual update if function doesn't exist
+              await supabase
+                .from('enhancement_requests')
+                .update({
+                  upvotes: supabase.rpc('greatest', { a: 0, b: `upvotes + ${increment}` }),
+                  downvotes: supabase.rpc('greatest', { a: 0, b: `downvotes + ${decrement}` })
+                })
+                .eq('id', enhancementId);
+            }
+          }
           return NextResponse.json({ success: true, action: 'vote_removed' });
         } else {
           // Change vote
@@ -707,27 +710,32 @@ export async function PUT(request: NextRequest) {
       if (error) throw error;
       
       // Update comment count
-      await supabase.rpc('increment_comment_count', { p_enhancement_id: enhancementId }).catch(() => {
-        // Manual update if function doesn't exist
-        supabase
-          .from('enhancement_requests')
-          .select('comment_count')
-          .eq('id', enhancementId)
-          .single()
-          .then(({ data }) => {
-            supabase
+      {
+        const { error } = await supabase.rpc('increment_comment_count', { p_enhancement_id: enhancementId });
+        
+        if (error) {
+          // Manual update if function doesn't exist
+          const { data: current } = await supabase
+            .from('enhancement_requests')
+            .select('comment_count')
+            .eq('id', enhancementId)
+            .single();
+          
+          if (current) {
+            await supabase
               .from('enhancement_requests')
-              .update({ comment_count: (data?.comment_count || 0) + 1 })
+              .update({ comment_count: (current.comment_count || 0) + 1 })
               .eq('id', enhancementId);
-          });
-      });
+          }
+        }
+      }
       
       // Log activity
       await supabase.from('enhancement_activity').insert({
         enhancement_id: enhancementId,
         action: 'comment_added',
         actor_type: author_type || 'user',
-        actor_id,
+        actor_id: author_id,
         actor_name: author_name || 'User'
       });
       

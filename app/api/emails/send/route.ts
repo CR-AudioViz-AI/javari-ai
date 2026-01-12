@@ -90,15 +90,21 @@ export async function POST(request: NextRequest) {
       html
     });
     
+    // Extract email ID with type safety (Resend SDK type compatibility)
+    const emailId = 
+      (typeof (result as any)?.id === 'string' && (result as any).id) ||
+      (typeof (result as any)?.data?.id === 'string' && (result as any).data.id) ||
+      null;
+    
     // Log email sent
     await supabase.from('email_sequences').insert({
       user_id: data?.userId,
       sequence_name: template,
       status: 'sent',
-      metadata: { emailId: result.id, to, template }
+      metadata: { emailId: emailId, to, template }
     });
     
-    return NextResponse.json({ success: true, id: result.id });
+    return NextResponse.json({ success: true, id: emailId });
   } catch (error) {
     console.error('Email error:', error);
     return NextResponse.json({ error: 'Failed to send email' }, { status: 500 });
