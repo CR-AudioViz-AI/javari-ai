@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
     const vercel = new AutonomousVercel({
       token: process.env.VERCEL_TOKEN!,
       teamId: process.env.VERCEL_TEAM_ID!,
-      projectName: 'crav-javari'
+      projectId: process.env.VERCEL_PROJECT_ID || 'prj_crav-javari'
     })
 
     const selfHealing = new SelfHealingSystem({
