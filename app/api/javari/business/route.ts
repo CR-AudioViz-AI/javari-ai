@@ -702,7 +702,7 @@ async function executeCommand(cmd: BusinessCommand): Promise<any> {
       parameters: cmd.parameters,
       status: 'pending',
       created_at: new Date().toISOString()
-    }).catch(() => {})
+    });
     
     return {
       type: 'approval_required',
@@ -765,7 +765,7 @@ export async function POST(request: NextRequest) {
       parameters: parsedCommand.parameters,
       confidence: parsedCommand.confidence,
       created_at: new Date().toISOString()
-    }).catch(() => {})
+    });
     
     const result = await executeCommand(parsedCommand)
     
