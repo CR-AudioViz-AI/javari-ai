@@ -1,51 +1,348 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
-import Image from 'next/image';
-import { ChatService } from '@/lib/javari-services';
-import { PromptHintsBar } from '@/components/javari/PromptHintsBar';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import {
-  MessageSquare,
-  Plus,
-  Star,
-  FolderKanban,
-  Globe,
-  HelpCircle,
-  CreditCard,
-  Settings as SettingsIcon,
-  FileText,
-  Shield,
-  LogOut,
-  ChevronLeft,
-  ChevronRight,
-  Copy,
-  Check,
-  MoreVertical,
-  Download,
-  Printer,
-  FileDown,
-  Mic,
-  MicOff,
-  Volume2,
-  VolumeX,
-  Sparkles,
-  AlertCircle,
-  X,
-} from 'lucide-react';
-import VoicePanel from '@/components/VoicePanel';
-import VoiceConversation from '@/components/VoiceConversation';
+/**
+ * JAVARI AI - Proper Interface Layout + OPERATOR MODE + PASTE-TO-DOCS
+ * ====================================================================
+ * Layout:
+ * - LEFT SIDEBAR: Javari logo top-left, starred chats, all chats, projects
+ * - CENTER: Chat messages
+ * - RIGHT SIDEBAR: Javari avatar top, documents below
+ * - BOTTOM: AI provider selector buttons under chat input
+ * 
+ * OPERATOR MODE:
+ * - Detects spec documents automatically
+ * - Generates tickets instead of summaries
+ * - Issues task batches to AI agents
+ * - Enforces proof requirements
+ * 
+ * PASTE-TO-DOCS (P0 UX FIX):
+ * - Detects pasted virtual documents in chat input
+ * - Pattern: FILE X — filename.md followed by content
+ * - Treats pasted docs exactly like uploaded files
+ * - Auto-clears after successful processing
+ * 
+ * @version 4.1.0
+ * @date January 6, 2026
+ */
 
-// Brand colors from Bible
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import Image from 'next/image';
+import { 
+  Upload, File, X, Check, AlertCircle, Loader2, Send, Bot, User, 
+  FileText, Image as ImageIcon, FileSpreadsheet, ChevronLeft, ChevronRight,
+  Trash2, Plus, Star, MessageSquare, FolderKanban, Clock, Search,
+  Download, MoreVertical, Sparkles, Settings, Zap, Clipboard
+} from 'lucide-react';
+
+// =============================================================================
+// FEATURE FLAGS
+// =============================================================================
+
+// Auto-clear docs after processing
+const DOCS_AUTO_CLEAR_AFTER_SEND = true;
+
+// P0 UX FIX: Enable paste-to-docs feature
+const TEXT_DOCS_ENABLED = true;
+
+// =============================================================================
+// OPERATOR MODE LOGIC (Inline to avoid import issues)
+// =============================================================================
+
+const SPEC_KEYWORDS = ['SPEC', 'PROOF', 'CONTROL', 'P0', 'TICKET', 'OPERATOR', 'ACCEPTANCE', 'CRITERIA'];
+
+// =============================================================================
+// PASTE-TO-DOCS: Virtual Document Parser
+// =============================================================================
+
+interface VirtualDocument {
+  name: string;
+  content: string;
+  type: string;
+  size: number;
+}
+
+/**
+ * parseVirtualDocs - Detects and extracts pasted document packs from input text
+ * 
+ * Pattern: FILE X — filename.md
+ *          ...content...
+ *          FILE Y — anotherfile.md
+ *          ...more content...
+ * 
+ * @param text - Raw input text that may contain pasted document packs
+ * @returns { docs: VirtualDocument[], cleanedText: string, hasVirtualDocs: boolean }
+ */
+function parseVirtualDocs(text: string): { 
+  docs: VirtualDocument[]; 
+  cleanedText: string; 
+  hasVirtualDocs: boolean;
+} {
+  if (!TEXT_DOCS_ENABLED) {
+    return { docs: [], cleanedText: text, hasVirtualDocs: false };
+  }
+
+  // Pattern matches: FILE X — filename.ext followed by content until next FILE or end
+  // Handles various dash characters (—, -, –)
+  const pattern = /^FILE\s+\d+\s*[—\-–]\s*(.+?)\n([\s\S]*?)(?=\nFILE\s+\d+\s*[—\-–]|$)/gm;
+  
+  const docs: VirtualDocument[] = [];
+  let match;
+  let lastIndex = 0;
+  let cleanedParts: string[] = [];
+  let textCopy = text;
+  
+  // Also try to detect the simpler pattern without "FILE X —" prefix
+  // e.g., just "--- filename.md ---" or similar markers
+  const altPattern = /^---\s*(.+?\.(?:md|txt|json|yaml|yml|ts|tsx|js|jsx))\s*---\n([\s\S]*?)(?=\n---\s*\S+\.\S+\s*---|$)/gm;
+  
+  // Check for FILE X — pattern first
+  while ((match = pattern.exec(text)) !== null) {
+    const filename = match[1].trim();
+    const content = match[2].trim();
+    
+    if (content.length > 0) {
+      docs.push({
+        name: filename,
+        content: content,
+        type: getFileType(filename),
+        size: new Blob([content]).size
+      });
+    }
+  }
+  
+  // If no FILE X — pattern found, try alt pattern
+  if (docs.length === 0) {
+    while ((match = altPattern.exec(text)) !== null) {
+      const filename = match[1].trim();
+      const content = match[2].trim();
+      
+      if (content.length > 0) {
+        docs.push({
+          name: filename,
+          content: content,
+          type: getFileType(filename),
+          size: new Blob([content]).size
+        });
+      }
+    }
+  }
+  
+  // Clean the text by removing the document blocks
+  if (docs.length > 0) {
+    // Remove all FILE X — ... blocks from the original text
+    let cleaned = text;
+    
+    // Remove FILE X — pattern blocks
+    cleaned = cleaned.replace(/FILE\s+\d+\s*[—\-–]\s*.+?\n[\s\S]*?(?=\nFILE\s+\d+\s*[—\-–]|$)/g, '');
+    
+    // Remove alt pattern blocks
+    cleaned = cleaned.replace(/---\s*.+?\.(?:md|txt|json|yaml|yml|ts|tsx|js|jsx)\s*---\n[\s\S]*?(?=\n---\s*\S+\.\S+\s*---|$)/g, '');
+    
+    // Clean up extra whitespace
+    cleaned = cleaned.trim();
+    
+    return {
+      docs,
+      cleanedText: cleaned,
+      hasVirtualDocs: true
+    };
+  }
+  
+  return { docs: [], cleanedText: text, hasVirtualDocs: false };
+}
+
+/**
+ * getFileType - Determine MIME type from filename extension
+ */
+function getFileType(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() || '';
+  const typeMap: Record<string, string> = {
+    'md': 'text/markdown',
+    'txt': 'text/plain',
+    'json': 'application/json',
+    'yaml': 'text/yaml',
+    'yml': 'text/yaml',
+    'ts': 'text/typescript',
+    'tsx': 'text/typescript',
+    'js': 'text/javascript',
+    'jsx': 'text/javascript',
+    'html': 'text/html',
+    'css': 'text/css',
+    'py': 'text/python',
+    'csv': 'text/csv',
+    'xml': 'text/xml',
+  };
+  return typeMap[ext] || 'text/plain';
+}
+
+// =============================================================================
+// OPERATOR INTENT DETECTION - Routes operator vs normal requests
+// =============================================================================
+function detectOperatorIntent(input: string): boolean {
+  const q = input.toLowerCase().trim();
+  const triggers = [
+    'status', 'next task', 'proof', 'readiness', 'report', 'ticket', 'p0',
+    'deploy', 'pr ', 'pull request', 'rollback', 'checklist', 'operator',
+    'execution', 'task batch', 'batch #', 'what tickets', 'show tickets',
+    'verification', 'blocker', 'blockers', 'sprint', 'milestone'
+  ];
+  return triggers.some(t => q.includes(t));
+}
+
+function isSpecDocument(filename: string, content: string): boolean {
+  const specPatterns = [/spec/i, /proof/i, /control/i, /ticket/i, /operator/i, /p0/i];
+  for (const pattern of specPatterns) {
+    if (pattern.test(filename)) return true;
+  }
+  let keywordCount = 0;
+  const upper = content.toUpperCase();
+  for (const kw of SPEC_KEYWORDS) {
+    if (upper.includes(kw)) keywordCount++;
+    if (keywordCount >= 3) return true;
+  }
+  return false;
+}
+
+function generateOperatorResponse(docs: { name: string; content: string }[]): string {
+  const timestamp = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }) + ' EST';
+  const specDocs = docs.filter(d => isSpecDocument(d.name, d.content));
+  
+  let output = `# 🎯 JAVARI OPERATOR MODE ACTIVATED\n`;
+  output += `**Timestamp:** ${timestamp}\n`;
+  output += `**Mode:** OPERATOR\n`;
+  output += `**Status:** EXECUTING\n\n---\n\n`;
+  
+  // Documents detected
+  output += `## 📄 DOCUMENTS DETECTED\n\n`;
+  output += `| # | Filename | Status |\n|---|----------|--------|\n`;
+  docs.forEach((d, i) => {
+    const isSpec = specDocs.includes(d);
+    output += `| ${i + 1} | ${d.name} | ${isSpec ? '✅ SPEC' : '📄 Doc'} |\n`;
+  });
+  output += `\n---\n\n`;
+  
+  // Extract tickets from spec content
+  const allContent = specDocs.map(d => d.content).join('\n\n');
+  const tickets: { id: string; title: string; priority: string }[] = [];
+  
+  // Look for bullet points and numbered items
+  const lines = allContent.split('\n');
+  let ticketNum = 1;
+  for (const line of lines) {
+    if (/^\s*[-*]\s+\[?\s*[xX ]?\s*\]?\s*(.{10,100})/.test(line) || 
+        /^\s*\d+\.\s+(.{10,100})/.test(line)) {
+      const match = line.match(/^\s*[-*\d.]+\s*\[?\s*[xX ]?\s*\]?\s*(.+)$/);
+      if (match && match[1].trim().length > 10) {
+        const title = match[1].trim().slice(0, 80);
+        const priority = /p0|critical|must|blocker/i.test(title) ? 'P0' : 
+                        /p1|should|important/i.test(title) ? 'P1' : 'P2';
+        tickets.push({ id: `TICKET-${String(ticketNum).padStart(3, '0')}`, title, priority });
+        ticketNum++;
+        if (ticketNum > 15) break; // Limit to 15 tickets
+      }
+    }
+  }
+  
+  // Tickets section
+  output += `## 🎫 P0 TICKET LIST\n\n`;
+  if (tickets.length > 0) {
+    for (const t of tickets) {
+      output += `### ${t.id}: ${t.title}\n`;
+      output += `**Priority:** ${t.priority}\n`;
+      output += `**Assigned To:** Claude\n`;
+      output += `**Status:** 🔴 NOT STARTED\n\n`;
+      output += `**Proof Required:**\n- [ ] PR link\n- [ ] Deployment URL\n- [ ] Verification output\n- [ ] Rollback command\n\n---\n\n`;
+    }
+  } else {
+    output += `*No specific tickets extracted. Review documents manually.*\n\n`;
+  }
+  
+  // Task batch
+  output += `## 📋 TASK BATCH #1 - CLAUDE\n\n`;
+  output += `**Issued:** ${timestamp}\n`;
+  output += `**Due:** IMMEDIATE\n\n`;
+  output += `### Assigned Tickets\n`;
+  tickets.slice(0, 5).forEach((t, i) => {
+    output += `${i + 1}. **${t.id}:** ${t.title.slice(0, 50)}...\n`;
+  });
+  output += `\n### Proof Submission\n\`\`\`\nPR: [GitHub URL]\nDeploy: [Staging URL]\nVerify: [Steps + Output]\nRollback: git revert [SHA]\n\`\`\`\n\n---\n\n`;
+  
+  // Checklist
+  output += `## ✅ CHECKLIST\n\n`;
+  output += `| # | Ticket | Status | Proof |\n|---|--------|--------|-------|\n`;
+  tickets.forEach((t, i) => {
+    output += `| ${i + 1} | ${t.id} | 🔴 | ❌ |\n`;
+  });
+  output += `\n**Complete:** 0/${tickets.length}\n\n`;
+  
+  // Proof requirements
+  output += `## 🔒 PROOF REQUIREMENTS (ENFORCED)\n\n`;
+  output += `1. **PR link** - Merged pull request\n`;
+  output += `2. **Deploy URL** - Live staging/production URL\n`;
+  output += `3. **Verification** - Steps executed + actual output\n`;
+  output += `4. **Rollback** - git revert [SHA] command\n\n`;
+  output += `**NO EXCEPTIONS. NO "CLOSE ENOUGH". NO TRUST-BASED COMPLETION.**\n\n---\n\n`;
+  output += `*Javari Operator Mode v1.0 | Proof-enforced execution*`;
+  
+  return output;
+}
+
+// =============================================================================
+// OPERATOR MODE: Question Response (NO CITATIONS)
+// =============================================================================
+function generateOperatorQuestionResponse(question: string, docs: { name: string; content: string }[]): string {
+  const timestamp = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }) + ' EST';
+  const q = question.toLowerCase();
+  
+  // Determine response type based on question
+  let output = `## 🎯 OPERATOR RESPONSE\n`;
+  output += `**Timestamp:** ${timestamp}\n`;
+  output += `**Mode:** OPERATOR (Citations Disabled)\n\n`;
+  
+  if (/status|progress|checklist|how.*going/i.test(q)) {
+    output += `### Current Execution Status\n\n`;
+    output += `| Status | Count |\n|--------|-------|\n`;
+    output += `| 🟢 Complete | 0 |\n`;
+    output += `| 🟡 In Progress | 0 |\n`;
+    output += `| 🔴 Not Started | All |\n\n`;
+    output += `**Next Action:** Execute Task Batch #1\n\n`;
+  } else if (/ticket|task|what.*do|next/i.test(q)) {
+    output += `### Next Tasks\n\n`;
+    output += `Refer to the **TASK BATCH #1** issued above.\n\n`;
+    output += `Execute tickets in order. Submit proof for each before marking complete.\n\n`;
+  } else if (/proof|evidence|verify/i.test(q)) {
+    output += `### Proof Requirements\n\n`;
+    output += `Every ticket requires:\n`;
+    output += `1. **PR link** - Merged pull request\n`;
+    output += `2. **Deploy URL** - Live URL\n`;
+    output += `3. **Verification** - Steps + output\n`;
+    output += `4. **Rollback** - git revert command\n\n`;
+    output += `**Submit proof to mark ticket complete.**\n\n`;
+  } else if (/report|readiness|launch/i.test(q)) {
+    output += `### Readiness Report\n\n`;
+    output += `**Status:** 🔴 NOT READY\n\n`;
+    output += `**Reason:** Outstanding tickets require completion and proof.\n\n`;
+    output += `Complete all P0 tickets with proof before requesting launch approval.\n\n`;
+  } else {
+    // Generic operator response
+    output += `### Operator Guidance\n\n`;
+    output += `I'm in **Operator Mode** managing spec execution.\n\n`;
+    output += `Available commands:\n`;
+    output += `- "status" - View execution progress\n`;
+    output += `- "next task" - See next action items\n`;
+    output += `- "proof requirements" - View what's needed\n`;
+    output += `- "readiness report" - Check launch status\n\n`;
+    output += `**Documents loaded:** ${docs.length}\n\n`;
+  }
+  
+  output += `---\n*Operator Mode Active | Citations Disabled | Proof Required*`;
+  
+  return output;
+}
+
+// =============================================================================
+// BRAND COLORS
+// =============================================================================
 const COLORS = {
   navy: '#002B5B',
   red: '#FD201D',
@@ -54,1566 +351,1169 @@ const COLORS = {
   javaribg: '#0A1628',
 };
 
+// =============================================================================
+// TYPES
+// =============================================================================
+interface StoredDocument {
+  id: string;
+  name: string;
+  content: string;
+  size: number;
+  type: string;
+  status: 'uploading' | 'processing' | 'ready' | 'error';
+  progress: number;
+  error?: string;
+  uploadedAt: Date;
+  isVirtual?: boolean; // P0 UX FIX: Flag for pasted documents
+}
+
+interface Citation {
+  documentId: string;
+  documentName: string;
+  snippet: string;
+}
+
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
-  timestamp: string;
-  provider?: string;
-  hasArtifacts?: boolean;
+  citations?: Citation[];
+  timestamp: Date;
+}
+
+// Document manifest for audit (no file content, just metadata)
+interface DocManifest {
+  name: string;
+  size: number;
+  type: string;
+  uploadedAt: string;
+  isVirtual?: boolean; // P0 UX FIX: Track if doc was pasted
 }
 
 interface Conversation {
   id: string;
   title: string;
-  pinned: boolean;      // User pinned this conversation
-  messages: Message[];
-  project_id?: string;
-  updated_at: string;
-  created_at?: string;
-  build_status?: 'success' | 'failed' | 'pending' | null;  // Track build status
-  message_count?: number;
-}
-
-// Group conversations by time period
-interface ConversationGroups {
-  pinned: Conversation[];
-  today: Conversation[];
-  yesterday: Conversation[];
-  previous7Days: Conversation[];
-  older: Conversation[];
-}
-
-interface Project {
-  id: string;
-  name: string;
-  conversations: Conversation[];
   starred: boolean;
+  messages: Message[];
+  updated_at: string;
+  created_at: string;
+  message_count: number;
+  // Audit metadata
+  operatorMode: boolean;
+  canonicalSpecsLoaded: boolean;
+  docManifest: DocManifest[]; // What docs were loaded (metadata only)
 }
 
-interface Artifact {
-  id: string;
-  name: string;
-  type: 'code' | 'document' | 'image' | 'data';
-  content: string;
-  size: string;
-  language?: string; // For code artifacts
-}
+// localStorage key for persistence
+const STORAGE_KEY = 'javari_conversations_v1';
 
 interface AIProvider {
   id: string;
   name: string;
-  credits: number;
   icon: string;
-  description: string;
-  bestFor: string[];
+  color: string;
+  available: boolean;
 }
 
-interface AISelectionModal {
-  show: boolean;
-  currentAI: string;
-  newAI: string;
-  currentCredits: number;
-  newCredits: number;
-}
+// =============================================================================
+// AI PROVIDERS
+// =============================================================================
+const AI_PROVIDERS: AIProvider[] = [
+  { id: 'auto', name: 'Auto', icon: '✨', color: '#00D4FF', available: true },
+  { id: 'gpt4', name: 'GPT-4', icon: '🟢', color: '#10a37f', available: true },
+  { id: 'claude', name: 'Claude', icon: '🟤', color: '#d97706', available: true },
+  { id: 'gemini', name: 'Gemini', icon: '🔵', color: '#4285f4', available: true },
+  { id: 'perplexity', name: 'Perplexity', icon: '🟣', color: '#8b5cf6', available: true },
+  { id: 'mistral', name: 'Mistral', icon: '🟠', color: '#ff6b35', available: true },
+  { id: 'llama', name: 'Llama', icon: '🦙', color: '#0084ff', available: true },
+  { id: 'cohere', name: 'Cohere', icon: '💜', color: '#d946ef', available: true },
+];
 
-export default function MainJavariInterface() {
-  // State management
-  const [leftSidebarOpen, setLeftSidebarOpen] = useState(true); // Hidden on mobile by default
-  const [rightSidebarOpen, setRightSidebarOpen] = useState(true); // Hidden on mobile by default
-  const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [inputMessage, setInputMessage] = useState('');
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
-  const [credits, setCredits] = useState({ current: 1250, total: 5000 });
-  const [userPlan, setUserPlan] = useState('Pro');
-  const [userName, setUserName] = useState('Roy Henderson');
-  const [language, setLanguage] = useState('English');
-  // Voice listening handled by isListeningToUser
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [voiceEnabled, setVoiceEnabled] = useState(false);
-  const [voiceChatActive, setVoiceChatActive] = useState(false);
-  // Voice chat handled by VoiceConversation component
-  const [selectedAI, setSelectedAI] = useState<string>('auto');
-  const [recommendedAI, setRecommendedAI] = useState<string>('gpt-4');
-  const [aiSelectionModal, setAiSelectionModal] = useState<AISelectionModal>({
-    show: false,
-    currentAI: 'auto',
-    newAI: '',
-    currentCredits: 0,
-    newCredits: 0,
-  });
-  const [copiedArtifacts, setCopiedArtifacts] = useState<Record<string, boolean>>({});
-  const [previewingArtifact, setPreviewingArtifact] = useState<Artifact | null>(null);
-  const [artifactViewMode, setArtifactViewMode] = useState<Record<string, 'code' | 'preview'>>({});
+// =============================================================================
+// TEXT EXTRACTION
+// =============================================================================
+async function extractTextFromFile(file: File): Promise<string> {
+  const type = file.type || '';
+  const name = file.name.toLowerCase();
   
-  // NEW: Better conversation management
-  const [searchQuery, setSearchQuery] = useState('');
-  const [allConversations, setAllConversations] = useState<Conversation[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-
-  // Group conversations by time period
-  const groupConversations = (convos: Conversation[]): ConversationGroups => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
-    const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-    const groups: ConversationGroups = {
-      pinned: [],
-      today: [],
-      yesterday: [],
-      previous7Days: [],
-      older: [],
-    };
-
-    // Filter by search if query exists
-    let filtered = convos;
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      filtered = convos.filter(c => 
-        c.title.toLowerCase().includes(query)
-      );
+  if (type.includes('text') || type.includes('json') || 
+      name.endsWith('.txt') || name.endsWith('.md') ||
+      name.endsWith('.csv') || name.endsWith('.json') ||
+      name.endsWith('.html') || name.endsWith('.xml') ||
+      name.endsWith('.js') || name.endsWith('.ts') ||
+      name.endsWith('.jsx') || name.endsWith('.tsx') ||
+      name.endsWith('.py') || name.endsWith('.css') ||
+      name.endsWith('.yaml') || name.endsWith('.yml')) {
+    try {
+      return await file.text();
+    } catch {
+      return `[Could not read text from ${file.name}]`;
     }
+  }
+  
+  return `[Document: ${file.name}]\nType: ${type || 'unknown'}\nSize: ${(file.size / 1024).toFixed(1)} KB`;
+}
 
-    filtered.forEach(conv => {
-      const updated = new Date(conv.updated_at);
-      
-      if (conv.pinned) {
-        groups.pinned.push(conv);
-      } else if (updated >= today) {
-        groups.today.push(conv);
-      } else if (updated >= yesterday) {
-        groups.yesterday.push(conv);
-      } else if (updated >= weekAgo) {
-        groups.previous7Days.push(conv);
-      } else {
-        groups.older.push(conv);
+// =============================================================================
+// MAIN COMPONENT
+// =============================================================================
+export function MainJavariInterface() {
+  // State
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      id: 'welcome',
+      role: 'assistant',
+      content: `Hi! I'm Javari, your AI assistant. Upload documents on the right, or paste document packs directly into chat. I'll help you analyze them with citations. What would you like to work on?`,
+      timestamp: new Date()
+    }
+  ]);
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [documents, setDocuments] = useState<StoredDocument[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState('auto');
+  const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
+  const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterStarred, setFilterStarred] = useState(false);
+  const [canonicalSpecsLoaded, setCanonicalSpecsLoaded] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false); // Track if localStorage loaded
+  
+  // Conversations state - hydrated from localStorage
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
+  const [operatorMode, setOperatorMode] = useState(true); // Default ON for Roy
+  
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // =============================================================================
+  // LOCALSTORAGE PERSISTENCE
+  // =============================================================================
+  
+  // Hydrate from localStorage on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        // Restore conversations with proper Date objects
+        const restored = parsed.map((conv: any) => ({
+          ...conv,
+          messages: conv.messages.map((msg: any) => ({
+            ...msg,
+            timestamp: new Date(msg.timestamp)
+          }))
+        }));
+        setConversations(restored);
       }
-    });
+    } catch (err) {
+      console.error('Failed to load conversations from localStorage:', err);
+    }
+    setIsHydrated(true);
+  }, []);
+  
+  // Save to localStorage whenever conversations change (after hydration)
+  useEffect(() => {
+    if (isHydrated && conversations.length > 0) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
+      } catch (err) {
+        console.error('Failed to save conversations to localStorage:', err);
+      }
+    }
+  }, [conversations, isHydrated]);
 
-    return groups;
+  // Auto-scroll
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // =============================================================================
+  // FILE HANDLERS
+  // =============================================================================
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const files = Array.from(e.dataTransfer.files);
+    processFiles(files);
+  }, []);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    processFiles(files);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const conversationGroups = groupConversations(allConversations);
-  // Load all conversations on mount and refresh
-  const loadConversations = async () => {
+  const processFiles = async (files: File[]) => {
+    const processedDocs: { name: string; content: string }[] = [];
+    
+    for (const file of files) {
+      const id = `doc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      
+      const newDoc: StoredDocument = {
+        id, name: file.name, content: '', size: file.size,
+        type: file.type || 'application/octet-stream',
+        status: 'processing', progress: 30, uploadedAt: new Date()
+      };
+      setDocuments(prev => [...prev, newDoc]);
+
+      try {
+        const content = await extractTextFromFile(file);
+        setDocuments(prev => prev.map(d => 
+          d.id === id ? { ...d, content, status: 'ready', progress: 100 } : d
+        ));
+        processedDocs.push({ name: file.name, content });
+      } catch (err: any) {
+        setDocuments(prev => prev.map(d => 
+          d.id === id ? { ...d, status: 'error', progress: 100, error: err.message } : d
+        ));
+      }
+    }
+    
+    // OPERATOR MODE HARD GATE: Check for canonical spec documents
+    if (operatorMode && processedDocs.length > 0) {
+      // Detect canonical spec docs by filename
+      const CANONICAL_PATTERNS = [
+        /JAVARI_P0_FIX_SPEC/i,
+        /JAVARI_CONTROL_PLANE/i,
+        /JAVARI_OPERATOR/i,
+        /P0.*SPEC/i,
+        /CONTROL.*PLANE/i,
+        /OPERATOR.*KICKOFF/i
+      ];
+      
+      const hasCanonicalSpecs = processedDocs.some(d => 
+        CANONICAL_PATTERNS.some(pattern => pattern.test(d.name)) ||
+        isSpecDocument(d.name, d.content)
+      );
+      
+      if (hasCanonicalSpecs) {
+        // SET FLAG: This enables operator intent routing in sendMessage
+        // But do NOT auto-execute or auto-clear - let user choose what to do
+        setCanonicalSpecsLoaded(true);
+        
+        // Show a notification that specs were detected, but don't auto-execute
+        setMessages(prev => [...prev, {
+          id: `msg_spec_detected_${Date.now()}`,
+          role: 'assistant',
+          content: `📋 **Spec documents detected!**\n\n` +
+            `I found ${processedDocs.filter(d => isSpecDocument(d.name, d.content)).length} spec document(s).\n\n` +
+            `**Options:**\n` +
+            `- Type **"summarize"** for an AI summary of all documents\n` +
+            `- Type **"status"** or **"tickets"** for Operator Mode task list\n` +
+            `- Ask any question about the documents`,
+          timestamp: new Date()
+        }]);
+        
+        // DO NOT auto-clear docs - user may want to summarize or ask questions
+      }
+    }
+  };
+
+  // =============================================================================
+  // P0 UX FIX: Process Virtual Documents from Pasted Text
+  // =============================================================================
+  const processVirtualDocs = (virtualDocs: VirtualDocument[]): StoredDocument[] => {
+    const now = new Date();
+    return virtualDocs.map((vDoc, idx) => ({
+      id: `vdoc_${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 8)}`,
+      name: vDoc.name,
+      content: vDoc.content,
+      size: vDoc.size,
+      type: vDoc.type,
+      status: 'ready' as const,
+      progress: 100,
+      uploadedAt: now,
+      isVirtual: true // Mark as pasted, not uploaded
+    }));
+  };
+
+  const removeDocument = (id: string) => {
+    setDocuments(prev => prev.filter(d => d.id !== id));
+  };
+
+  // =============================================================================
+  // CHAT HANDLER - WITH OPERATOR MODE BYPASS + PASTE-TO-DOCS
+  // =============================================================================
+  const sendMessage = async () => {
+    if (!input.trim() || isLoading) return;
+
+    // =========================================================================
+    // P0 UX FIX: Detect and process pasted virtual documents BEFORE routing
+    // =========================================================================
+    let messageText = input.trim();
+    let virtualDocsProcessed: StoredDocument[] = [];
+    
+    if (TEXT_DOCS_ENABLED) {
+      const { docs, cleanedText, hasVirtualDocs } = parseVirtualDocs(messageText);
+      
+      if (hasVirtualDocs && docs.length > 0) {
+        // Convert virtual docs to StoredDocuments and add to documents state
+        virtualDocsProcessed = processVirtualDocs(docs);
+        
+        // Add virtual docs to document state immediately
+        setDocuments(prev => [...prev, ...virtualDocsProcessed]);
+        
+        // Show confirmation message
+        setMessages(prev => [...prev, {
+          id: `msg_vdoc_detect_${Date.now()}`,
+          role: 'assistant',
+          content: `✅ **Detected ${docs.length} pasted document(s):**\n\n` +
+            docs.map((d, i) => `${i + 1}. **${d.name}** (${(d.size / 1024).toFixed(1)} KB)`).join('\n') +
+            `\n\nYou can now ask questions, summarize, or run operator tasks.`,
+          timestamp: new Date()
+        }]);
+        
+        // Use cleaned text (without document blocks) for the actual message
+        messageText = cleanedText;
+        
+        // Check for spec documents in pasted content
+        if (operatorMode) {
+          const hasSpecs = docs.some(d => isSpecDocument(d.name, d.content));
+          if (hasSpecs) {
+            setCanonicalSpecsLoaded(true);
+          }
+        }
+        
+        // If the cleaned text is empty, user just pasted docs - don't send empty message
+        if (!messageText.trim()) {
+          setInput('');
+          setIsLoading(false);
+          return;
+        }
+      }
+    }
+    // =========================================================================
+    // END P0 UX FIX: Paste-to-Docs Detection
+    // =========================================================================
+
+    const userMessage: Message = {
+      id: `msg_${Date.now()}`,
+      role: 'user',
+      content: messageText, // Use cleaned text, not raw input with doc blocks
+      timestamp: new Date()
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+    const question = messageText;
+    setInput('');
+    setIsLoading(true);
+
     try {
-      setIsLoading(true);
-      const conversations = await ChatService.loadConversations();
-      setAllConversations(conversations.map(c => ({
-        id: c.id,
-        title: c.title,
-        pinned: c.starred || false, // Using starred as pinned
-        messages: [],
-        updated_at: c.updated_at,
-        created_at: c.created_at,
-      })));
-    } catch (error) {
-      console.error('Error loading conversations:', error);
+      // =========================================================================
+      // OPERATOR MODE ROUTER: Only intercept if OPERATOR INTENT detected
+      // =========================================================================
+      const operatorIntent = detectOperatorIntent(question);
+      
+      if (operatorMode && canonicalSpecsLoaded && operatorIntent) {
+        // User asked an operator-related question (status, tickets, proof, etc.)
+        // DO NOT run citation search
+        // Generate Operator response
+        
+        const readyDocs = documents.filter(d => d.status === 'ready');
+        const operatorAnswer = generateOperatorQuestionResponse(question, readyDocs);
+        
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        setMessages(prev => [...prev, {
+          id: `msg_${Date.now()}`,
+          role: 'assistant',
+          content: operatorAnswer,
+          // NO CITATIONS - explicitly undefined
+          timestamp: new Date()
+        }]);
+        
+        // Auto-clear docs after processing (if enabled)
+        if (DOCS_AUTO_CLEAR_AFTER_SEND) {
+          setDocuments([]);
+          setIsDragging(false);
+        }
+        
+        setIsLoading(false);
+        return; // EXIT EARLY - do not run citations pipeline
+      }
+      // =========================================================================
+      // END OPERATOR MODE ROUTER
+      // =========================================================================
+
+      // =========================================================================
+      // SUMMARIZE INTENT ROUTER: Real AI summarization
+      // =========================================================================
+      const summaryTriggers = ['summarize', 'summary', 'overview', 'tl;dr', 'tldr', 
+                               'executive summary', 'bullet summary', 'summarise'];
+      const isSummaryIntent = summaryTriggers.some(t => 
+        question.toLowerCase().includes(t) || question.toLowerCase() === t
+      );
+      
+      const readyDocsForSummary = documents.filter(d => d.status === 'ready');
+      
+      if (isSummaryIntent) {
+        // Check if docs are uploaded
+        if (readyDocsForSummary.length === 0) {
+          setMessages(prev => [...prev, {
+            id: `msg_${Date.now()}`,
+            role: 'assistant',
+            content: `📄 **No documents uploaded.**\n\nUpload documents using the panel on the right, or paste document packs directly into chat, then type "summarize" to get an AI-powered summary.`,
+            timestamp: new Date()
+          }]);
+          setIsLoading(false);
+          return;
+        }
+        
+        // Call the summarize API
+        try {
+          const docsPayload = readyDocsForSummary.map(d => ({
+            name: d.name,
+            content: d.content,
+            type: d.type
+          }));
+          
+          // Map provider selector to API provider
+          const providerMap: Record<string, string> = {
+            'auto': 'auto',
+            'claude': 'anthropic',
+            'gpt4': 'openai',
+            'gemini': 'openai', // fallback
+            'perplexity': 'openai', // fallback
+            'mistral': 'openai', // fallback
+            'llama': 'openai', // fallback
+            'cohere': 'openai', // fallback
+          };
+          
+          const response = await fetch('/api/javari/summarize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              documents: docsPayload,
+              provider: providerMap[selectedProvider] || 'auto'
+            })
+          });
+          
+          const result = await response.json();
+          
+          if (result.success && result.summary) {
+            const timestamp = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }) + ' EST';
+            
+            // Format the summary nicely
+            let summaryText = `# 📊 Document Summary\n`;
+            summaryText += `**Generated:** ${timestamp}\n`;
+            summaryText += `**Documents:** ${readyDocsForSummary.length}`;
+            // P0 UX FIX: Note if any docs were pasted
+            const virtualCount = readyDocsForSummary.filter(d => d.isVirtual).length;
+            if (virtualCount > 0) {
+              summaryText += ` (${virtualCount} pasted)`;
+            }
+            summaryText += `\n`;
+            summaryText += `**Provider:** ${result.provider || 'AI'}\n\n`;
+            summaryText += `---\n\n`;
+            summaryText += `## ✅ EXECUTIVE SUMMARY\n\n${result.summary.executive}\n\n`;
+            
+            if (result.summary.keyPoints?.length > 0) {
+              summaryText += `## 🔑 KEY POINTS\n\n`;
+              result.summary.keyPoints.forEach((point: string) => {
+                summaryText += `- ${point}\n`;
+              });
+              summaryText += `\n`;
+            }
+            
+            if (result.summary.actionItems?.length > 0 && 
+                !result.summary.actionItems[0]?.toLowerCase().includes('no specific')) {
+              summaryText += `## 📌 ACTION ITEMS\n\n`;
+              result.summary.actionItems.forEach((item: string) => {
+                summaryText += `- ${item}\n`;
+              });
+              summaryText += `\n`;
+            }
+            
+            summaryText += `## 📄 DOCUMENTS ANALYZED\n\n`;
+            readyDocsForSummary.forEach((doc, i) => {
+              const virtualBadge = doc.isVirtual ? ' 📋' : '';
+              summaryText += `${i + 1}. **${doc.name}**${virtualBadge} (${(doc.size / 1024).toFixed(1)} KB)\n`;
+            });
+            
+            setMessages(prev => [...prev, {
+              id: `msg_${Date.now()}`,
+              role: 'assistant',
+              content: summaryText,
+              timestamp: new Date()
+            }]);
+          } else {
+            // API returned error
+            setMessages(prev => [...prev, {
+              id: `msg_${Date.now()}`,
+              role: 'assistant',
+              content: `⚠️ **Summary Generation Failed**\n\n${result.error || 'Unknown error'}\n\nPlease try again or contact support if the issue persists.`,
+              timestamp: new Date()
+            }]);
+          }
+        } catch (apiErr: any) {
+          // Network or other error
+          setMessages(prev => [...prev, {
+            id: `msg_${Date.now()}`,
+            role: 'assistant',
+            content: `⚠️ **API Error**\n\n${apiErr.message || 'Failed to connect to summarization service.'}\n\nPlease check your connection and try again.`,
+            timestamp: new Date()
+          }]);
+        }
+        
+        // Auto-clear docs after successful summary
+        if (DOCS_AUTO_CLEAR_AFTER_SEND) {
+          setDocuments([]);
+          setIsDragging(false);
+        }
+        
+        setIsLoading(false);
+        return; // EXIT - do not fall through to citations
+      }
+      // =========================================================================
+      // END SUMMARIZE INTENT ROUTER
+      // =========================================================================
+
+      // Normal citations pipeline (runs for normal questions even with Operator Mode ON)
+      const readyDocs = documents.filter(d => d.status === 'ready');
+      const questionWords = question.toLowerCase()
+        .split(/\s+/)
+        .filter(w => w.length > 2);
+      
+      const relevantDocs = readyDocs
+        .map(doc => {
+          const content = doc.content.toLowerCase();
+          const matchCount = questionWords.filter(word => content.includes(word)).length;
+          return { ...doc, matchCount };
+        })
+        .filter(doc => doc.matchCount > 0)
+        .sort((a, b) => b.matchCount - a.matchCount);
+
+      const citations: Citation[] = relevantDocs.slice(0, 3).map(doc => {
+        let bestIdx = -1;
+        for (const word of questionWords) {
+          const idx = doc.content.toLowerCase().indexOf(word);
+          if (idx >= 0 && (bestIdx === -1 || idx < bestIdx)) bestIdx = idx;
+        }
+        const start = Math.max(0, bestIdx - 50);
+        const end = Math.min(doc.content.length, bestIdx + 150);
+        let snippet = doc.content.slice(start, end).trim();
+        if (start > 0) snippet = '...' + snippet;
+        if (end < doc.content.length) snippet = snippet + '...';
+        return { documentId: doc.id, documentName: doc.name, snippet };
+      });
+
+      let answer: string;
+      if (readyDocs.length === 0) {
+        answer = `Upload documents using the panel on the right, or paste document packs directly into chat. I'll search through them to answer your questions with citations.`;
+      } else if (citations.length > 0) {
+        answer = `Based on your ${readyDocs.length} document(s), I found ${citations.length} relevant section(s). See citations below.`;
+      } else {
+        answer = `I searched through ${readyDocs.length} document(s) but couldn't find content matching your question. Try different keywords.`;
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      setMessages(prev => [...prev, {
+        id: `msg_${Date.now()}`,
+        role: 'assistant',
+        content: answer,
+        citations: citations.length > 0 ? citations : undefined,
+        timestamp: new Date()
+      }]);
+      
+      // Auto-clear docs after successful processing (normal mode)
+      if (DOCS_AUTO_CLEAR_AFTER_SEND && readyDocs.length > 0) {
+        setDocuments([]);
+        setIsDragging(false);
+      }
+    } catch (err: any) {
+      // On error, do NOT clear docs - user may want to retry
+      setMessages(prev => [...prev, {
+        id: `msg_${Date.now()}`,
+        role: 'assistant',
+        content: `Error: ${err.message}`,
+        timestamp: new Date()
+      }]);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Load conversations on mount
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  // Filter conversations
+  const filteredConversations = conversations.filter(conv => {
+    if (filterStarred && !conv.starred) return false;
+    if (searchQuery && !conv.title.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+    return true;
+  });
+
+  const formatDate = (dateStr: string) => {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diff = now.getTime() - date.getTime();
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    return `${days}d ago`;
+  };
+
+  const toggleStarred = (id: string) => {
+    setConversations(prev => prev.map(c => 
+      c.id === id ? { ...c, starred: !c.starred } : c
+    ));
+  };
+
+  // =============================================================================
+  // CHAT MANAGEMENT - Save, Load, New Chat
+  // =============================================================================
   
-
-
-
-useEffect(() => {
-    loadConversations();
-  }, []);
-
-  // Load messages when conversation changes
-  useEffect(() => {
-    const loadMsgs = async () => {
-      if (currentConversation && currentConversation.id && !currentConversation.id.startsWith('temp-')) {
-        try {
-          const msgs = await ChatService.loadMessages(currentConversation.id);
-          if (msgs.length > 0) {
-            setMessages(msgs.map(m => ({
-              id: m.id,
-              role: m.role as 'user' | 'assistant',
-              content: m.content,
-              timestamp: m.created_at,
-              provider: m.provider,
-            })));
-          }
-        } catch (error) {
-          console.error('Error loading messages:', error);
-        }
+  // Save current conversation to the list (with audit metadata)
+  const saveCurrentConversation = () => {
+    if (messages.length <= 1) return; // Don't save if only welcome message
+    
+    // Generate title from first user message
+    const firstUserMsg = messages.find(m => m.role === 'user');
+    const title = firstUserMsg 
+      ? firstUserMsg.content.slice(0, 40) + (firstUserMsg.content.length > 40 ? '...' : '')
+      : 'New Conversation';
+    
+    const convId = currentConversationId || `conv_${Date.now()}`;
+    const now = new Date().toISOString();
+    
+    // Create doc manifest from current documents (metadata only, no content)
+    // P0 UX FIX: Include isVirtual flag in manifest
+    const docManifest: DocManifest[] = documents
+      .filter(d => d.status === 'ready')
+      .map(d => ({
+        name: d.name,
+        size: d.size,
+        type: d.type,
+        uploadedAt: d.uploadedAt.toISOString(),
+        isVirtual: d.isVirtual || false
+      }));
+    
+    setConversations(prev => {
+      // Check if this conversation already exists
+      const existingIdx = prev.findIndex(c => c.id === convId);
+      const existingConv = existingIdx >= 0 ? prev[existingIdx] : null;
+      
+      const updatedConv: Conversation = {
+        id: convId,
+        title,
+        starred: existingConv?.starred || false,
+        messages: messages,
+        updated_at: now,
+        created_at: existingConv?.created_at || now,
+        message_count: messages.length,
+        // Audit metadata
+        operatorMode: operatorMode,
+        canonicalSpecsLoaded: canonicalSpecsLoaded,
+        docManifest: docManifest.length > 0 ? docManifest : (existingConv?.docManifest || [])
+      };
+      
+      if (existingIdx >= 0) {
+        // Update existing
+        const newList = [...prev];
+        newList[existingIdx] = updatedConv;
+        return newList;
+      } else {
+        // Add new at top
+        return [updatedConv, ...prev];
       }
-    };
-    loadMsgs();
-  }, [currentConversation?.id]);
-
+    });
+    
+    return convId;
+  };
   
-  // Ref for auto-scrolling messages
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  // AI Providers with credit costs
-  const aiProviders: Record<string, AIProvider> = {
-    'gpt-4': { 
-      id: 'gpt-4', 
-      name: 'GPT-4', 
-      credits: 2, 
-      icon: '🤖',
-      description: 'Best for creative writing, complex reasoning',
-      bestFor: ['Writing', 'Analysis', 'General tasks']
-    },
-    'claude': { 
-      id: 'claude', 
-      name: 'Claude', 
-      credits: 3, 
-      icon: '🎯',
-      description: 'Best for code, analysis, long context',
-      bestFor: ['Coding', 'Research', 'Documentation']
-    },
-    'gemini': { 
-      id: 'gemini', 
-      name: 'Gemini', 
-      credits: 2, 
-      icon: '✨',
-      description: 'Best for multimodal tasks, fast responses',
-      bestFor: ['Images', 'Video', 'Speed']
-    },
-    'perplexity': { 
-      id: 'perplexity', 
-      name: 'Perplexity', 
-      credits: 1, 
-      icon: '🔍',
-      description: 'Best for research, current information',
-      bestFor: ['Research', 'News', 'Facts']
-    },
+  // Load a conversation (restore audit state)
+  const loadConversation = (convId: string) => {
+    const conv = conversations.find(c => c.id === convId);
+    if (conv && conv.messages.length > 0) {
+      // Save current first if it has content
+      if (messages.length > 1 && currentConversationId !== convId) {
+        saveCurrentConversation();
+      }
+      
+      setCurrentConversationId(convId);
+      setMessages(conv.messages);
+      
+      // CRITICAL: Clear docs when switching conversations (no document leakage)
+      setDocuments([]);
+      
+      // Restore audit state from conversation
+      if (conv.operatorMode !== undefined) setOperatorMode(conv.operatorMode);
+      if (conv.canonicalSpecsLoaded !== undefined) setCanonicalSpecsLoaded(conv.canonicalSpecsLoaded);
+    }
   };
-
-  // Enhanced AI detection with multi-factor analysis
-  const detectBestAI = (query: string): string => {
-    const lowerQuery = query.toLowerCase()
-    const scores: Record<string, number> = {
-      'gpt-4': 0,
-      'claude': 0,
-      'gemini': 0,
-      'perplexity': 0
+  
+  // Start new chat
+  const startNewChat = () => {
+    // Save current conversation if it has content
+    if (messages.length > 1) {
+      saveCurrentConversation();
     }
-
-    // Claude - Best for code and technical tasks
-    const claudeKeywords = ['code', 'function', 'class', 'algorithm', 'debug', 'refactor', 'typescript', 'javascript', 'python', 'react', 'api', 'database', 'sql', 'component', 'analyze', 'technical', 'architecture'];
-    const claudeMatches = claudeKeywords.filter(k => lowerQuery.includes(k)).length;
-    scores['claude'] = claudeMatches * 3;
-
-    // Perplexity - Best for research and current information
-    const perplexityKeywords = ['research', 'latest', 'current', 'news', 'recent', 'today', '2024', '2025', 'search', 'find', 'what is', 'who is', 'trend', 'market', 'statistics'];
-    const perplexityMatches = perplexityKeywords.filter(k => lowerQuery.includes(k)).length;
-    scores['perplexity'] = perplexityMatches * 3;
-
-    // Gemini - Best for multimodal and visual tasks
-    const geminiKeywords = ['image', 'picture', 'photo', 'visual', 'diagram', 'chart', 'graph', 'design', 'ui', 'mockup', 'video', 'audio'];
-    const geminiMatches = geminiKeywords.filter(k => lowerQuery.includes(k)).length;
-    scores['gemini'] = geminiMatches * 3;
-
-    // GPT-4 - Best for general tasks, writing, creative work
-    const gpt4Keywords = ['write', 'essay', 'article', 'blog', 'story', 'content', 'email', 'letter', 'explain', 'summarize', 'brainstorm', 'creative', 'strategy'];
-    const gpt4Matches = gpt4Keywords.filter(k => lowerQuery.includes(k)).length;
-    scores['gpt-4'] = gpt4Matches * 3;
-
-    // Additional heuristics
-    if (lowerQuery.length > 200 && /function|class|import|export|const|let/i.test(query)) {
-      scores['claude'] += 5;
-    }
-    if (/\b(today|now|current|latest|recent)\b/i.test(query)) {
-      scores['perplexity'] += 3;
-    }
-    if (/```|`[\w\s]+`/.test(query)) {
-      scores['claude'] += 4;
-    }
-    if (/feel|imagine|beautiful|wonderful|amazing|creative/i.test(query)) {
-      scores['gpt-4'] += 2;
-    }
-
-    // Find provider with highest score
-    const bestProvider = Object.entries(scores).reduce((best, current) => {
-      return current[1] > best[1] ? current : best
-    }, ['gpt-4', 0])[0]
-
-    // If no clear winner (all scores low), default to GPT-4
-    if (scores[bestProvider] < 2) {
-      return 'gpt-4'
-    }
-
-    return bestProvider;
+    
+    // Create new conversation ID
+    const newConvId = `conv_${Date.now()}`;
+    setCurrentConversationId(newConvId);
+    
+    // Reset messages
+    setMessages([{
+      id: 'welcome',
+      role: 'assistant',
+      content: `Starting a new conversation! How can I help you?`,
+      timestamp: new Date()
+    }]);
+    
+    // CRITICAL: Reset ALL document state
+    setDocuments([]);
+    setCanonicalSpecsLoaded(false);
+    
+    // Reset any input state
+    setInput('');
+    setIsLoading(false);
+    setIsDragging(false);
   };
-
-  // Auto-scroll to bottom when messages change
+  
+  // Auto-save conversation when messages change (debounced effect)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (messages.length > 1 && currentConversationId) {
+      const timer = setTimeout(() => {
+        saveCurrentConversation();
+      }, 1000); // Save 1 second after last message change
+      return () => clearTimeout(timer);
+    }
   }, [messages]);
 
-  // Handle AI provider change with modal
-  const handleAIChange = (newAI: string) => {
-    if (newAI === selectedAI) return;
+  const readyDocsCount = documents.filter(d => d.status === 'ready').length;
 
-    const current = selectedAI === 'auto' ? recommendedAI : selectedAI;
-    const currentCredits = aiProviders[current]?.credits || 0;
-    const newCredits = aiProviders[newAI]?.credits || 0;
-
-    // If switching from auto or costs are different, show modal
-    if (selectedAI === 'auto' || currentCredits !== newCredits) {
-      setAiSelectionModal({
-        show: true,
-        currentAI: current,
-        newAI: newAI,
-        currentCredits: currentCredits,
-        newCredits: newCredits,
-      });
-    } else {
-      setSelectedAI(newAI);
-    }
-  };
-
-  // Confirm AI change
-  const confirmAIChange = () => {
-    setSelectedAI(aiSelectionModal.newAI);
-    setAiSelectionModal({ ...aiSelectionModal, show: false });
-  };
-
-  // Send message handler with REAL OpenAI API
-  const handleSendMessage = async () => {
-    if (!inputMessage.trim()) return;
-
-    const userMessage = inputMessage;
-    setInputMessage('');
-
-    // Get or create conversation
-    let convId = currentConversation?.id;
-    let isGuest = false;
-    
-    if (!convId || convId.startsWith('temp-')) {
-      try {
-        // Create title from first message (first 50 chars)
-        const title = userMessage.substring(0, 50).replace(/[^\w\s]/g, '').trim() || 'New Chat';
-        const newConvo = await ChatService.createConversation(title);
-        
-        if (newConvo) {
-          convId = newConvo.id;
-          
-          // Set as current conversation with pinned=false (not pinned by default, like Claude)
-          const newConversation: Conversation = {
-            id: newConvo.id,
-            title: newConvo.title,
-            pinned: false,
-            messages: [],
-            updated_at: newConvo.updated_at,
-          };
-          
-          setCurrentConversation(newConversation);
-          
-          // Add to allConversations at the top (most recent)
-          setAllConversations(prev => [newConversation, ...prev]);
-        } else {
-          // Guest mode - chat without saving
-          isGuest = true;
-          convId = 'guest-' + Date.now();
-          console.log('Running in guest mode - chat will not be saved');
-        }
-      } catch (e) {
-        console.error('Error creating conversation:', e);
-        isGuest = true;
-        convId = 'guest-' + Date.now();
-      }
-    }
-
-    // Auto-detect best AI if in auto mode
-    let aiToUse = selectedAI;
-    if (selectedAI === 'auto') {
-      const detected = detectBestAI(userMessage);
-      setRecommendedAI(detected);
-      aiToUse = detected;
-    }
-
-    const newMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: userMessage,
-      timestamp: new Date().toISOString(),
-    };
-
-    setMessages(prev => [...prev, newMessage]);
-    
-    // Only save to DB if not guest
-    if (!isGuest) {
-      await ChatService.saveMessage(convId, 'user', userMessage);
-    }
-
-    // Create placeholder for AI response
-    const aiResponseId = (Date.now() + 1).toString();
-    const aiResponse: Message = {
-      id: aiResponseId,
-      role: 'assistant',
-      content: 'Thinking...',
-      timestamp: new Date().toISOString(),
-      provider: aiToUse,
-      hasArtifacts: false,
-    };
-    setMessages(prev => [...prev, aiResponse]);
-
-    try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messages: [
-            ...messages.map(m => ({
-              role: m.role,
-              content: m.content
-            })),
-            { role: 'user', content: userMessage }
-          ],
-          aiProvider: aiToUse,
-          conversationId: isGuest ? undefined : convId
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`API request failed: ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log('API response:', data);
-
-      // Check if autonomous deployment
-      if (data.isAutonomous && data.workflowId) {
-        setMessages(prev =>
-          prev.map(m =>
-            m.id === aiResponseId ? { ...m, content: data.content || 'Starting deployment...', provider: 'javari' } : m
-          )
-        );
-
-        // Poll for deployment status
-        const pollInterval = setInterval(async () => {
-          try {
-            const statusRes = await fetch(`/api/autonomous/status/${data.workflowId}`);
-            const statusData = await statusRes.json();
-            const workflow = statusData.workflow;
-
-            if (workflow?.status === 'success') {
-              clearInterval(pollInterval);
-              const successMsg = `✅ Live: https://${workflow.artifacts?.deploymentUrl}\n📁 Repo: ${workflow.artifacts?.repoUrl}`;
-              setMessages(prev => [...prev, {
-                id: Date.now().toString(),
-                role: 'assistant',
-                content: successMsg,
-                timestamp: new Date().toISOString(),
-                provider: 'javari',
-              }]);
-              if (!isGuest) {
-                await ChatService.saveMessage(convId, 'assistant', successMsg, 'javari');
-              }
-            } else if (workflow?.status === 'failed') {
-              clearInterval(pollInterval);
-              const errorMsg = `❌ Build failed: ${workflow.error?.message || 'Unknown error'}`;
-              setMessages(prev => [...prev, {
-                id: Date.now().toString(),
-                role: 'assistant',
-                content: errorMsg,
-                timestamp: new Date().toISOString(),
-                provider: 'error',
-              }]);
-              if (!isGuest) {
-                await ChatService.saveMessage(convId, 'assistant', errorMsg, 'error');
-              }
-            }
-          } catch (e) {
-            console.error('Polling error:', e);
-          }
-        }, 5000);
-        return;
-      }
-
-      // Regular response - update the placeholder with actual content
-      const responseContent = data.content || data.message || 'No response received';
+  // =============================================================================
+  // RENDER
+  // =============================================================================
+  return (
+    <div className="h-screen flex" style={{ backgroundColor: COLORS.javaribg }}>
       
-      setMessages(prev =>
-        prev.map(m =>
-          m.id === aiResponseId ? { ...m, content: responseContent, provider: data.provider || aiToUse } : m
-        )
-      );
-
-      // Save assistant message (only if not guest)
-      if (!isGuest) {
-        await ChatService.saveMessage(convId, 'assistant', responseContent, data.provider || aiToUse);
-      }
-
-      // Parse content for artifacts (code blocks)
-      const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
-      const codeBlocks = [...responseContent.matchAll(codeBlockRegex)];
-      
-      if (codeBlocks.length > 0) {
-        codeBlocks.forEach((match, index) => {
-          const language = match[1] || 'text';
-          const code = match[2];
-          const newArtifact: Artifact = {
-            id: `${Date.now()}-${index}`,
-            name: `${language}_snippet_${index + 1}.${language}`,
-            type: 'code',
-            content: code,
-            size: `${(code.length / 1024).toFixed(1)} KB`,
-            language: language,
-          };
-          setArtifacts(prev => [...prev, newArtifact]);
-        });
-
-        // Update message to indicate artifacts were created
-        setMessages(prev => 
-          prev.map(m => 
-            m.id === aiResponseId 
-              ? { ...m, hasArtifacts: true }
-              : m
-          )
-        );
-      }
-
-    } catch (error: unknown) {
-      console.error('Error calling AI API:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      
-      // Update message with error
-      setMessages(prev => 
-        prev.map(m => 
-          m.id === aiResponseId 
-            ? { 
-                ...m, 
-                content: `Sorry, I encountered an error: ${errorMessage}. Please try again.`,
-                provider: 'error'
-              }
-            : m
-        )
-      );
-    }
-  }
-
-  // Handle voice message - sends and returns response for speaking
-  const handleVoiceMessage = async (message: string): Promise<string> => {
-    if (!message.trim()) return '';
-    
-    // Add user message to chat
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: message,
-      timestamp: new Date(),
-    };
-    
-    setMessages(prev => [...prev, userMsg]);
-    setVoiceChatActive(true);
-    
-    try {
-      // Get AI response
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: [...messages, userMsg].map(m => ({
-            role: m.role,
-            content: m.content
-          })),
-          provider: selectedProvider,
-          model: selectedModel,
-        }),
-      });
-      
-      const data = await response.json();
-      const assistantContent = data.content || data.message || 'I apologize, I could not process that.';
-      
-      // Add assistant message
-      const assistantMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: assistantContent,
-        timestamp: new Date(),
-      };
-      
-      setMessages(prev => [...prev, assistantMsg]);
-      
-      // Return the response text for voice to speak
-      return assistantContent;
-      
-    } catch (error) {
-      console.error('Voice chat error:', error);
-      return 'I apologize, there was an error processing your message.';
-    }
-  };
-;
-  
-  // Start a new chat
-  const handleNewChat = () => {
-    // Clear messages and current conversation
-    setMessages([]);
-    setCurrentConversation(null);
-    console.log('New chat ready');
-  };
-
-  // Handle Projects - Allow project management and chat organization
-  const handleProjects = () => {
-    // TODO: Implement projects modal/sidebar
-    console.log('Projects clicked - opening project manager');
-    alert('Projects feature coming soon! This will let you organize chats by project.');
-  };
-
-  // Select a conversation from sidebar
-  const selectConversation = async (conv: Conversation) => {
-    setCurrentConversation(conv);
-    // Messages will be loaded by useEffect
-  };
-
-  // Toggle pin status
-  const togglePin = async (convId: string, pinned: boolean) => {
-    await ChatService.toggleStar(convId, pinned);
-    setAllConversations(prev => 
-      prev.map(c => c.id === convId ? { ...c, pinned } : c)
-    );
-  };
-
-  // Delete conversation
-  const deleteConversation = async (convId: string) => {
-    if (!confirm('Delete this conversation?')) return;
-    await ChatService.deleteConversation(convId);
-    setAllConversations(prev => prev.filter(c => c.id !== convId));
-    if (currentConversation?.id === convId) {
-      setCurrentConversation(null);
-      setMessages([]);
-    }
-  };
-
-  // Conversation Item Component
-  const ConversationItem = ({ 
-    conv, 
-    isActive, 
-    onSelect, 
-    onPin, 
-    onDelete 
-  }: { 
-    conv: Conversation; 
-    isActive: boolean; 
-    onSelect: () => void; 
-    onPin: () => void; 
-    onDelete: () => void;
-  }) => {
-    const [showMenu, setShowMenu] = useState(false);
-    
-    return (
+      {/* ============== LEFT SIDEBAR ============== */}
       <div 
-        className={`group relative flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors ${
-          isActive 
-            ? 'bg-gray-700/50 border border-cyan-500/50' 
-            : 'hover:bg-gray-800/50'
-        }`}
-        onClick={onSelect}
+        className={`${leftSidebarOpen ? 'w-80' : 'w-0'} transition-all duration-300 overflow-hidden border-r flex flex-col`}
+        style={{ borderColor: COLORS.cyan + '30' }}
       >
+        {/* Logo Section */}
+        <div className="p-4 border-b" style={{ borderColor: COLORS.cyan + '30' }}>
+          <div className="flex items-center gap-3">
+            <Image
+              src="/logos/javarilogo.png"
+              alt="Javari Logo"
+              width={40}
+              height={40}
+              className="rounded-lg"
+            />
+            <div>
+              <h1 className="text-white font-bold text-lg">Javari</h1>
+              <p className="text-xs text-gray-400">AI Assistant</p>
+            </div>
+          </div>
+        </div>
 
-        {/* Build status indicator */}
-        <div className="flex-shrink-0">
-          {conv.build_status === 'success' && (
-            <Check className="w-4 h-4 text-green-500" />
-          )}
-          {conv.build_status === 'failed' && (
-            <AlertCircle className="w-4 h-4 text-red-500" />
-          )}
-          {conv.build_status === 'pending' && (
-            <div className="w-4 h-4 border-2 border-yellow-500 border-t-transparent rounded-full animate-spin" />
-          )}
-          {!conv.build_status && (
-            <MessageSquare className="w-4 h-4 text-gray-500" />
+        {/* New Chat Button */}
+        <div className="p-4">
+          <button 
+            onClick={startNewChat}
+            className="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-white transition-all hover:opacity-90"
+            style={{ backgroundColor: COLORS.cyan }}
+          >
+            <Plus className="w-4 h-4" />
+            New Chat
+          </button>
+        </div>
+
+        {/* Search */}
+        <div className="px-4 pb-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search chats..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-white/5 border border-white/10 rounded-lg pl-10 pr-4 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500"
+            />
+          </div>
+        </div>
+
+        {/* Filter Tabs */}
+        <div className="px-4 pb-3 flex gap-2">
+          <button
+            onClick={() => setFilterStarred(false)}
+            className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              !filterStarred ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-gray-400'
+            }`}
+          >
+            <MessageSquare className="w-3 h-3 inline mr-1" />
+            All
+          </button>
+          <button
+            onClick={() => setFilterStarred(true)}
+            className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              filterStarred ? 'bg-yellow-500/20 text-yellow-400' : 'bg-white/5 text-gray-400'
+            }`}
+          >
+            <Star className="w-3 h-3 inline mr-1" />
+            Starred
+          </button>
+        </div>
+
+        {/* Conversations List */}
+        <div className="flex-1 overflow-y-auto px-2">
+          {filteredConversations.length === 0 ? (
+            <div className="p-4 text-center text-gray-500 text-sm">
+              {filterStarred ? 'No starred chats' : 'No conversations yet'}
+            </div>
+          ) : (
+            filteredConversations.map(conv => (
+              <div
+                key={conv.id}
+                onClick={() => loadConversation(conv.id)}
+                className={`p-3 rounded-lg mb-1 cursor-pointer group transition-all ${
+                  currentConversationId === conv.id
+                    ? 'bg-cyan-500/20'
+                    : 'hover:bg-white/5'
+                }`}
+              >
+                <div className="flex items-start gap-2">
+                  <MessageSquare className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-white truncate">{conv.title}</p>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); toggleStarred(conv.id); }}
+                        className="opacity-0 group-hover:opacity-100 p-1 hover:bg-white/10 rounded"
+                      >
+                        <Star className={`w-3 h-3 ${conv.starred ? 'text-yellow-400 fill-yellow-400' : 'text-gray-400'}`} />
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <Clock className="w-3 h-3 text-gray-500" />
+                      <span className="text-xs text-gray-500">{formatDate(conv.updated_at)}</span>
+                      <span className="text-xs text-gray-600">•</span>
+                      <span className="text-xs text-gray-500">{conv.message_count} msgs</span>
+                      {/* P0 UX FIX: Show badge if conversation had pasted docs */}
+                      {conv.docManifest?.some(d => d.isVirtual) && (
+                        <>
+                          <span className="text-xs text-gray-600">•</span>
+                          <Clipboard className="w-3 h-3 text-cyan-400" title="Had pasted docs" />
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))
           )}
         </div>
-        
-        {/* Title */}
-        <div className="flex-1 min-w-0">
-          <div className="text-sm text-white truncate">{conv.title || 'New Chat'}</div>
-        </div>
-        
-        {/* Pin indicator */}
-        {conv.pinned && (
-          <Star className="w-3 h-3 flex-shrink-0" style={{ color: COLORS.javariCyan }} fill={COLORS.javariCyan} />
-        )}
-        
-        {/* Menu button - shows on hover */}
-        <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-          <DropdownMenu open={showMenu} onOpenChange={setShowMenu}>
-            <DropdownMenuTrigger asChild>
-              <button 
-                className="p-1 rounded hover:bg-gray-700"
-                onClick={(e) => { e.stopPropagation(); setShowMenu(true); }}
-              >
-                <MoreVertical className="w-4 h-4 text-gray-400" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-40">
-              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onPin(); setShowMenu(false); }}>
-                <Star className="w-4 h-4 mr-2" />
-                {conv.pinned ? 'Unpin' : 'Pin'}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem 
-                onClick={(e) => { e.stopPropagation(); onDelete(); setShowMenu(false); }}
-                className="text-red-500"
-              >
-                <X className="w-4 h-4 mr-2" />
-                Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+
+        {/* Settings */}
+        <div className="p-4 border-t" style={{ borderColor: COLORS.cyan + '30' }}>
+          <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-all">
+            <Settings className="w-4 h-4" />
+            <span className="text-sm">Settings</span>
+          </button>
         </div>
       </div>
-    );
-  };
 
-  // Copy artifact to clipboard
-  const copyArtifact = (artifactId: string, content: string) => {
-    navigator.clipboard.writeText(content);
-    setCopiedArtifacts({ ...copiedArtifacts, [artifactId]: true });
-    setTimeout(() => {
-      setCopiedArtifacts({ ...copiedArtifacts, [artifactId]: false });
-    }, 2000);
-  };
-
-  // Download artifact
-  const downloadArtifact = (artifact: Artifact, format: string) => {
-    const blob = new Blob([artifact.content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${artifact.name}.${format}`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  // Generate preview HTML for React/TSX components
-  const generatePreviewHTML = (code: string, language: string): string => {
-    const isReact = ['tsx', 'jsx', 'typescript', 'javascript'].includes(language?.toLowerCase() || '');
-    
-    if (isReact) {
-      // Clean the code for preview
-      const cleanCode = code
-        .replace(/import\s+.*?from\s+['"][^'"]+['"]\s*;?/g, '// import removed')
-        .replace(/export\s+default\s+/g, '')
-        .replace(/export\s+/g, '');
-      
-      return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script src="https://unpkg.com/react@18/umd/react.development.js"><\/script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"><\/script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>
-  <script src="https://cdn.tailwindcss.com"><\/script>
-  <style>
-    body { margin: 0; padding: 16px; background: #1e293b; color: white; font-family: system-ui, sans-serif; min-height: 100vh; }
-    .error { color: #f87171; padding: 16px; background: #7f1d1d; border-radius: 8px; margin: 16px; }
-    .loading { color: #94a3b8; padding: 16px; text-align: center; }
-  </style>
-</head>
-<body>
-  <div id="root"><div class="loading">Loading preview...</div></div>
-  <script type="text/babel" data-presets="react,typescript">
-    const { useState, useEffect, useRef } = React;
-    
-    try {
-      ${cleanCode}
-      
-      // Find component to render
-      const findComponent = () => {
-        const code = \`${cleanCode.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`;
-        const match = code.match(/(?:const|function)\\s+([A-Z][a-zA-Z0-9]*)/);
-        if (match) return match[1];
-        return null;
-      };
-      
-      const compName = findComponent();
-      const Component = compName ? eval(compName) : null;
-      
-      if (Component) {
-        ReactDOM.createRoot(document.getElementById('root')).render(<Component />);
-      } else {
-        document.getElementById('root').innerHTML = '<div class="error">Component not found. Check console for errors.</div>';
-      }
-    } catch (e) {
-      document.getElementById('root').innerHTML = '<div class="error"><strong>Preview Error:</strong><br/>' + e.message + '</div>';
-      console.error('Preview error:', e);
-    }
-  <\/script>
-</body>
-</html>`;
-    }
-    
-    // For HTML
-    return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script src="https://cdn.tailwindcss.com"><\/script>
-  <style>body { margin: 0; background: #1e293b; color: white; min-height: 100vh; }</style>
-</head>
-<body>${code}</body>
-</html>`;
-  };
-
-  // Toggle artifact view mode
-  const toggleArtifactView = (artifactId: string) => {
-    setArtifactViewMode(prev => ({
-      ...prev,
-      [artifactId]: prev[artifactId] === 'preview' ? 'code' : 'preview'
-    }));
-  };
-
-  return (
-    <div className="h-screen flex flex-col" style={{ backgroundColor: COLORS.javaribg }}>
-      {/* Mobile Menu Button */}
+      {/* Toggle Left Sidebar */}
       <button
         onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
-        className="md:hidden fixed top-4 left-4 z-50 p-4 rounded-lg shadow-xl"
-        style={{ backgroundColor: COLORS.navy, border: `2px solid ${COLORS.cyan}` }}
+        className="absolute left-0 top-1/2 -translate-y-1/2 z-10 p-1.5 rounded-r-lg bg-slate-800 text-gray-400 hover:text-white transition-all"
+        style={{ left: leftSidebarOpen ? '318px' : '0' }}
       >
-        <MessageSquare className="w-7 h-7" style={{ color: COLORS.cyan }} />
+        {leftSidebarOpen ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
       </button>
 
-      {/* Mobile Backdrop */}
-      {leftSidebarOpen && (
-        <div
-          className="md:hidden fixed inset-0 bg-black/50 z-30"
-          onClick={() => setLeftSidebarOpen(false)}
-        />
-      )}
+      {/* ============== MAIN CONTENT ============== */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto p-6">
+          <div className="max-w-4xl mx-auto space-y-6">
+            {messages.map(msg => (
+              <div key={msg.id} className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                {/* Avatar */}
+                <div className={`
+                  w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0
+                  ${msg.role === 'user' ? 'bg-cyan-500/20' : 'bg-purple-500/20'}
+                `}>
+                  {msg.role === 'user' 
+                    ? <User className="w-5 h-5" style={{ color: COLORS.cyan }} />
+                    : <Bot className="w-5 h-5 text-purple-400" />
+                  }
+                </div>
 
-      {/* Main 3-Column Layout */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* LEFT SIDEBAR - CLAUDE-LIKE CONVERSATION MANAGEMENT */}
-        {leftSidebarOpen && (
-          <div 
-            className="w-full md:w-80 md:relative absolute inset-y-0 left-0 z-40 border-r flex flex-col"
-            style={{ 
-              backgroundColor: COLORS.navy,
-              borderColor: COLORS.cyan + '40'
-            }}
-          >
-            {/* Logo - Top of Sidebar */}
-            <div className="p-4 flex justify-between items-center border-b" style={{ borderColor: COLORS.cyan + '40' }}>
-              <Image
-                src="/javariailogo.png"
-                alt="Javari AI"
-                width={60}
-                height={60}
-                className="rounded-lg md:w-[80px] md:h-[80px]"
+                {/* Message Content */}
+                <div className={`max-w-[80%] ${msg.role === 'user' ? 'text-right' : ''}`}>
+                  <div className={`
+                    inline-block px-4 py-3 rounded-2xl text-sm
+                    ${msg.role === 'user' 
+                      ? 'bg-cyan-500/20 text-white rounded-br-none' 
+                      : 'bg-white/5 text-gray-200 rounded-bl-none'}
+                  `}>
+                    <div className="whitespace-pre-wrap">{msg.content}</div>
+                  </div>
+
+                  {/* Citations */}
+                  {msg.citations && msg.citations.length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      <p className="text-xs text-gray-500 uppercase tracking-wide">Sources</p>
+                      {msg.citations.map((cite, idx) => (
+                        <div 
+                          key={idx}
+                          className="bg-white/5 rounded-lg p-3 text-left"
+                        >
+                          <div className="flex items-center gap-2 mb-1">
+                            <FileText className="w-3 h-3" style={{ color: COLORS.cyan }} />
+                            <span className="text-xs font-medium text-cyan-400">{cite.documentName}</span>
+                          </div>
+                          <p className="text-xs text-gray-400 line-clamp-2">{cite.snippet}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <p className="text-xs text-gray-600 mt-1">
+                    {msg.timestamp.toLocaleTimeString()}
+                  </p>
+                </div>
+              </div>
+            ))}
+            {isLoading && (
+              <div className="flex gap-4">
+                <div className="w-10 h-10 rounded-full bg-purple-500/20 flex items-center justify-center">
+                  <Loader2 className="w-5 h-5 text-purple-400 animate-spin" />
+                </div>
+                <div className="bg-white/5 rounded-2xl rounded-bl-none px-4 py-3">
+                  <p className="text-sm text-gray-400">Thinking...</p>
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+        </div>
+
+        {/* Input Area */}
+        <div className="border-t p-4" style={{ borderColor: COLORS.cyan + '30' }}>
+          <div className="max-w-4xl mx-auto space-y-3">
+            <div className="flex gap-3">
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Ask about your documents, or paste FILE X — blocks..."
+                className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-500 resize-none focus:outline-none focus:border-cyan-500"
+                rows={1}
               />
-              {/* Mobile close button */}
               <button
-                onClick={() => setLeftSidebarOpen(false)}
-                className="md:hidden p-2 rounded-lg"
-                style={{ backgroundColor: COLORS.navy, border: `1px solid ${COLORS.cyan}` }}
+                onClick={sendMessage}
+                disabled={!input.trim() || isLoading}
+                className="px-4 rounded-xl text-white transition-all disabled:opacity-40"
+                style={{ backgroundColor: COLORS.cyan }}
               >
-                <X className="w-5 h-5" style={{ color: COLORS.cyan }} />
+                <Send className="w-5 h-5" />
               </button>
             </div>
 
-            {/* New Chat Button */}
-            <div className="p-4 border-b" style={{ borderColor: COLORS.cyan + '40' }}>
-              <Button 
-                className="w-full"
-                onClick={handleNewChat}
-                style={{ 
-                  backgroundColor: COLORS.red,
-                  color: 'white'
-                }}
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                New Chat
-              </Button>
-            </div>
-
-            {/* Search Bar */}
-            <div className="px-4 py-2">
-              <div className="relative">
-                <input
-                  type="text"
-                  placeholder="Search conversations..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full px-3 py-2 pl-9 rounded-lg text-sm text-white placeholder-gray-400 focus:outline-none focus:ring-2"
+            {/* AI Provider Selector Buttons */}
+            <div className="flex flex-wrap gap-2 justify-center">
+              {AI_PROVIDERS.map(provider => (
+                <button
+                  key={provider.id}
+                  onClick={() => setSelectedProvider(provider.id)}
+                  disabled={!provider.available}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
+                    selectedProvider === provider.id 
+                      ? 'ring-2 ring-offset-2 ring-offset-slate-900' 
+                      : 'opacity-70 hover:opacity-100'
+                  } ${!provider.available ? 'opacity-30 cursor-not-allowed' : ''}`}
                   style={{ 
-                    backgroundColor: COLORS.javaribg, 
-                    borderColor: COLORS.cyan + '40',
-                    border: '1px solid'
-                  }}
-                />
-                <MessageSquare className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              </div>
-            </div>
-
-            {/* Conversation List - Grouped by Time */}
-            <ScrollArea className="flex-1 px-2">
-              <div className="space-y-4 py-2">
-                
-                {/* PINNED Section */}
-                {conversationGroups.pinned.length > 0 && (
-                  <div>
-                    <div className="flex items-center gap-2 px-2 py-1">
-                      <Star className="w-3 h-3" style={{ color: COLORS.javariCyan }} fill={COLORS.javariCyan} />
-                      <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Pinned</span>
-                    </div>
-                    {conversationGroups.pinned.map(conv => (
-                      <ConversationItem 
-                        key={conv.id} 
-                        conv={conv} 
-                        isActive={currentConversation?.id === conv.id}
-                        onSelect={() => selectConversation(conv)}
-                        onPin={() => togglePin(conv.id, !conv.pinned)}
-                        onDelete={() => deleteConversation(conv.id)}
-                      />
-                    ))}
-                  </div>
-                )}
-
-                {/* TODAY Section */}
-                {conversationGroups.today.length > 0 && (
-                  <div>
-                    <div className="flex items-center gap-2 px-2 py-1">
-                      <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Today</span>
-                    </div>
-                    {conversationGroups.today.map(conv => (
-                      <ConversationItem 
-                        key={conv.id} 
-                        conv={conv} 
-                        isActive={currentConversation?.id === conv.id}
-                        onSelect={() => selectConversation(conv)}
-                        onPin={() => togglePin(conv.id, !conv.pinned)}
-                        onDelete={() => deleteConversation(conv.id)}
-                      />
-                    ))}
-                  </div>
-                )}
-
-                {/* YESTERDAY Section */}
-                {conversationGroups.yesterday.length > 0 && (
-                  <div>
-                    <div className="flex items-center gap-2 px-2 py-1">
-                      <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Yesterday</span>
-                    </div>
-                    {conversationGroups.yesterday.map(conv => (
-                      <ConversationItem 
-                        key={conv.id} 
-                        conv={conv} 
-                        isActive={currentConversation?.id === conv.id}
-                        onSelect={() => selectConversation(conv)}
-                        onPin={() => togglePin(conv.id, !conv.pinned)}
-                        onDelete={() => deleteConversation(conv.id)}
-                      />
-                    ))}
-                  </div>
-                )}
-
-                {/* PREVIOUS 7 DAYS Section */}
-                {conversationGroups.previous7Days.length > 0 && (
-                  <div>
-                    <div className="flex items-center gap-2 px-2 py-1">
-                      <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Previous 7 Days</span>
-                    </div>
-                    {conversationGroups.previous7Days.map(conv => (
-                      <ConversationItem 
-                        key={conv.id} 
-                        conv={conv} 
-                        isActive={currentConversation?.id === conv.id}
-                        onSelect={() => selectConversation(conv)}
-                        onPin={() => togglePin(conv.id, !conv.pinned)}
-                        onDelete={() => deleteConversation(conv.id)}
-                      />
-                    ))}
-                  </div>
-                )}
-
-                {/* OLDER Section */}
-                {conversationGroups.older.length > 0 && (
-                  <div>
-                    <div className="flex items-center gap-2 px-2 py-1">
-                      <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Older</span>
-                    </div>
-                    {conversationGroups.older.map(conv => (
-                      <ConversationItem 
-                        key={conv.id} 
-                        conv={conv} 
-                        isActive={currentConversation?.id === conv.id}
-                        onSelect={() => selectConversation(conv)}
-                        onPin={() => togglePin(conv.id, !conv.pinned)}
-                        onDelete={() => deleteConversation(conv.id)}
-                      />
-                    ))}
-                  </div>
-                )}
-
-                {/* Empty State */}
-                {allConversations.length === 0 && !isLoading && (
-                  <div className="text-center py-8">
-                    <MessageSquare className="w-12 h-12 mx-auto mb-3 text-gray-500" />
-                    <p className="text-gray-400 text-sm">No conversations yet</p>
-                    <p className="text-gray-500 text-xs mt-1">Start a new chat to begin</p>
-                  </div>
-                )}
-
-                {/* Loading State */}
-                {isLoading && (
-                  <div className="text-center py-8">
-                    <div className="animate-spin w-6 h-6 border-2 border-gray-500 border-t-cyan-400 rounded-full mx-auto"></div>
-                    <p className="text-gray-400 text-sm mt-2">Loading...</p>
-                  </div>
-                )}
-              </div>
-            </ScrollArea>
-
-            {/* User Profile Menu - Bottom Left */}
-            <div className="p-4 pb-20 border-t" style={{ borderColor: COLORS.cyan + '40' }}>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button 
-                    variant="outline" 
-                    className="w-full justify-start"
-                    style={{ borderColor: COLORS.cyan }}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold" style={{ backgroundColor: COLORS.red }}>
-                        {userName.charAt(0)}
-                      </div>
-                      <div className="text-left">
-                        <div className="text-white text-sm font-medium">{userName}</div>
-                        <div className="text-white/80 text-xs">{userPlan} Plan</div>
-                      </div>
-                    </div>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-56">
-                  <DropdownMenuItem>
-                    <Globe className="w-4 h-4 mr-2" />
-                    Language: {language}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem>
-                    <HelpCircle className="w-4 h-4 mr-2" />
-                    Help & Support
-                  </DropdownMenuItem>
-                  <DropdownMenuItem>
-                    <CreditCard className="w-4 h-4 mr-2" />
-                    Manage Plan
-                  </DropdownMenuItem>
-                  <DropdownMenuItem>
-                    <SettingsIcon className="w-4 h-4 mr-2" />
-                    Settings
-                  </DropdownMenuItem>
-                  <DropdownMenuItem>
-                    <FileText className="w-4 h-4 mr-2" />
-                    Asset Library
-                  </DropdownMenuItem>
-                  <DropdownMenuItem>
-                    <Shield className="w-4 h-4 mr-2" />
-                    Privacy & Security
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem className="text-red-600">
-                    <LogOut className="w-4 h-4 mr-2" />
-                    Sign Out
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </div>
-        )}
-
-        {/* CENTER COLUMN */}
-        <div className="flex-1 flex flex-col relative">
-          {/* Toggle buttons - Hide on mobile */}
-          <div className="hidden md:block absolute left-0 top-1/2 -translate-y-1/2 z-10">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
-              style={{ borderColor: COLORS.cyan }}
-            >
-              {leftSidebarOpen ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-            </Button>
-          </div>
-
-          {/* Chat Messages Area */}
-          <ScrollArea className="flex-1 p-3 md:p-6">
-            <div className="space-y-4 max-w-4xl mx-auto md:ml-[220px] pt-6">{/* Adjusted padding after moving avatar to right sidebar */}
-
-              {/* Messages */}
-              {messages.length === 0 ? (
-                <div className="text-center py-12">
-                  <div className="text-white/70 mb-4">
-                    <Sparkles className="w-16 h-16 mx-auto mb-4" style={{ color: COLORS.javariCyan }} />
-                    <p className="text-lg font-medium text-white">Ready to assist you</p>
-                    <p className="text-sm">Ask me anything - I'll auto-select the best AI for your task</p>
-                  </div>
-                </div>
-              ) : (
-                messages.map(message => (
-                  <div
-                    key={message.id}
-                    className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                  >
-                    <div
-                      className="max-w-[85%] md:max-w-[70%] p-3 md:p-4 rounded-lg text-sm md:text-base"
-                      style={{
-                        backgroundColor: message.role === 'user' ? COLORS.cyan : COLORS.navy,
-                        color: 'white',
-                      }}
-                    >
-                      {message.role === 'assistant' && (
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="text-xl">{aiProviders[message.provider || 'gpt-4']?.icon}</span>
-                          <span className="text-xs opacity-75">
-                            Javari via {aiProviders[message.provider || 'gpt-4']?.name}
-                          </span>
-                        </div>
-                      )}
-                      <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                      {message.role === 'assistant' && (voiceEnabled || voiceChatActive) && (
-                        <VoicePanel text={message.content} autoPlay={true} />
-                      )}
-                      <span className="text-xs opacity-50 mt-2 block">
-                        {new Date(message.timestamp).toLocaleString('en-US', { 
-                          month: 'short', 
-                          day: 'numeric', 
-                          year: 'numeric',
-                          hour: 'numeric', 
-                          minute: '2-digit',
-                          hour12: true 
-                        })}
-                      </span>
-                    </div>
-                  </div>
-                ))
-              )}
-              {/* Auto-scroll anchor */}
-              <div ref={messagesEndRef} />
-            </div>
-          </ScrollArea>
-
-          {/* Input Area with AI Selector Below */}
-          <div className="p-2 md:p-4 pb-6 md:pb-24 border-t" style={{ borderColor: COLORS.cyan + '40', backgroundColor: COLORS.navy }}>
-            {/* Voice Chat - One Button, Hands-Free Conversation */}
-            <div className="mb-4">
-              <VoiceConversation 
-                onUserMessage={handleVoiceMessage}
-                isProcessing={false}
-              />
-            </div>
-
-            {/* Or Type - Simple Text Input */}
-            <div className="flex gap-2 mb-3">
-              <input
-                type="text"
-                value={inputMessage}
-                onChange={(e) => setInputMessage(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                placeholder="Or type here..."
-                className="flex-1 px-3 md:px-4 py-2 md:py-3 text-sm md:text-base rounded-lg border focus:outline-none focus:ring-2"
-                style={{
-                  backgroundColor: COLORS.javaribg,
-                  borderColor: COLORS.cyan,
-                  color: 'white',
-                }}
-              />
-              <Button
-                onClick={handleSendMessage}
-                className="px-3 md:px-4"
-                style={{ backgroundColor: COLORS.red, color: 'white' }}
-              >
-                Send
-              </Button>
-            </div>
-
-            {/* AI Model Selector - Scrollable on mobile */}
-            <div className="flex justify-center mt-2 md:mt-4 overflow-x-auto">
-              <div className="flex items-center gap-2 md:gap-3 bg-gray-900/50 rounded-lg p-2 md:p-3 border whitespace-nowrap" style={{ borderColor: COLORS.cyan + '40' }}>
-                <span className="text-xs md:text-sm text-white font-medium hidden md:inline">Select AI:</span>
-                {/* Auto Button */}
-                <Button
-                  size="sm"
-                  variant={selectedAI === 'auto' ? 'default' : 'outline'}
-                  onClick={() => setSelectedAI('auto')}
-                  className="h-8 md:h-10 px-2 md:px-4 text-xs md:text-sm font-medium"
-                  style={selectedAI === 'auto' ? { 
-                    backgroundColor: COLORS.javariCyan,
-                    color: COLORS.navy,
-                    borderColor: COLORS.javariCyan 
-                  } : {
-                    borderColor: COLORS.cyan + '60',
-                    color: COLORS.cyan
+                    backgroundColor: selectedProvider === provider.id ? provider.color + '30' : 'rgba(255,255,255,0.05)',
+                    color: selectedProvider === provider.id ? provider.color : '#9ca3af',
+                    ringColor: provider.color
                   }}
                 >
-                  ✨ Auto
-                </Button>
-                
-                {/* AI Provider Buttons */}
-                {Object.values(aiProviders).map(provider => (
-                  <Button
-                    key={provider.id}
-                    size="sm"
-                    variant={selectedAI === provider.id ? 'default' : 'outline'}
-                    onClick={() => handleAIChange(provider.id)}
-                    className="h-8 md:h-10 px-2 md:px-4 text-xs md:text-sm font-medium"
-                    style={selectedAI === provider.id ? { 
-                      backgroundColor: COLORS.cyan,
-                      color: COLORS.navy,
-                      borderColor: COLORS.cyan 
-                    } : {
-                      borderColor: COLORS.cyan + '60',
-                      color: COLORS.cyan
-                    }}
-                  >
-                    {provider.icon} {provider.name}
-                  </Button>
-                ))}
-              </div>
+                  <span>{provider.icon}</span>
+                  {provider.name}
+                </button>
+              ))}
             </div>
           </div>
-        </div>
-
-        {/* RIGHT SIDEBAR - Artifacts with Claude-Style Output - Hidden on mobile */}
-        {rightSidebarOpen && (
-          <div 
-            className="hidden md:flex w-96 border-l flex-col sticky top-0 h-screen overflow-y-auto"
-            style={{ 
-              backgroundColor: COLORS.navy,
-              borderColor: COLORS.cyan + '40'
-            }}
-          >
-            {/* Javari Avatar - Top of Right Panel */}
-            <div className="p-6 border-b flex flex-col items-center" style={{ borderColor: COLORS.cyan + '40', backgroundColor: COLORS.javaribg }}>
-              <div className="relative mb-4">
-                <Image
-                  src="/avatars/javariavatar.png"
-                  alt="Javari Avatar"
-                  width={96}
-                  height={96}
-                  className="rounded-full object-cover"
-                  style={{
-                    border: `3px solid ${COLORS.javariCyan}`,
-                    boxShadow: `0 0 30px ${COLORS.javariCyan}90, 0 0 60px ${COLORS.javariCyan}50`,
-                    objectPosition: '60% center'
-                  }}
-                />
-                {/* Live Indicator */}
-                <div 
-                  className="absolute bottom-1 right-1 w-5 h-5 rounded-full border-2 border-white animate-pulse"
-                  style={{ backgroundColor: '#00FF00' }}
-                />
-              </div>
-              <p className="text-white text-lg font-semibold mb-1">Javari AI</p>
-              {selectedAI === 'auto' && (
-                <p className="text-xs" style={{ color: COLORS.javariCyan }}>
-                  Auto-selecting: {aiProviders[recommendedAI]?.name}
-                </p>
-              )}
-            </div>
-
-            {/* Javari AI Status - Always Visible */}
-            <div className="p-4 border-b" style={{ borderColor: COLORS.cyan + '40', backgroundColor: COLORS.javaribg }}>
-              <div className="flex items-center gap-2 mb-3">
-                <div 
-                  className="w-2 h-2 rounded-full animate-pulse"
-                  style={{ backgroundColor: '#00FF00' }}
-                />
-                <p className="text-white/90 text-sm font-semibold">Javari AI Joins Every Chat</p>
-              </div>
-              <p className="text-xs text-white/60">Your AI partner across all conversations</p>
-            </div>
-
-            <div className="p-4 border-b" style={{ borderColor: COLORS.cyan + '40' }}>
-              <h3 className="text-white font-medium">Generated Content</h3>
-              <p className="text-xs text-white/60 mt-1">Files and artifacts from this conversation</p>
-            </div>
-
-            <ScrollArea className="flex-1 p-4">
-              <div className="space-y-4">
-                {artifacts.length === 0 ? (
-                  <div className="text-center text-white/60 py-8">
-                    <FileText className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                    <p>No artifacts yet</p>
-                    <p className="text-xs mt-1">Generated files will appear here</p>
-                  </div>
-                ) : (
-                  artifacts.map(artifact => (
-                    <div 
-                      key={artifact.id}
-                      className="border rounded-lg overflow-hidden"
-                      style={{ 
-                        borderColor: COLORS.cyan + '40',
-                        backgroundColor: COLORS.javaribg 
-                      }}
-                    >
-                      {/* Artifact Header with Tabs */}
-                      <div className="p-3 border-b" style={{ borderColor: COLORS.cyan + '40' }}>
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            <FileText className="w-4 h-4" style={{ color: COLORS.cyan }} />
-                            <span className="text-white text-sm font-medium">{artifact.name}</span>
-                          </div>
-                          <span className="text-xs text-white/60">{artifact.size}</span>
-                        </div>
-                        {/* Code/Preview Tabs */}
-                        <div className="flex gap-1">
-                          <button
-                            onClick={() => setArtifactViewMode(prev => ({ ...prev, [artifact.id]: 'code' }))}
-                            className={`px-3 py-1 text-xs rounded-t ${
-                              artifactViewMode[artifact.id] !== 'preview' 
-                                ? 'bg-cyan-600 text-white' 
-                                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                            }`}
-                          >
-                            Code
-                          </button>
-                          <button
-                            onClick={() => setArtifactViewMode(prev => ({ ...prev, [artifact.id]: 'preview' }))}
-                            className={`px-3 py-1 text-xs rounded-t ${
-                              artifactViewMode[artifact.id] === 'preview' 
-                                ? 'bg-cyan-600 text-white' 
-                                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                            }`}
-                          >
-                            ▶ Preview
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Artifact Content - Code or Preview */}
-                      <div className="relative">
-                        {artifactViewMode[artifact.id] === 'preview' ? (
-                          <div className="h-64 bg-slate-800">
-                            <iframe
-                              srcDoc={generatePreviewHTML(artifact.content, artifact.language || 'tsx')}
-                              className="w-full h-full border-0"
-                              sandbox="allow-scripts"
-                              title={`Preview: ${artifact.name}`}
-                            />
-                          </div>
-                        ) : (
-                          <div className="p-3 max-h-48 overflow-auto">
-                            <pre className="text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
-                              <code>{artifact.content}</code>
-                            </pre>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Artifact Actions - Claude Style */}
-                      <div className="p-3 border-t flex items-center gap-2" style={{ borderColor: COLORS.cyan + '40' }}>
-                        {/* Primary Action: Copy */}
-                        <Button
-                          size="sm"
-                          onClick={() => copyArtifact(artifact.id, artifact.content)}
-                          className="flex-1"
-                          style={{
-                            backgroundColor: copiedArtifacts[artifact.id] ? COLORS.cyan : COLORS.cyan,
-                            color: COLORS.navy,
-                          }}
-                        >
-                          {copiedArtifacts[artifact.id] ? (
-                            <>
-                              <Check className="w-3 h-3 mr-2" />
-                              Copied!
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-3 h-3 mr-2" />
-                              Copy
-                            </>
-                          )}
-                        </Button>
-
-                        {/* Secondary Actions: More Dropdown */}
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              style={{ borderColor: COLORS.cyan, color: COLORS.cyan }}
-                            >
-                              <MoreVertical className="w-3 h-3" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => downloadArtifact(artifact, artifact.type)}>
-                              <Download className="w-4 h-4 mr-2" />
-                              Download as .{artifact.type}
-                            </DropdownMenuItem>
-                            {artifact.type === 'code' && (
-                              <>
-                                <DropdownMenuItem onClick={() => downloadArtifact(artifact, 'ts')}>
-                                  <Download className="w-4 h-4 mr-2" />
-                                  Download as .ts
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => downloadArtifact(artifact, 'tsx')}>
-                                  <Download className="w-4 h-4 mr-2" />
-                                  Download as .tsx
-                                </DropdownMenuItem>
-                              </>
-                            )}
-                            {artifact.type === 'document' && (
-                              <>
-                                <DropdownMenuItem onClick={() => downloadArtifact(artifact, 'md')}>
-                                  <Download className="w-4 h-4 mr-2" />
-                                  Download as .md
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => downloadArtifact(artifact, 'txt')}>
-                                  <Download className="w-4 h-4 mr-2" />
-                                  Download as .txt
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => downloadArtifact(artifact, 'pdf')}>
-                                  <Download className="w-4 h-4 mr-2" />
-                                  Download as .pdf
-                                </DropdownMenuItem>
-                              </>
-                            )}
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={() => window.print()}>
-                              <Printer className="w-4 h-4 mr-2" />
-                              Print
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </ScrollArea>
-          </div>
-        )}
-
-        {/* Right sidebar toggle - Hidden on mobile */}
-        <div className="hidden md:block absolute right-0 top-1/2 -translate-y-1/2 z-10">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setRightSidebarOpen(!rightSidebarOpen)}
-            style={{ borderColor: COLORS.cyan }}
-          >
-            {rightSidebarOpen ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
-          </Button>
         </div>
       </div>
 
-      {/* AI Selection Confirmation Modal */}
-      {aiSelectionModal.show && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div 
-            className="rounded-lg p-6 max-w-md w-full mx-4"
-            style={{ backgroundColor: COLORS.navy, border: `1px solid ${COLORS.cyan}40` }}
+      {/* ============== RIGHT SIDEBAR ============== */}
+      <div 
+        className={`${rightSidebarOpen ? 'w-72' : 'w-0'} transition-all duration-300 overflow-hidden border-l flex flex-col`}
+        style={{ borderColor: COLORS.cyan + '30' }}
+      >
+        {/* Javari Avatar Section */}
+        <div className="p-6 border-b flex flex-col items-center" style={{ borderColor: COLORS.cyan + '30' }}>
+          <div className="relative mb-3">
+            <Image
+              src="/avatars/javariavatar.png"
+              alt="Javari Avatar"
+              width={80}
+              height={80}
+              className="rounded-full object-cover"
+              style={{
+                border: `3px solid ${COLORS.javariCyan}`,
+                boxShadow: `0 0 25px ${COLORS.javariCyan}60`,
+              }}
+            />
+            {/* Live Indicator */}
+            <div className="absolute bottom-1 right-1 w-4 h-4 rounded-full bg-green-500 border-2 border-slate-900 animate-pulse" />
+          </div>
+          <p className="text-white font-semibold">Javari</p>
+          <p className="text-xs text-gray-400">Online • Ready to help</p>
+          <p className="text-xs mt-1" style={{ color: COLORS.cyan }}>
+            Using: {AI_PROVIDERS.find(p => p.id === selectedProvider)?.name}
+          </p>
+          
+          {/* Operator Mode Toggle */}
+          <button
+            onClick={() => {
+              setOperatorMode(!operatorMode);
+              if (operatorMode) setCanonicalSpecsLoaded(false); // Reset when turning off
+            }}
+            className={`mt-3 px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
+              operatorMode 
+                ? 'bg-yellow-500/20 text-yellow-400 ring-1 ring-yellow-500/50' 
+                : 'bg-white/5 text-gray-400 hover:text-white'
+            }`}
           >
-            <div className="flex items-start justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <AlertCircle className="w-5 h-5" style={{ color: COLORS.javariCyan }} />
-                <h3 className="text-white font-medium text-lg">Switch AI Model?</h3>
-              </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setAiSelectionModal({ ...aiSelectionModal, show: false })}
-              >
-                <X className="w-4 h-4 text-white/70 hover:text-white" />
-              </Button>
+            <Zap className="w-3 h-3" />
+            Operator Mode {operatorMode ? 'ON' : 'OFF'}
+          </button>
+          
+          {/* Operator Mode Hint */}
+          {operatorMode && (
+            <p className="mt-2 text-xs text-gray-500 text-center px-2">
+              Routes operator commands only.<br/>Normal questions still work.
+            </p>
+          )}
+          
+          {/* Citations Disabled Badge - shows when Operator Mode active with specs */}
+          {operatorMode && canonicalSpecsLoaded && (
+            <div className="mt-2 px-2 py-1 rounded bg-red-500/20 text-red-400 text-xs flex items-center gap-1">
+              <X className="w-3 h-3" />
+              Specs Loaded • Operator Ready
             </div>
+          )}
+        </div>
 
-            <div className="space-y-4">
-              <div className="p-4 rounded-lg" style={{ backgroundColor: COLORS.javaribg }}>
-                <p className="text-white text-sm mb-3">
-                  {selectedAI === 'auto' ? 'Javari recommends' : 'Currently using'}:
-                </p>
-                <div className="flex items-center justify-between mb-4 p-3 rounded border" style={{ borderColor: COLORS.cyan + '40' }}>
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">{aiProviders[aiSelectionModal.currentAI]?.icon}</span>
-                    <div>
-                      <div className="text-white font-medium">{aiProviders[aiSelectionModal.currentAI]?.name}</div>
-                      <div className="text-xs text-white/60">{aiProviders[aiSelectionModal.currentAI]?.description}</div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-white font-medium">{aiSelectionModal.currentCredits} credits</div>
-                    <div className="text-xs text-white/60">per message</div>
-                  </div>
+        {/* Documents Section */}
+        <div className="flex-1 overflow-hidden flex flex-col">
+          <div className="p-4 border-b" style={{ borderColor: COLORS.cyan + '30' }}>
+            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+              <FileText className="w-4 h-4" style={{ color: COLORS.cyan }} />
+              Documents ({readyDocsCount})
+            </h3>
+            {/* P0 UX FIX: Hint about pasting docs */}
+            {TEXT_DOCS_ENABLED && readyDocsCount === 0 && (
+              <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
+                <Clipboard className="w-3 h-3" />
+                Paste FILE blocks in chat
+              </p>
+            )}
+          </div>
+
+          {/* Upload Zone */}
+          <div
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+            className={`
+              m-4 border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all
+              ${isDragging ? 'border-cyan-400 bg-cyan-400/10' : 'border-white/20 hover:border-white/40 bg-white/5'}
+            `}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+            <Upload className={`w-8 h-8 mx-auto mb-2 ${isDragging ? 'text-cyan-400' : 'text-gray-400'}`} />
+            <p className="text-white text-sm font-medium">Drop files here</p>
+            <p className="text-xs text-gray-400">or click to browse</p>
+          </div>
+
+          {/* Document List */}
+          <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-2">
+            {documents.map(doc => (
+              <div
+                key={doc.id}
+                className="flex items-center gap-2 p-2.5 bg-white/5 rounded-lg group"
+              >
+                <div className={`
+                  w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0
+                  ${doc.status === 'ready' ? 'bg-green-500/20 text-green-400' :
+                    doc.status === 'error' ? 'bg-red-500/20 text-red-400' :
+                    'bg-cyan-500/20 text-cyan-400'}
+                `}>
+                  {doc.status === 'processing' 
+                    ? <Loader2 className="w-4 h-4 animate-spin" />
+                    : doc.status === 'ready' 
+                      ? <Check className="w-4 h-4" />
+                      : <AlertCircle className="w-4 h-4" />
+                  }
                 </div>
-
-                <div className="flex items-center justify-center mb-4">
-                  <ChevronRight className="w-5 h-5 text-white/50" />
-                </div>
-
-                <p className="text-white text-sm mb-3">Switching to:</p>
-                <div className="flex items-center justify-between p-3 rounded border" style={{ borderColor: COLORS.javariCyan }}>
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">{aiProviders[aiSelectionModal.newAI]?.icon}</span>
-                    <div>
-                      <div className="text-white font-medium">{aiProviders[aiSelectionModal.newAI]?.name}</div>
-                      <div className="text-xs text-white/60">{aiProviders[aiSelectionModal.newAI]?.description}</div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-white font-medium">{aiSelectionModal.newCredits} credits</div>
-                    <div className="text-xs text-white/60">per message</div>
-                  </div>
-                </div>
-              </div>
-
-              {aiSelectionModal.newCredits !== aiSelectionModal.currentCredits && (
-                <div 
-                  className="p-3 rounded-lg text-center"
-                  style={{ 
-                    backgroundColor: aiSelectionModal.newCredits > aiSelectionModal.currentCredits ? COLORS.red + '20' : COLORS.cyan + '20',
-                    border: `1px solid ${aiSelectionModal.newCredits > aiSelectionModal.currentCredits ? COLORS.red : COLORS.cyan}60`
-                  }}
-                >
-                  <p className="text-sm text-white">
-                    {aiSelectionModal.newCredits > aiSelectionModal.currentCredits ? (
-                      <>⚠️ This will use {aiSelectionModal.newCredits - aiSelectionModal.currentCredits} more credits per message</>
-                    ) : (
-                      <>✅ This will save {aiSelectionModal.currentCredits - aiSelectionModal.newCredits} credits per message</>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-white truncate flex items-center gap-1">
+                    {doc.name}
+                    {/* P0 UX FIX: Badge for pasted docs */}
+                    {doc.isVirtual && (
+                      <Clipboard className="w-3 h-3 text-cyan-400 flex-shrink-0" title="Pasted document" />
                     )}
                   </p>
+                  <p className="text-xs text-gray-500">{(doc.size/1024).toFixed(1)} KB</p>
                 </div>
-              )}
-
-              <div className="flex gap-3">
-                <Button
-                  className="flex-1"
-                  variant="outline"
-                  onClick={() => setAiSelectionModal({ ...aiSelectionModal, show: false })}
-                  style={{ borderColor: COLORS.cyan, color: COLORS.cyan }}
+                <button
+                  onClick={() => removeDocument(doc.id)}
+                  className="p-1 opacity-0 group-hover:opacity-100 hover:bg-white/10 rounded text-gray-400 hover:text-white transition"
                 >
-                  Cancel
-                </Button>
-                <Button
-                  className="flex-1"
-                  onClick={confirmAIChange}
-                  style={{ backgroundColor: COLORS.red, color: 'white' }}
-                >
-                  Switch AI
-                </Button>
+                  <X className="w-4 h-4" />
+                </button>
               </div>
-            </div>
+            ))}
           </div>
         </div>
-      )}
+      </div>
 
-      {/* Prompt Hints Bar */}
-      <PromptHintsBar />
+      {/* Toggle Right Sidebar */}
+      <button
+        onClick={() => setRightSidebarOpen(!rightSidebarOpen)}
+        className="absolute right-0 top-1/2 -translate-y-1/2 z-10 p-1.5 rounded-l-lg bg-slate-800 text-gray-400 hover:text-white transition-all"
+        style={{ right: rightSidebarOpen ? '286px' : '0' }}
+      >
+        {rightSidebarOpen ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+      </button>
     </div>
   );
 }
 
-
-
-
+export default MainJavariInterface;

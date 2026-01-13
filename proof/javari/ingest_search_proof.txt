@@ -1,0 +1,270 @@
+# =============================================================================
+# JAVARI PHASE 1 PROOF: KNOWLEDGE INGESTION & SEARCH
+# =============================================================================
+# File: /proof/javari/ingest_search_proof.txt
+# Created: January 8, 2026 - 11:25 AM EST
+# Purpose: Prove that Phase 1 endpoints work correctly
+# =============================================================================
+
+## SETUP
+
+Base URL: https://javari-ai.vercel.app (or current deployment URL)
+
+## TEST 1: Ingest knowledge from allowed source (Claude chat)
+
+```bash
+curl -X POST "https://javari-ai.vercel.app/api/learning/ingest" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source_type": "chat",
+    "source_name": "claude",
+    "source_url": null,
+    "license_or_tos_url": null,
+    "content_type": "text/plain",
+    "raw_content": "The best way to handle TypeScript strict mode errors is to fix them at the source rather than suppressing them. Use explicit type annotations and avoid any types.",
+    "tags": ["typescript", "best-practices", "model-output"]
+  }'
+```
+
+Expected Response:
+```json
+{
+  "success": true,
+  "id": "uuid-here",
+  "content_hash": "sha256-hash",
+  "tags": ["typescript", "best-practices", "model-output", "chat", "claude"],
+  "message": "Knowledge ingested successfully",
+  "timestamp": "2026-01-08T..."
+}
+```
+
+## TEST 2: Ingest knowledge from documentation source
+
+```bash
+curl -X POST "https://javari-ai.vercel.app/api/learning/ingest" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source_type": "doc",
+    "source_name": "nextjs-docs",
+    "source_url": "https://nextjs.org/docs/app/api-reference/functions/next-response",
+    "license_or_tos_url": "https://github.com/vercel/next.js/blob/canary/license.md",
+    "content_type": "text/markdown",
+    "raw_content": "NextResponse extends the Web Response API with additional convenience methods. Use NextResponse.json() to return JSON responses from Route Handlers.",
+    "tags": ["nextjs", "api", "response"]
+  }'
+```
+
+Expected Response:
+```json
+{
+  "success": true,
+  "id": "uuid-here",
+  "content_hash": "sha256-hash",
+  "tags": ["nextjs", "api", "response", "doc", "nextjs-docs"],
+  "message": "Knowledge ingested successfully",
+  "timestamp": "2026-01-08T..."
+}
+```
+
+## TEST 3: Reject ingestion from disallowed source
+
+```bash
+curl -X POST "https://javari-ai.vercel.app/api/learning/ingest" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source_type": "web",
+    "source_name": "random-scraper",
+    "source_url": "https://example.com/scraped",
+    "license_or_tos_url": null,
+    "content_type": "text/plain",
+    "raw_content": "This should be rejected",
+    "tags": ["test"]
+  }'
+```
+
+Expected Response:
+```json
+{
+  "success": false,
+  "error": "Source \"random-scraper\" is not in the allowed sources list. See JAVARI_KNOWLEDGE_POLICY.md",
+  "timestamp": "2026-01-08T..."
+}
+```
+Status: 403
+
+## TEST 4: Duplicate detection
+
+```bash
+# Run the same request as TEST 1 again
+curl -X POST "https://javari-ai.vercel.app/api/learning/ingest" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source_type": "chat",
+    "source_name": "claude",
+    "source_url": null,
+    "license_or_tos_url": null,
+    "content_type": "text/plain",
+    "raw_content": "The best way to handle TypeScript strict mode errors is to fix them at the source rather than suppressing them. Use explicit type annotations and avoid any types.",
+    "tags": ["typescript", "best-practices", "model-output"]
+  }'
+```
+
+Expected Response:
+```json
+{
+  "success": true,
+  "duplicate": true,
+  "existing_id": "uuid-from-test-1",
+  "message": "Content already exists in knowledge base",
+  "timestamp": "2026-01-08T..."
+}
+```
+
+## TEST 5: Search knowledge base
+
+```bash
+curl -X GET "https://javari-ai.vercel.app/api/learning/ingest?q=typescript+errors&k=10"
+```
+
+Expected Response:
+```json
+{
+  "success": true,
+  "query": "typescript errors",
+  "count": 1,
+  "results": [
+    {
+      "id": "uuid",
+      "snippet": "The best way to handle TypeScript strict mode errors is to fix them at the source...",
+      "source_name": "claude",
+      "source_url": null,
+      "source_type": "chat",
+      "created_at": "2026-01-08T...",
+      "confidence": 0.95,
+      "tags": ["typescript", "best-practices", "model-output", "chat", "claude"]
+    }
+  ],
+  "timestamp": "2026-01-08T..."
+}
+```
+
+## TEST 6: Log a decision
+
+```bash
+curl -X POST "https://javari-ai.vercel.app/api/decisions/log" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "decision": "Use TypeScript strict mode in all new projects",
+    "adopted": true,
+    "rationale": "Strict mode catches bugs at compile time, reducing production errors. The initial setup cost is worth the long-term maintenance benefits.",
+    "links": ["https://www.typescriptlang.org/tsconfig#strict"],
+    "category": "coding-standards",
+    "impact_level": "high",
+    "context": {
+      "projects_affected": ["javari-ai", "javari-builder", "all-new-repos"]
+    }
+  }'
+```
+
+Expected Response:
+```json
+{
+  "success": true,
+  "id": "decision-uuid",
+  "message": "Decision logged successfully",
+  "timestamp": "2026-01-08T..."
+}
+```
+
+## TEST 7: Retrieve decisions
+
+```bash
+curl -X GET "https://javari-ai.vercel.app/api/decisions/log?limit=10&category=coding-standards"
+```
+
+Expected Response:
+```json
+{
+  "success": true,
+  "count": 1,
+  "stats": {
+    "total": 1,
+    "adopted": 1,
+    "rejected": 0,
+    "by_impact": {
+      "critical": 0,
+      "high": 1,
+      "medium": 0,
+      "low": 0
+    }
+  },
+  "decisions": [
+    {
+      "id": "decision-uuid",
+      "decision": "Use TypeScript strict mode in all new projects",
+      "adopted": true,
+      "rationale": "...",
+      "links": ["https://..."],
+      "category": "coding-standards",
+      "impact_level": "high",
+      "context": {...},
+      "created_at": "2026-01-08T...",
+      "outcome": null,
+      "outcome_recorded_at": null
+    }
+  ],
+  "timestamp": "2026-01-08T..."
+}
+```
+
+## TEST 8: Record decision outcome
+
+```bash
+curl -X PATCH "https://javari-ai.vercel.app/api/decisions/log" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "decision-uuid-from-test-6",
+    "outcome": "Successfully implemented across all repos. Caught 47 type errors during migration that would have been runtime bugs."
+  }'
+```
+
+Expected Response:
+```json
+{
+  "success": true,
+  "id": "decision-uuid",
+  "message": "Decision outcome recorded",
+  "timestamp": "2026-01-08T..."
+}
+```
+
+## VERIFICATION CHECKLIST
+
+After running all tests, verify:
+
+- [ ] TEST 1: Returns success with id and content_hash
+- [ ] TEST 2: Returns success with license validation
+- [ ] TEST 3: Returns 403 with rejection message
+- [ ] TEST 4: Returns duplicate: true with existing_id
+- [ ] TEST 5: Returns search results with snippets and confidence
+- [ ] TEST 6: Returns success with decision id
+- [ ] TEST 7: Returns decisions with stats
+- [ ] TEST 8: Returns success with outcome recorded
+
+## ACCEPTANCE CRITERIA
+
+Phase 1 is COMPLETE when:
+
+1. ✅ JAVARI_SYSTEM_CARD.md exists and defines identity/scope
+2. ✅ JAVARI_KNOWLEDGE_POLICY.md exists and defines allowed sources
+3. ✅ POST /api/learning/ingest accepts and validates knowledge
+4. ✅ GET /api/learning/ingest?q=... returns search results with citations
+5. ✅ POST /api/decisions/log logs decisions with rationale
+6. ✅ Supabase tables exist: javari_knowledge_items, javari_decisions, javari_ingestion_logs
+7. ✅ This proof file exists with working curl commands
+
+## NEXT STEPS
+
+After Phase 1 passes:
+→ Move to Phase 2: Operator Loop + Proof Pack automation
+→ See JAVARI_TOP_AI_PATH.md for details

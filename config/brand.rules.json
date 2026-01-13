@@ -1,0 +1,120 @@
+{
+  "brandName": "CR AudioViz AI",
+  "companyLegal": "CR AudioViz AI, LLC",
+  "aiAssistant": "Javari AI",
+  "tagline": "Your Story. Our Design",
+  "domain": "craudiovizai.com",
+  
+  "requiredTokens": {
+    "brandPrimary": ["CR AudioViz AI", "CRAudioVizAI", "craudiovizai"],
+    "aiAssistant": ["Javari AI", "Javari", "JavariAI"],
+    "virtualWorld": ["CRAIverse"]
+  },
+  
+  "deprecatedTokens": {
+    "oldBranding": [
+      "CravBarrels",
+      "CravCards", 
+      "CravKey",
+      "Crav ",
+      "CRAV"
+    ],
+    "reasoning": "All Crav branding consolidated to Javari per brand guidelines"
+  },
+  
+  "cssVariables": {
+    "primaryColor": "--brand-primary",
+    "secondaryColor": "--brand-secondary",
+    "accentColor": "--brand-accent",
+    "expectedValues": {
+      "--brand-primary": "#",
+      "--brand-secondary": "#",
+      "--brand-accent": "#"
+    }
+  },
+  
+  "requiredElements": {
+    "header": {
+      "selector": "header, [role='banner'], nav[aria-label*='main'], .header, #header",
+      "mustContain": ["logo", "navigation"]
+    },
+    "footer": {
+      "selector": "footer, [role='contentinfo'], .footer, #footer",
+      "mustContain": ["copyright", "links"]
+    },
+    "logo": {
+      "selector": "img[alt*='logo'], img[alt*='Logo'], .logo, #logo, [aria-label*='logo']",
+      "altTextPattern": "(CR AudioViz|CRAudioViz|Javari|logo)"
+    }
+  },
+  
+  "metaRequirements": {
+    "titleMinLength": 30,
+    "titleMaxLength": 60,
+    "descriptionMinLength": 120,
+    "descriptionMaxLength": 160,
+    "titleMustContain": [],
+    "descriptionMustContain": []
+  },
+  
+  "e2eFlows": {
+    "login": {
+      "path": "/login",
+      "successRedirect": "/dashboard",
+      "elements": {
+        "emailInput": "input[type='email'], input[name='email'], #email",
+        "passwordInput": "input[type='password'], input[name='password'], #password",
+        "submitButton": "button[type='submit'], input[type='submit'], .login-button"
+      }
+    },
+    "dashboard": {
+      "path": "/dashboard",
+      "requiredElements": ["nav", "main", ".dashboard-content, [data-testid='dashboard']"]
+    },
+    "logout": {
+      "trigger": "button:has-text('Logout'), button:has-text('Sign out'), a:has-text('Logout'), [data-testid='logout']",
+      "successRedirect": "/login"
+    }
+  },
+  
+  "crawlConfig": {
+    "maxDepth": 3,
+    "maxPages": 100,
+    "timeout": 30000,
+    "viewports": {
+      "desktop": { "width": 1920, "height": 1080 },
+      "mobile": { "width": 390, "height": 844 }
+    },
+    "excludePatterns": [
+      "/api/",
+      "/admin/",
+      "/_next/",
+      "/static/",
+      ".pdf",
+      ".zip",
+      ".png",
+      ".jpg",
+      ".svg"
+    ],
+    "includePaths": [
+      "/",
+      "/login",
+      "/signup",
+      "/dashboard",
+      "/tools",
+      "/apps",
+      "/games",
+      "/about",
+      "/pricing",
+      "/contact"
+    ]
+  },
+  
+  "reporting": {
+    "outputDir": "evidence/brand-audit",
+    "screenshotDir": "evidence/brand-audit/screenshots",
+    "reportDir": "reports",
+    "jsonOutput": "brand-audit-results.json",
+    "mdOutput": "BRAND_AUDIT_REPORT"
+  }
+}
