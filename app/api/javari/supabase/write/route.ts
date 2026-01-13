@@ -7,7 +7,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import telemetryEngine from '@/lib/telemetry-engine';
 
 // Whitelist of allowed tables
 const ALLOWED_TABLES = ['projects', 'milestones'] as const;
@@ -38,7 +37,6 @@ export async function POST(req: NextRequest): Promise<NextResponse<WriteResponse
     // Feature flag check
     const writeEnabled = process.env.FEATURE_SUPABASE_WRITE === '1';
     if (!writeEnabled) {
-      telemetryEngine.emitProgress('supabase-write', 0);
       return NextResponse.json({
         success: false,
         error: 'Supabase write proxy is disabled (FEATURE_SUPABASE_WRITE=0)',
@@ -51,7 +49,6 @@ export async function POST(req: NextRequest): Promise<NextResponse<WriteResponse
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (!supabaseUrl || !serviceRoleKey) {
-      telemetryEngine.emitProgress('supabase-write', 0);
       return NextResponse.json({
         success: false,
         error: 'Missing Supabase credentials',
@@ -75,7 +72,6 @@ export async function POST(req: NextRequest): Promise<NextResponse<WriteResponse
 
     // Validate table whitelist
     if (!ALLOWED_TABLES.includes(table as AllowedTable)) {
-      telemetryEngine.emitProgress('supabase-write', 0);
       return NextResponse.json({
         success: false,
         error: `Table '${table}' not in whitelist. Allowed: ${ALLOWED_TABLES.join(', ')}`,
@@ -85,7 +81,6 @@ export async function POST(req: NextRequest): Promise<NextResponse<WriteResponse
 
     // Validate operation whitelist
     if (!ALLOWED_OPERATIONS.includes(operation as AllowedOperation)) {
-      telemetryEngine.emitProgress('supabase-write', 0);
       return NextResponse.json({
         success: false,
         error: `Operation '${operation}' not allowed. Allowed: ${ALLOWED_OPERATIONS.join(', ')}`,
@@ -119,7 +114,6 @@ export async function POST(req: NextRequest): Promise<NextResponse<WriteResponse
       },
     });
 
-    let result;
     const recordIds: string[] = [];
 
     // Execute operation
@@ -141,8 +135,6 @@ export async function POST(req: NextRequest): Promise<NextResponse<WriteResponse
           recordIds.push(insertedData.id);
         }
       }
-
-      result = insertedData;
     } else if (operation === 'update') {
       let query = supabase.from(table).update(data);
 
@@ -165,16 +157,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<WriteResponse
           recordIds.push(updatedData.id);
         }
       }
-
-      result = updatedData;
     }
-
-    // Emit success telemetry
-    telemetryEngine.emitProgress('supabase-write', 100);
-    telemetryEngine.emitHeartbeat(
-      'supabase-write',
-      `${operation} on ${table}: ${recordIds.length} record(s)`
-    );
 
     return NextResponse.json({
       success: true,
@@ -183,9 +166,6 @@ export async function POST(req: NextRequest): Promise<NextResponse<WriteResponse
     }, { status: 200 });
 
   } catch (error) {
-    // Emit failure telemetry
-    telemetryEngine.emitProgress('supabase-write', 0);
-    
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     
     return NextResponse.json({
