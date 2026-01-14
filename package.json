@@ -2,9 +2,12 @@
   "name": "javari-ai",
   "version": "1.0.0",
   "scripts": {
-    "security:telemetry-smoke": "node --loader ts-node/esm orchestrator/tests/telemetry-smoke.ts"
+    "security:telemetry-smoke": "node --loader ts-node/esm orchestrator/tests/telemetry-smoke.ts",
+    "env:verify": "bash scripts/env-verify-run.sh"
   },
   "devDependencies": {
-    "ts-node": "^10.9.2"
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3",
+    "@types/node": "^20.10.6"
   }
 }
