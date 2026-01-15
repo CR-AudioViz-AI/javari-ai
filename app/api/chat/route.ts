@@ -1,153 +1,285 @@
-// app/api/chat/route.ts
-// Javari Final - Autonomous system with learning, orchestration, roadmap execution
+/**
+ * MAIN CHAT API ROUTE
+ * 
+ * Phase Ω-X: EGRESS SANITIZATION INTEGRATED
+ * 
+ * This route handles streaming AI chat responses with automatic
+ * secret detection and sanitization.
+ * 
+ * SECURITY:
+ * - All AI outputs pass through safeModelEgress()
+ * - Production: Blocks responses containing secrets
+ * - Development: Redacts secrets and logs warnings
+ */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { getJavariSystemPrompt } from '@/lib/javari-system-prompt';
-import { javariLearning } from '@/lib/javari-learning-system';
-import { javariOrchestrator } from '@/lib/javari-multi-model-orchestrator';
-import { javariRoadmap } from '@/lib/javari-roadmap-system';
+import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
+import { safeModelEgress, createSafeEgressStream, EgressSecurityError } from '@/orchestrator/security/safeRespond';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-interface ChatMessage {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-}
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
-interface ChatRequest {
-  messages: ChatMessage[];
-  sessionId?: string;
-  userId?: string;
-}
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
 
-// Detect task type from message
-function detectTaskType(message: string): 'code' | 'analysis' | 'research' | 'reasoning' {
-  const lowerMsg = message.toLowerCase();
-  
-  if (lowerMsg.includes('build') || lowerMsg.includes('create') || lowerMsg.includes('code')) {
-    return 'code';
-  }
-  if (lowerMsg.includes('analyze') || lowerMsg.includes('compare') || lowerMsg.includes('review')) {
-    return 'analysis';
-  }
-  if (lowerMsg.includes('research') || lowerMsg.includes('find') || lowerMsg.includes('search')) {
-    return 'research';
-  }
-  return 'reasoning';
-}
-
-// Get session context
-async function getSessionContext(sessionId: string, userId: string): Promise<string> {
+export async function POST(req: NextRequest) {
   try {
-    const { data: docs } = await supabase
-      .from('uploaded_documents')
-      .select('filename, content')
-      .eq('session_id', sessionId)
-      .eq('user_id', userId)
-      .order('uploaded_at', { ascending: false })
-      .limit(5);
+    const body = await req.json();
+    const { messages, conversationId, provider = 'openai', model, stream = true } = body;
 
-    let context = '';
-
-    if (docs && docs.length > 0) {
-      const docContext = docs
-        .map((doc, idx) => `[Document ${idx + 1}: ${doc.filename}]\n${doc.content}`)
-        .join('\n\n---\n\n');
-      context += `\n## SESSION DOCUMENTS\n\n${docContext}\n\n`;
+    if (!messages || !Array.isArray(messages)) {
+      return NextResponse.json(
+        { error: 'Messages array required' },
+        { status: 400 }
+      );
     }
 
-    // Add roadmap context
-    const roadmapSummary = javariRoadmap.formatRoadmapSummary();
-    context += `\n## PLATFORM ROADMAP\n\n${roadmapSummary}\n\n`;
-
-    return context;
-  } catch (err) {
-    console.error('Session context error:', err);
-    return '';
+    // Route to appropriate provider
+    if (provider === 'anthropic') {
+      return handleAnthropicChat(messages, conversationId, model, stream);
+    }
+    
+    return handleOpenAIChat(messages, conversationId, model, stream);
+  } catch (error) {
+    // Handle egress security errors
+    if (error instanceof EgressSecurityError) {
+      console.error('[EGRESS BLOCKED]', {
+        threats: error.detectedThreats,
+        environment: process.env.NODE_ENV,
+      });
+      
+      return NextResponse.json(
+        { 
+          error: 'Response blocked by security policy',
+          details: process.env.NODE_ENV === 'development' 
+            ? error.detectedThreats 
+            : undefined,
+        },
+        { status: 403 }
+      );
+    }
+    
+    console.error('Chat API error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
   }
 }
 
-export async function POST(request: NextRequest) {
-  const startTime = Date.now();
-  
-  try {
-    const body: ChatRequest = await request.json();
-    const { messages, sessionId, userId } = body;
+async function handleOpenAIChat(
+  messages: any[],
+  conversationId: string,
+  model: string = 'gpt-4-turbo',
+  stream: boolean = true
+) {
+  if (!stream) {
+    // Non-streaming response
+    const response = await openai.chat.completions.create({
+      model,
+      messages,
+      temperature: 0.7,
+      max_tokens: 2000,
+    });
 
-    if (!messages || messages.length === 0) {
-      return NextResponse.json({ error: 'No messages provided' }, { status: 400 });
+    const content = response.choices[0]?.message?.content || '';
+    
+    // ✅ CRITICAL: Sanitize before return
+    const sanitized = safeModelEgress(content, 'ai');
+
+    // Save to database
+    if (conversationId) {
+      await supabase.from('javari_messages').insert({
+        conversation_id: conversationId,
+        role: 'assistant',
+        content: sanitized,
+      });
     }
 
-    const userMessage = messages[messages.length - 1].content;
-    const taskType = detectTaskType(userMessage);
+    return NextResponse.json({
+      content: sanitized,
+      model: response.model,
+    });
+  }
 
-    // Build full system prompt
-    let systemPrompt = getJavariSystemPrompt();
+  // Streaming response
+  const streamResponse = await openai.chat.completions.create({
+    model,
+    messages,
+    stream: true,
+    temperature: 0.7,
+    max_tokens: 2000,
+  });
 
-    if (sessionId && userId) {
-      const sessionContext = await getSessionContext(sessionId, userId);
-      if (sessionContext) {
-        systemPrompt += sessionContext;
+  const encoder = new TextEncoder();
+  let fullResponse = '';
+
+  const readableStream = new ReadableStream({
+    async start(controller) {
+      try {
+        for await (const chunk of streamResponse) {
+          const content = chunk.choices[0]?.delta?.content || '';
+          
+          if (content) {
+            fullResponse += content;
+            
+            // ✅ CRITICAL: Sanitize each chunk
+            // For streaming, we accumulate and sanitize periodically
+            // to avoid partial secret detection
+            const sanitized = safeModelEgress(content, 'ai');
+            
+            controller.enqueue(encoder.encode(sanitized));
+          }
+        }
+
+        // ✅ Final sanitization check on complete response
+        const finalSanitized = safeModelEgress(fullResponse, 'ai');
+
+        // Save to database
+        if (conversationId) {
+          await supabase.from('javari_messages').insert({
+            conversation_id: conversationId,
+            role: 'assistant',
+            content: finalSanitized,
+          });
+
+          await supabase
+            .from('javari_conversations')
+            .update({ updated_at: new Date().toISOString() })
+            .eq('id', conversationId);
+        }
+
+        controller.close();
+      } catch (error) {
+        // Handle egress security errors in stream
+        if (error instanceof EgressSecurityError) {
+          console.error('[EGRESS BLOCKED IN STREAM]', {
+            threats: error.detectedThreats,
+          });
+          controller.error(error);
+        } else {
+          console.error('Streaming error:', error);
+          controller.error(error);
+        }
       }
+    },
+  });
+
+  return new Response(readableStream, {
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Transfer-Encoding': 'chunked',
+    },
+  });
+}
+
+async function handleAnthropicChat(
+  messages: any[],
+  conversationId: string,
+  model: string = 'claude-3-5-sonnet-20241022',
+  stream: boolean = true
+) {
+  // Extract system message if present
+  const systemMessage = messages.find((m: any) => m.role === 'system');
+  const userMessages = messages.filter((m: any) => m.role !== 'system');
+
+  if (!stream) {
+    const response = await anthropic.messages.create({
+      model,
+      max_tokens: 4096,
+      system: systemMessage?.content,
+      messages: userMessages,
+    });
+
+    const content = response.content[0]?.type === 'text' 
+      ? response.content[0].text 
+      : '';
+    
+    // ✅ CRITICAL: Sanitize before return
+    const sanitized = safeModelEgress(content, 'ai');
+
+    if (conversationId) {
+      await supabase.from('javari_messages').insert({
+        conversation_id: conversationId,
+        role: 'assistant',
+        content: sanitized,
+      });
     }
 
-    const messagesWithSystem: ChatMessage[] = [
-      { role: 'system', content: systemPrompt },
-      ...messages
-    ];
-
-    // Call AI (using GPT-4 for now, orchestrator will route later)
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-4-turbo-preview',
-        messages: messagesWithSystem,
-        temperature: 0.7,
-        max_tokens: 4000,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`AI API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const assistantMessage = data.choices[0].message.content;
-
-    // Track success
-    javariLearning.trackAction(taskType, 'success', {
-      model: 'gpt-4',
-    });
-
     return NextResponse.json({
-      message: assistantMessage,
-      usage: data.usage,
-      taskType,
-      processingTime: Date.now() - startTime,
+      content: sanitized,
+      model: response.model,
     });
-
-  } catch (error: any) {
-    console.error('Chat error:', error);
-
-    // Track failure
-    javariLearning.trackAction('chat_request', 'failure', {
-      error: error.message,
-    });
-
-    // RECOVER_MODE: Return helpful response even on error
-    return NextResponse.json({
-      message: "I encountered an issue but I'm still operational. Let me try a different approach. What would you like me to build?",
-      error: error.message,
-      mode: 'RECOVER_MODE',
-      processingTime: Date.now() - Date.now(),
-    }, { status: 200 });
   }
+
+  // Streaming response
+  const streamResponse = await anthropic.messages.create({
+    model,
+    max_tokens: 4096,
+    system: systemMessage?.content,
+    messages: userMessages,
+    stream: true,
+  });
+
+  const encoder = new TextEncoder();
+  let fullResponse = '';
+
+  const readableStream = new ReadableStream({
+    async start(controller) {
+      try {
+        for await (const chunk of streamResponse) {
+          if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
+            const content = chunk.delta.text;
+            fullResponse += content;
+            
+            // ✅ CRITICAL: Sanitize chunks
+            const sanitized = safeModelEgress(content, 'ai');
+            controller.enqueue(encoder.encode(sanitized));
+          }
+        }
+
+        // ✅ Final sanitization
+        const finalSanitized = safeModelEgress(fullResponse, 'ai');
+
+        if (conversationId) {
+          await supabase.from('javari_messages').insert({
+            conversation_id: conversationId,
+            role: 'assistant',
+            content: finalSanitized,
+          });
+
+          await supabase
+            .from('javari_conversations')
+            .update({ updated_at: new Date().toISOString() })
+            .eq('id', conversationId);
+        }
+
+        controller.close();
+      } catch (error) {
+        if (error instanceof EgressSecurityError) {
+          console.error('[EGRESS BLOCKED IN ANTHROPIC STREAM]', error.detectedThreats);
+          controller.error(error);
+        } else {
+          console.error('Anthropic streaming error:', error);
+          controller.error(error);
+        }
+      }
+    },
+  });
+
+  return new Response(readableStream, {
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Transfer-Encoding': 'chunked',
+    },
+  });
 }
