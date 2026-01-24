@@ -1,68 +1,42 @@
-// app/layout.tsx - Root layout with SEO metadata
-import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
-import './globals.css'
+/**
+ * Javari AI - Root Layout (App Shell)
+ * SPEC 03 — Canonical Application Shell
+ * 
+ * Defines the semantic structure for all pages:
+ * - Skip-to-content link (accessibility)
+ * - Header slot (empty placeholder)
+ * - Navigation slot (empty placeholder)
+ * - Main content area (children)
+ * - Footer slot (empty placeholder)
+ * - System overlay slot (empty placeholder)
+ * 
+ * Server Component - renders without JavaScript
+ * No client state, no business logic, no navigation implementation
+ * 
+ * @version 1.0.0
+ * @spec SPEC 03
+ * @timestamp Tuesday, January 28, 2025 at 11:12 AM EST
+ */
 
-const inter = Inter({ subsets: ['latin'] })
+import type { Metadata } from 'next'
+import './globals.css'
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://javariai.com'),
   title: {
-    default: 'Javari AI - Your AI Business Partner | CR AudioViz AI',
+    default: 'Javari AI - Your AI Business Partner',
     template: '%s | Javari AI'
   },
-  description: 'Javari AI is your autonomous business partner. Use voice commands, video calls, and natural language to manage revenue, users, deployments, and more. Start free today.',
-  keywords: ['AI assistant', 'business automation', 'voice commands', 'AI COO', 'business management', 'SaaS tools', 'productivity AI'],
+  description: 'Javari AI - Your autonomous business partner for managing revenue, users, deployments, and more.',
+  keywords: ['AI assistant', 'business automation', 'Javari AI'],
   authors: [{ name: 'CR AudioViz AI, LLC' }],
-  creator: 'CR AudioViz AI, LLC',
-  publisher: 'CR AudioViz AI, LLC',
-  formatDetection: {
-    email: false,
-    telephone: false
-  },
-  openGraph: {
-    type: 'website',
-    locale: 'en_US',
-    url: 'https://javariai.com',
-    siteName: 'Javari AI',
-    title: 'Javari AI - Your AI Business Partner',
-    description: 'Run your business with voice commands. Javari AI manages revenue, users, deployments, and more autonomously.',
-    images: [
-      {
-        url: '/og-image.png',
-        width: 1200,
-        height: 630,
-        alt: 'Javari AI - Your AI Business Partner'
-      }
-    ]
-  },
-  twitter: {
-    card: 'summary_large_image',
-    title: 'Javari AI - Your AI Business Partner',
-    description: 'Run your business with voice commands. Start free with 50 credits.',
-    images: ['/og-image.png'],
-    creator: '@craudiovizai'
-  },
   robots: {
     index: true,
     follow: true,
-    googleBot: {
-      index: true,
-      follow: true,
-      'max-video-preview': -1,
-      'max-image-preview': 'large',
-      'max-snippet': -1
-    }
   },
   icons: {
     icon: '/favicon.ico',
-    shortcut: '/favicon-16x16.png',
-    apple: '/apple-touch-icon.png'
   },
-  manifest: '/site.webmanifest',
-  alternates: {
-    canonical: 'https://javariai.com'
-  }
 }
 
 export default function RootLayout({
@@ -72,33 +46,58 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{
-            __html: JSON.stringify({
-              '@context': 'https://schema.org',
-              '@type': 'SoftwareApplication',
-              name: 'Javari AI',
-              applicationCategory: 'BusinessApplication',
-              operatingSystem: 'Web',
-              offers: {
-                '@type': 'Offer',
-                price: '0',
-                priceCurrency: 'USD'
-              },
-              aggregateRating: {
-                '@type': 'AggregateRating',
-                ratingValue: '4.9',
-                ratingCount: '150'
-              }
-            })
+      <body>
+        {/* Skip-to-content link for keyboard navigation */}
+        <a 
+          href="#main-content" 
+          className="skip-to-content"
+          style={{
+            position: 'absolute',
+            left: '-9999px',
+            zIndex: 999,
+            padding: '1rem',
+            backgroundColor: 'hsl(var(--primary))',
+            color: 'hsl(var(--primary-foreground))',
+            textDecoration: 'none',
+            borderRadius: 'var(--radius-md)',
           }}
-        />
-      </head>
-      <body className={inter.className}>{children}</body>
+          onFocus={(e) => {
+            e.currentTarget.style.left = '1rem';
+            e.currentTarget.style.top = '1rem';
+          }}
+          onBlur={(e) => {
+            e.currentTarget.style.left = '-9999px';
+            e.currentTarget.style.top = 'auto';
+          }}
+        >
+          Skip to main content
+        </a>
+
+        {/* Header slot - EMPTY placeholder for future implementation */}
+        <header role="banner">
+          {/* Header content will be added in future steps */}
+        </header>
+
+        {/* Navigation slot - EMPTY placeholder for future implementation */}
+        <nav role="navigation" aria-label="Main navigation">
+          {/* Navigation content will be added in future steps */}
+        </nav>
+
+        {/* Main content area - where page children render */}
+        <main role="main" id="main-content">
+          {children}
+        </main>
+
+        {/* Footer slot - EMPTY placeholder for future implementation */}
+        <footer role="contentinfo">
+          {/* Footer content will be added in future steps */}
+        </footer>
+
+        {/* System overlay slot - EMPTY placeholder for modals, toasts, etc. */}
+        <div role="region" aria-live="polite" aria-atomic="true">
+          {/* System overlays (modals, toasts) will be added in future steps */}
+        </div>
+      </body>
     </html>
   )
 }
