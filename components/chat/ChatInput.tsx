@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { chat as javariChat } from '@/agents/javari';
 
 interface ChatInputProps {
-  onMessage?: (message: string, response: string) => void;
+  onMessage?: (message: string, response: string, sources?: Array<{ source: string; similarity: number }>) => void;
   disabled?: boolean;
 }
 
@@ -30,9 +30,9 @@ export default function ChatInput({ onMessage, disabled }: ChatInputProps) {
         { role: 'user', content: userMessage }
       ]);
 
-      // Notify parent component
+      // Notify parent component with sources
       if (onMessage) {
-        onMessage(userMessage, result.message);
+        onMessage(userMessage, result.message, result.sources);
       }
 
       // Log sources if available
