@@ -1,25 +1,27 @@
 /**
  * Javari AI - Root Layout (App Shell)
  * SPEC 03 — Canonical Application Shell
+ * Updated: Integrated SPEC 02 Navigation System
  * 
  * Defines the semantic structure for all pages:
  * - Skip-to-content link (accessibility)
  * - Header slot (empty placeholder)
- * - Navigation slot (empty placeholder)
+ * - Navigation slot (TopNav + MobileNav from SPEC 02)
  * - Main content area (children)
  * - Footer slot (empty placeholder)
  * - System overlay slot (empty placeholder)
  * 
  * Server Component - renders without JavaScript
- * No client state, no business logic, no navigation implementation
+ * Navigation components handle their own client state
  * 
- * @version 1.0.0
- * @spec SPEC 03
- * @timestamp Tuesday, January 28, 2025 at 11:12 AM EST
+ * @version 1.1.0
+ * @spec SPEC 03 + SPEC 02
+ * @timestamp Tuesday, January 28, 2025 at 11:28 AM EST
  */
 
 import type { Metadata } from 'next'
 import './globals.css'
+import { TopNav, MobileNav } from '@/components/navigation'
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://javariai.com'),
@@ -50,25 +52,7 @@ export default function RootLayout({
         {/* Skip-to-content link for keyboard navigation */}
         <a 
           href="#main-content" 
-          className="skip-to-content"
-          style={{
-            position: 'absolute',
-            left: '-9999px',
-            zIndex: 999,
-            padding: '1rem',
-            backgroundColor: 'hsl(var(--primary))',
-            color: 'hsl(var(--primary-foreground))',
-            textDecoration: 'none',
-            borderRadius: 'var(--radius-md)',
-          }}
-          onFocus={(e) => {
-            e.currentTarget.style.left = '1rem';
-            e.currentTarget.style.top = '1rem';
-          }}
-          onBlur={(e) => {
-            e.currentTarget.style.left = '-9999px';
-            e.currentTarget.style.top = 'auto';
-          }}
+          className="absolute -left-[9999px] z-[999] p-4 bg-primary text-primary-foreground no-underline rounded-md focus:left-4 focus:top-4"
         >
           Skip to main content
         </a>
@@ -78,10 +62,9 @@ export default function RootLayout({
           {/* Header content will be added in future steps */}
         </header>
 
-        {/* Navigation slot - EMPTY placeholder for future implementation */}
-        <nav role="navigation" aria-label="Main navigation">
-          {/* Navigation content will be added in future steps */}
-        </nav>
+        {/* Navigation slot - Canonical Navigation System (SPEC 02) */}
+        <TopNav />
+        <MobileNav />
 
         {/* Main content area - where page children render */}
         <main role="main" id="main-content">

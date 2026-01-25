@@ -1,16 +1,16 @@
 /**
  * Javari AI - Navigation Link Component
- * SPEC 02 — Canonical Navigation System
+ * SPEC 02 — Canonical Navigation System (Hardened)
  * 
  * Accessible navigation link with active state detection
  * - Uses Next.js Link for client-side navigation
  * - aria-current for active links
- * - Focus-visible states
- * - Design token styling
+ * - Tailwind styling with design tokens only
+ * - No inline styles or JS style mutations
  * 
- * @version 1.0.0
+ * @version 1.1.0
  * @spec SPEC 02
- * @timestamp Tuesday, January 28, 2025 at 11:22 AM EST
+ * @timestamp Tuesday, January 28, 2025 at 11:40 AM EST
  */
 
 'use client'
@@ -34,49 +34,23 @@ export function NavLink({ href, children, onClick, className = '' }: NavLinkProp
       href={href}
       onClick={onClick}
       aria-current={isActive ? 'page' : undefined}
-      className={className}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        padding: 'var(--spacing-2) var(--spacing-4)',
-        color: isActive ? 'hsl(var(--primary))' : 'hsl(var(--foreground))',
-        textDecoration: 'none',
-        fontWeight: isActive ? '600' : '500',
-        fontSize: '0.9375rem',
-        borderRadius: 'var(--radius-md)',
-        transition: 'all var(--duration-fast) var(--easing-standard)',
-        position: 'relative',
-      }}
-      onMouseEnter={(e) => {
-        if (!isActive) {
-          e.currentTarget.style.backgroundColor = 'hsl(var(--surface))'
+      className={`
+        inline-flex items-center relative
+        px-4 py-2 rounded-md
+        text-[0.9375rem] no-underline
+        transition-all duration-fast
+        focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus focus-visible:outline-offset-2
+        ${isActive 
+          ? 'text-primary font-semibold' 
+          : 'text-foreground font-medium hover:bg-surface'
         }
-      }}
-      onMouseLeave={(e) => {
-        if (!isActive) {
-          e.currentTarget.style.backgroundColor = 'transparent'
-        }
-      }}
-      onFocus={(e) => {
-        e.currentTarget.style.outline = '2px solid hsl(var(--focus))'
-        e.currentTarget.style.outlineOffset = '2px'
-      }}
-      onBlur={(e) => {
-        e.currentTarget.style.outline = 'none'
-      }}
+        ${className}
+      `}
     >
       {children}
       {isActive && (
         <span
-          style={{
-            position: 'absolute',
-            bottom: '0',
-            left: 'var(--spacing-2)',
-            right: 'var(--spacing-2)',
-            height: '2px',
-            backgroundColor: 'hsl(var(--primary))',
-            borderRadius: 'var(--radius-sm)',
-          }}
+          className="absolute bottom-0 left-2 right-2 h-[2px] bg-primary rounded-sm"
           aria-hidden="true"
         />
       )}

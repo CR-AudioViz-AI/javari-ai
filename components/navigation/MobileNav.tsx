@@ -1,20 +1,20 @@
 /**
  * Javari AI - Mobile Navigation
- * SPEC 02 — Canonical Navigation System
+ * SPEC 02 — Canonical Navigation System (Hardened)
  * 
  * Mobile navigation with drawer overlay
  * - Hamburger menu button
  * - Overlay drawer with navigation links
  * - Escape key closes drawer
  * - Focus trap when open
- * - aria-expanded / aria-controls
- * - WCAG 2.2 AA compliant
+ * - Tailwind styling with design tokens only
+ * - No inline styles or JS style mutations
  * 
  * Client Component (requires local state for open/close)
  * 
- * @version 1.0.0
+ * @version 1.1.0
  * @spec SPEC 02
- * @timestamp Tuesday, January 28, 2025 at 11:25 AM EST
+ * @timestamp Tuesday, January 28, 2025 at 11:43 AM EST
  */
 
 'use client'
@@ -46,7 +46,6 @@ export function MobileNav() {
 
     if (isOpen) {
       document.addEventListener('keydown', handleEscape)
-      // Prevent body scroll when drawer is open
       document.body.style.overflow = 'hidden'
     }
 
@@ -102,24 +101,8 @@ export function MobileNav() {
   return (
     <>
       {/* Mobile Header Bar */}
-      <div
-        className="mobile-nav-header"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: 'var(--spacing-4)',
-          borderBottom: '1px solid hsl(var(--border))',
-          backgroundColor: 'hsl(var(--background))',
-        }}
-      >
-        <span
-          style={{
-            fontSize: '1.25rem',
-            fontWeight: '700',
-            color: 'hsl(var(--primary))',
-          }}
-        >
+      <div className="flex md:hidden items-center justify-between p-4 border-b border-border bg-background">
+        <span className="text-xl font-bold text-primary">
           Javari AI
         </span>
 
@@ -130,32 +113,7 @@ export function MobileNav() {
           aria-expanded={isOpen}
           aria-controls="mobile-drawer"
           aria-label={isOpen ? 'Close menu' : 'Open menu'}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '40px',
-            height: '40px',
-            padding: 'var(--spacing-2)',
-            backgroundColor: 'transparent',
-            border: 'none',
-            borderRadius: 'var(--radius-md)',
-            cursor: 'pointer',
-            transition: 'background-color var(--duration-fast) var(--easing-standard)',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = 'hsl(var(--surface))'
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = 'transparent'
-          }}
-          onFocus={(e) => {
-            e.currentTarget.style.outline = '2px solid hsl(var(--focus))'
-            e.currentTarget.style.outlineOffset = '2px'
-          }}
-          onBlur={(e) => {
-            e.currentTarget.style.outline = 'none'
-          }}
+          className="flex items-center justify-center w-10 h-10 p-2 bg-transparent border-0 rounded-md cursor-pointer transition-colors duration-fast hover:bg-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus focus-visible:outline-offset-2"
         >
           {/* Hamburger Icon */}
           <svg
@@ -189,14 +147,7 @@ export function MobileNav() {
       {isOpen && (
         <div
           onClick={closeMenu}
-          style={{
-            position: 'fixed',
-            inset: '0',
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            zIndex: '998',
-            transition: 'opacity var(--duration-normal) var(--easing-standard)',
-            opacity: isOpen ? '1' : '0',
-          }}
+          className="fixed inset-0 bg-black/50 z-[998] transition-opacity duration-normal"
           aria-hidden="true"
         />
       )}
@@ -208,66 +159,24 @@ export function MobileNav() {
         role="dialog"
         aria-modal="true"
         aria-label="Mobile navigation"
-        style={{
-          position: 'fixed',
-          top: '0',
-          right: '0',
-          bottom: '0',
-          width: '280px',
-          maxWidth: '80vw',
-          backgroundColor: 'hsl(var(--background))',
-          boxShadow: 'var(--elevation-lg)',
-          zIndex: '999',
-          transform: isOpen ? 'translateX(0)' : 'translateX(100%)',
-          transition: 'transform var(--duration-normal) var(--easing-emphasized)',
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'auto',
-        }}
+        className={`
+          fixed top-0 right-0 bottom-0 w-[280px] max-w-[80vw]
+          bg-background shadow-lg z-[999]
+          flex flex-col overflow-auto
+          transition-transform duration-normal
+          ${isOpen ? 'translate-x-0' : 'translate-x-full'}
+        `}
       >
         {/* Drawer Header */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: 'var(--spacing-4)',
-            borderBottom: '1px solid hsl(var(--border))',
-          }}
-        >
-          <span
-            style={{
-              fontSize: '1.125rem',
-              fontWeight: '600',
-              color: 'hsl(var(--foreground))',
-            }}
-          >
+        <div className="flex items-center justify-between p-4 border-b border-border">
+          <span className="text-lg font-semibold text-foreground">
             Menu
           </span>
 
           <button
             onClick={closeMenu}
             aria-label="Close menu"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: '32px',
-              height: '32px',
-              padding: 'var(--spacing-1)',
-              backgroundColor: 'transparent',
-              border: 'none',
-              borderRadius: 'var(--radius-md)',
-              cursor: 'pointer',
-              color: 'hsl(var(--foreground))',
-            }}
-            onFocus={(e) => {
-              e.currentTarget.style.outline = '2px solid hsl(var(--focus))'
-              e.currentTarget.style.outlineOffset = '2px'
-            }}
-            onBlur={(e) => {
-              e.currentTarget.style.outline = 'none'
-            }}
+            className="flex items-center justify-center w-8 h-8 p-1 bg-transparent border-0 rounded-md cursor-pointer text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus focus-visible:outline-offset-2"
           >
             <svg
               width="20"
@@ -290,12 +199,7 @@ export function MobileNav() {
         <nav
           role="navigation"
           aria-label="Mobile navigation"
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            padding: 'var(--spacing-4)',
-            gap: 'var(--spacing-1)',
-          }}
+          className="flex flex-col p-4 gap-1"
         >
           {navigationLinks.map((link) => (
             <NavLink key={link.href} href={link.href} onClick={closeMenu}>
@@ -304,15 +208,6 @@ export function MobileNav() {
           ))}
         </nav>
       </div>
-
-      {/* Responsive CSS - Show only on mobile */}
-      <style jsx>{`
-        @media (min-width: 768px) {
-          .mobile-nav-header {
-            display: none;
-          }
-        }
-      `}</style>
     </>
   )
 }

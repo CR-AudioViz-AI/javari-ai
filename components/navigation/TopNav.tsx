@@ -1,18 +1,18 @@
 /**
  * Javari AI - Top Navigation (Desktop)
- * SPEC 02 — Canonical Navigation System
+ * SPEC 02 — Canonical Navigation System (Hardened)
  * 
  * Primary navigation for desktop viewports
  * - Horizontal layout
  * - Uses NavLink for routing
- * - Responsive hiding on mobile
- * - Design token styling
+ * - Tailwind responsive classes (hidden on mobile)
+ * - Design token styling via Tailwind
  * 
  * Server Component (no client state needed)
  * 
- * @version 1.0.0
+ * @version 1.1.0
  * @spec SPEC 02
- * @timestamp Tuesday, January 28, 2025 at 11:23 AM EST
+ * @timestamp Tuesday, January 28, 2025 at 11:42 AM EST
  */
 
 import { NavLink } from './NavLink'
@@ -30,59 +30,21 @@ export function TopNav() {
     <nav
       role="navigation"
       aria-label="Primary navigation"
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 'var(--spacing-2)',
-        padding: 'var(--spacing-4)',
-        borderBottom: '1px solid hsl(var(--border))',
-        backgroundColor: 'hsl(var(--background))',
-      }}
-      // Hide on mobile (< 768px)
-      className="desktop-nav"
+      className="hidden md:flex items-center gap-2 p-4 border-b border-border bg-background"
     >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--spacing-1)',
-          marginRight: 'var(--spacing-8)',
-        }}
-      >
-        <span
-          style={{
-            fontSize: '1.25rem',
-            fontWeight: '700',
-            color: 'hsl(var(--primary))',
-          }}
-        >
+      <div className="flex items-center gap-1 mr-8">
+        <span className="text-xl font-bold text-primary">
           Javari AI
         </span>
       </div>
 
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--spacing-1)',
-          flex: '1',
-        }}
-      >
+      <div className="flex items-center gap-1 flex-1">
         {navigationLinks.map((link) => (
           <NavLink key={link.href} href={link.href}>
             {link.label}
           </NavLink>
         ))}
       </div>
-
-      {/* Responsive CSS */}
-      <style jsx>{`
-        @media (max-width: 767px) {
-          .desktop-nav {
-            display: none;
-          }
-        }
-      `}</style>
     </nav>
   )
 }
