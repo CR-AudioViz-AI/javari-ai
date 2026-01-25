@@ -35,10 +35,10 @@ export default function Home() {
         }
       />
 
-      <PageSection>
+      <PageSection className="pt-6">
         <PageGrid columns={3}>
           {/* Quick Stats Cards */}
-          <Card>
+          <Card className="transition-shadow duration-fast hover:shadow-md">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-medium text-foreground/60">
@@ -50,29 +50,29 @@ export default function Home() {
             <CardContent>
               <div className="text-3xl font-bold text-foreground">0</div>
               <p className="text-xs text-foreground/60 mt-1">
-                No projects yet
+                Ready to start
               </p>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="transition-shadow duration-fast hover:shadow-md">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-medium text-foreground/60">
                   Team Members
                 </h3>
-                <Badge variant="success">Online</Badge>
+                <Badge variant="success">Ready</Badge>
               </div>
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-foreground">0</div>
               <p className="text-xs text-foreground/60 mt-1">
-                Invite your team
+                Invite collaborators
               </p>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="transition-shadow duration-fast hover:shadow-md">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-medium text-foreground/60">
@@ -82,24 +82,24 @@ export default function Home() {
               </div>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold text-foreground">0</div>
+              <div className="text-3xl font-bold text-foreground">0 GB</div>
               <p className="text-xs text-foreground/60 mt-1">
-                of 10 GB available
+                10 GB available
               </p>
             </CardContent>
           </Card>
         </PageGrid>
       </PageSection>
 
-      <PageSection title="Recent Projects" description="Your most recently updated projects">
+      <PageSection title="Recent Projects" description="Your most recently updated projects" className="pt-8">
         <Card>
           <CardContent>
             <DataEmptyState
               title="No projects yet"
-              description="Get started by creating your first project. Projects help you organize your work and collaborate with your team."
+              description="Create your first project to organize your work and collaborate with your team."
               action={
                 <Button variant="primary">
-                  Create Your First Project
+                  Create Project
                 </Button>
               }
             />
@@ -107,12 +107,12 @@ export default function Home() {
         </Card>
       </PageSection>
 
-      <PageSection title="Recent Activity" description="Latest updates and changes">
+      <PageSection title="Recent Activity" description="Updates and changes from your team" className="pt-8 pb-6">
         <Card>
           <CardContent>
             <DataEmptyState
               title="No recent activity"
-              description="Activity will appear here as you and your team work on projects."
+              description="Activity from you and your team will appear here."
             />
           </CardContent>
         </Card>

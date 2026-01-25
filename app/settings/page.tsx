@@ -38,31 +38,31 @@ export default function SettingsPage() {
             <nav className="space-y-1">
               <a
                 href="#profile"
-                className="block px-3 py-2 text-sm rounded-md bg-surface text-foreground font-medium"
+                className="block px-3 py-2 text-sm rounded-md bg-surface text-foreground font-medium transition-colors duration-fast"
               >
                 Profile
               </a>
               <a
                 href="#account"
-                className="block px-3 py-2 text-sm rounded-md text-foreground/60 hover:bg-surface hover:text-foreground"
+                className="block px-3 py-2 text-sm rounded-md text-foreground/60 hover:bg-surface hover:text-foreground transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
               >
                 Account
               </a>
               <a
                 href="#security"
-                className="block px-3 py-2 text-sm rounded-md text-foreground/60 hover:bg-surface hover:text-foreground"
+                className="block px-3 py-2 text-sm rounded-md text-foreground/60 hover:bg-surface hover:text-foreground transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
               >
                 Security
               </a>
               <a
                 href="#notifications"
-                className="block px-3 py-2 text-sm rounded-md text-foreground/60 hover:bg-surface hover:text-foreground"
+                className="block px-3 py-2 text-sm rounded-md text-foreground/60 hover:bg-surface hover:text-foreground transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
               >
                 Notifications
               </a>
               <a
                 href="#billing"
-                className="block px-3 py-2 text-sm rounded-md text-foreground/60 hover:bg-surface hover:text-foreground"
+                className="block px-3 py-2 text-sm rounded-md text-foreground/60 hover:bg-surface hover:text-foreground transition-colors duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
               >
                 Billing
               </a>
@@ -70,9 +70,9 @@ export default function SettingsPage() {
           </div>
         }
       >
-        <div className="space-y-6">
+        <div className="space-y-8">
           {/* Profile Section */}
-          <PageSection id="profile" title="Profile" description="Manage your public profile information">
+          <PageSection id="profile" title="Profile" description="Manage your public profile information" className="pt-6">
             <Card>
               <CardContent>
                 <div className="space-y-6 py-4">
@@ -103,7 +103,7 @@ export default function SettingsPage() {
                     </div>
                   </div>
 
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 pt-2">
                     <Button variant="primary" size="sm">
                       Save Changes
                     </Button>
@@ -124,7 +124,7 @@ export default function SettingsPage() {
               <CardContent>
                 <div className="space-y-6 py-4">
                   <div className="flex items-center justify-between">
-                    <div>
+                    <div className="flex-1 min-w-0 pr-4">
                       <h4 className="text-sm font-medium text-foreground">
                         Language
                       </h4>
@@ -140,7 +140,7 @@ export default function SettingsPage() {
                   <Separator />
 
                   <div className="flex items-center justify-between">
-                    <div>
+                    <div className="flex-1 min-w-0 pr-4">
                       <h4 className="text-sm font-medium text-foreground">
                         Timezone
                       </h4>
@@ -156,12 +156,12 @@ export default function SettingsPage() {
                   <Separator />
 
                   <div className="flex items-center justify-between">
-                    <div>
+                    <div className="flex-1 min-w-0 pr-4">
                       <h4 className="text-sm font-medium text-error">
                         Delete Account
                       </h4>
                       <p className="text-sm text-foreground/60">
-                        Permanently delete your account and all data
+                        Permanently delete your account
                       </p>
                     </div>
                     <Button variant="outline" size="sm">
@@ -176,12 +176,12 @@ export default function SettingsPage() {
           <Separator />
 
           {/* Security Section */}
-          <PageSection id="security" title="Security" description="Manage your security preferences">
+          <PageSection id="security" title="Security" description="Manage your security preferences" className="pb-6">
             <Card>
               <CardContent>
                 <div className="space-y-6 py-4">
                   <div className="flex items-center justify-between">
-                    <div>
+                    <div className="flex-1 min-w-0 pr-4">
                       <h4 className="text-sm font-medium text-foreground">
                         Password
                       </h4>
@@ -190,19 +190,19 @@ export default function SettingsPage() {
                       </p>
                     </div>
                     <Button variant="outline" size="sm">
-                      Change Password
+                      Change
                     </Button>
                   </div>
 
                   <Separator />
 
                   <div className="flex items-center justify-between">
-                    <div>
+                    <div className="flex-1 min-w-0 pr-4">
                       <h4 className="text-sm font-medium text-foreground">
                         Two-Factor Authentication
                       </h4>
                       <p className="text-sm text-foreground/60">
-                        Add an extra layer of security
+                        Extra layer of security
                       </p>
                     </div>
                     <Button variant="primary" size="sm">
@@ -213,16 +213,16 @@ export default function SettingsPage() {
                   <Separator />
 
                   <div className="flex items-center justify-between">
-                    <div>
+                    <div className="flex-1 min-w-0 pr-4">
                       <h4 className="text-sm font-medium text-foreground">
                         Active Sessions
                       </h4>
                       <p className="text-sm text-foreground/60">
-                        Manage devices logged into your account
+                        Manage your devices
                       </p>
                     </div>
                     <Button variant="outline" size="sm">
-                      View Sessions
+                      View
                     </Button>
                   </div>
                 </div>

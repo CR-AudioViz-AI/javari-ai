@@ -38,7 +38,7 @@ export default function DashboardPage() {
         }
       />
 
-      <PageSection>
+      <PageSection className="pt-6">
         <Card>
           <CardContent>
             <Table>
@@ -56,7 +56,7 @@ export default function DashboardPage() {
                   <TableCell colSpan={5}>
                     <DataEmptyState
                       title="No projects found"
-                      description="Create your first project to get started. Projects help you organize your work and collaborate with your team."
+                      description="Create your first project to organize your work and start collaborating."
                       action={
                         <Button variant="primary">
                           Create Project
@@ -71,57 +71,57 @@ export default function DashboardPage() {
         </Card>
       </PageSection>
 
-      <PageSection title="Quick Actions" description="Common tasks and workflows">
+      <PageSection title="Quick Actions" description="Common tasks and workflows" className="pt-8 pb-6">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Card>
+          <Card className="transition-shadow duration-fast hover:shadow-md">
             <CardContent>
               <div className="py-4">
                 <h3 className="font-medium text-foreground mb-2">
                   Import Data
                 </h3>
                 <p className="text-sm text-foreground/60 mb-4">
-                  Import projects from CSV or JSON
+                  Import from CSV or JSON
                 </p>
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" className="w-full">
                   Import
                 </Button>
               </div>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="transition-shadow duration-fast hover:shadow-md">
             <CardContent>
               <div className="py-4">
                 <h3 className="font-medium text-foreground mb-2">
                   Team Settings
                 </h3>
                 <p className="text-sm text-foreground/60 mb-4">
-                  Manage team members and permissions
+                  Manage members and roles
                 </p>
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" className="w-full">
                   Manage
                 </Button>
               </div>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="transition-shadow duration-fast hover:shadow-md">
             <CardContent>
               <div className="py-4">
                 <h3 className="font-medium text-foreground mb-2">
                   Analytics
                 </h3>
                 <p className="text-sm text-foreground/60 mb-4">
-                  View project insights and metrics
+                  View insights and metrics
                 </p>
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" className="w-full">
                   View
                 </Button>
               </div>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="transition-shadow duration-fast hover:shadow-md">
             <CardContent>
               <div className="py-4">
                 <h3 className="font-medium text-foreground mb-2">
@@ -130,7 +130,7 @@ export default function DashboardPage() {
                 <p className="text-sm text-foreground/60 mb-4">
                   Learn how to use the platform
                 </p>
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" className="w-full">
                   Read Docs
                 </Button>
               </div>
