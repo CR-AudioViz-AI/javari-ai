@@ -1,27 +1,25 @@
 /**
  * Javari AI - Root Layout (App Shell)
  * SPEC 03 — Canonical Application Shell
- * Updated: Integrated SPEC 02 Navigation System
  * 
  * Defines the semantic structure for all pages:
  * - Skip-to-content link (accessibility)
  * - Header slot (empty placeholder)
- * - Navigation slot (TopNav + MobileNav from SPEC 02)
+ * - Navigation slot (empty placeholder)
  * - Main content area (children)
  * - Footer slot (empty placeholder)
  * - System overlay slot (empty placeholder)
  * 
  * Server Component - renders without JavaScript
- * Navigation components handle their own client state
+ * No client state, no business logic, no navigation implementation
  * 
- * @version 1.1.0
- * @spec SPEC 03 + SPEC 02
- * @timestamp Tuesday, January 28, 2025 at 11:28 AM EST
+ * @version 1.0.0
+ * @spec SPEC 03
+ * @timestamp Tuesday, January 28, 2025 at 11:12 AM EST
  */
 
 import type { Metadata } from 'next'
 import './globals.css'
-import { TopNav, MobileNav } from '@/components/navigation'
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://javariai.com'),
@@ -80,9 +78,10 @@ export default function RootLayout({
           {/* Header content will be added in future steps */}
         </header>
 
-        {/* Navigation slot - Canonical Navigation System (SPEC 02) */}
-        <TopNav />
-        <MobileNav />
+        {/* Navigation slot - EMPTY placeholder for future implementation */}
+        <nav role="navigation" aria-label="Main navigation">
+          {/* Navigation content will be added in future steps */}
+        </nav>
 
         {/* Main content area - where page children render */}
         <main role="main" id="main-content">
