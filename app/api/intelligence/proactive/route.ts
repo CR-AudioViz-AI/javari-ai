@@ -400,7 +400,7 @@ export async function POST(request: NextRequest) {
           metadata: s.metadata,
           created_at: s.createdAt
         }))
-      ).catch(() => {}); // Non-blocking
+      ); // Non-blocking
     }
     
     return NextResponse.json({

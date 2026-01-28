@@ -336,7 +336,7 @@ async function executeBulkOperation(
     results: bulkOp.results,
     status: bulkOp.status,
     created_at: new Date().toISOString()
-  }).catch(() => {});
+  });
   
   return bulkOp;
 }
