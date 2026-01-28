@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
+import { logError } from '@/lib/utils/error-handler';
 
 /**
  * POST /api/health/fix - Attempt to auto-fix a build issue

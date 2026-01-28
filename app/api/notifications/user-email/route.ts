@@ -523,7 +523,7 @@ export async function POST(request: NextRequest) {
       resend_id: result.id,
       error: result.error,
       created_at: new Date().toISOString()
-    }).catch(() => {});
+    });
     
     return NextResponse.json(result);
     

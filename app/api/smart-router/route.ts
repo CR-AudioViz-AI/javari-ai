@@ -242,30 +242,9 @@ Please incorporate this real-time data naturally into your response. Don't just 
 // =============================================================================
 // EXPORT FOR USE IN CHAT
 // =============================================================================
-export async function enhanceWithKnowledge(userMessage: string): Promise<{
-  enhancedPrompt: string;
-  analysis: QueryAnalysis;
-  contextData: unknown;
-}> {
-  const analysis = analyzeQuery(userMessage);
-  let contextData = null;
-  
-  if (analysis.shouldFetchData) {
-    contextData = await fetchContextData(analysis);
-  }
-  
-  const enhancedPrompt = buildEnhancedPrompt(userMessage, analysis, contextData);
-  
-  return {
-    enhancedPrompt,
-    analysis,
-    contextData
-  };
-}
 
-// =============================================================================
-// API ROUTE
-// =============================================================================
+import * as SmartRouter from '@/lib/smart-router-utils';
+
 export async function POST(request: NextRequest) {
   try {
     const { message } = await request.json();
@@ -274,7 +253,7 @@ export async function POST(request: NextRequest) {
       return Response.json({ success: false, error: 'Message required' }, { status: 400 });
     }
     
-    const result = await enhanceWithKnowledge(message);
+    const result = await SmartRouter.enhanceWithKnowledge(message);
     
     return Response.json({
       success: true,

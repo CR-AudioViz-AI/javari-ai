@@ -530,8 +530,8 @@ export async function GET(request: NextRequest) {
   
   // Quick queries via GET
   const category = searchParams.get('category') as KnowledgeCategory;
-  const query = searchParams.get('q') || searchParams.get('query');
-  const location = searchParams.get('location');
+  const query = searchParams.get('q') || searchParams.get('query') || undefined;
+  const location = searchParams.get('location') ?? undefined;
   const limit = parseInt(searchParams.get('limit') || '5');
   
   if (!category || !query) {
