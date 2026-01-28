@@ -1,3 +1,5 @@
+"use client";
+
 /**
  * Javari AI - Loading UI
  * SPEC 03 — Canonical Application Shell
