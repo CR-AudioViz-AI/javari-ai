@@ -1,41 +1,75 @@
-import type { UnifiedRoutingEnvelope } from './envelope/types';
+/**
+ * Unified Routing Dispatcher (URE-native)
+ *
+ * Takes UnifiedRoutingEnvelope, performs validation,
+ * normalizes flags, and dispatches to Mode A, Mode B,
+ * or Execution pathways.
+ */
 
-export interface RouteRequestResult {
-  success: boolean;
-  requestId: string;
-  provider?: string;
-  response?: unknown;
-  error?: string;
+import type { UnifiedRoutingEnvelope } from './envelope/types';
+import { buildEnvelope } from './envelope/buildEnvelope';
+import { decideModeAWithLearning } from './modeA/decideModeAWithLearning';
+import { orchestrate } from './modeB/orchestrator';
+import { resolveExecutionModels } from './execution/resolveExecutionModels';
+import { isRoutingEnabled } from './flags';
+
+export interface RouteRequestInput {
+  readonly payload: any;
+  readonly policy?: any;
 }
 
-/**
- * Main routing entry point - accepts Unified Routing Envelope
- * 
- * All routing flows (Mode A, Mode B, policy-driven, etc.) must use this interface.
- */
+export interface RouteRequestResult {
+  readonly envelope: UnifiedRoutingEnvelope;
+  readonly mode: 'A' | 'B';
+  readonly decision: any;
+  readonly executionPlan?: any;
+}
+
 export async function routeRequest(env: UnifiedRoutingEnvelope): Promise<RouteRequestResult> {
   if (!env || !env.payload) {
-    throw new Error("RoutingEnvelope missing or invalid");
+    throw new Error("Invalid RoutingEnvelope: missing payload");
   }
 
-  const { metadata, payload, dryRun, useLearning, usePriors, requireValidator } = env;
-
-  // TODO: Implement actual routing logic
-  // For now, return a placeholder response
-  return {
-    success: true,
-    requestId: metadata.requestId,
-    provider: 'placeholder',
-    response: {
-      message: 'URE integration complete - routing logic pending',
-      envelope: {
-        requestId: metadata.requestId,
-        timestamp: metadata.timestamp,
-        dryRun,
-        useLearning,
-        usePriors,
-        requireValidator,
+  if (!isRoutingEnabled()) {
+    return {
+      envelope: env,
+      mode: 'A',
+      decision: {
+        reason: "Routing disabled via feature flag",
       },
-    },
+    };
+  }
+
+  const payload = env.payload;
+
+  // Decide Mode A vs Mode B (simple rule for now)
+  const isModeB = !!payload.objective && !!payload.taskType;
+  const mode: 'A' | 'B' = isModeB ? 'B' : 'A';
+
+  if (mode === 'A') {
+    const decision = decideModeAWithLearning(payload, []);
+    const exec = env.policy
+      ? resolveExecutionModels(env.policy, decision.selectedProvider.id)
+      : null;
+
+    return {
+      envelope: env,
+      mode,
+      decision,
+      executionPlan: exec,
+    };
+  }
+
+  // MODE B
+  const decision = orchestrate(payload, []);
+  const exec = env.policy
+    ? resolveExecutionModels(env.policy, decision.plan.assignments[0].providerId)
+    : null;
+
+  return {
+    envelope: env,
+    mode,
+    decision,
+    executionPlan: exec,
   };
 }
