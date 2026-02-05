@@ -23,6 +23,7 @@ export interface RouteRequestResult {
   readonly mode: 'A' | 'B';
   readonly decision: any;
   readonly executionPlan?: any;
+  readonly executionResult?: any;
 }
 
 export async function routeRequest(env: UnifiedRoutingEnvelope): Promise<RouteRequestResult> {
@@ -52,11 +53,35 @@ export async function routeRequest(env: UnifiedRoutingEnvelope): Promise<RouteRe
       ? resolveExecutionModels(env.policy, decision.selectedProvider.id)
       : null;
 
+    // AUTO-EXECUTE if executionPlan exists
+    let executionResult = null;
+    if (exec && (env as any).flags?.autoExecute) {
+      const { approvePlan } = await import('./approval/approvePlan.js');
+      const { issueExecutionToken } = await import('./execution/token.js');
+      const { executeCollaborationPlan } = await import('./execution/adapter.js');
+
+      const approval = approvePlan({
+        planId: decision.selectedProvider.id,
+        approverId: env.metadata.userId || 'system',
+        approverRole: 'system',
+        reason: 'Auto-execution enabled',
+      });
+
+      const token = issueExecutionToken(approval);
+      executionResult = await executeCollaborationPlan(
+        decision,
+        approval,
+        token,
+        exec
+      );
+    }
+
     return {
       envelope: env,
       mode,
       decision,
       executionPlan: exec,
+      executionResult,
     };
   }
 
@@ -66,10 +91,34 @@ export async function routeRequest(env: UnifiedRoutingEnvelope): Promise<RouteRe
     ? resolveExecutionModels(env.policy, decision.plan.assignments[0].providerId)
     : null;
 
+  // MODE B auto-execution
+  let executionResult = null;
+  if (exec && (env as any).flags?.autoExecute) {
+    const { approvePlan } = await import('./approval/approvePlan.js');
+    const { issueExecutionToken } = await import('./execution/token.js');
+    const { executeCollaborationPlan } = await import('./execution/adapter.js');
+
+    const approval = approvePlan({
+      planId: decision.plan.planId,
+      approverId: env.metadata.userId || 'system',
+      approverRole: 'system',
+      reason: 'Auto-execution enabled',
+    });
+
+    const token = issueExecutionToken(approval);
+    executionResult = await executeCollaborationPlan(
+      decision.plan,
+      approval,
+      token,
+      exec
+    );
+  }
+
   return {
     envelope: env,
     mode,
     decision,
     executionPlan: exec,
+    executionResult,
   };
 }

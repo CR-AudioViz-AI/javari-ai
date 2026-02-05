@@ -22,4 +22,7 @@ export interface UnifiedRoutingEnvelope {
   readonly dryRun: boolean;                      // No live calls ever
   readonly telemetryEnabled: boolean;            // Mode A telemetry
   readonly payload: unknown;                     // User request (Mode A or B)
+  readonly flags?: {                             // Optional execution flags
+    autoExecute?: boolean;                       // Auto-execute approved plans
+  };
 }
