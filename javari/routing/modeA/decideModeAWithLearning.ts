@@ -1,11 +1,12 @@
 /**
  * Mode A: Single-provider decision with optional learning integration
  * 
- * Now integrated with cost model for intelligent provider selection
+ * Now integrated with cost model AND historical priors for intelligent provider selection
  */
 
 import { scoreProvidersForSubtask } from "../providers/costModel";
 import type { ProviderCostEstimate } from "../providers/costModel";
+import { getProviderPrior } from "../learning/providerPriors";
 
 export interface ModeADecision {
   selectedProvider: {
@@ -38,10 +39,19 @@ export function decideModeAWithLearning(payload: any, priors: any[]): ModeADecis
     requestId
   );
 
-  // Choose winner by lowest total score
-  estimates.sort((a, b) => a.totalScore - b.totalScore);
+  // Apply learned priors (Step 89)
+  // Adjust scores based on historical performance
+  const estimatesWithPriors = estimates.map(est => {
+    const prior = getProviderPrior(est.providerId as any);
+    // Prior acts as inverse multiplier: higher prior = lower (better) score
+    const adjustedScore = est.totalScore / prior;
+    return { ...est, totalScore: adjustedScore };
+  });
 
-  const winner = estimates[0];
+  // Choose winner by lowest total score
+  estimatesWithPriors.sort((a, b) => a.totalScore - b.totalScore);
+
+  const winner = estimatesWithPriors[0];
 
   return {
     selectedProvider: {

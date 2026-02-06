@@ -1,11 +1,12 @@
 /**
  * Mode B: Multi-provider orchestration with role-based assignments
  * 
- * Now integrated with cost model for intelligent provider selection
+ * Now integrated with cost model AND historical priors for intelligent provider selection
  */
 
 import { scoreProvidersForSubtask } from "../providers/costModel";
 import type { ProviderCostEstimate } from "../providers/costModel";
+import { getProviderPrior } from "../learning/providerPriors";
 
 export interface ModeBDecision {
   plan: {
@@ -42,9 +43,16 @@ export function orchestrate(payload: any, priors: any[]): ModeBDecision {
     planId
   );
 
-  estimates.sort((a, b) => a.totalScore - b.totalScore);
+  // Apply learned priors (Step 89)
+  const estimatesWithPriors = estimates.map(est => {
+    const prior = getProviderPrior(est.providerId as any);
+    const adjustedScore = est.totalScore / prior;
+    return { ...est, totalScore: adjustedScore };
+  });
+
+  estimatesWithPriors.sort((a, b) => a.totalScore - b.totalScore);
   
-  const winner = estimates[0];
+  const winner = estimatesWithPriors[0];
 
   return {
     plan: {

@@ -9,6 +9,7 @@ import type { ExecutionToken } from './token';
 import { simulateProviderResponse } from "../providers/simulate";
 import { claudeAdapter, openaiAdapter, llamaAdapter, mistralAdapter, grokAdapter } from "../providers/live";
 import { recordProviderHealth } from "../providers/health";
+import { addHistoryRecord } from "../learning/history";
 
 // Live provider lookup registry
 const LIVE_PROVIDERS: Record<string, any> = {
@@ -68,6 +69,16 @@ export async function executeCollaborationPlan(
         liveResult.latencyMs || end - start
       );
 
+      // Add to learning history (Step 89)
+      addHistoryRecord({
+        timestamp: Date.now(),
+        providerId,
+        ok: liveResult.ok,
+        latencyMs: liveResult.latencyMs || end - start,
+        tokensUsed: liveResult.tokensUsed || 0,
+        capability: plan.capability || null,
+      });
+
       return {
         success: liveResult.ok,
         ok: liveResult.ok,
@@ -107,6 +118,16 @@ export async function executeCollaborationPlan(
     true, // Simulated executions always succeed
     result.latencyMs
   );
+
+  // Add to learning history (Step 89)
+  addHistoryRecord({
+    timestamp: Date.now(),
+    providerId,
+    ok: true,
+    latencyMs: result.latencyMs,
+    tokensUsed: plan.estimatedTokens ?? 500,
+    capability: plan.capability || null,
+  });
 
   return {
     success: true,

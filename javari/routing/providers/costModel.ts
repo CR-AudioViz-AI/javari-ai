@@ -1,5 +1,6 @@
 import { ProviderId } from "./types";
 import { getHealthPenalty } from "./health";
+import { aggregateHistory } from "../learning/history";
 
 // Base cost per 1K tokens in USD cents (simulated)
 export const BASE_COST: Record<ProviderId, number> = {
@@ -71,7 +72,22 @@ export function estimateProviderCost(
 
   // Apply health penalty multiplier (Step 87)
   const healthPenalty = getHealthPenalty(providerId);
-  const totalScore = baseScore * healthPenalty;
+  
+  // Apply history-based penalty (Step 89)
+  const aggregate = aggregateHistory(providerId, 50);
+  let historyPenalty = 1.0;
+  
+  if (aggregate.windowSize > 0) {
+    if (aggregate.successRate < 0.40) {
+      historyPenalty = 1.50;
+    } else if (aggregate.successRate < 0.60) {
+      historyPenalty = 1.25;
+    } else if (aggregate.successRate < 0.80) {
+      historyPenalty = 1.10;
+    }
+  }
+  
+  const totalScore = baseScore * healthPenalty * historyPenalty;
 
   return {
     providerId,
