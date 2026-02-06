@@ -8,6 +8,7 @@ import type { PlanApproval } from '../approval/approvePlan';
 import type { ExecutionToken } from './token';
 import { simulateProviderResponse } from "../providers/simulate";
 import { claudeAdapter, openaiAdapter, llamaAdapter, mistralAdapter, grokAdapter } from "../providers/live";
+import { recordProviderHealth } from "../providers/health";
 
 // Live provider lookup registry
 const LIVE_PROVIDERS: Record<string, any> = {
@@ -60,6 +61,13 @@ export async function executeCollaborationPlan(
       const end = Date.now();
       const completedAt = new Date().toISOString();
 
+      // Update provider health (Step 87)
+      recordProviderHealth(
+        providerId,
+        liveResult.ok,
+        liveResult.latencyMs || end - start
+      );
+
       return {
         success: liveResult.ok,
         ok: liveResult.ok,
@@ -92,6 +100,13 @@ export async function executeCollaborationPlan(
   // Include latency + execution timing
   const end = Date.now();
   const completedAt = new Date().toISOString();
+
+  // Update provider health (Step 87)
+  recordProviderHealth(
+    providerId,
+    true, // Simulated executions always succeed
+    result.latencyMs
+  );
 
   return {
     success: true,

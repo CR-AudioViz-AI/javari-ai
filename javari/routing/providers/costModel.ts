@@ -1,4 +1,5 @@
 import { ProviderId } from "./types";
+import { getHealthPenalty } from "./health";
 
 // Base cost per 1K tokens in USD cents (simulated)
 export const BASE_COST: Record<ProviderId, number> = {
@@ -63,10 +64,14 @@ export function estimateProviderCost(
 
   const reliability = baseRel;
 
-  const totalScore =
+  const baseScore =
     costCents * 0.6 +
     simulatedLatency * 0.2 +
     (1 - reliability) * 200; // reliability penalty
+
+  // Apply health penalty multiplier (Step 87)
+  const healthPenalty = getHealthPenalty(providerId);
+  const totalScore = baseScore * healthPenalty;
 
   return {
     providerId,
