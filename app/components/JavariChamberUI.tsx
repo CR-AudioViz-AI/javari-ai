@@ -1,283 +1,306 @@
 /**
- * JAVARI CHAMBER UI
+ * MULTI-AI CHAMBER UI
  * 
- * Real-time interface showing ChatGPT + Claude + Javari collaboration
+ * Interactive interface for ChatGPT + Claude + Javari collaboration
+ * Fixed: Enter key submission, JSON payload, loading states, error display
  */
 
 'use client';
 
 import { useState } from 'react';
-import { useJavariChamber } from '../hooks/useJavariChamber';
 
 export default function JavariChamberUI() {
   const [goal, setGoal] = useState('');
-  const chamber = useJavariChamber();
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!goal.trim()) return;
+  const handleSubmit = async () => {
+    if (!goal.trim() || loading) return;
+
+    setLoading(true);
+    setError(null);
+    setResult(null);
 
     try {
-      await chamber.sendGoal(goal);
-    } catch (error) {
-      console.error('Chamber error:', error);
+      const token = localStorage.getItem('sb-ocuaxglzgaswsjqlhlnc-auth-token');
+      if (!token) {
+        throw new Error('Please log in first');
+      }
+
+      const response = await fetch('/api/chamber/run', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${JSON.parse(token).access_token}`,
+        },
+        body: JSON.stringify({ goal: goal.trim() }),
+      });
+
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Chamber execution failed');
+      }
+
+      setResult(data);
+      console.log('Chamber Result:', data);
+      
+    } catch (err: any) {
+      console.error('Chamber Error:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Submit on Enter (without Shift)
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit();
     }
   };
 
   return (
-    <div className="chamber-container">
-      {/* Header */}
-      <div className="chamber-header">
-        <h1>Multi-AI Chamber</h1>
-        <p>ChatGPT (Architect) + Claude (Builder) + Javari (Observer)</p>
-      </div>
+    <div style={{ 
+      maxWidth: '1200px', 
+      margin: '40px auto', 
+      padding: '20px',
+      fontFamily: 'system-ui, -apple-system, sans-serif'
+    }}>
+      <h1 style={{ fontSize: '32px', marginBottom: '10px' }}>
+        Multi-AI Chamber
+      </h1>
+      <p style={{ color: '#666', marginBottom: '30px' }}>
+        ChatGPT (Architect) + Claude (Builder) + Javari (Observer)
+      </p>
 
-      {/* Input */}
-      <form onSubmit={handleSubmit} className="chamber-input">
+      {/* Input Section */}
+      <div style={{ marginBottom: '30px' }}>
+        <label style={{ 
+          display: 'block', 
+          fontWeight: '600', 
+          marginBottom: '8px' 
+        }}>
+          Build Goal
+        </label>
         <textarea
           value={goal}
           onChange={(e) => setGoal(e.target.value)}
-          placeholder="Describe what you want to build..."
-          rows={4}
-          disabled={chamber.loading}
+          onKeyDown={handleKeyDown}
+          placeholder="Example: Create a simple counter component with increment, decrement, and reset buttons"
+          disabled={loading}
+          style={{
+            width: '100%',
+            minHeight: '120px',
+            padding: '12px',
+            fontSize: '14px',
+            border: '1px solid #ddd',
+            borderRadius: '6px',
+            resize: 'vertical',
+            fontFamily: 'inherit',
+            opacity: loading ? 0.6 : 1,
+          }}
         />
-        <button type="submit" disabled={chamber.loading || !goal.trim()}>
-          {chamber.loading ? 'Executing...' : 'Execute Chamber'}
-        </button>
-      </form>
+        <p style={{ 
+          fontSize: '12px', 
+          color: '#666', 
+          marginTop: '6px' 
+        }}>
+          Press Enter to submit, Shift+Enter for new line
+        </p>
 
-      {/* Progress */}
-      {chamber.loading && (
-        <div className="chamber-progress">
-          <div className="progress-bar">
-            <div className="progress-fill" style={{ width: `${(chamber.steps.length / 4) * 100}%` }} />
-          </div>
-          <p>
-            Step {chamber.steps.length}/4:{' '}
-            {chamber.steps[chamber.steps.length - 1]?.phase || 'Starting...'}
+        <button
+          onClick={handleSubmit}
+          disabled={loading || !goal.trim()}
+          style={{
+            marginTop: '12px',
+            padding: '12px 24px',
+            fontSize: '14px',
+            fontWeight: '600',
+            backgroundColor: loading || !goal.trim() ? '#ccc' : '#0070f3',
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            cursor: loading || !goal.trim() ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {loading ? 'Executing Chamber...' : 'Execute Chamber'}
+        </button>
+      </div>
+
+      {/* Loading State */}
+      {loading && (
+        <div style={{
+          padding: '20px',
+          backgroundColor: '#f0f9ff',
+          border: '1px solid #0070f3',
+          borderRadius: '6px',
+          marginBottom: '20px',
+        }}>
+          <p style={{ margin: 0, color: '#0070f3' }}>
+            🔄 Chamber executing... This may take 30-90 seconds.
           </p>
         </div>
       )}
 
-      {/* Results */}
-      {chamber.result && (
-        <div className="chamber-results">
+      {/* Error Display */}
+      {error && (
+        <div style={{
+          padding: '20px',
+          backgroundColor: '#fff0f0',
+          border: '1px solid #ff4444',
+          borderRadius: '6px',
+          marginBottom: '20px',
+        }}>
+          <h3 style={{ margin: '0 0 10px 0', color: '#ff4444' }}>
+            ❌ Error
+          </h3>
+          <pre style={{ 
+            margin: 0, 
+            fontSize: '13px', 
+            whiteSpace: 'pre-wrap',
+            color: '#333',
+          }}>
+            {error}
+          </pre>
+        </div>
+      )}
+
+      {/* Results Display */}
+      {result && (
+        <div style={{ marginTop: '30px' }}>
+          <h2 style={{ fontSize: '24px', marginBottom: '20px' }}>
+            ✅ Chamber Results
+          </h2>
+
           {/* Architect Output */}
-          <div className="result-section architect">
-            <h2>🏗️ Architect (ChatGPT)</h2>
-            {chamber.architectOutput && (
-              <>
-                <div className="reasoning">
-                  <strong>Reasoning:</strong>
-                  <p>{chamber.architectOutput.reasoning}</p>
-                </div>
-                <div className="build-plan">
-                  <strong>Build Plan:</strong>
-                  <p>{chamber.architectOutput.buildPlan}</p>
-                </div>
-                <div className="commands">
-                  <strong>Commands: {chamber.architectOutput.buildCommands.length}</strong>
-                  <ul>
-                    {chamber.architectOutput.buildCommands.map((cmd, i) => (
-                      <li key={i}>
-                        {cmd.type}: {cmd.target}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </>
-            )}
-          </div>
+          {result.architect_output && (
+            <div style={{
+              marginBottom: '20px',
+              padding: '16px',
+              backgroundColor: '#f0f9ff',
+              border: '1px solid #0070f3',
+              borderRadius: '6px',
+            }}>
+              <h3 style={{ margin: '0 0 12px 0', color: '#0070f3' }}>
+                🏗️ Architect (ChatGPT)
+              </h3>
+              <div style={{ fontSize: '13px' }}>
+                <p><strong>Reasoning:</strong> {result.architect_output.reasoning}</p>
+                {result.architect_output.buildPlan && (
+                  <div>
+                    <strong>Build Plan:</strong>
+                    <pre style={{ 
+                      marginTop: '8px',
+                      padding: '12px',
+                      backgroundColor: 'white',
+                      borderRadius: '4px',
+                      fontSize: '12px',
+                      overflow: 'auto',
+                    }}>
+                      {result.architect_output.buildPlan}
+                    </pre>
+                  </div>
+                )}
+                {result.architect_output.buildCommands && (
+                  <p><strong>Commands:</strong> {result.architect_output.buildCommands.length} operations</p>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Builder Output */}
-          <div className="result-section builder">
-            <h2>🔨 Builder (Claude)</h2>
-            {chamber.builderOutput && (
-              <>
-                <div className="build-status">
-                  Status: {chamber.builderOutput.ok ? '✅ Success' : '❌ Failed'}
-                </div>
-                <div className="build-stats">
-                  <div>Created: {chamber.builderOutput.createdFiles.length} files</div>
-                  <div>Modified: {chamber.builderOutput.modifiedFiles.length} files</div>
-                  <div>Deleted: {chamber.builderOutput.deletedFiles.length} files</div>
-                  {chamber.commitId && <div>Commit: {chamber.commitId}</div>}
-                </div>
-                <div className="build-logs">
-                  <strong>Build Logs:</strong>
-                  <pre>
-                    {chamber.builderOutput.buildLogs.map((log, i) => (
-                      <div key={i}>{log}</div>
-                    ))}
-                  </pre>
-                </div>
-              </>
-            )}
-          </div>
+          {result.build_result && (
+            <div style={{
+              marginBottom: '20px',
+              padding: '16px',
+              backgroundColor: '#f0fff4',
+              border: '1px solid #10b981',
+              borderRadius: '6px',
+            }}>
+              <h3 style={{ margin: '0 0 12px 0', color: '#10b981' }}>
+                🔨 Builder (Claude)
+              </h3>
+              <div style={{ fontSize: '13px' }}>
+                <p><strong>Status:</strong> {result.build_result.ok ? '✅ Success' : '❌ Failed'}</p>
+                {result.build_result.commitId && (
+                  <p><strong>Commit ID:</strong> <code>{result.build_result.commitId}</code></p>
+                )}
+                {result.build_result.modifiedFiles && result.build_result.modifiedFiles.length > 0 && (
+                  <p><strong>Modified:</strong> {result.build_result.modifiedFiles.join(', ')}</p>
+                )}
+                {result.build_result.createdFiles && result.build_result.createdFiles.length > 0 && (
+                  <p><strong>Created:</strong> {result.build_result.createdFiles.join(', ')}</p>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Javari Thoughts */}
-          <div className="result-section observer">
-            <h2>🧠 Javari Thoughts</h2>
-            {chamber.javariThoughts && (
-              <>
-                <div className="patterns">
-                  <strong>Patterns Learned: {chamber.javariThoughts.patternsLearned.length}</strong>
-                  <ul>
-                    {chamber.javariThoughts.patternsLearned.map((pattern, i) => (
-                      <li key={i}>
-                        {pattern.description} ({Math.round(pattern.confidence * 100)}% confidence)
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="automations">
-                  <strong>Future Automations: {chamber.javariThoughts.futureAutomations.length}</strong>
-                  <ul>
-                    {chamber.javariThoughts.futureAutomations.map((auto, i) => (
-                      <li key={i}>
-                        {auto.trigger}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="insights">
-                  <strong>Insights:</strong>
-                  <ul>
-                    {chamber.javariThoughts.insights.map((insight, i) => (
-                      <li key={i}>
-                        <strong>{insight.category}:</strong> {insight.observation}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </>
-            )}
-          </div>
+          {result.observation_result && (
+            <div style={{
+              marginBottom: '20px',
+              padding: '16px',
+              backgroundColor: '#fff7ed',
+              border: '1px solid #f59e0b',
+              borderRadius: '6px',
+            }}>
+              <h3 style={{ margin: '0 0 12px 0', color: '#f59e0b' }}>
+                🧠 Javari (Observer)
+              </h3>
+              <div style={{ fontSize: '13px' }}>
+                {result.observation_result.patternsLearned && result.observation_result.patternsLearned.length > 0 && (
+                  <div>
+                    <strong>Patterns Learned:</strong>
+                    <ul style={{ margin: '8px 0', paddingLeft: '20px' }}>
+                      {result.observation_result.patternsLearned.map((p: any, i: number) => (
+                        <li key={i}>{p.pattern_type}: {p.description}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {result.observation_result.futureAutomations && result.observation_result.futureAutomations.length > 0 && (
+                  <div>
+                    <strong>Future Automations:</strong>
+                    <ul style={{ margin: '8px 0', paddingLeft: '20px' }}>
+                      {result.observation_result.futureAutomations.map((a: any, i: number) => (
+                        <li key={i}>{a.trigger}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Raw Response (for debugging) */}
+          <details style={{ marginTop: '20px' }}>
+            <summary style={{ 
+              cursor: 'pointer', 
+              fontWeight: '600',
+              padding: '8px',
+              backgroundColor: '#f9fafb',
+              border: '1px solid #e5e7eb',
+              borderRadius: '4px',
+            }}>
+              🔍 Raw Response (Debug)
+            </summary>
+            <pre style={{
+              marginTop: '8px',
+              padding: '12px',
+              backgroundColor: '#f9fafb',
+              border: '1px solid #e5e7eb',
+              borderRadius: '4px',
+              fontSize: '11px',
+              overflow: 'auto',
+            }}>
+              {JSON.stringify(result, null, 2)}
+            </pre>
+          </details>
         </div>
       )}
-
-      {/* Error */}
-      {chamber.error && (
-        <div className="chamber-error">
-          <h3>Error</h3>
-          <p>{chamber.error}</p>
-        </div>
-      )}
-
-      <style jsx>{`
-        .chamber-container {
-          max-width: 1400px;
-          margin: 0 auto;
-          padding: 24px;
-        }
-
-        .chamber-header {
-          text-align: center;
-          margin-bottom: 32px;
-        }
-
-        .chamber-header h1 {
-          font-size: 32px;
-          font-weight: 700;
-          margin-bottom: 8px;
-        }
-
-        .chamber-input {
-          margin-bottom: 24px;
-        }
-
-        .chamber-input textarea {
-          width: 100%;
-          padding: 16px;
-          border: 2px solid #e5e7eb;
-          border-radius: 8px;
-          font-size: 16px;
-          margin-bottom: 12px;
-        }
-
-        .chamber-input button {
-          width: 100%;
-          padding: 16px;
-          background: #635bff;
-          color: white;
-          border: none;
-          border-radius: 8px;
-          font-size: 16px;
-          font-weight: 600;
-          cursor: pointer;
-        }
-
-        .chamber-input button:disabled {
-          background: #cbd5e1;
-          cursor: not-allowed;
-        }
-
-        .chamber-progress {
-          margin-bottom: 24px;
-          text-align: center;
-        }
-
-        .progress-bar {
-          width: 100%;
-          height: 8px;
-          background: #e5e7eb;
-          border-radius: 4px;
-          overflow: hidden;
-          margin-bottom: 12px;
-        }
-
-        .progress-fill {
-          height: 100%;
-          background: #635bff;
-          transition: width 0.3s;
-        }
-
-        .chamber-results {
-          display: grid;
-          grid-template-columns: 1fr;
-          gap: 24px;
-        }
-
-        .result-section {
-          border: 2px solid #e5e7eb;
-          border-radius: 12px;
-          padding: 24px;
-        }
-
-        .result-section h2 {
-          margin-bottom: 16px;
-          font-size: 20px;
-          font-weight: 600;
-        }
-
-        .architect {
-          border-color: #3b82f6;
-        }
-
-        .builder {
-          border-color: #10b981;
-        }
-
-        .observer {
-          border-color: #f59e0b;
-        }
-
-        .build-logs pre {
-          background: #f9fafb;
-          padding: 16px;
-          border-radius: 8px;
-          overflow-x: auto;
-          font-size: 13px;
-        }
-
-        .chamber-error {
-          background: #fef2f2;
-          border: 2px solid #fecaca;
-          border-radius: 8px;
-          padding: 16px;
-          color: #dc2626;
-        }
-      `}</style>
     </div>
   );
 }
