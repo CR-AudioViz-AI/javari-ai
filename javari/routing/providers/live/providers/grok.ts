@@ -1,3 +1,4 @@
+// TEMPORARILY DISABLED - Missing grok-beta package
 import type {
   ProviderAdapter,
   LiveProviderExecuteOptions,
@@ -14,7 +15,7 @@ async function loadClient() {
   return GrokClient;
 }
 
-export const grokAdapter: ProviderAdapter = {
+// export const grokAdapter: ProviderAdapter = {
   id: "xai-grok-beta",
   name: "xAI Grok Beta",
   capabilities: {
