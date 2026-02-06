@@ -1,28 +1,15 @@
 import type { ProviderAdapter, ProviderExecutionInput, ProviderExecutionOutput } from "../types";
+import { createHash } from "crypto";
 
-/**
- * Claude (Anthropic) Provider Adapter
- * 
- * Placeholder implementation - will be replaced with Anthropic SDK integration
- */
 export const claudeAdapter: ProviderAdapter = {
-  providerId: "claude",
+  providerId: "anthropic-claude-sonnet",
 
   async execute(input: ProviderExecutionInput): Promise<ProviderExecutionOutput> {
-    // Placeholder: simulate Claude response
+    const hash = createHash("sha256").update(input.prompt).digest("hex");
     return {
-      completion: `[Claude Placeholder] Received: "${input.prompt}"`,
-      tokensUsed: 100,
-      raw: { provider: "claude", model: input.modelId },
+      completion: `[CLAUDE SIMULATED OUTPUT]: ${input.prompt}`,
+      tokensUsed: (hash.charCodeAt(0) % 20) + 20,
+      raw: { simulated: true },
     };
-  },
-
-  async *stream(input: ProviderExecutionInput): AsyncGenerator<string> {
-    // Placeholder: simulate streaming
-    const words = `[Claude Stream] ${input.prompt}`.split(" ");
-    for (const word of words) {
-      yield word + " ";
-      await new Promise((r) => setTimeout(r, 50));
-    }
   },
 };
