@@ -1,12 +1,22 @@
 /**
  * Execution adapter - executes collaboration plans with approved tokens
  * 
- * Now integrated with simulated provider responses
+ * Now integrated with simulated provider responses AND live provider scaffolding
  */
 
 import type { PlanApproval } from '../approval/approvePlan';
 import type { ExecutionToken } from './token';
 import { simulateProviderResponse } from "../providers/simulate";
+import { claudeAdapter, openaiAdapter, llamaAdapter, mistralAdapter, grokAdapter } from "../providers/live";
+
+// Live provider lookup registry
+const LIVE_PROVIDERS: Record<string, any> = {
+  "anthropic-claude-sonnet": claudeAdapter,
+  "openai-gpt4-turbo": openaiAdapter,
+  "meta-llama-3-8b": llamaAdapter,
+  "mistral-mixtral-8x7b": mistralAdapter,
+  "xai-grok-beta": grokAdapter,
+};
 
 export interface ExecutionResult {
   success: boolean;
@@ -34,9 +44,46 @@ export async function executeCollaborationPlan(
   const startedAt = new Date().toISOString();
   const start = Date.now();
 
-  // Simulated provider execution
+  const providerId = plan.primaryModel || plan.selectedProvider?.id || "anthropic-claude-sonnet";
+
+  // LIVE PROVIDER MODE (if enabled via env var)
+  if (process.env.JAVARI_LIVE_PROVIDERS_ENABLED === "true") {
+    const provider = LIVE_PROVIDERS[providerId];
+    if (provider) {
+      const liveResult = await provider.executeLive({
+        providerId,
+        input: plan.input || plan.payload || plan,
+        tokens: plan.estimatedTokens ?? 500,
+        requestId: plan.planId || approval.planId,
+      });
+
+      const end = Date.now();
+      const completedAt = new Date().toISOString();
+
+      return {
+        success: liveResult.ok,
+        ok: liveResult.ok,
+        planId: approval.planId,
+        tokenId: token.tokenId,
+        providerId,
+        startedAt,
+        completedAt,
+        rawOutput: liveResult.rawOutput,
+        costCents: 0, // Will be calculated from tokensUsed in future
+        latencyMs: 0,
+        totalExecutionMs: end - start,
+        reasoning: `Live provider execution: ${providerId}`,
+        outputs: {
+          message: liveResult.rawOutput,
+          tokensUsed: liveResult.tokensUsed,
+        },
+      };
+    }
+  }
+
+  // SIMULATED PROVIDER MODE (default)
   const result = await simulateProviderResponse({
-    providerId: plan.primaryModel || plan.selectedProvider?.id || "anthropic-claude-sonnet",
+    providerId,
     input: plan.input || plan.payload || plan,
     tokens: plan.estimatedTokens ?? 500,
     requestId: plan.planId || approval.planId,
