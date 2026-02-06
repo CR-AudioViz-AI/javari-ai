@@ -6,7 +6,7 @@
  */
 
 import { Metadata } from 'next';
-import JavariChamberUI from '@/components/JavariChamberUI';
+import JavariChamberUI from '../../components/JavariChamberUI';
 
 export const metadata: Metadata = {
   title: 'Multi-AI Chamber | Javari AI',
