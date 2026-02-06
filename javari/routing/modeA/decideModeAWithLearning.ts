@@ -1,8 +1,11 @@
 /**
  * Mode A: Single-provider decision with optional learning integration
  * 
- * Placeholder implementation - will be replaced with full logic
+ * Now integrated with cost model for intelligent provider selection
  */
+
+import { scoreProvidersForSubtask } from "../providers/costModel";
+import type { ProviderCostEstimate } from "../providers/costModel";
 
 export interface ModeADecision {
   selectedProvider: {
@@ -11,16 +14,43 @@ export interface ModeADecision {
   };
   reason: string;
   confidence: number;
+  requestId?: string;
+  costEstimate?: ProviderCostEstimate;
 }
 
 export function decideModeAWithLearning(payload: any, priors: any[]): ModeADecision {
-  // Placeholder: always select Claude Sonnet 4
+  const requestId = payload.requestId || `req-${Date.now()}`;
+  
+  // Cost model scoring
+  const estimatedTokens = 500; // temporary placeholder until tokenizer added
+  const providers = [
+    "anthropic-claude-sonnet",
+    "openai-gpt4-turbo",
+    "meta-llama-3-8b",
+    "mistral-mixtral-8x7b",
+    "xai-grok-beta",
+  ];
+
+  const estimates = scoreProvidersForSubtask(
+    providers,
+    estimatedTokens,
+    payload.taskType || "general",
+    requestId
+  );
+
+  // Choose winner by lowest total score
+  estimates.sort((a, b) => a.totalScore - b.totalScore);
+
+  const winner = estimates[0];
+
   return {
     selectedProvider: {
-      id: 'claude-sonnet-4',
-      name: 'Claude Sonnet 4',
+      id: winner.providerId,
+      name: winner.providerId,
     },
-    reason: 'Default provider selection (placeholder)',
-    confidence: 0.8,
+    reason: `Selected via cost model: ${winner.costCents}¢, ${winner.latencyMs}ms, ${Math.round(winner.reliability * 100)}% reliability`,
+    confidence: winner.reliability,
+    requestId,
+    costEstimate: winner,
   };
 }

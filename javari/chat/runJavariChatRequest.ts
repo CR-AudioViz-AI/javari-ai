@@ -16,6 +16,7 @@ export interface JavariChatResponse {
   fallbackModel?: string;
   validatorModel?: string;
   decision: any;
+  costEstimate?: any;
   executionPlan?: any;
   executionResult?: any;
   timestamp: string;
@@ -66,6 +67,7 @@ export async function runJavariChatRequest(
     requestId: envelope.metadata.requestId,
     mode: routed.mode,
     decision: routed.decision,
+    costEstimate: routed.decision.costEstimate || null,
     executionPlan: routed.executionPlan || null,
     executionResult: routed.executionResult || null,
     primaryModel: routed.executionPlan?.primaryModel,
