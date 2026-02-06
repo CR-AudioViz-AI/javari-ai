@@ -7,7 +7,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useJavariChamber } from '@/hooks/useJavariChamber';
+import { useJavariChamber } from '../hooks/useJavariChamber';
 
 export default function JavariChamberUI() {
   const [goal, setGoal] = useState('');
