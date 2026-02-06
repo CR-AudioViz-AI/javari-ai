@@ -1,3 +1,4 @@
+// TEMPORARILY DISABLED - Missing @meta-llama/llama package
 import type {
   ProviderAdapter,
   LiveProviderExecuteOptions,
@@ -14,7 +15,7 @@ async function loadClient() {
   return MetaLlamaClient;
 }
 
-export const llamaAdapter: ProviderAdapter = {
+// export const llamaAdapter: ProviderAdapter = {
   id: "meta-llama-3-8b",
   name: "Meta Llama 3 8B",
   capabilities: {
