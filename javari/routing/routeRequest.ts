@@ -56,9 +56,9 @@ export async function routeRequest(env: UnifiedRoutingEnvelope): Promise<RouteRe
     // AUTO-EXECUTE if executionPlan exists
     let executionResult = null;
     if (exec && (env as any).flags?.autoExecute) {
-      const { approvePlan } = await import('./approval/approvePlan.js');
-      const { issueExecutionToken } = await import('./execution/token.js');
-      const { executeCollaborationPlan } = await import('./execution/adapter.js');
+      const { approvePlan } = await import('./approval/approvePlan');
+      const { issueExecutionToken } = await import('./execution/token');
+      const { executeCollaborationPlan } = await import('./execution/adapter');
 
       const approval = approvePlan({
         planId: decision.selectedProvider.id,
@@ -94,9 +94,9 @@ export async function routeRequest(env: UnifiedRoutingEnvelope): Promise<RouteRe
   // MODE B auto-execution
   let executionResult = null;
   if (exec && (env as any).flags?.autoExecute) {
-    const { approvePlan } = await import('./approval/approvePlan.js');
-    const { issueExecutionToken } = await import('./execution/token.js');
-    const { executeCollaborationPlan } = await import('./execution/adapter.js');
+    const { approvePlan } = await import('./approval/approvePlan');
+    const { issueExecutionToken } = await import('./execution/token');
+    const { executeCollaborationPlan } = await import('./execution/adapter');
 
     const approval = approvePlan({
       planId: decision.plan.planId,
