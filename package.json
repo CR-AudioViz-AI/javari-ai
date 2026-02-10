@@ -29,7 +29,7 @@
     "@radix-ui/react-tooltip": "^1.1.4",
     "@supabase/auth-helpers-nextjs": "^0.10.0",
     "@supabase/ssr": "^0.7.0",
-    "@supabase/supabase-js": "^2.47.10",
+    "@supabase/supabase-js": "^2.46.0",
     "@vercel/analytics": "^1.4.1",
     "axios": "^1.6.2",
     "class-variance-authority": "^0.7.1",
@@ -43,10 +43,10 @@
     "react-dom": "^18.3.1",
     "react-markdown": "^9.0.1",
     "recharts": "^2.13.3",
+    "resend": "^3.0.0",
     "stripe": "^17.3.1",
     "tailwind-merge": "^2.5.5",
-    "tailwindcss-animate": "^1.0.7",
-    "resend": "^3.0.0"
+    "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
