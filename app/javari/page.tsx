@@ -2,14 +2,14 @@
 import { useState, useRef, useEffect } from "react";
 import styles from "./javari.module.css";
 /**
- * JAVARI PHASE 1 — UI STABILIZATION SHELL
- * ---------------------------------------
- * - Dark theme (isolated to Javari only)
- * - Dedicated chat viewport
- * - Clean bubble system
- * - Mobile-safe input bar
- * - Model + credits placeholders for Phase 2
- * - Zero impact on CRAudioVizAI global header/footer
+ * JAVARI PHASE 1 — UI STABILIZATION SHELL (FIX #2)
+ * ------------------------------------------------
+ * - Add identity bar
+ * - Add message animations
+ * - Add elevation/shadows
+ * - Improve bubble geometry & spacing
+ * - Improve input bar
+ * - Prepare theme variables for future routing + Mode 2
  */
 export default function JavariChatPage() {
   const [messages, setMessages] = useState([
@@ -27,7 +27,7 @@ export default function JavariChatPage() {
     if (!input.trim()) return;
     setMessages(prev => [...prev, { role: "user", content: input }]);
     setInput("");
-    // Phase 2+ will replace this with routed LLM logic
+    // Placeholder until Phase 2 routing engine
     setTimeout(() => {
       setMessages(prev => [
         ...prev,
@@ -37,20 +37,25 @@ export default function JavariChatPage() {
   };
   return (
     <div className={styles.javariShell}>
-      {/* HEADER ROW — MODEL + CREDITS (PLACEHOLDERS FOR PHASE 2) */}
-      <div className={styles.topBar}>
-        <span className={styles.modelIndicator}>Model: GPT-4 (UX)</span>
-        <span className={styles.creditsCounter}>Credits: 1,240</span>
+      {/* IDENTITY BAR */}
+      <div className={styles.identityBar}>
+        <div className={styles.identityLeft}>
+          <span className={styles.identityTitle}>Javari — AI Orchestrator</span>
+        </div>
+        <div className={styles.identityRight}>
+          <span className={styles.modelIndicator}>Model: GPT-4 (UX)</span>
+          <span className={styles.creditsCounter}>Credits: 1,240</span>
+        </div>
       </div>
-      {/* CHAT AREA */}
+      {/* CHAT WINDOW */}
       <div ref={scrollRef} className={styles.chatWindow}>
         {messages.map((msg, index) => (
           <div
             key={index}
             className={
               msg.role === "user"
-                ? styles.userBubble
-                : styles.assistantBubble
+                ? `${styles.userBubble} ${styles.bubbleAnim}`
+                : `${styles.assistantBubble} ${styles.bubbleAnim}`
             }
           >
             {msg.content}
