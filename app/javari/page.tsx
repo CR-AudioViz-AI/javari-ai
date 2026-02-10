@@ -15,11 +15,19 @@ export default function JavariPage() {
   ]);
   const [avatarState, setAvatarState] = useState("idle");
   const [activeModel, setActiveModel] = useState("none");
+  const [creditBalance, setCreditBalance] = useState(100.0);
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
   const messagesEndRef = useRef(null);
 
   async function sendMessage() {
     if (!input.trim()) return;
+    if (creditBalance <= 0) {
+      setIsBlocked(true);
+      setErrorMessage("Out of credits! Please purchase more to continue.");
+      return;
+    }
 
     const userMsg = {
       role: "user",
@@ -31,24 +39,67 @@ export default function JavariPage() {
     setInput("");
     setAvatarState("thinking");
     setActiveModel("routing…");
+    setErrorMessage("");
 
-    const reply = await fetch("/api/javari/router", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: userMsg.content })
-    }).then((r) => r.json());
+    try {
+      const response = await fetch("/api/javari/router", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: userMsg.content })
+      });
 
-    setAvatarState("speaking");
-    setActiveModel(reply.model);
+      if (!response.ok) {
+        const errorData = await response.json();
+        
+        if (response.status === 401) {
+          setErrorMessage("Please log in to use Javari.");
+          setAvatarState("idle");
+          return;
+        }
+        
+        if (response.status === 402) {
+          setErrorMessage(errorData.error || "Insufficient credits.");
+          setIsBlocked(true);
+          setCreditBalance(errorData.credit_balance || 0);
+          setAvatarState("idle");
+          return;
+        }
 
-    const aiMsg = {
-      role: "assistant",
-      content: reply.reply,
-      time: new Date().toLocaleTimeString()
-    };
+        throw new Error(errorData.error || "Request failed");
+      }
 
-    setMessages((prev) => [...prev, aiMsg]);
-    setAvatarState("idle");
+      const reply = await response.json();
+
+      setAvatarState("speaking");
+      setActiveModel(reply.model);
+      setCreditBalance(reply.credit_balance);
+
+      const aiMsg = {
+        role: "assistant",
+        content: reply.reply,
+        time: new Date().toLocaleTimeString()
+      };
+
+      setMessages((prev) => [...prev, aiMsg]);
+      setAvatarState("idle");
+
+      // Check if balance is now zero
+      if (reply.credit_balance <= 0) {
+        setIsBlocked(true);
+        setErrorMessage("You've run out of credits!");
+      }
+
+    } catch (error: any) {
+      setErrorMessage(error.message || "Something went wrong.");
+      setAvatarState("idle");
+      
+      const errorMsg = {
+        role: "assistant",
+        content: `Error: ${error.message}`,
+        time: new Date().toLocaleTimeString()
+      };
+      setMessages((prev) => [...prev, errorMsg]);
+    }
   }
 
   useEffect(() => {
@@ -63,7 +114,36 @@ export default function JavariPage() {
 
       {/* CENTER — CHAT */}
       <section className={styles.chatColumn}>
-        <div className={styles.chatHeader}>Javari AI</div>
+        <div className={styles.chatHeader}>
+          <span>Javari AI</span>
+          <span className={styles.headerCredits}>
+            Credits: <span style={{ 
+              color: creditBalance <= 0 ? "#ef4444" : 
+                     creditBalance < 10 ? "#f59e0b" : 
+                     creditBalance < 50 ? "#fbbf24" : "#10b981"
+            }}>
+              {creditBalance.toFixed(2)}
+            </span>
+          </span>
+        </div>
+
+        {/* OUT OF CREDITS BANNER */}
+        {isBlocked && (
+          <div className={styles.creditBanner}>
+            <div className={styles.bannerIcon}>⚠️</div>
+            <div className={styles.bannerText}>
+              <strong>Out of Credits</strong>
+              <p>Purchase more credits to continue using Javari AI.</p>
+            </div>
+          </div>
+        )}
+
+        {/* ERROR MESSAGE */}
+        {errorMessage && !isBlocked && (
+          <div className={styles.errorBanner}>
+            {errorMessage}
+          </div>
+        )}
 
         <div className={styles.chatWindow}>
           {messages.map((m, i) => (
@@ -75,19 +155,34 @@ export default function JavariPage() {
         <div className={styles.inputRow}>
           <input
             value={input}
-            placeholder="Ask Javari anything…"
+            placeholder={
+              isBlocked ? "Out of credits..." : "Ask Javari anything…"
+            }
             className={styles.inputBox}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+            onKeyDown={(e) => e.key === "Enter" && !isBlocked && sendMessage()}
+            disabled={isBlocked}
           />
-          <button onClick={sendMessage} className={styles.sendBtn}>
-            Send
+          <button 
+            onClick={sendMessage} 
+            className={styles.sendBtn}
+            disabled={isBlocked || !input.trim()}
+            style={{
+              opacity: isBlocked || !input.trim() ? 0.5 : 1,
+              cursor: isBlocked || !input.trim() ? "not-allowed" : "pointer"
+            }}
+          >
+            {isBlocked ? "Blocked" : "Send"}
           </button>
         </div>
       </section>
 
       {/* RIGHT COLUMN — AVATAR */}
-      <JavariRightPane avatarState={avatarState} activeModel={activeModel} />
+      <JavariRightPane 
+        avatarState={avatarState} 
+        activeModel={activeModel}
+        creditBalance={creditBalance}
+      />
     </div>
   );
 }
