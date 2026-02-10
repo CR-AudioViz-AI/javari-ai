@@ -104,7 +104,7 @@ export async function deductCredits(
   });
 
   if (error) {
-    throw new Error(\`Credit deduction failed: \${error.message}\`);
+    throw new Error(`Credit deduction failed: ${error.message}`);
   }
 
   return data || 0;
@@ -158,6 +158,6 @@ export function estimateTokens(text: string): number {
 
 // Format duration for timeline
 export function formatDuration(ms: number): string {
-  if (ms < 1000) return \`\${ms}ms\`;
-  return \`\${(ms / 1000).toFixed(2)}s\`;
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(2)}s`;
 }
