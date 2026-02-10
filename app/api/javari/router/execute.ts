@@ -1,6 +1,7 @@
-import { ExecutionResult, ModelSelection, RouterInput } from "./types";
+import { ExecutionResult, ModelSelection, RouterInput, CouncilResult } from "./types";
 import { resolveKey } from "./keys";
-import { computeModelCost } from "./utils";
+import { computeModelCost, estimateTokens } from "./utils";
+import { runCouncil } from "./council";
 
 export async function executeModel(
   input: RouterInput,
@@ -16,7 +17,6 @@ export async function executeModel(
 
   try {
     if (selection.model.startsWith("openai")) {
-      // GPT-4o / o3 family
       const response = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -25,18 +25,19 @@ export async function executeModel(
         },
         body: JSON.stringify({
           model: selection.model.replace("openai:", ""),
-          messages: [{ role: "user", content: input.message }]
+          messages: [{ role: "user", content: input.message }],
+          max_tokens: 1024
         })
-      }).then(r => r.json());
+      });
 
-      output = response?.choices?.[0]?.message?.content || "OpenAI produced no output.";
-      inputTokens = response?.usage?.prompt_tokens || Math.ceil(input.message.length / 4);
-      outputTokens = response?.usage?.completion_tokens || Math.ceil(output.length / 4);
-      totalTokens = response?.usage?.total_tokens || (inputTokens + outputTokens);
+      const data = await response.json();
+      output = data?.choices?.[0]?.message?.content || "OpenAI produced no output.";
+      inputTokens = data?.usage?.prompt_tokens || estimateTokens(input.message);
+      outputTokens = data?.usage?.completion_tokens || estimateTokens(output);
+      totalTokens = data?.usage?.total_tokens || (inputTokens + outputTokens);
     }
 
     else if (selection.model.startsWith("anthropic")) {
-      // Claude validator + fallback
       const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
@@ -49,31 +50,12 @@ export async function executeModel(
           max_tokens: 1024,
           messages: [{ role: "user", content: input.message }]
         })
-      }).then(r => r.json());
+      });
 
-      output = response?.content?.[0]?.text || "Claude produced no output.";
-      inputTokens = response?.usage?.input_tokens || Math.ceil(input.message.length / 4);
-      outputTokens = response?.usage?.output_tokens || Math.ceil(output.length / 4);
-      totalTokens = inputTokens + outputTokens;
-    }
-
-    else if (selection.model.startsWith("meta")) {
-      // Llama 3 Inference endpoint
-      const response = await fetch("https://api.meta-llama.com/v1/chat", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${key}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          model: "llama-3-8b",
-          messages: [{ role: "user", content: input.message }]
-        })
-      }).then(r => r.json());
-
-      output = response?.choices?.[0]?.message?.content || "Llama produced no output.";
-      inputTokens = Math.ceil(input.message.length / 4);
-      outputTokens = Math.ceil(output.length / 4);
+      const data = await response.json();
+      output = data?.content?.[0]?.text || "Claude produced no output.";
+      inputTokens = data?.usage?.input_tokens || estimateTokens(input.message);
+      outputTokens = data?.usage?.output_tokens || estimateTokens(output);
       totalTokens = inputTokens + outputTokens;
     }
 
@@ -87,14 +69,36 @@ export async function executeModel(
         body: JSON.stringify({
           model: "mistral-large-latest",
           messages: [{ role: "user", content: input.message }],
-          response_format: { type: "json_object" }
+          max_tokens: 1024
         })
-      }).then(r => r.json());
+      });
 
-      output = response?.choices?.[0]?.message?.content || "Mistral produced no output.";
-      inputTokens = response?.usage?.prompt_tokens || Math.ceil(input.message.length / 4);
-      outputTokens = response?.usage?.completion_tokens || Math.ceil(output.length / 4);
-      totalTokens = response?.usage?.total_tokens || (inputTokens + outputTokens);
+      const data = await response.json();
+      output = data?.choices?.[0]?.message?.content || "Mistral produced no output.";
+      inputTokens = data?.usage?.prompt_tokens || estimateTokens(input.message);
+      outputTokens = data?.usage?.completion_tokens || estimateTokens(output);
+      totalTokens = data?.usage?.total_tokens || (inputTokens + outputTokens);
+    }
+
+    else if (selection.model.startsWith("groq")) {
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${key}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: "llama-3.1-70b-versatile",
+          messages: [{ role: "user", content: input.message }],
+          max_tokens: 1024
+        })
+      });
+
+      const data = await response.json();
+      output = data?.choices?.[0]?.message?.content || "Groq produced no output.";
+      inputTokens = data?.usage?.prompt_tokens || estimateTokens(input.message);
+      outputTokens = data?.usage?.completion_tokens || estimateTokens(output);
+      totalTokens = data?.usage?.total_tokens || (inputTokens + outputTokens);
     }
 
     else if (selection.model.startsWith("xai")) {
@@ -105,28 +109,30 @@ export async function executeModel(
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          model: "grok-beta",
-          messages: [{ role: "user", content: input.message }]
+          model: "grok-3",
+          messages: [{ role: "user", content: input.message }],
+          max_tokens: 1024
         })
-      }).then(r => r.json());
+      });
 
-      output = response?.choices?.[0]?.message?.content || "Grok produced no output.";
-      inputTokens = response?.usage?.prompt_tokens || Math.ceil(input.message.length / 4);
-      outputTokens = response?.usage?.completion_tokens || Math.ceil(output.length / 4);
-      totalTokens = response?.usage?.total_tokens || (inputTokens + outputTokens);
+      const data = await response.json();
+      output = data?.choices?.[0]?.message?.content || "Grok produced no output.";
+      inputTokens = data?.usage?.prompt_tokens || estimateTokens(input.message);
+      outputTokens = data?.usage?.completion_tokens || estimateTokens(output);
+      totalTokens = data?.usage?.total_tokens || (inputTokens + outputTokens);
     }
 
     else {
       output = "Unknown model routed.";
-      inputTokens = Math.ceil(input.message.length / 4);
-      outputTokens = Math.ceil(output.length / 4);
+      inputTokens = estimateTokens(input.message);
+      outputTokens = estimateTokens(output);
       totalTokens = inputTokens + outputTokens;
     }
 
   } catch (err: any) {
     output = `Model execution error: ${err.message}`;
-    inputTokens = Math.ceil(input.message.length / 4);
-    outputTokens = Math.ceil(output.length / 4);
+    inputTokens = estimateTokens(input.message);
+    outputTokens = estimateTokens(output);
     totalTokens = inputTokens + outputTokens;
   }
 
@@ -143,4 +149,8 @@ export async function executeModel(
     },
     credit_cost: creditCost
   };
+}
+
+export async function executeSuperMode(input: RouterInput): Promise<CouncilResult> {
+  return runCouncil(input);
 }
