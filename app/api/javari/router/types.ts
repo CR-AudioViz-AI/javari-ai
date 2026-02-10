@@ -3,6 +3,7 @@ export type RouterInput = {
   session_id?: string;
   user_id?: string;
   context?: any;
+  supermode?: boolean;
 };
 
 export type IntentClassification = {
@@ -36,6 +37,40 @@ export type ValidationResult = {
   output: string;
 };
 
+export type CouncilDraft = {
+  model: string;
+  output: string;
+  tokens: number;
+  duration_ms: number;
+  evidence: string[];
+  confidence: number;
+};
+
+export type CouncilTimelineStep = {
+  timestamp: number;
+  model: string;
+  action: string;
+  duration_ms: number;
+};
+
+export type ModelContributorScore = {
+  model: string;
+  score: number;
+  reasoning: string;
+  evidence_count: number;
+  selected: boolean;
+};
+
+export type CouncilResult = {
+  final: string;
+  timeline: CouncilTimelineStep[];
+  contributors: ModelContributorScore[];
+  validated: boolean;
+  total_tokens: number;
+  duration_ms: number;
+  credit_cost: number;
+};
+
 export type FinalResponse = {
   reply: string;
   model: string;
@@ -51,6 +86,9 @@ export type FinalResponse = {
   session_id: string;
   enforced: boolean;
   usage_log_id?: string;
+  supermode?: boolean;
+  timeline?: CouncilTimelineStep[];
+  contributors?: ModelContributorScore[];
 };
 
 export type UserAuth = {
@@ -69,6 +107,7 @@ export type UsageLog = {
   request_message: string;
   response_text: string;
   session_id?: string;
+  supermode?: boolean;
 };
 
 // Model cost mapping (credits per 1000 tokens)
@@ -77,6 +116,23 @@ export const MODEL_COSTS = {
   "openai:gpt-4o": 5.0,
   "anthropic:claude-3.5-sonnet": 3.0,
   "mistral:large": 2.0,
-  "meta:llama-3-8b": 0.5,
-  "xai:grok-beta": 4.0
+  "meta:llama-3-70b": 0.5,
+  "xai:grok-3": 4.0,
+  "groq:llama-3-70b": 0.1,
+  "together:llama-3-70b": 0.2,
+  "perplexity:sonar": 1.0,
+  "cohere:command-r": 0.8,
+  "huggingface:llama-3.2": 0.05
 };
+
+export const COUNCIL_MODELS = [
+  "openai:gpt-4o",
+  "anthropic:claude-3.5-sonnet",
+  "mistral:large",
+  "groq:llama-3-70b",
+  "xai:grok-3",
+  "perplexity:sonar",
+  "together:llama-3-70b"
+];
+
+export const COUNCIL_MULTIPLIER = 3.0;
