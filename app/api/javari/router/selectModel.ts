@@ -1,41 +1,46 @@
 import { IntentClassification, ModelSelection } from "./types";
 
-export function selectModel(signal: IntentClassification): ModelSelection {
-  if (signal.highRisk || signal.requiresValidation) {
+export function selectModel(intent: IntentClassification): ModelSelection {
+  // High-risk tasks always use best model
+  if (intent.highRisk) {
     return {
       model: "anthropic:claude-3.5-sonnet",
-      confidence: 0.98,
-      reason: "High risk / validation required"
+      confidence: 0.95,
+      reason: "High-risk query requires premium validation"
     };
   }
 
-  if (signal.requiresReasoning) {
+  // Complex reasoning tasks
+  if (intent.requiresReasoning) {
     return {
-      model: "openai:o3",
-      confidence: 0.91,
-      reason: "Deep reasoning required"
+      model: "openai:gpt-4o",
+      confidence: 0.9,
+      reason: "Complex reasoning task"
     };
   }
 
-  if (signal.jsonRequired) {
+  // JSON formatting
+  if (intent.jsonRequired) {
     return {
       model: "mistral:large",
       confidence: 0.85,
-      reason: "JSON fidelity required"
+      reason: "Structured output required"
     };
   }
 
-  if (signal.lowCostPreferred) {
+  // Low-cost preferred
+  if (intent.lowCostPreferred) {
     return {
-      model: "meta:llama-3-8b",
-      confidence: 0.74,
-      reason: "Low cost request"
+      model: "groq:llama-3-70b",
+      confidence: 0.75,
+      reason: "Simple query - cost optimization"
     };
   }
 
+  // Default to balanced model
   return {
     model: "openai:gpt-4o",
-    confidence: 0.80,
-    reason: "Default balanced model"
+    confidence: 0.8,
+    reason: "Standard routing"
   };
 }
