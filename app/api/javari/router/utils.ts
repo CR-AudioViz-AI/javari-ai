@@ -39,7 +39,7 @@ export async function getSupabaseUser(req: Request): Promise<UserAuth | null> {
   const supabase = createClient(supabaseUrl, supabaseKey, {
     global: {
       headers: {
-        Authorization: \`Bearer \${authCookie.value}\`
+        Authorization: `Bearer ${authCookie.value}`
       }
     }
   });
