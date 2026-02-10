@@ -5,10 +5,20 @@ import styles from "./javari.module.css";
 import JavariHistoryPane from "@/components/javari/JavariHistoryPane";
 import JavariRightPane from "@/components/javari/JavariRightPane";
 import JavariMessageBubble from "@/components/javari/JavariMessageBubble";
+import { CouncilTimelineStep, ModelContributorScore } from "@/app/api/javari/router/types";
+
+interface Message {
+  role: "user" | "assistant";
+  content: string;
+  time: string;
+  supermode?: boolean;
+  contributors?: ModelContributorScore[];
+  validated?: boolean;
+}
 
 export default function JavariPage() {
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [sessions, setSessions] = useState([
     { id: "session-1", label: "Today" },
     { id: "session-2", label: "Yesterday" }
@@ -18,8 +28,16 @@ export default function JavariPage() {
   const [creditBalance, setCreditBalance] = useState(100.0);
   const [isBlocked, setIsBlocked] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [supermodeEnabled, setSupermodeEnabled] = useState(false);
+  const [timeline, setTimeline] = useState<CouncilTimelineStep[]>([]);
+  const [contributors, setContributors] = useState<ModelContributorScore[]>([]);
 
-  const messagesEndRef = useRef(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const toggleSupermode = () => {
+    setSupermodeEnabled(!supermodeEnabled);
+    setErrorMessage("");
+  };
 
   async function sendMessage() {
     if (!input.trim()) return;
@@ -29,7 +47,7 @@ export default function JavariPage() {
       return;
     }
 
-    const userMsg = {
+    const userMsg: Message = {
       role: "user",
       content: input,
       time: new Date().toLocaleTimeString()
@@ -37,15 +55,27 @@ export default function JavariPage() {
 
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
-    setAvatarState("thinking");
-    setActiveModel("routing…");
+    
+    if (supermodeEnabled) {
+      setAvatarState("supermodeThinking");
+      setActiveModel("AI Council");
+    } else {
+      setAvatarState("thinking");
+      setActiveModel("routing…");
+    }
+    
     setErrorMessage("");
+    setTimeline([]);
+    setContributors([]);
 
     try {
       const response = await fetch("/api/javari/router", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: userMsg.content })
+        body: JSON.stringify({ 
+          message: userMsg.content,
+          supermode: supermodeEnabled
+        })
       });
 
       if (!response.ok) {
@@ -70,20 +100,41 @@ export default function JavariPage() {
 
       const reply = await response.json();
 
-      setAvatarState("speaking");
+      if (supermodeEnabled) {
+        setAvatarState("supermodeSpeak");
+      } else {
+        setAvatarState("speaking");
+      }
+
       setActiveModel(reply.model);
       setCreditBalance(reply.credit_balance);
 
-      const aiMsg = {
+      if (reply.timeline) {
+        setTimeline(reply.timeline);
+      }
+      if (reply.contributors) {
+        setContributors(reply.contributors);
+      }
+
+      const aiMsg: Message = {
         role: "assistant",
         content: reply.reply,
-        time: new Date().toLocaleTimeString()
+        time: new Date().toLocaleTimeString(),
+        supermode: reply.supermode,
+        contributors: reply.contributors,
+        validated: reply.supermode
       };
 
       setMessages((prev) => [...prev, aiMsg]);
-      setAvatarState("idle");
+      
+      setTimeout(() => {
+        if (supermodeEnabled) {
+          setAvatarState("supermodeIdle");
+        } else {
+          setAvatarState("idle");
+        }
+      }, 2000);
 
-      // Check if balance is now zero
       if (reply.credit_balance <= 0) {
         setIsBlocked(true);
         setErrorMessage("You've run out of credits!");
@@ -93,7 +144,7 @@ export default function JavariPage() {
       setErrorMessage(error.message || "Something went wrong.");
       setAvatarState("idle");
       
-      const errorMsg = {
+      const errorMsg: Message = {
         role: "assistant",
         content: `Error: ${error.message}`,
         time: new Date().toLocaleTimeString()
@@ -106,13 +157,17 @@ export default function JavariPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  useEffect(() => {
+    if (avatarState === "idle" || avatarState === "supermodeIdle") {
+      setAvatarState(supermodeEnabled ? "supermodeIdle" : "idle");
+    }
+  }, [supermodeEnabled]);
+
   return (
     <div className={styles.outerContainer}>
       
-      {/* LEFT COLUMN — HISTORY */}
       <JavariHistoryPane sessions={sessions} onSelect={() => {}} />
 
-      {/* CENTER — CHAT */}
       <section className={styles.chatColumn}>
         <div className={styles.chatHeader}>
           <span>Javari AI</span>
@@ -127,7 +182,6 @@ export default function JavariPage() {
           </span>
         </div>
 
-        {/* OUT OF CREDITS BANNER */}
         {isBlocked && (
           <div className={styles.creditBanner}>
             <div className={styles.bannerIcon}>⚠️</div>
@@ -138,7 +192,6 @@ export default function JavariPage() {
           </div>
         )}
 
-        {/* ERROR MESSAGE */}
         {errorMessage && !isBlocked && (
           <div className={styles.errorBanner}>
             {errorMessage}
@@ -156,7 +209,9 @@ export default function JavariPage() {
           <input
             value={input}
             placeholder={
-              isBlocked ? "Out of credits..." : "Ask Javari anything…"
+              isBlocked ? "Out of credits..." : 
+              supermodeEnabled ? "Ask the AI Council anything…" :
+              "Ask Javari anything…"
             }
             className={styles.inputBox}
             onChange={(e) => setInput(e.target.value)}
@@ -172,16 +227,19 @@ export default function JavariPage() {
               cursor: isBlocked || !input.trim() ? "not-allowed" : "pointer"
             }}
           >
-            {isBlocked ? "Blocked" : "Send"}
+            {isBlocked ? "Blocked" : supermodeEnabled ? "Ask Council" : "Send"}
           </button>
         </div>
       </section>
 
-      {/* RIGHT COLUMN — AVATAR */}
       <JavariRightPane 
         avatarState={avatarState} 
         activeModel={activeModel}
         creditBalance={creditBalance}
+        supermodeEnabled={supermodeEnabled}
+        onToggleSupermode={toggleSupermode}
+        timeline={timeline}
+        contributors={contributors}
       />
     </div>
   );
