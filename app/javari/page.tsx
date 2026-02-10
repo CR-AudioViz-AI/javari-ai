@@ -1,20 +1,24 @@
 "use client";
+
 import { useState, useRef, useEffect } from "react";
 import styles from "./javari.module.css";
+
 /**
- * JAVARI PHASE 1 — UI FIX #3
+ * JAVARI PHASE 1 — UI FIX #4 (FINAL UI BASELINE)
  * ------------------------------------------------
- * - Add timestamps
- * - Add message grouping (user/user, assistant/assistant)
- * - Add Javari persona badge
- * - Improved spacing + visual rhythm
- * - Animation refinements
+ * - Collapsible chat history panel (UI only)
+ * - Session header
+ * - Scroll memory improvements
+ * - Mobile overlay for history panel
+ * - Clean structural foundation for Phase 2 & Mode 2
  */
+
 type Msg = {
   role: "user" | "assistant";
   content: string;
   timestamp: string;
 };
+
 export default function JavariChatPage() {
   const [messages, setMessages] = useState<Msg[]>([
     {
@@ -23,52 +27,104 @@ export default function JavariChatPage() {
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     }
   ]);
+
   const [input, setInput] = useState("");
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [sessions, setSessions] = useState<string[]>([
+    "Session 1 — Today",
+    "Session 2 — Yesterday",
+    "Session 3 — Draft Flow"
+  ]);
+
   const scrollRef = useRef<HTMLDivElement>(null);
-  // Scroll to bottom when messages update
+
+  // Scroll memory: preserve last scroll height
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages]);
+
   const sendMessage = () => {
     if (!input.trim()) return;
+
     const timestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
     setMessages(prev => [
       ...prev,
       { role: "user", content: input, timestamp }
     ]);
+
     setInput("");
-    // Placeholder assistant response — Phase 2 replaces this with routed model
+
+    // Placeholder for Phase 2 routing engine
     setTimeout(() => {
       const timestamp2 = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
       setMessages(prev => [
         ...prev,
         { role: "assistant", content: "Javari received your message.", timestamp: timestamp2 }
       ]);
     }, 600);
   };
+
   const isGrouped = (index: number) => {
     if (index === 0) return false;
     return messages[index].role === messages[index - 1].role;
   };
+
   return (
     <div className={styles.javariShell}>
+
+      {/* HISTORY PANEL */}
+      <div className={`${styles.historyPanel} ${historyOpen ? styles.historyOpen : ""}`}>
+        <div className={styles.historyHeader}>
+          <span>Chat History</span>
+          <button onClick={() => setHistoryOpen(false)} className={styles.closeHistory}>×</button>
+        </div>
+        <div className={styles.historyList}>
+          {sessions.map((session, idx) => (
+            <div key={idx} className={styles.historyItem}>
+              {session}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* MOBILE OVERLAY WHEN HISTORY OPEN */}
+      {historyOpen && (
+        <div className={styles.overlay} onClick={() => setHistoryOpen(false)}></div>
+      )}
+
+      {/* HISTORY TOGGLE BUTTON */}
+      <button className={styles.historyToggle} onClick={() => setHistoryOpen(true)}>
+        ☰
+      </button>
+
       {/* IDENTITY BAR */}
       <div className={styles.identityBar}>
         <div className={styles.identityLeft}>
           <span className={styles.identityTitle}>Javari — AI Orchestrator</span>
           <span className={styles.personaBadge}>● active</span>
         </div>
+
         <div className={styles.identityRight}>
           <span className={styles.modelIndicator}>Model: GPT-4 (UX)</span>
           <span className={styles.creditsCounter}>Credits: 1,240</span>
         </div>
       </div>
+
+      {/* SESSION HEADER */}
+      <div className={styles.sessionHeader}>
+        <span>Session started: {new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+        <span>Mode: Standard</span>
+      </div>
+
       {/* CHAT WINDOW */}
       <div ref={scrollRef} className={styles.chatWindow}>
         {messages.map((msg, index) => {
           const grouped = isGrouped(index);
+
           return (
             <div
               key={index}
@@ -83,6 +139,7 @@ export default function JavariChatPage() {
               >
                 {msg.content}
               </div>
+
               <div
                 className={
                   msg.role === "user"
@@ -96,6 +153,7 @@ export default function JavariChatPage() {
           );
         })}
       </div>
+
       {/* INPUT BAR */}
       <div className={styles.inputBar}>
         <input
@@ -107,6 +165,7 @@ export default function JavariChatPage() {
         />
         <button onClick={sendMessage}>Send</button>
       </div>
+
     </div>
   );
 }
