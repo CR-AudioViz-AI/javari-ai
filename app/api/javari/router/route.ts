@@ -1,12 +1,9 @@
-export const runtime = "nodejs";
-
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 import { classifyIntent } from "./classify";
 import { selectModel } from "./selectModel";
-import { executeModel } from "./execute";
-import { validateOutput } from "./validate";
-import { assemble } from "./assemble";
+import { executeModel, executeSuperMode } from "./execute";
+import { validateOutput, validateCouncil } from "./validate";
+import { assemble, assembleCouncil } from "./assemble";
 import { RouterInput } from "./types";
 import { 
   getSupabaseUser, 
@@ -17,13 +14,7 @@ import {
 
 export async function POST(req: Request) {
   try {
-    // 1. Extract auth token from cookies
-    const cookieStore = cookies();
-    const authCookie = cookieStore.get("sb-access-token");
-    const accessToken = authCookie?.value;
-
-    // 2. Authenticate user
-    const userAuth = await getSupabaseUser(accessToken);
+    const userAuth = await getSupabaseUser(req);
     
     if (!userAuth) {
       return NextResponse.json(
@@ -32,7 +23,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // 3. Check credit balance
     const creditBalance = await getUserCredits(userAuth.user_id);
     
     if (creditBalance <= 0) {
@@ -45,21 +35,59 @@ export async function POST(req: Request) {
       );
     }
 
-    // 4. Parse request body
     const body: RouterInput = await req.json();
     body.user_id = userAuth.user_id;
 
-    // 5. Classify intent and select model
+    const isSuperMode = body.supermode === true;
+
+    if (isSuperMode) {
+      const council = await executeSuperMode(body);
+
+      const validatedOutput = await validateCouncil(council);
+      council.validated = true;
+
+      if (council.credit_cost > creditBalance) {
+        return NextResponse.json(
+          { 
+            error: `SuperMode costs ${council.credit_cost} credits, but you only have ${creditBalance} credits.`,
+            credit_balance: creditBalance,
+            credit_cost: council.credit_cost
+          },
+          { status: 402 }
+        );
+      }
+
+      const newBalance = await deductCredits(userAuth.user_id, council.credit_cost);
+
+      const usageLogId = await logUsage(userAuth.user_id, {
+        user_id: userAuth.user_id,
+        model: "council",
+        input_tokens: 0,
+        output_tokens: 0,
+        total_tokens: council.total_tokens,
+        credit_cost: council.credit_cost,
+        request_message: body.message,
+        response_text: validatedOutput,
+        session_id: body.session_id,
+        supermode: true
+      });
+
+      const final = assembleCouncil(
+        body,
+        council,
+        validatedOutput,
+        newBalance,
+        usageLogId || undefined
+      );
+
+      return NextResponse.json(final);
+    }
+
     const intent = await classifyIntent(body);
     const selected = selectModel(intent);
-
-    // 6. Execute model
     const exec = await executeModel(body, selected);
-
-    // 7. Validate output
     const val = await validateOutput(exec, selected);
 
-    // 8. Check if user has enough credits for this request
     if (exec.credit_cost > creditBalance) {
       return NextResponse.json(
         { 
@@ -71,10 +99,8 @@ export async function POST(req: Request) {
       );
     }
 
-    // 9. Deduct credits
     const newBalance = await deductCredits(userAuth.user_id, exec.credit_cost);
 
-    // 10. Log usage
     const usageLogId = await logUsage(userAuth.user_id, {
       user_id: userAuth.user_id,
       model: selected.model,
@@ -84,10 +110,10 @@ export async function POST(req: Request) {
       credit_cost: exec.credit_cost,
       request_message: body.message,
       response_text: val.output,
-      session_id: body.session_id
+      session_id: body.session_id,
+      supermode: false
     });
 
-    // 11. Assemble final response
     const final = assemble(
       body,
       { ...exec, output: val.output },
