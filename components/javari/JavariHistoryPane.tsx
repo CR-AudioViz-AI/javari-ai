@@ -1,23 +1,41 @@
 "use client";
-import React from "react";
-import styles from "./javari.module.css";
 
-export default function JavariHistoryPane({ sessions, onSelect }) {
+import React from "react";
+import styles from "@/app/javari/javari.module.css";
+
+interface Session {
+  id: string;
+  label: string;
+}
+
+interface JavariHistoryPaneProps {
+  sessions: Session[];
+  onSelect: (sessionId: string) => void;
+}
+
+export default function JavariHistoryPane({ sessions, onSelect }: JavariHistoryPaneProps) {
   return (
-    <aside className={styles.leftPane}>
-      <h3 className={styles.leftPaneTitle}>Sessions</h3>
-      <ul className={styles.sessionList}>
-        {sessions.map((s) => (
-          <li
-            key={s.id}
+    <aside className={styles.historyPane}>
+      <div className={styles.historyHeader}>
+        <h2 className={styles.historyTitle}>History</h2>
+        <button className={styles.newChatBtn} aria-label="New chat">
+          + New Chat
+        </button>
+      </div>
+
+      <div className={styles.sessionList}>
+        {sessions.map((session) => (
+          <button
+            key={session.id}
             className={styles.sessionItem}
-            onClick={() => onSelect(s.id)}
+            onClick={() => onSelect(session.id)}
+            aria-label={`Load session ${session.label}`}
           >
-            <div className={styles.sessionDot}></div>
-            <div className={styles.sessionLabel}>{s.label}</div>
-          </li>
+            <span className={styles.sessionIcon}>💬</span>
+            <span className={styles.sessionLabel}>{session.label}</span>
+          </button>
         ))}
-      </ul>
+      </div>
     </aside>
   );
 }
