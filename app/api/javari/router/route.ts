@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { classifyIntent } from "./classify";
 import { selectModel } from "./selectModel";
 import { executeModel } from "./execute";
@@ -14,8 +15,13 @@ import {
 
 export async function POST(req: Request) {
   try {
-    // 1. Authenticate user
-    const userAuth = await getSupabaseUser(req);
+    // 1. Extract auth token from cookies
+    const cookieStore = cookies();
+    const authCookie = cookieStore.get("sb-access-token");
+    const accessToken = authCookie?.value;
+
+    // 2. Authenticate user
+    const userAuth = await getSupabaseUser(accessToken);
     
     if (!userAuth) {
       return NextResponse.json(
@@ -24,7 +30,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // 2. Check credit balance
+    // 3. Check credit balance
     const creditBalance = await getUserCredits(userAuth.user_id);
     
     if (creditBalance <= 0) {
@@ -37,21 +43,21 @@ export async function POST(req: Request) {
       );
     }
 
-    // 3. Parse request body
+    // 4. Parse request body
     const body: RouterInput = await req.json();
     body.user_id = userAuth.user_id;
 
-    // 4. Classify intent and select model
+    // 5. Classify intent and select model
     const intent = await classifyIntent(body);
     const selected = selectModel(intent);
 
-    // 5. Execute model
+    // 6. Execute model
     const exec = await executeModel(body, selected);
 
-    // 6. Validate output
+    // 7. Validate output
     const val = await validateOutput(exec, selected);
 
-    // 7. Check if user has enough credits for this request
+    // 8. Check if user has enough credits for this request
     if (exec.credit_cost > creditBalance) {
       return NextResponse.json(
         { 
@@ -63,10 +69,10 @@ export async function POST(req: Request) {
       );
     }
 
-    // 8. Deduct credits
+    // 9. Deduct credits
     const newBalance = await deductCredits(userAuth.user_id, exec.credit_cost);
 
-    // 9. Log usage
+    // 10. Log usage
     const usageLogId = await logUsage(userAuth.user_id, {
       user_id: userAuth.user_id,
       model: selected.model,
@@ -79,7 +85,7 @@ export async function POST(req: Request) {
       session_id: body.session_id
     });
 
-    // 10. Assemble final response
+    // 11. Assemble final response
     const final = assemble(
       body,
       { ...exec, output: val.output },
