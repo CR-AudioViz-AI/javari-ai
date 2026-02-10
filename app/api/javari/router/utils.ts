@@ -1,5 +1,4 @@
 import { createClient } from "@supabase/supabase-js";
-import { cookies } from "next/headers";
 import { UserAuth, UsageLog, MODEL_COSTS } from "./types";
 
 export const now = () => Date.now();
@@ -18,27 +17,19 @@ export const safe = async (fn: () => Promise<any>) => {
   }
 };
 
-// Get Supabase client with user session
-export async function getSupabaseUser(req: Request): Promise<UserAuth | null> {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  
-  const cookieStore = cookies();
-  const authCookie = cookieStore.get("sb-access-token");
-  
-  if (!authCookie) {
+// Get Supabase user from access token
+export async function getSupabaseUser(accessToken?: string): Promise<UserAuth | null> {
+  if (!accessToken) {
     return null;
   }
 
-  const supabase = createClient(supabaseUrl, supabaseKey, {
-    global: {
-      headers: {
-        Authorization: `Bearer ${authCookie.value}`
-      }
-    }
-  });
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  
+  const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-  const { data: { user }, error } = await supabase.auth.getUser();
+  // Get user from access token
+  const { data: { user }, error } = await supabase.auth.getUser(accessToken);
   
   if (error || !user) {
     return null;
