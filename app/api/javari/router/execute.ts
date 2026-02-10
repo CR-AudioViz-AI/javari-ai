@@ -1,5 +1,6 @@
 import { ExecutionResult, ModelSelection, RouterInput } from "./types";
 import { resolveKey } from "./keys";
+import { computeModelCost } from "./utils";
 
 export async function executeModel(
   input: RouterInput,
@@ -9,7 +10,9 @@ export async function executeModel(
 
   const start = Date.now();
   let output = "";
-  let tokens = 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let totalTokens = 0;
 
   try {
     if (selection.model.startsWith("openai")) {
@@ -27,7 +30,9 @@ export async function executeModel(
       }).then(r => r.json());
 
       output = response?.choices?.[0]?.message?.content || "OpenAI produced no output.";
-      tokens = response?.usage?.total_tokens || output.length;
+      inputTokens = response?.usage?.prompt_tokens || Math.ceil(input.message.length / 4);
+      outputTokens = response?.usage?.completion_tokens || Math.ceil(output.length / 4);
+      totalTokens = response?.usage?.total_tokens || (inputTokens + outputTokens);
     }
 
     else if (selection.model.startsWith("anthropic")) {
@@ -47,7 +52,9 @@ export async function executeModel(
       }).then(r => r.json());
 
       output = response?.content?.[0]?.text || "Claude produced no output.";
-      tokens = 2000;
+      inputTokens = response?.usage?.input_tokens || Math.ceil(input.message.length / 4);
+      outputTokens = response?.usage?.output_tokens || Math.ceil(output.length / 4);
+      totalTokens = inputTokens + outputTokens;
     }
 
     else if (selection.model.startsWith("meta")) {
@@ -65,7 +72,9 @@ export async function executeModel(
       }).then(r => r.json());
 
       output = response?.choices?.[0]?.message?.content || "Llama produced no output.";
-      tokens = output.length;
+      inputTokens = Math.ceil(input.message.length / 4);
+      outputTokens = Math.ceil(output.length / 4);
+      totalTokens = inputTokens + outputTokens;
     }
 
     else if (selection.model.startsWith("mistral")) {
@@ -83,7 +92,9 @@ export async function executeModel(
       }).then(r => r.json());
 
       output = response?.choices?.[0]?.message?.content || "Mistral produced no output.";
-      tokens = output.length;
+      inputTokens = response?.usage?.prompt_tokens || Math.ceil(input.message.length / 4);
+      outputTokens = response?.usage?.completion_tokens || Math.ceil(output.length / 4);
+      totalTokens = response?.usage?.total_tokens || (inputTokens + outputTokens);
     }
 
     else if (selection.model.startsWith("xai")) {
@@ -100,22 +111,36 @@ export async function executeModel(
       }).then(r => r.json());
 
       output = response?.choices?.[0]?.message?.content || "Grok produced no output.";
-      tokens = output.length;
+      inputTokens = response?.usage?.prompt_tokens || Math.ceil(input.message.length / 4);
+      outputTokens = response?.usage?.completion_tokens || Math.ceil(output.length / 4);
+      totalTokens = response?.usage?.total_tokens || (inputTokens + outputTokens);
     }
 
     else {
       output = "Unknown model routed.";
-      tokens = output.length;
+      inputTokens = Math.ceil(input.message.length / 4);
+      outputTokens = Math.ceil(output.length / 4);
+      totalTokens = inputTokens + outputTokens;
     }
 
   } catch (err: any) {
     output = `Model execution error: ${err.message}`;
-    tokens = output.length;
+    inputTokens = Math.ceil(input.message.length / 4);
+    outputTokens = Math.ceil(output.length / 4);
+    totalTokens = inputTokens + outputTokens;
   }
+
+  const creditCost = computeModelCost(selection.model, totalTokens);
 
   return {
     output,
-    tokens,
-    duration_ms: Date.now() - start
+    tokens: totalTokens,
+    duration_ms: Date.now() - start,
+    usage: {
+      input: inputTokens,
+      output: outputTokens,
+      total: totalTokens
+    },
+    credit_cost: creditCost
   };
 }
