@@ -4,17 +4,20 @@ export function assemble(
   input: RouterInput,
   exec: ExecutionResult,
   model: string,
-  validator: string
+  validator: string,
+  creditBalance: number,
+  usageLogId?: string
 ): FinalResponse {
   return {
     reply: exec.output,
     model,
     validator,
-    credits: 1.0,
-    usage: {
-      input: input.message.length,
-      output: exec.output.length
-    },
-    session_id: input.session_id || "new"
+    credits: exec.credit_cost,
+    credit_balance: creditBalance,
+    usage: exec.usage,
+    credit_cost: exec.credit_cost,
+    session_id: input.session_id || "new",
+    enforced: true,
+    usage_log_id: usageLogId
   };
 }
