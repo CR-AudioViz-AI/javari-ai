@@ -29,11 +29,21 @@
   margin-bottom: 14px;
   box-shadow: 0 4px 10px var(--j-shadow);
 }
+.identityLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 .identityTitle {
   font-size: 1.05rem;
   font-weight: 600;
   color: var(--j-accent2);
 }
+.personaBadge {
+  font-size: 0.75rem;
+  color: #82ff9e;
+}
+/* RIGHT SIDE */
 .identityRight {
   display: flex;
   gap: 16px;
@@ -57,14 +67,34 @@
   padding: 16px;
   box-shadow: inset 0 0 10px rgba(0,0,0,0.35);
 }
+/* MESSAGE WRAPPER (GROUPING) */
+.messageWrapper {
+  margin-bottom: 18px;
+}
+.grouped {
+  margin-top: -10px;
+}
+/* TIMESTAMPS */
+.userTimestamp,
+.assistantTimestamp {
+  font-size: 0.72rem;
+  opacity: 0.55;
+  margin-top: 4px;
+}
+.userTimestamp {
+  text-align: right;
+}
+.assistantTimestamp {
+  text-align: left;
+}
 /* BUBBLE ANIMATION */
 .bubbleAnim {
-  animation: bubbleFadeIn 0.28s ease-out;
+  animation: bubbleFadeIn 0.25s ease-out;
 }
 @keyframes bubbleFadeIn {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(5px);
   }
   to {
     opacity: 1;
@@ -75,7 +105,6 @@
 .userBubble,
 .assistantBubble {
   max-width: 78%;
-  margin-bottom: 16px;
   padding: 12px 16px;
   border-radius: 14px;
   line-height: 1.45;
