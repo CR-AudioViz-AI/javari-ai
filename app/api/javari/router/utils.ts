@@ -1,15 +1,16 @@
 import { createClient } from "@supabase/supabase-js";
+import { cookies } from "next/headers";
 import { UserAuth, UsageLog, MODEL_COSTS } from "./types";
 
 export const now = () => Date.now();
 
-export const measure = async (fn: () => Promise<any>) => {
+export const measure = async <T>(fn: () => Promise<T>): Promise<{ output: T; duration: number }> => {
   const start = now();
   const output = await fn();
   return { output, duration: now() - start };
 };
 
-export const safe = async (fn: () => Promise<any>) => {
+export const safe = async <T>(fn: () => Promise<T>): Promise<T | { error: string }> => {
   try {
     return await fn();
   } catch (err: any) {
@@ -17,19 +18,33 @@ export const safe = async (fn: () => Promise<any>) => {
   }
 };
 
-// Get Supabase user from access token
-export async function getSupabaseUser(accessToken?: string): Promise<UserAuth | null> {
-  if (!accessToken) {
+export const safeParallel = async <T>(
+  tasks: (() => Promise<T>)[]
+): Promise<(T | { error: string })[]> => {
+  return Promise.all(tasks.map(task => safe(task)));
+};
+
+// Get Supabase client with user session
+export async function getSupabaseUser(req: Request): Promise<UserAuth | null> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  
+  const cookieStore = cookies();
+  const authCookie = cookieStore.get("sb-access-token");
+  
+  if (!authCookie) {
     return null;
   }
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-  
-  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+  const supabase = createClient(supabaseUrl, supabaseKey, {
+    global: {
+      headers: {
+        Authorization: \`Bearer \${authCookie.value}\`
+      }
+    }
+  });
 
-  // Get user from access token
-  const { data: { user }, error } = await supabase.auth.getUser(accessToken);
+  const { data: { user }, error } = await supabase.auth.getUser();
   
   if (error || !user) {
     return null;
@@ -89,7 +104,7 @@ export async function deductCredits(
   });
 
   if (error) {
-    throw new Error(`Credit deduction failed: ${error.message}`);
+    throw new Error(\`Credit deduction failed: \${error.message}\`);
   }
 
   return data || 0;
@@ -116,7 +131,8 @@ export async function logUsage(
       credit_cost: details.credit_cost,
       request_message: details.request_message,
       response_text: details.response_text,
-      session_id: details.session_id
+      session_id: details.session_id,
+      supermode: details.supermode || false
     })
     .select("id")
     .single();
@@ -132,5 +148,16 @@ export async function logUsage(
 // Compute model cost based on tokens
 export function computeModelCost(model: string, tokens: number): number {
   const costPer1k = MODEL_COSTS[model as keyof typeof MODEL_COSTS] || 1.0;
-  return Math.ceil((tokens / 1000) * costPer1k * 100) / 100; // Round to 2 decimals
+  return Math.ceil((tokens / 1000) * costPer1k * 100) / 100;
+}
+
+// Estimate tokens from text (fallback)
+export function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+// Format duration for timeline
+export function formatDuration(ms: number): string {
+  if (ms < 1000) return \`\${ms}ms\`;
+  return \`\${(ms / 1000).toFixed(2)}s\`;
 }
