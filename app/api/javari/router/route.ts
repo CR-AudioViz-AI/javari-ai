@@ -1,7 +1,9 @@
 // app/api/javari/router/route.ts
 import { NextRequest } from 'next/server';
 import { getProvider, getProviderApiKey } from '@/lib/javari/providers';
-import { runCouncil, mergeCouncilResults } from '@/lib/javari/council/engine';
+import { runCouncil } from '@/lib/javari/council/engine';
+import { mergeCouncilResults } from '@/lib/javari/council/merge';
+import { validateCouncilResult } from '@/lib/javari/council/validator';
 import { RouterRequest, StreamEvent } from '@/lib/javari/router/types';
 
 export const runtime = 'edge';
@@ -24,39 +26,91 @@ export async function POST(req: NextRequest) {
           return;
         }
 
-        // SUPERMODE - Council
+        // SUPERMODE - Enhanced Council
         if (mode === 'super') {
-          const councilData: any[] = [];
-
-          const results = await runCouncil(
+          const councilResults = await runCouncil(
             message,
-            ['openai', 'groq', 'anthropic'],
-            (provider, chunk) => {
-              // Stream partial results from each provider
+            // onStream callback
+            (provider, chunk, partial) => {
               sendEvent(controller, encoder, {
                 type: 'council',
-                data: { provider, chunk }
+                data: { 
+                  provider, 
+                  chunk,
+                  partial: partial.substring(0, 100) + '...'
+                }
+              });
+            },
+            // onProviderComplete callback
+            (result) => {
+              sendEvent(controller, encoder, {
+                type: 'council',
+                data: {
+                  provider: result.provider,
+                  complete: true,
+                  confidence: result.confidence,
+                  latency: result.latency,
+                  error: result.error
+                }
               });
             }
           );
 
-          // Send council results
+          // Merge results
+          const merged = mergeCouncilResults(councilResults.results);
+          
           sendEvent(controller, encoder, {
             type: 'council',
-            data: results
-          });
-
-          // Merge and send final answer
-          const finalResponse = mergeCouncilResults(results);
-
-          sendEvent(controller, encoder, {
-            type: 'final',
             data: {
-              response: finalResponse,
-              mode: 'super',
-              councilResults: results
+              phase: 'merge',
+              ...councilResults.metadata,
+              merged: true
             }
           });
+
+          // Optional validation
+          try {
+            const validated = await validateCouncilResult(merged);
+            
+            sendEvent(controller, encoder, {
+              type: 'council',
+              data: {
+                phase: 'validation',
+                validated: validated.validated,
+                validator: validated.validatorProvider
+              }
+            });
+
+            // Final response
+            sendEvent(controller, encoder, {
+              type: 'final',
+              data: {
+                response: validated.finalText,
+                mode: 'super',
+                reasoning: merged.reasoning,
+                metadata: {
+                  ...councilResults.metadata,
+                  ...merged.metadata,
+                  validated: validated.validated
+                }
+              }
+            });
+
+          } catch (validationError) {
+            // Send without validation
+            sendEvent(controller, encoder, {
+              type: 'final',
+              data: {
+                response: merged.finalText,
+                mode: 'super',
+                reasoning: merged.reasoning,
+                metadata: {
+                  ...councilResults.metadata,
+                  ...merged.metadata
+                }
+              }
+            });
+          }
 
           controller.close();
           return;
@@ -140,9 +194,10 @@ function sendEvent(
 export async function GET() {
   return Response.json({
     status: 'healthy',
-    version: '4.1B',
-    providers: ['openai', 'anthropic', 'groq'],
+    version: '4.1C-B',
+    providers: ['openai', 'anthropic', 'groq', 'mistral', 'xai', 'deepseek', 'cohere'],
     modes: ['single', 'super', 'advanced', 'roadmap'],
+    features: ['weighted-scoring', 'fault-tolerance', 'agreement-detection', 'validation'],
     timestamp: new Date().toISOString()
   });
 }
