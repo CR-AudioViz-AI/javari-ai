@@ -3,7 +3,8 @@ import { BaseProvider } from './BaseProvider';
 import { AIProvider, RouterOptions } from '../router/types';
 
 export class AnthropicProvider extends BaseProvider {
-  private model: string = 'claude-3-5-sonnet-20240620';  // Correct model ID
+  // Using Claude 3.5 Sonnet latest version
+  private model: string = 'claude-3-5-sonnet-latest';
 
   getName(): AIProvider {
     return 'anthropic';
