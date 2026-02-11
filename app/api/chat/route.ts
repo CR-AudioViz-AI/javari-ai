@@ -21,13 +21,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Get base URL from request origin
+    const url = new URL(req.url);
+    const baseUrl = `${url.protocol}//${url.host}`;
+
     const routerRes = await fetch(
-      `${process.env.NEXT_PUBLIC_JAVARI_HOST}/api/javari/router`,
+      `${baseUrl}/api/javari/router`,
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: req.headers.get("Authorization") || ""
         },
         body: JSON.stringify({
           message,
@@ -50,26 +53,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const stream = new ReadableStream({
-      async start(controller) {
-        const reader = routerRes.body!.getReader();
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          controller.enqueue(value);
-        }
-
-        controller.close();
-      }
-    });
-
-    return new Response(stream, {
+    // Return the router response directly
+    const data = await routerRes.json();
+    
+    return new Response(JSON.stringify(data), {
       status: 200,
       headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache, no-transform",
-        Connection: "keep-alive"
+        "Content-Type": "application/json"
       }
     });
   } catch (err: any) {
