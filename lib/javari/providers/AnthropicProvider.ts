@@ -34,7 +34,8 @@ export class AnthropicProvider extends BaseProvider {
     );
 
     if (!response.ok) {
-      throw new Error(`Anthropic API error: ${response.status}`);
+      const error = await response.text();
+      throw new Error(`Anthropic API error: ${response.status} - ${error}`);
     }
 
     const reader = response.body?.getReader();
@@ -48,22 +49,27 @@ export class AnthropicProvider extends BaseProvider {
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
+      const lines = buffer.split('\n\n');
       buffer = lines.pop() || '';
 
       for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-
-          try {
-            const json = JSON.parse(data);
-            
-            if (json.type === 'content_block_delta') {
+        if (!line.trim()) continue;
+        
+        const eventMatch = line.match(/^event: (.+)$/m);
+        const dataMatch = line.match(/^data: (.+)$/m);
+        
+        if (eventMatch && dataMatch) {
+          const event = eventMatch[1];
+          const data = dataMatch[1];
+          
+          if (event === 'content_block_delta') {
+            try {
+              const json = JSON.parse(data);
               const content = json.delta?.text;
               if (content) yield content;
+            } catch (e) {
+              // Skip invalid JSON
             }
-          } catch (e) {
-            // Skip invalid JSON
           }
         }
       }
