@@ -4,6 +4,7 @@ import { getProvider, getProviderApiKey } from '@/lib/javari/providers';
 import { runCouncil } from '@/lib/javari/council/engine';
 import { mergeCouncilResults } from '@/lib/javari/council/merge';
 import { validateCouncilResult } from '@/lib/javari/council/validator';
+import { generateRoadmap } from '@/lib/javari/roadmap/engine';
 import { RouterRequest, StreamEvent } from '@/lib/javari/router/types';
 
 export const runtime = 'edge';
@@ -26,22 +27,49 @@ export async function POST(req: NextRequest) {
           return;
         }
 
+        // ROADMAP MODE - Project Planning
+        if (mode === 'roadmap') {
+          try {
+            const roadmap = await generateRoadmap(
+              { goal: message },
+              (chunk) => {
+                sendEvent(controller, encoder, {
+                  type: 'token',
+                  data: chunk
+                });
+              }
+            );
+
+            sendEvent(controller, encoder, {
+              type: 'final',
+              data: {
+                response: roadmap.summary,
+                mode: 'roadmap',
+                roadmap: roadmap
+              }
+            });
+
+          } catch (roadmapError: any) {
+            sendEvent(controller, encoder, {
+              type: 'error',
+              data: { message: 'Roadmap generation failed', details: roadmapError.message }
+            });
+          }
+
+          controller.close();
+          return;
+        }
+
         // SUPERMODE - Enhanced Council
         if (mode === 'super') {
           const councilResults = await runCouncil(
             message,
-            // onStream callback
             (provider, chunk, partial) => {
               sendEvent(controller, encoder, {
                 type: 'council',
-                data: { 
-                  provider, 
-                  chunk,
-                  partial: partial.substring(0, 100) + '...'
-                }
+                data: { provider, chunk, partial: partial.substring(0, 100) + '...' }
               });
             },
-            // onProviderComplete callback
             (result) => {
               sendEvent(controller, encoder, {
                 type: 'council',
@@ -56,58 +84,39 @@ export async function POST(req: NextRequest) {
             }
           );
 
-          // Merge results
           const merged = mergeCouncilResults(councilResults.results);
           
           sendEvent(controller, encoder, {
             type: 'council',
-            data: {
-              phase: 'merge',
-              ...councilResults.metadata,
-              merged: true
-            }
+            data: { phase: 'merge', ...councilResults.metadata, merged: true }
           });
 
-          // Optional validation
           try {
             const validated = await validateCouncilResult(merged);
             
             sendEvent(controller, encoder, {
               type: 'council',
-              data: {
-                phase: 'validation',
-                validated: validated.validated,
-                validator: validated.validatorProvider
-              }
+              data: { phase: 'validation', validated: validated.validated, validator: validated.validatorProvider }
             });
 
-            // Final response
             sendEvent(controller, encoder, {
               type: 'final',
               data: {
                 response: validated.finalText,
                 mode: 'super',
                 reasoning: merged.reasoning,
-                metadata: {
-                  ...councilResults.metadata,
-                  ...merged.metadata,
-                  validated: validated.validated
-                }
+                metadata: { ...councilResults.metadata, ...merged.metadata, validated: validated.validated }
               }
             });
 
           } catch (validationError) {
-            // Send without validation
             sendEvent(controller, encoder, {
               type: 'final',
               data: {
                 response: merged.finalText,
                 mode: 'super',
                 reasoning: merged.reasoning,
-                metadata: {
-                  ...councilResults.metadata,
-                  ...merged.metadata
-                }
+                metadata: { ...councilResults.metadata, ...merged.metadata }
               }
             });
           }
@@ -116,7 +125,7 @@ export async function POST(req: NextRequest) {
           return;
         }
 
-        // SINGLE MODE - One provider
+        // SINGLE MODE
         const providerName = requestedProvider || 'openai';
         
         let apiKey: string;
@@ -138,21 +147,12 @@ export async function POST(req: NextRequest) {
           
           for await (const chunk of provider.generateStream(message)) {
             fullResponse += chunk;
-            
-            sendEvent(controller, encoder, {
-              type: 'token',
-              data: chunk
-            });
+            sendEvent(controller, encoder, { type: 'token', data: chunk });
           }
 
           sendEvent(controller, encoder, {
             type: 'final',
-            data: {
-              response: fullResponse,
-              provider: providerName,
-              model: provider.getModel(),
-              mode
-            }
+            data: { response: fullResponse, provider: providerName, model: provider.getModel(), mode }
           });
 
         } catch (streamError: any) {
@@ -194,10 +194,10 @@ function sendEvent(
 export async function GET() {
   return Response.json({
     status: 'healthy',
-    version: '4.1C-B',
+    version: '4.1C-C',
     providers: ['openai', 'anthropic', 'groq', 'mistral', 'xai', 'deepseek', 'cohere'],
     modes: ['single', 'super', 'advanced', 'roadmap'],
-    features: ['weighted-scoring', 'fault-tolerance', 'agreement-detection', 'validation'],
+    features: ['weighted-scoring', 'fault-tolerance', 'agreement-detection', 'validation', 'roadmap-generation'],
     timestamp: new Date().toISOString()
   });
 }
