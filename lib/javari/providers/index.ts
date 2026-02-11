@@ -3,9 +3,22 @@ import { BaseProvider } from './BaseProvider';
 import { OpenAIProvider } from './OpenAIProvider';
 import { AnthropicProvider } from './AnthropicProvider';
 import { GroqProvider } from './GroqProvider';
+import { MistralProvider } from './MistralProvider';
+import { XAIProvider } from './XAIProvider';
+import { DeepSeekProvider } from './DeepSeekProvider';
+import { CohereProvider } from './CohereProvider';
 import { AIProvider } from '../router/types';
 
-export { BaseProvider, OpenAIProvider, AnthropicProvider, GroqProvider };
+export { 
+  BaseProvider, 
+  OpenAIProvider, 
+  AnthropicProvider, 
+  GroqProvider,
+  MistralProvider,
+  XAIProvider,
+  DeepSeekProvider,
+  CohereProvider
+};
 
 export function getProvider(provider: AIProvider, apiKey: string): BaseProvider {
   switch (provider) {
@@ -15,8 +28,16 @@ export function getProvider(provider: AIProvider, apiKey: string): BaseProvider 
       return new AnthropicProvider(apiKey);
     case 'groq':
       return new GroqProvider(apiKey);
+    case 'mistral':
+      return new MistralProvider(apiKey);
+    case 'xai':
+      return new XAIProvider(apiKey);
+    case 'deepseek':
+      return new DeepSeekProvider(apiKey);
+    case 'cohere':
+      return new CohereProvider(apiKey);
     default:
-      throw new Error(`Provider ${provider} not yet implemented`);
+      throw new Error(`Provider ${provider} not implemented`);
   }
 }
 
@@ -25,6 +46,10 @@ export function getProviderApiKey(provider: AIProvider): string {
     'openai': 'OPENAI_API_KEY',
     'anthropic': 'ANTHROPIC_API_KEY',
     'groq': 'GROQ_API_KEY',
+    'mistral': 'MISTRAL_API_KEY',
+    'xai': 'XAI_API_KEY',
+    'deepseek': 'DEEPSEEK_API_KEY',
+    'cohere': 'COHERE_API_KEY',
   };
 
   const envKey = keyMap[provider];
@@ -36,3 +61,13 @@ export function getProviderApiKey(provider: AIProvider): string {
   
   return key;
 }
+
+export const ALL_PROVIDERS: AIProvider[] = [
+  'openai',
+  'anthropic',
+  'groq',
+  'mistral',
+  'xai',
+  'deepseek',
+  'cohere'
+];
