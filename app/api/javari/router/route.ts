@@ -1,6 +1,7 @@
 // app/api/javari/router/route.ts
 import { NextRequest } from 'next/server';
 import { getProvider, getProviderApiKey } from '@/lib/javari/providers';
+import { runCouncil, mergeCouncilResults } from '@/lib/javari/council/engine';
 import { RouterRequest, StreamEvent } from '@/lib/javari/router/types';
 
 export const runtime = 'edge';
@@ -23,26 +24,61 @@ export async function POST(req: NextRequest) {
           return;
         }
 
-        // Determine provider
+        // SUPERMODE - Council
+        if (mode === 'super') {
+          const councilData: any[] = [];
+
+          const results = await runCouncil(
+            message,
+            ['openai', 'groq', 'anthropic'],
+            (provider, chunk) => {
+              // Stream partial results from each provider
+              sendEvent(controller, encoder, {
+                type: 'council',
+                data: { provider, chunk }
+              });
+            }
+          );
+
+          // Send council results
+          sendEvent(controller, encoder, {
+            type: 'council',
+            data: results
+          });
+
+          // Merge and send final answer
+          const finalResponse = mergeCouncilResults(results);
+
+          sendEvent(controller, encoder, {
+            type: 'final',
+            data: {
+              response: finalResponse,
+              mode: 'super',
+              councilResults: results
+            }
+          });
+
+          controller.close();
+          return;
+        }
+
+        // SINGLE MODE - One provider
         const providerName = requestedProvider || 'openai';
         
-        // Get API key from environment
         let apiKey: string;
         try {
           apiKey = getProviderApiKey(providerName);
         } catch (error: any) {
           sendEvent(controller, encoder, {
             type: 'error',
-            data: { message: `Provider ${providerName} not configured`, details: error.message }
+            data: { message: `Provider ${providerName} not configured` }
           });
           controller.close();
           return;
         }
 
-        // Create provider instance
         const provider = getProvider(providerName, apiKey);
 
-        // Stream response
         try {
           let fullResponse = '';
           
@@ -55,7 +91,6 @@ export async function POST(req: NextRequest) {
             });
           }
 
-          // Send final event
           sendEvent(controller, encoder, {
             type: 'final',
             data: {
@@ -69,20 +104,14 @@ export async function POST(req: NextRequest) {
         } catch (streamError: any) {
           sendEvent(controller, encoder, {
             type: 'error',
-            data: { 
-              message: 'Stream error',
-              details: streamError.message 
-            }
+            data: { message: 'Stream error', details: streamError.message }
           });
         }
 
       } catch (error: any) {
         sendEvent(controller, encoder, {
           type: 'error',
-          data: { 
-            message: 'Server error',
-            details: error.message 
-          }
+          data: { message: 'Server error', details: error.message }
         });
       } finally {
         controller.close();
@@ -111,8 +140,9 @@ function sendEvent(
 export async function GET() {
   return Response.json({
     status: 'healthy',
-    version: '4.1A',
-    providers: ['openai', 'anthropic'],
+    version: '4.1B',
+    providers: ['openai', 'anthropic', 'groq'],
+    modes: ['single', 'super', 'advanced', 'roadmap'],
     timestamp: new Date().toISOString()
   });
 }
