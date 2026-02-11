@@ -3,7 +3,7 @@ import { BaseProvider } from './BaseProvider';
 import { AIProvider, RouterOptions } from '../router/types';
 
 export class AnthropicProvider extends BaseProvider {
-  private model: string = 'claude-3-5-sonnet-20241022';
+  private model: string = 'claude-3-5-sonnet-20240620';  // Correct model ID
 
   getName(): AIProvider {
     return 'anthropic';
