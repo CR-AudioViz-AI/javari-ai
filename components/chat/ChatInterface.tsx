@@ -1,206 +1,220 @@
-"use client";
+'use client';
 
-import React, { useEffect, useRef, useState } from "react";
-import ConversationHistory from "./ConversationHistory";
-import ModeToggle from "./ModeToggle";
-import ProviderSelector from "./ProviderSelector";
-import MessageList from "./MessageList";
-import InputBar from "./InputBar";
-import CouncilPanel from "./CouncilPanel";
+import { useState, useEffect } from 'react';
+import { create } from 'zustand';
+import MessageList from './MessageList';
+import InputBar from './InputBar';
+import ConversationHistory from './ConversationHistory';
+import CouncilPanel from './CouncilPanel';
+import ModeToggle from './ModeToggle';
 
-type Mode = "single" | "super" | "advanced" | "roadmap";
+// Type Definitions
+export type ChatMode = 'single' | 'advanced' | 'super' | 'roadmap';
 
-interface Message {
-  role: "user" | "assistant" | "system";
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
   content: string;
+  timestamp: number;
   provider?: string;
-  metadata?: any;
+  mode?: ChatMode;
+  metadata?: {
+    councilVotes?: Array<{
+      provider: string;
+      vote: string;
+      confidence: number;
+      reasoning: string;
+    }>;
+    [key: string]: any;
+  };
 }
 
+export interface ChatSession {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  mode: ChatMode;
+  provider: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+// Zustand Store (in-memory, no localStorage)
+interface ChatStore {
+  sessions: ChatSession[];
+  currentSessionId: string;
+  addSession: (session: ChatSession) => void;
+  updateSession: (id: string, session: ChatSession) => void;
+  setCurrentSessionId: (id: string) => void;
+  clearSessions: () => void;
+}
+
+const useChatStore = create<ChatStore>((set) => ({
+  sessions: [],
+  currentSessionId: '',
+  addSession: (session) =>
+    set((state) => ({
+      sessions: [...state.sessions.filter((s) => s.id !== session.id), session],
+    })),
+  updateSession: (id, session) =>
+    set((state) => ({
+      sessions: state.sessions.map((s) => (s.id === id ? session : s)),
+    })),
+  setCurrentSessionId: (id) => set({ currentSessionId: id }),
+  clearSessions: () => set({ sessions: [], currentSessionId: '' }),
+}));
+
 export default function ChatInterface() {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [sessionId, setSessionId] = useState<string>("");
-  const [mode, setMode] = useState<Mode>("single");
-  const [provider, setProvider] = useState("openai");
-  const [councilData, setCouncilData] = useState<any[]>([]);
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [mode, setMode] = useState<ChatMode>('single');
+  const [provider, setProvider] = useState('openai');
+  const [loading, setLoading] = useState(false);
+  const [showCouncil, setShowCouncil] = useState(false);
 
-  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const { sessions, currentSessionId, addSession, setCurrentSessionId } = useChatStore();
 
-  // Scroll to bottom on new messages
   useEffect(() => {
-    if (bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [messages]);
+    // Initialize new session
+    const newSessionId = `session-${Date.now()}`;
+    setCurrentSessionId(newSessionId);
+  }, [setCurrentSessionId]);
 
-  // Load last session from history
-  useEffect(() => {
-    const history = JSON.parse(localStorage.getItem("javari_history") || "[]");
-    if (history.length > 0) {
-      const last = history[0];
-      loadConversation(last.id);
-    } else {
-      startNewConversation();
-    }
-  }, []);
-
-  function startNewConversation() {
-    const id = crypto.randomUUID();
-    setSessionId(id);
-    setActiveConversationId(id);
-    setMessages([]);
-    setCouncilData([]);
-  }
-
-  function loadConversation(id: string) {
-    const key = `chat_${id}`;
-    const saved = localStorage.getItem(key);
-    if (saved) {
-      const data = JSON.parse(saved);
-      setSessionId(id);
-      setActiveConversationId(id);
-      setMessages(data.messages || []);
-      setMode(data.mode || "single");
-      setProvider(data.provider || "openai");
-      setCouncilData(data.councilData || []);
-    }
-  }
-
-  function saveConversation(updatedMessages: Message[], updatedCouncil: any[] = []) {
-    if (!sessionId) return;
-
-    const key = `chat_${sessionId}`;
-    const data = {
-      id: sessionId,
+  const saveSession = (updatedMessages: ChatMessage[]) => {
+    const session: ChatSession = {
+      id: currentSessionId,
+      title: updatedMessages[0]?.content.slice(0, 50) || 'New Chat',
       messages: updatedMessages,
       mode,
       provider,
-      councilData: updatedCouncil,
-      updated: Date.now()
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
     };
 
-    localStorage.setItem(key, JSON.stringify(data));
+    addSession(session);
+  };
 
-    // Update global history
-    const history = JSON.parse(localStorage.getItem("javari_history") || "[]");
-    const existingIndex = history.findIndex((h: any) => h.id === sessionId);
+  const sendMessage = async (content: string) => {
+    if (!content.trim() || loading) return;
 
-    const entry = {
-      id: sessionId,
-      title: updatedMessages[0]?.content || "New Chat",
-      lastUpdated: Date.now()
+    setLoading(true);
+
+    const userMessage: ChatMessage = {
+      id: `msg-${Date.now()}`,
+      role: 'user',
+      content,
+      timestamp: Date.now(),
     };
 
-    if (existingIndex >= 0) {
-      history[existingIndex] = entry;
-    } else {
-      history.unshift(entry);
-    }
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
 
-    localStorage.setItem("javari_history", JSON.stringify(history));
-  }
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: content,
+          mode,
+          provider,
+          history: messages,
+        }),
+      });
 
-  async function sendMessage(text: string) {
-    if (!text.trim()) return;
-
-    const userMsg: Message = { role: "user", content: text };
-    const updatedMsgs = [...messages, userMsg];
-    setMessages(updatedMsgs);
-    saveConversation(updatedMsgs, councilData);
-
-    const response = await fetch("/api/chat", {
-      method: "POST",
-      body: JSON.stringify({
-        message: text,
-        mode,
-        provider,
-        sessionId,
-        history: updatedMsgs
-      })
-    });
-
-    if (!response.body) return;
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-
-    let assistantBuffer = "";
-    let councilBuffer: any[] = [];
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const chunk = decoder.decode(value, { stream: true });
-
-      // Process SSE events
-      const lines = chunk.split("\n");
-      for (const line of lines) {
-        if (line.startsWith("data:")) {
-          const dataStr = line.replace("data:", "").trim();
-
-          try {
-            const event = JSON.parse(dataStr);
-
-            if (event.type === "token") {
-              assistantBuffer += event.data;
-              const tempMsgs = [...updatedMsgs, { role: "assistant", content: assistantBuffer }];
-              setMessages(tempMsgs);
-            }
-
-            if (event.type === "council") {
-              councilBuffer = event.data;
-              setCouncilData(councilBuffer);
-            }
-
-          } catch (err) {
-            console.error("Stream parse error", err);
-          }
-        }
+      if (!res.ok) {
+        throw new Error(`API error: ${res.status}`);
       }
-    }
 
-    const finalMsgs = [...updatedMsgs, { role: "assistant", content: assistantBuffer }];
-    setMessages(finalMsgs);
-    saveConversation(finalMsgs, councilBuffer);
-  }
+      const data = await res.json();
+
+      const assistantMessage: ChatMessage = {
+        id: `msg-${Date.now()}-ai`,
+        role: 'assistant',
+        content: data.response || 'No response received',
+        provider: data.provider,
+        mode,
+        timestamp: Date.now(),
+        metadata: data.metadata,
+      };
+
+      const finalMessages = [...updatedMessages, assistantMessage];
+      setMessages(finalMessages);
+      saveSession(finalMessages);
+
+      if (mode === 'super' && data.metadata?.councilVotes) {
+        setShowCouncil(true);
+      }
+    } catch (error) {
+      console.error('Chat error:', error);
+      const errorMessage: ChatMessage = {
+        id: `msg-${Date.now()}-error`,
+        role: 'assistant',
+        content: `Error: ${error instanceof Error ? error.message : 'Failed to get response'}`,
+        timestamp: Date.now(),
+      };
+      const errorMessages = [...updatedMessages, errorMessage];
+      setMessages(errorMessages);
+      saveSession(errorMessages);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadSession = (session: ChatSession) => {
+    setCurrentSessionId(session.id);
+    setMessages(session.messages);
+    setMode(session.mode);
+    setProvider(session.provider);
+    setShowCouncil(false);
+  };
+
+  const newChat = () => {
+    const newSessionId = `session-${Date.now()}`;
+    setCurrentSessionId(newSessionId);
+    setMessages([]);
+    setShowCouncil(false);
+  };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-black text-white">
-
-      {/* LEFT SIDEBAR */}
+    <div className="flex h-full">
+      {/* Left Sidebar - Conversation History */}
       <ConversationHistory
-        activeId={activeConversationId}
-        onSelect={loadConversation}
+        sessions={sessions}
+        currentSessionId={currentSessionId}
+        onSelectSession={loadSession}
+        onNewChat={newChat}
       />
 
-      {/* MAIN CHAT AREA */}
-      <div className="flex flex-col flex-1 border-l border-r border-neutral-800">
-
-        {/* Top Controls */}
-        <div className="p-3 border-b border-neutral-800 flex items-center gap-4">
-          <ModeToggle mode={mode} onChange={setMode} />
-          {mode === "single" && (
-            <ProviderSelector provider={provider} onChange={setProvider} />
-          )}
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col">
+        {/* Header */}
+        <div className="bg-slate-800/50 border-b border-purple-500/30 p-4">
+          <div className="flex items-center justify-between">
+            <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-400 to-pink-600 bg-clip-text text-transparent">
+              Javari AI Chat
+            </h1>
+            <ModeToggle
+              mode={mode}
+              onModeChange={setMode}
+              provider={provider}
+              onProviderChange={setProvider}
+            />
+          </div>
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4">
-          <MessageList messages={messages} />
-          <div ref={bottomRef} />
-        </div>
+        <MessageList messages={messages} loading={loading} />
 
         {/* Input */}
-        <div className="p-3 border-t border-neutral-800">
-          <InputBar onSend={sendMessage} />
-        </div>
+        <InputBar onSendMessage={sendMessage} disabled={loading} mode={mode} />
       </div>
 
-      {/* RIGHT SIDEBAR – SUPERMODE ONLY */}
-      <CouncilPanel visible={mode === "super"} council={councilData} />
-
+      {/* Right Sidebar - Council Panel (SuperMode) */}
+      {showCouncil && mode === 'super' && (
+        <CouncilPanel
+          votes={messages[messages.length - 1]?.metadata?.councilVotes || []}
+          onClose={() => setShowCouncil(false)}
+        />
+      )}
     </div>
   );
 }
