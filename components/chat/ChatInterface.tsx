@@ -1,177 +1,206 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import MessageList from './MessageList';
-import InputBar from './InputBar';
-import ConversationHistory from './ConversationHistory';
-import CouncilPanel from './CouncilPanel';
-import ModeToggle from './ModeToggle';
-import { ChatMessage, ChatMode, ChatSession } from '@/lib/chat/ai-providers';
+import React, { useEffect, useRef, useState } from "react";
+import ConversationHistory from "./ConversationHistory";
+import ModeToggle from "./ModeToggle";
+import ProviderSelector from "./ProviderSelector";
+import MessageList from "./MessageList";
+import InputBar from "./InputBar";
+import CouncilPanel from "./CouncilPanel";
+
+type Mode = "single" | "super" | "advanced" | "roadmap";
+
+interface Message {
+  role: "user" | "assistant" | "system";
+  content: string;
+  provider?: string;
+  metadata?: any;
+}
 
 export default function ChatInterface() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [mode, setMode] = useState<ChatMode>('single');
-  const [provider, setProvider] = useState('openai');
-  const [loading, setLoading] = useState(false);
-  const [sessionId, setSessionId] = useState<string>('');
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [showCouncil, setShowCouncil] = useState(false);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [sessionId, setSessionId] = useState<string>("");
+  const [mode, setMode] = useState<Mode>("single");
+  const [provider, setProvider] = useState("openai");
+  const [councilData, setCouncilData] = useState<any[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
 
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  // Scroll to bottom on new messages
   useEffect(() => {
-    // Initialize new session
-    const newSessionId = `session-${Date.now()}`;
-    setSessionId(newSessionId);
-    loadSessions();
+    if (bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages]);
+
+  // Load last session from history
+  useEffect(() => {
+    const history = JSON.parse(localStorage.getItem("javari_history") || "[]");
+    if (history.length > 0) {
+      const last = history[0];
+      loadConversation(last.id);
+    } else {
+      startNewConversation();
+    }
   }, []);
 
-  const loadSessions = () => {
-    try {
-      const stored = localStorage.getItem('chat-sessions');
-      if (stored) {
-        setSessions(JSON.parse(stored));
-      }
-    } catch (e) {
-      console.error('Failed to load sessions:', e);
+  function startNewConversation() {
+    const id = crypto.randomUUID();
+    setSessionId(id);
+    setActiveConversationId(id);
+    setMessages([]);
+    setCouncilData([]);
+  }
+
+  function loadConversation(id: string) {
+    const key = `chat_${id}`;
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      const data = JSON.parse(saved);
+      setSessionId(id);
+      setActiveConversationId(id);
+      setMessages(data.messages || []);
+      setMode(data.mode || "single");
+      setProvider(data.provider || "openai");
+      setCouncilData(data.councilData || []);
     }
-  };
+  }
 
-  const saveSession = (updatedMessages: ChatMessage[]) => {
-    try {
-      const session: ChatSession = {
-        id: sessionId,
-        title: updatedMessages[0]?.content.slice(0, 50) || 'New Chat',
-        messages: updatedMessages,
-        mode,
-        provider,
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-      };
+  function saveConversation(updatedMessages: Message[], updatedCouncil: any[] = []) {
+    if (!sessionId) return;
 
-      const allSessions = [...sessions.filter(s => s.id !== sessionId), session];
-      setSessions(allSessions);
-      localStorage.setItem('chat-sessions', JSON.stringify(allSessions));
-    } catch (e) {
-      console.error('Failed to save session:', e);
-    }
-  };
-
-  const sendMessage = async (content: string) => {
-    setLoading(true);
-
-    const userMessage: ChatMessage = {
-      id: `msg-${Date.now()}`,
-      role: 'user',
-      content,
-      timestamp: Date.now()
+    const key = `chat_${sessionId}`;
+    const data = {
+      id: sessionId,
+      messages: updatedMessages,
+      mode,
+      provider,
+      councilData: updatedCouncil,
+      updated: Date.now()
     };
 
-    const updatedMessages = [...messages, userMessage];
-    setMessages(updatedMessages);
+    localStorage.setItem(key, JSON.stringify(data));
 
-    try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: content,
-          mode,
-          provider,
-          history: messages
-        })
-      });
+    // Update global history
+    const history = JSON.parse(localStorage.getItem("javari_history") || "[]");
+    const existingIndex = history.findIndex((h: any) => h.id === sessionId);
 
-      const data = await res.json();
+    const entry = {
+      id: sessionId,
+      title: updatedMessages[0]?.content || "New Chat",
+      lastUpdated: Date.now()
+    };
 
-      const assistantMessage: ChatMessage = {
-        id: `msg-${Date.now()}-ai`,
-        role: 'assistant',
-        content: data.response || 'No response',
-        provider: data.provider,
-        mode,
-        timestamp: Date.now(),
-        metadata: data.metadata
-      };
-
-      const finalMessages = [...updatedMessages, assistantMessage];
-      setMessages(finalMessages);
-      saveSession(finalMessages);
-
-      if (mode === 'super' && data.metadata?.councilVotes) {
-        setShowCouncil(true);
-      }
-    } catch (error) {
-      console.error('Chat error:', error);
-      const errorMessage: ChatMessage = {
-        id: `msg-${Date.now()}-error`,
-        role: 'assistant',
-        content: 'Error: Failed to get response',
-        timestamp: Date.now()
-      };
-      setMessages([...updatedMessages, errorMessage]);
+    if (existingIndex >= 0) {
+      history[existingIndex] = entry;
+    } else {
+      history.unshift(entry);
     }
 
-    setLoading(false);
-  };
+    localStorage.setItem("javari_history", JSON.stringify(history));
+  }
 
-  const loadSession = (session: ChatSession) => {
-    setSessionId(session.id);
-    setMessages(session.messages);
-    setMode(session.mode);
-    setProvider(session.provider);
-  };
+  async function sendMessage(text: string) {
+    if (!text.trim()) return;
 
-  const newChat = () => {
-    const newSessionId = `session-${Date.now()}`;
-    setSessionId(newSessionId);
-    setMessages([]);
-    setShowCouncil(false);
-  };
+    const userMsg: Message = { role: "user", content: text };
+    const updatedMsgs = [...messages, userMsg];
+    setMessages(updatedMsgs);
+    saveConversation(updatedMsgs, councilData);
+
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        message: text,
+        mode,
+        provider,
+        sessionId,
+        history: updatedMsgs
+      })
+    });
+
+    if (!response.body) return;
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    let assistantBuffer = "";
+    let councilBuffer: any[] = [];
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+
+      // Process SSE events
+      const lines = chunk.split("\n");
+      for (const line of lines) {
+        if (line.startsWith("data:")) {
+          const dataStr = line.replace("data:", "").trim();
+
+          try {
+            const event = JSON.parse(dataStr);
+
+            if (event.type === "token") {
+              assistantBuffer += event.data;
+              const tempMsgs = [...updatedMsgs, { role: "assistant", content: assistantBuffer }];
+              setMessages(tempMsgs);
+            }
+
+            if (event.type === "council") {
+              councilBuffer = event.data;
+              setCouncilData(councilBuffer);
+            }
+
+          } catch (err) {
+            console.error("Stream parse error", err);
+          }
+        }
+      }
+    }
+
+    const finalMsgs = [...updatedMsgs, { role: "assistant", content: assistantBuffer }];
+    setMessages(finalMsgs);
+    saveConversation(finalMsgs, councilBuffer);
+  }
 
   return (
-    <div className="flex h-full">
-      {/* Left Sidebar - Conversation History */}
-      <ConversationHistory 
-        sessions={sessions}
-        currentSessionId={sessionId}
-        onSelectSession={loadSession}
-        onNewChat={newChat}
+    <div className="flex h-screen overflow-hidden bg-black text-white">
+
+      {/* LEFT SIDEBAR */}
+      <ConversationHistory
+        activeId={activeConversationId}
+        onSelect={loadConversation}
       />
 
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col">
-        {/* Header */}
-        <div className="bg-slate-800/50 border-b border-purple-500/30 p-4">
-          <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-400 to-pink-600 bg-clip-text text-transparent">
-              Javari AI Chat
-            </h1>
-            <ModeToggle 
-              mode={mode} 
-              onModeChange={setMode}
-              provider={provider}
-              onProviderChange={setProvider}
-            />
-          </div>
+      {/* MAIN CHAT AREA */}
+      <div className="flex flex-col flex-1 border-l border-r border-neutral-800">
+
+        {/* Top Controls */}
+        <div className="p-3 border-b border-neutral-800 flex items-center gap-4">
+          <ModeToggle mode={mode} onChange={setMode} />
+          {mode === "single" && (
+            <ProviderSelector provider={provider} onChange={setProvider} />
+          )}
         </div>
 
         {/* Messages */}
-        <MessageList messages={messages} loading={loading} />
+        <div className="flex-1 overflow-y-auto p-4">
+          <MessageList messages={messages} />
+          <div ref={bottomRef} />
+        </div>
 
         {/* Input */}
-        <InputBar 
-          onSendMessage={sendMessage} 
-          disabled={loading}
-          mode={mode}
-        />
+        <div className="p-3 border-t border-neutral-800">
+          <InputBar onSend={sendMessage} />
+        </div>
       </div>
 
-      {/* Right Sidebar - Council Panel (SuperMode) */}
-      {showCouncil && mode === 'super' && (
-        <CouncilPanel 
-          votes={messages[messages.length - 1]?.metadata?.councilVotes || []}
-          onClose={() => setShowCouncil(false)}
-        />
-      )}
+      {/* RIGHT SIDEBAR – SUPERMODE ONLY */}
+      <CouncilPanel visible={mode === "super"} council={councilData} />
+
     </div>
   );
 }
