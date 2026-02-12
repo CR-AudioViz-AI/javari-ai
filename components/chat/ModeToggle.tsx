@@ -17,6 +17,16 @@ const modes: { key: Mode; label: string }[] = [
 ];
 
 export default function ModeToggle({ mode, onChange }: ModeToggleProps) {
+  console.log('[ModeToggle] Rendered with mode:', mode);
+  console.log('[ModeToggle] onChange function:', typeof onChange);
+  
+  const handleClick = (newMode: Mode) => {
+    console.log('[ModeToggle] Button clicked! Old mode:', mode, 'New mode:', newMode);
+    console.log('[ModeToggle] Calling onChange...');
+    onChange(newMode);
+    console.log('[ModeToggle] onChange called');
+  };
+  
   return (
     <div className="flex items-center gap-2 bg-neutral-900 text-white p-2 rounded-md border border-neutral-700">
       {modes.map(({ key, label }) => {
@@ -24,9 +34,14 @@ export default function ModeToggle({ mode, onChange }: ModeToggleProps) {
         return (
           <button
             key={key}
-            onClick={() => onChange(key)}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleClick(key);
+            }}
+            type="button"
             className={`
-              px-3 py-1 rounded-md text-sm transition
+              px-3 py-1 rounded-md text-sm transition cursor-pointer
               ${active ? "bg-blue-600 text-white" : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"}
             `}
           >
