@@ -1,55 +1,40 @@
 // lib/javari/council/engine.ts
 import { getProvider, getProviderApiKey, ALL_PROVIDERS } from '../providers';
 import { AIProvider } from '../router/types';
-import { calculateProviderScore, ReliabilityTracker } from './weights';
-import { COUNCIL_ROLES, getProviderRole, getActiveCouncil, addRoleContext, RoleConfig } from './roles';
-import { preprocessPrompt } from '../utils/preprocessPrompt'; // FIXED: Added import
+import { preprocessPrompt } from '../utils/preprocessPrompt';
 
 export interface CouncilResult {
   provider: AIProvider;
-  role: string;
   response: string;
   confidence: number;
-  roleWeight: number;
-  weightedScore: number;
-  reasoning?: string;
-  error?: string;
   latency: number;
-  tokens?: number;
+  error?: string;
 }
 
 export interface CouncilMetadata {
   totalProviders: number;
   successfulProviders: number;
   failedProviders: number;
-  agreementScore: number;
   selectedProvider: AIProvider;
-  selectedRole: string;
-  selectionReason: string;
-  roleDistribution: Record<string, number>;
+  totalTime: number;
 }
 
-const reliabilityTracker = new ReliabilityTracker();
-
-export async function runCouncil(
+// SPEED OPTIMIZATION: Parallel execution, fail fast
+export async function runCouncilFast(
   message: string,
-  onStream?: (provider: AIProvider, chunk: string, partial: string) => void,
-  onProviderComplete?: (result: CouncilResult) => void
+  onStream?: (provider: AIProvider, chunk: string) => void
 ): Promise<{ results: CouncilResult[]; metadata: CouncilMetadata }> {
   
-  // FIXED: Preprocess prompt BEFORE council execution
+  const startTime = Date.now();
+  
+  // Preprocess once for all providers
   const preprocessed = preprocessPrompt(message);
   const processedMessage = preprocessed.rewrittenPrompt;
   const preferredModel = preprocessed.modelToUse;
   
-  console.log('[Council] Preprocessed:', {
-    original: message.substring(0, 50),
-    rewritten: processedMessage.substring(0, 50),
-    model: preferredModel,
-    nounTrigger: preprocessed.nounTrigger
-  });
+  console.log('[Council-Fast] Starting parallel execution');
   
-  // Get available providers (those with configured API keys)
+  // Get available providers
   const availableProviders = ALL_PROVIDERS.filter(provider => {
     try {
       getProviderApiKey(provider);
@@ -63,145 +48,71 @@ export async function runCouncil(
     throw new Error('No providers configured');
   }
 
-  // Get active council with roles
-  const activeCouncil = getActiveCouncil(availableProviders);
-
-  if (activeCouncil.length === 0) {
-    throw new Error('No council members available');
-  }
-
-  const results: CouncilResult[] = [];
-
-  // Run all council members in parallel with role-specific prompts
-  const promises = activeCouncil.map(async (roleConfig: RoleConfig) => {
-    const startTime = Date.now();
+  // SPEED: Execute ALL providers in parallel, don't wait for slowest
+  const promises = availableProviders.map(async (providerName) => {
+    const providerStart = Date.now();
     let fullResponse = '';
     
     try {
-      const apiKey = getProviderApiKey(roleConfig.provider);
-      const provider = getProvider(roleConfig.provider, apiKey);
+      const apiKey = getProviderApiKey(providerName);
+      const provider = getProvider(providerName, apiKey);
 
-      // Add role context to PROCESSED message
-      const roleMessage = addRoleContext(processedMessage, roleConfig);
-
-      // FIXED: Pass preferredModel to provider
-      for await (const chunk of provider.generateStream(roleMessage, { 
-        timeout: 30000,
-        rolePrompt: roleConfig.systemPrompt,
-        preferredModel: preferredModel // Pass model selection
+      // Stream with preferred model
+      for await (const chunk of provider.generateStream(processedMessage, { 
+        timeout: 15000, // 15s max per provider
+        preferredModel: preferredModel
       })) {
         fullResponse += chunk;
         if (onStream) {
-          onStream(roleConfig.provider, chunk, fullResponse);
+          onStream(providerName, chunk);
         }
       }
 
-      const latency = Date.now() - startTime;
-      const baseConfidence = calculateProviderScore(roleConfig.provider, latency, fullResponse.length);
-      
-      // Apply role weight to confidence
-      const weightedScore = baseConfidence * roleConfig.weight;
-
-      reliabilityTracker.record(roleConfig.provider, true, latency);
-
-      const result: CouncilResult = {
-        provider: roleConfig.provider,
-        role: roleConfig.displayName,
-        response: fullResponse,
-        confidence: baseConfidence,
-        roleWeight: roleConfig.weight,
-        weightedScore,
-        latency,
-      };
-
-      if (onProviderComplete) {
-        onProviderComplete(result);
-      }
-
-      return result;
-
-    } catch (error: any) {
-      const latency = Date.now() - startTime;
-      reliabilityTracker.record(roleConfig.provider, false, latency);
+      const latency = Date.now() - providerStart;
 
       return {
-        provider: roleConfig.provider,
-        role: roleConfig.displayName,
+        provider: providerName,
+        response: fullResponse,
+        confidence: 1.0,
+        latency
+      };
+
+    } catch (error: any) {
+      const latency = Date.now() - providerStart;
+      console.error(`[Council-Fast] ${providerName} failed:`, error.message);
+
+      return {
+        provider: providerName,
         response: '',
         confidence: 0,
-        roleWeight: roleConfig.weight,
-        weightedScore: 0,
-        error: error.message,
         latency,
+        error: error.message
       };
     }
   });
 
-  const allResults = await Promise.all(promises);
+  // Wait for all with timeout
+  const results = await Promise.all(promises);
   
-  // Calculate metadata
-  const successful = allResults.filter(r => !r.error && r.response);
-  const failed = allResults.filter(r => r.error || !r.response);
+  const successful = results.filter(r => !r.error && r.response);
+  const failed = results.filter(r => r.error || !r.response);
   
-  // Calculate role distribution
-  const roleDistribution: Record<string, number> = {};
-  for (const result of successful) {
-    roleDistribution[result.role] = (roleDistribution[result.role] || 0) + 1;
-  }
+  // Select fastest successful response
+  const best = successful.length > 0 
+    ? successful.reduce((prev, curr) => curr.latency < prev.latency ? curr : prev)
+    : results[0];
 
-  // Select best response based on weighted score
-  let selectedProvider: AIProvider = 'openai';
-  let selectedRole = 'General';
-  let selectionReason = 'Default';
-
-  if (successful.length > 0) {
-    const best = successful.reduce((prev, curr) => 
-      curr.weightedScore > prev.weightedScore ? curr : prev
-    );
-    selectedProvider = best.provider;
-    selectedRole = best.role;
-    selectionReason = `Highest weighted score (${best.weightedScore.toFixed(2)}) - Role: ${best.role}`;
-  }
+  const totalTime = Date.now() - startTime;
+  
+  console.log(`[Council-Fast] Complete in ${totalTime}ms - ${successful.length}/${results.length} succeeded`);
 
   const metadata: CouncilMetadata = {
-    totalProviders: allResults.length,
+    totalProviders: results.length,
     successfulProviders: successful.length,
     failedProviders: failed.length,
-    agreementScore: calculateAgreement(successful),
-    selectedProvider,
-    selectedRole,
-    selectionReason,
-    roleDistribution
+    selectedProvider: best.provider,
+    totalTime
   };
 
-  return { results: allResults, metadata };
-}
-
-function calculateAgreement(results: CouncilResult[]): number {
-  if (results.length < 2) return 1.0;
-
-  const responses = results.map(r => r.response.toLowerCase());
-  
-  let totalSimilarity = 0;
-  let comparisons = 0;
-
-  for (let i = 0; i < responses.length; i++) {
-    for (let j = i + 1; j < responses.length; j++) {
-      const similarity = simpleTextSimilarity(responses[i], responses[j]);
-      totalSimilarity += similarity;
-      comparisons++;
-    }
-  }
-
-  return comparisons > 0 ? totalSimilarity / comparisons : 0;
-}
-
-function simpleTextSimilarity(text1: string, text2: string): number {
-  const words1 = new Set(text1.split(/\s+/));
-  const words2 = new Set(text2.split(/\s+/));
-  
-  const intersection = new Set([...words1].filter(w => words2.has(w)));
-  const union = new Set([...words1, ...words2]);
-  
-  return union.size > 0 ? intersection.size / union.size : 0;
+  return { results, metadata };
 }
