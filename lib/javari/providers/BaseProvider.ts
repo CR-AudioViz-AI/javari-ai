@@ -1,6 +1,11 @@
 // lib/javari/providers/BaseProvider.ts
 import { AIProvider, ProviderResponse, RouterOptions } from '../router/types';
 
+// FIXED: Extended RouterOptions to include rolePrompt
+export interface ExtendedRouterOptions extends RouterOptions {
+  rolePrompt?: string;  // System prompt for role-based council execution
+}
+
 export abstract class BaseProvider {
   protected apiKey: string;
   protected timeout: number = 30000;
@@ -15,7 +20,9 @@ export abstract class BaseProvider {
 
   abstract getName(): AIProvider;
   abstract getModel(): string;
-  abstract generateStream(message: string, options?: RouterOptions): Promise<AsyncIterator<string>>;
+  
+  // FIXED: Changed signature to accept ExtendedRouterOptions with rolePrompt
+  abstract generateStream(message: string, options?: ExtendedRouterOptions): AsyncIterator<string>;
 
   protected async withTimeout<T>(promise: Promise<T>, timeoutMs?: number): Promise<T> {
     const timeout = timeoutMs || this.timeout;
