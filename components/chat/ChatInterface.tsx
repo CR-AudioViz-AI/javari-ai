@@ -192,12 +192,7 @@ export default function ChatInterface() {
             <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-400 to-pink-600 bg-clip-text text-transparent">
               Javari AI Chat
             </h1>
-            <ModeToggle
-              mode={mode}
-              onModeChange={setMode}
-              provider={provider}
-              onProviderChange={setProvider}
-            />
+            <ModeToggle mode={mode} onChange={setMode} />
           </div>
         </div>
 
