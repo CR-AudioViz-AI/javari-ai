@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import { ChatMessage } from '@/lib/chat/ai-providers';
 
 interface Props {
@@ -8,8 +9,18 @@ interface Props {
 }
 
 export default function MessageList({ messages, loading }: Props) {
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    if (bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, loading]);
+
   return (
-    <div className="flex-1 overflow-y-auto p-6 space-y-4">
+    <div ref={containerRef} className="flex-1 overflow-y-auto p-6 space-y-4">
       {messages.length === 0 && !loading && (
         <div className="flex items-center justify-center h-full">
           <div className="text-center text-gray-400">
@@ -51,7 +62,7 @@ export default function MessageList({ messages, loading }: Props) {
               <div className="mt-3 pt-3 border-t border-purple-500/30">
                 <div className="text-xs text-purple-300 mb-2">Reasoning Steps:</div>
                 <div className="space-y-2">
-                  {msg.metadata.steps.map((step, idx) => (
+                  {msg.metadata.steps.map((step: any, idx: number) => (
                     <div key={idx} className="text-sm bg-slate-900/50 p-2 rounded">
                       <div className="text-purple-400">Step {step.step}: {step.action}</div>
                       <div className="text-gray-300 text-xs mt-1">{step.result}</div>
@@ -75,6 +86,9 @@ export default function MessageList({ messages, loading }: Props) {
           </div>
         </div>
       )}
+
+      {/* Invisible anchor for auto-scroll */}
+      <div ref={bottomRef} />
     </div>
   );
 }
