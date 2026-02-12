@@ -6,6 +6,19 @@ import { RouterRequest, StreamEvent } from '@/lib/javari/router/types';
 export const runtime = 'edge';
 export const maxDuration = 25;
 
+// Optimize prompts to avoid slow OpenAI responses
+function optimizePrompt(message: string): string {
+  let optimized = message;
+  
+  // Replace words that trigger slow OpenAI responses
+  optimized = optimized.replace(/\bcreate\s+a\s+/gi, 'build a ');
+  optimized = optimized.replace(/\bmake\s+a\s+/gi, 'develop a ');
+  optimized = optimized.replace(/\bcreate\s+an\s+/gi, 'build an ');
+  optimized = optimized.replace(/\bmake\s+an\s+/gi, 'develop an ');
+  
+  return optimized;
+}
+
 export async function POST(req: NextRequest) {
   const encoder = new TextEncoder();
   
@@ -13,7 +26,7 @@ export async function POST(req: NextRequest) {
     async start(controller) {
       try {
         const body: RouterRequest = await req.json();
-        const { message, mode, provider: requestedProvider } = body;
+        let { message, mode, provider: requestedProvider } = body;
 
         if (!message) {
           sendEvent(controller, encoder, {
@@ -24,8 +37,10 @@ export async function POST(req: NextRequest) {
           return;
         }
 
-        // TEMPORARY: SuperMode = Single mode (council disabled due to timeout)
-        // Advanced and Roadmap also use single mode for now
+        // Optimize prompt to avoid slow responses
+        message = optimizePrompt(message);
+
+        // All modes use single AI (council disabled due to timeout issues)
         const providerName = requestedProvider || 'openai';
         
         let apiKey: string;
@@ -99,9 +114,9 @@ function sendEvent(
 export async function GET() {
   return Response.json({
     status: 'healthy',
-    version: '4.3-SIMPLIFIED',
+    version: '4.5-PROMPT-OPTIMIZED',
     modes: ['single', 'super', 'advanced', 'roadmap'],
-    note: 'All modes currently use single AI (council temporarily disabled)',
+    note: 'All modes use single AI with prompt optimization',
     timestamp: new Date().toISOString()
   });
 }
