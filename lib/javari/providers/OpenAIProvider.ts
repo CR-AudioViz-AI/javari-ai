@@ -4,7 +4,15 @@ import { AIProvider } from '../router/types';
 
 export class OpenAIProvider extends BaseProvider {
   private model: string = 'gpt-4-turbo-preview';
-  private fallbackModel: string = 'gpt-4o-mini';
+  private fallbackModel: string = 'gpt-4o-mini'; // Fast, no deep codegen
+
+  // CRITICAL: Nouns that trigger OpenAI's slow deep codegen mode
+  private readonly DEEP_CODEGEN_NOUNS = [
+    'screen', 'app', 'page', 'platform', 'system', 'dashboard',
+    'ui', 'component', 'frontend', 'authentication', 'auth',
+    'registration', 'full-stack', 'builder', 'interface',
+    'application', 'website', 'portal'
+  ];
 
   getName(): AIProvider {
     return 'openai';
@@ -14,32 +22,31 @@ export class OpenAIProvider extends BaseProvider {
     return this.model;
   }
 
-  // CRITICAL FIX: Target nouns that trigger slow responses
   private optimizePrompt(message: string): string {
     let optimized = message;
     
     // Remove polite prefixes
     optimized = optimized.replace(/^(can you|could you|please|would you)\s+/gi, '');
     
-    // Rewrite slow verbs
+    // Rewrite slow verbs (minor optimization)
     optimized = optimized.replace(/\bcreate\s+/gi, 'build ');
     optimized = optimized.replace(/\bmake\s+/gi, 'develop ');
     optimized = optimized.replace(/\bgenerate\s+a\s+full\s+/gi, 'produce a working ');
     optimized = optimized.replace(/\bwrite\s+me\s+/gi, 'write ');
-    optimized = optimized.replace(/\bi\s+need\s+code\s+for\s+/gi, 'write code for ');
-    
-    // CRITICAL: Rewrite slow target nouns (the actual problem)
-    optimized = optimized.replace(/\bscreen\b/gi, 'interface');
-    optimized = optimized.replace(/\bapp\b/gi, 'application code');
-    optimized = optimized.replace(/\bpage\b/gi, 'component');
-    optimized = optimized.replace(/\bplatform\b/gi, 'system');
-    optimized = optimized.replace(/\bauthentication system\b/gi, 'auth code');
-    optimized = optimized.replace(/\be-commerce\s+/gi, 'shop ');
-    optimized = optimized.replace(/\bsocial media\s+/gi, 'social ');
-    optimized = optimized.replace(/\bfull-stack\s+/gi, '');
-    optimized = optimized.replace(/\bcomplete\s+/gi, '');
     
     return optimized.trim();
+  }
+
+  // CRITICAL FIX: Detect if prompt will trigger deep codegen
+  private shouldUseFallback(prompt: string): boolean {
+    const lowerPrompt = prompt.toLowerCase();
+    const detected = this.DEEP_CODEGEN_NOUNS.some(noun => lowerPrompt.includes(noun));
+    
+    if (detected) {
+      console.log('[OpenAI] Deep codegen noun detected, forcing fallback model');
+    }
+    
+    return detected;
   }
 
   private async fetchWithTimeout(
@@ -69,8 +76,13 @@ export class OpenAIProvider extends BaseProvider {
   async *generateStream(message: string, options?: ExtendedRouterOptions): AsyncIterator<string> {
     const optimizedMessage = this.optimizePrompt(message);
     
+    // CRITICAL: Check for deep codegen nouns BEFORE choosing model
+    const useFallback = this.shouldUseFallback(optimizedMessage);
+    let modelToUse = useFallback ? this.fallbackModel : this.model;
+    
     console.log('[OpenAI] Original:', message);
     console.log('[OpenAI] Optimized:', optimizedMessage);
+    console.log('[OpenAI] Model:', modelToUse, useFallback ? '(forced fallback)' : '(primary)');
     
     const messages: Array<{role: string; content: string}> = [];
     
@@ -79,9 +91,6 @@ export class OpenAIProvider extends BaseProvider {
     }
     
     messages.push({ role: 'user', content: optimizedMessage });
-
-    let modelToUse = this.model;
-    let attemptedFallback = false;
 
     try {
       const response = await this.fetchWithTimeout(
@@ -104,85 +113,20 @@ export class OpenAIProvider extends BaseProvider {
       );
 
       if (!response.ok) {
-        if (!attemptedFallback && response.status === 429) {
-          console.log('[OpenAI] Rate limit, trying fallback...');
-          attemptedFallback = true;
-          modelToUse = this.fallbackModel;
-          
-          const fallbackResponse = await this.fetchWithTimeout(
-            'https://api.openai.com/v1/chat/completions',
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${this.apiKey}`,
-              },
-              body: JSON.stringify({
-                model: modelToUse,
-                messages,
-                max_tokens: options?.maxTokens || 2000,
-                temperature: options?.temperature || 0.7,
-                stream: true,
-              }),
-            },
-            10000
-          );
-          
-          if (!fallbackResponse.ok) {
-            throw new Error(`OpenAI API error: ${fallbackResponse.status}`);
-          }
-          
-          yield* this.processStream(fallbackResponse, modelToUse, optimizedMessage);
-          return;
-        }
-        
         throw new Error(`OpenAI API error: ${response.status}`);
       }
 
-      yield* this.processStream(response, modelToUse, optimizedMessage);
+      yield* this.processStream(response, modelToUse, optimizedMessage, useFallback);
 
     } catch (error: any) {
       console.error('[OpenAI] Error:', {
         originalPrompt: message,
         rewrittenPrompt: optimizedMessage,
         modelUsed: modelToUse,
+        nounTrigger: useFallback,
         timeoutTriggered: error.message?.includes('TIMEOUT'),
         error: error.message
       });
-      
-      if (error.message?.includes('TIMEOUT') && !attemptedFallback) {
-        console.log('[OpenAI] Timeout, trying fallback...');
-        attemptedFallback = true;
-        modelToUse = this.fallbackModel;
-        
-        try {
-          const fallbackResponse = await this.fetchWithTimeout(
-            'https://api.openai.com/v1/chat/completions',
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${this.apiKey}`,
-              },
-              body: JSON.stringify({
-                model: modelToUse,
-                messages,
-                max_tokens: options?.maxTokens || 1500,
-                temperature: options?.temperature || 0.7,
-                stream: true,
-              }),
-            },
-            8000
-          );
-          
-          if (fallbackResponse.ok) {
-            yield* this.processStream(fallbackResponse, modelToUse, optimizedMessage);
-            return;
-          }
-        } catch (fallbackError) {
-          console.error('[OpenAI] Fallback failed:', fallbackError);
-        }
-      }
       
       throw error;
     }
@@ -191,7 +135,8 @@ export class OpenAIProvider extends BaseProvider {
   private async *processStream(
     response: Response, 
     modelUsed: string,
-    optimizedPrompt: string
+    optimizedPrompt: string,
+    nounTriggered: boolean
   ): AsyncIterator<string> {
     const reader = response.body?.getReader();
     if (!reader) throw new Error('No response body');
@@ -207,7 +152,7 @@ export class OpenAIProvider extends BaseProvider {
 
       if (!firstChunkReceived) {
         const elapsed = Date.now() - streamStartTime;
-        console.log(`[OpenAI] First chunk in ${elapsed}ms (model: ${modelUsed})`);
+        console.log(`[OpenAI] First chunk in ${elapsed}ms (model: ${modelUsed}, nounTrigger: ${nounTriggered})`);
         firstChunkReceived = true;
       }
 
@@ -219,10 +164,7 @@ export class OpenAIProvider extends BaseProvider {
         if (line.startsWith('data: ')) {
           const data = line.slice(6);
           if (data === '[DONE]') {
-            console.log('[OpenAI] Complete:', {
-              modelUsed,
-              prompt: optimizedPrompt.substring(0, 50)
-            });
+            console.log('[OpenAI] Stream complete');
             return;
           }
 
