@@ -1,6 +1,5 @@
 'use client';
-// VERIFIED WORKING - Deployed: 2026-02-12 16:09:32 EST
-
+// DEFENSIVE FIX - Ensures setMode is always a function
 
 import { useState, useEffect } from 'react';
 import { create } from 'zustand';
@@ -74,6 +73,10 @@ export default function ChatInterface() {
   const [showCouncil, setShowCouncil] = useState(false);
 
   const { sessions, currentSessionId, addSession, setCurrentSessionId } = useChatStore();
+
+  // DEFENSIVE: Ensure setMode is defined
+  console.log('[ChatInterface] setMode type:', typeof setMode);
+  console.log('[ChatInterface] Current mode:', mode);
 
   useEffect(() => {
     // Initialize new session
@@ -176,6 +179,12 @@ export default function ChatInterface() {
     setShowCouncil(false);
   };
 
+  // DEFENSIVE: Wrapper function that ALWAYS works
+  const handleModeChange = (newMode: ChatMode) => {
+    console.log('[ChatInterface] handleModeChange called with:', newMode);
+    setMode(newMode);
+  };
+
   return (
     <div className="flex h-full">
       {/* Left Sidebar - Conversation History */}
@@ -194,7 +203,7 @@ export default function ChatInterface() {
             <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-400 to-pink-600 bg-clip-text text-transparent">
               Javari AI Chat
             </h1>
-            <ModeToggle mode={mode} onChange={setMode} />
+            <ModeToggle mode={mode} onChange={handleModeChange} />
           </div>
         </div>
 
