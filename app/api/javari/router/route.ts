@@ -16,6 +16,8 @@ export async function POST(req: NextRequest) {
         const body: RouterRequest = await req.json();
         let { message, mode, provider: requestedProvider } = body;
 
+        console.log(`[Router] Request received - Mode: ${mode}, Provider: ${requestedProvider || 'openai'}`);
+
         if (!message) {
           sendEvent(controller, encoder, {
             type: 'error',
@@ -42,30 +44,41 @@ export async function POST(req: NextRequest) {
         
         let apiKey: string;
         try {
+          console.log(`[Router] Getting API key for ${providerName}...`);
           apiKey = getProviderApiKey(providerName);
+          console.log(`[Router] API key retrieved: ${apiKey.substring(0, 10)}...`);
         } catch (error: any) {
+          console.error(`[Router] API key error for ${providerName}:`, error.message);
           sendEvent(controller, encoder, {
             type: 'error',
-            data: { message: `Provider ${providerName} not configured` }
+            data: { message: `Provider ${providerName} not configured: ${error.message}` }
           });
           controller.close();
           return;
         }
 
+        console.log(`[Router] Creating ${providerName} provider...`);
         const provider = getProvider(providerName, apiKey);
+        console.log(`[Router] Provider created successfully`);
 
         // Pass preprocessed model selection to provider
         const options = {
           preferredModel: preprocessed.modelToUse
         };
 
+        console.log(`[Router] Starting stream with model: ${options.preferredModel}`);
+
         try {
           let fullResponse = '';
+          let chunkCount = 0;
           
           for await (const chunk of provider.generateStream(message, options)) {
             fullResponse += chunk;
+            chunkCount++;
             sendEvent(controller, encoder, { type: 'token', data: chunk });
           }
+
+          console.log(`[Router] Stream complete - ${chunkCount} chunks, ${fullResponse.length} chars`);
 
           sendEvent(controller, encoder, {
             type: 'final',
@@ -78,16 +91,34 @@ export async function POST(req: NextRequest) {
           });
 
         } catch (streamError: any) {
+          console.error('[Router] Stream error:', {
+            error: streamError.message,
+            stack: streamError.stack,
+            name: streamError.name
+          });
           sendEvent(controller, encoder, {
             type: 'error',
-            data: { message: 'Stream error', details: streamError.message }
+            data: { 
+              message: 'Stream error', 
+              details: streamError.message,
+              errorType: streamError.name
+            }
           });
         }
 
       } catch (error: any) {
+        console.error('[Router] Fatal error:', {
+          error: error.message,
+          stack: error.stack,
+          name: error.name
+        });
         sendEvent(controller, encoder, {
           type: 'error',
-          data: { message: 'Server error', details: error.message }
+          data: { 
+            message: 'Server error', 
+            details: error.message,
+            errorType: error.name
+          }
         });
       } finally {
         controller.close();
@@ -116,9 +147,9 @@ function sendEvent(
 export async function GET() {
   return Response.json({
     status: 'healthy',
-    version: '5.1-SIMPLIFIED-WORKING',
+    version: '5.2-DEBUG-LOGGING',
     modes: ['single', 'super', 'advanced', 'roadmap'],
-    note: 'All modes use preprocessPrompt with noun-based fallback (gpt-4o-mini)',
+    note: 'Extensive error logging enabled',
     timestamp: new Date().toISOString()
   });
 }
