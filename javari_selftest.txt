@@ -1,8 +1,0 @@
-# Javari Self-Test
-    
-This file was created by Javari's autonomous self-test system.
-
-Timestamp: 2026-01-28T15:54:43.507Z
-Test Branch: javari-selftest-1769615683116
-
-This file can be safely deleted.
