@@ -1,6 +1,6 @@
 // lib/javari/providers/OpenAIProvider.ts
-import { BaseProvider } from './BaseProvider';
-import { AIProvider, RouterOptions } from '../router/types';
+import { BaseProvider, ExtendedRouterOptions } from './BaseProvider';
+import { AIProvider } from '../router/types';
 
 export class OpenAIProvider extends BaseProvider {
   private model: string = 'gpt-4-turbo-preview';
@@ -13,7 +13,19 @@ export class OpenAIProvider extends BaseProvider {
     return this.model;
   }
 
-  async *generateStream(message: string, options?: RouterOptions): AsyncIterator<string> {
+  // FIXED: Accept ExtendedRouterOptions with rolePrompt
+  async *generateStream(message: string, options?: ExtendedRouterOptions): AsyncIterator<string> {
+    // FIXED: Build messages array with optional system prompt for role-based execution
+    const messages: Array<{role: string; content: string}> = [];
+    
+    // Add system prompt if provided (for SuperMode role-based council)
+    if (options?.rolePrompt) {
+      messages.push({ role: 'system', content: options.rolePrompt });
+    }
+    
+    // Add user message
+    messages.push({ role: 'user', content: message });
+
     const response = await this.withTimeout(
       fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
@@ -23,7 +35,7 @@ export class OpenAIProvider extends BaseProvider {
         },
         body: JSON.stringify({
           model: this.model,
-          messages: [{ role: 'user', content: message }],
+          messages,  // FIXED: Use messages array with optional system prompt
           max_tokens: options?.maxTokens || 2000,
           temperature: options?.temperature || 0.7,
           stream: true,
