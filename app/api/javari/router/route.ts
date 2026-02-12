@@ -3,11 +3,30 @@ import { NextRequest } from 'next/server';
 import { getProvider, getProviderApiKey } from '@/lib/javari/providers';
 import { runCouncil } from '@/lib/javari/council/engine';
 import { mergeCouncilResults } from '@/lib/javari/council/merge';
-import { validateCouncilResult } from '@/lib/javari/council/validator';
 import { generateRoadmap } from '@/lib/javari/roadmap/engine';
 import { RouterRequest, StreamEvent } from '@/lib/javari/router/types';
 
+// FIXED: Import validation conditionally - it may not exist yet
+let validateCouncilResult: any = null;
+try {
+  const validator = require('@/lib/javari/council/validator');
+  validateCouncilResult = validator.validateCouncilResult;
+} catch (e) {
+  // Validation module doesn't exist - SuperMode will work without it
+  console.log('[Router] Validation module not available - continuing without validation');
+}
+
 export const runtime = 'edge';
+
+// FIXED: Add timeout wrapper for SuperMode to prevent 504 errors
+async function withCouncilTimeout<T>(promise: Promise<T>, timeoutMs: number = 25000): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error('Council timeout - responses took too long')), timeoutMs)
+    ),
+  ]);
+}
 
 export async function POST(req: NextRequest) {
   const encoder = new TextEncoder();
@@ -60,63 +79,93 @@ export async function POST(req: NextRequest) {
           return;
         }
 
-        // SUPERMODE - Enhanced Council
+        // SUPERMODE - Enhanced Council with Timeout Protection
         if (mode === 'super') {
-          const councilResults = await runCouncil(
-            message,
-            (provider, chunk, partial) => {
-              sendEvent(controller, encoder, {
-                type: 'council',
-                data: { provider, chunk, partial: partial.substring(0, 100) + '...' }
-              });
-            },
-            (result) => {
-              sendEvent(controller, encoder, {
-                type: 'council',
-                data: {
-                  provider: result.provider,
-                  complete: true,
-                  confidence: result.confidence,
-                  latency: result.latency,
-                  error: result.error
-                }
-              });
-            }
-          );
-
-          const merged = mergeCouncilResults(councilResults.results);
-          
-          sendEvent(controller, encoder, {
-            type: 'council',
-            data: { phase: 'merge', ...councilResults.metadata, merged: true }
-          });
-
           try {
-            const validated = await validateCouncilResult(merged);
+            // FIXED: Wrap council execution in timeout to prevent 504
+            const councilResults = await withCouncilTimeout(
+              runCouncil(
+                message,
+                (provider, chunk, partial) => {
+                  sendEvent(controller, encoder, {
+                    type: 'council',
+                    data: { provider, chunk, partial: partial.substring(0, 100) + '...' }
+                  });
+                },
+                (result) => {
+                  sendEvent(controller, encoder, {
+                    type: 'council',
+                    data: {
+                      provider: result.provider,
+                      complete: true,
+                      confidence: result.confidence,
+                      latency: result.latency,
+                      error: result.error
+                    }
+                  });
+                }
+              )
+            );
+
+            const merged = mergeCouncilResults(councilResults.results);
             
             sendEvent(controller, encoder, {
               type: 'council',
-              data: { phase: 'validation', validated: validated.validated, validator: validated.validatorProvider }
+              data: { phase: 'merge', ...councilResults.metadata, merged: true }
             });
 
-            sendEvent(controller, encoder, {
-              type: 'final',
-              data: {
-                response: validated.finalText,
-                mode: 'super',
-                reasoning: merged.reasoning,
-                metadata: { ...councilResults.metadata, ...merged.metadata, validated: validated.validated }
+            // FIXED: Only validate if validation module exists
+            if (validateCouncilResult) {
+              try {
+                const validated = await validateCouncilResult(merged);
+                
+                sendEvent(controller, encoder, {
+                  type: 'council',
+                  data: { phase: 'validation', validated: validated.validated, validator: validated.validatorProvider }
+                });
+
+                sendEvent(controller, encoder, {
+                  type: 'final',
+                  data: {
+                    response: validated.finalText,
+                    mode: 'super',
+                    reasoning: merged.reasoning,
+                    metadata: { ...councilResults.metadata, ...merged.metadata, validated: validated.validated }
+                  }
+                });
+              } catch (validationError) {
+                // Validation failed - use merged result
+                sendEvent(controller, encoder, {
+                  type: 'final',
+                  data: {
+                    response: merged.finalText,
+                    mode: 'super',
+                    reasoning: merged.reasoning,
+                    metadata: { ...councilResults.metadata, ...merged.metadata }
+                  }
+                });
               }
-            });
+            } else {
+              // No validation available - use merged result directly
+              sendEvent(controller, encoder, {
+                type: 'final',
+                data: {
+                  response: merged.finalText,
+                  mode: 'super',
+                  reasoning: merged.reasoning,
+                  metadata: { ...councilResults.metadata, ...merged.metadata }
+                }
+              });
+            }
 
-          } catch (validationError) {
+          } catch (superError: any) {
+            // FIXED: Handle timeout and other SuperMode errors gracefully
             sendEvent(controller, encoder, {
-              type: 'final',
-              data: {
-                response: merged.finalText,
-                mode: 'super',
-                reasoning: merged.reasoning,
-                metadata: { ...councilResults.metadata, ...merged.metadata }
+              type: 'error',
+              data: { 
+                message: 'SuperMode error', 
+                details: superError.message,
+                hint: superError.message.includes('timeout') ? 'Council responses took too long - try again' : undefined
               }
             });
           }
@@ -194,10 +243,10 @@ function sendEvent(
 export async function GET() {
   return Response.json({
     status: 'healthy',
-    version: '4.1C-C',
+    version: '4.2-FIXED',
     providers: ['openai', 'anthropic', 'groq', 'mistral', 'xai', 'deepseek', 'cohere'],
     modes: ['single', 'super', 'advanced', 'roadmap'],
-    features: ['weighted-scoring', 'fault-tolerance', 'agreement-detection', 'validation', 'roadmap-generation'],
+    features: ['role-based-council', 'timeout-protection', 'weighted-scoring', 'fault-tolerance'],
     timestamp: new Date().toISOString()
   });
 }
