@@ -4,7 +4,7 @@ import { AIProvider } from '../router/types';
 
 export class OpenAIProvider extends BaseProvider {
   private model: string = 'gpt-4-turbo-preview';
-  private fallbackModel: string = 'gpt-4o-mini'; // Faster fallback
+  private fallbackModel: string = 'gpt-4o-mini';
 
   getName(): AIProvider {
     return 'openai';
@@ -14,26 +14,34 @@ export class OpenAIProvider extends BaseProvider {
     return this.model;
   }
 
-  // ENHANCEMENT #2: Expanded Prompt Rewriting
+  // CRITICAL FIX: Target nouns that trigger slow responses
   private optimizePrompt(message: string): string {
     let optimized = message;
     
-    // Remove polite prefixes that add no value
+    // Remove polite prefixes
     optimized = optimized.replace(/^(can you|could you|please|would you)\s+/gi, '');
     
-    // Rewrite slow-trigger words to fast-trigger equivalents
-    optimized = optimized.replace(/\bcreate\s+a\s+/gi, 'build a ');
-    optimized = optimized.replace(/\bcreate\s+an\s+/gi, 'build an ');
-    optimized = optimized.replace(/\bmake\s+a\s+/gi, 'develop a ');
-    optimized = optimized.replace(/\bmake\s+an\s+/gi, 'develop an ');
+    // Rewrite slow verbs
+    optimized = optimized.replace(/\bcreate\s+/gi, 'build ');
+    optimized = optimized.replace(/\bmake\s+/gi, 'develop ');
     optimized = optimized.replace(/\bgenerate\s+a\s+full\s+/gi, 'produce a working ');
     optimized = optimized.replace(/\bwrite\s+me\s+/gi, 'write ');
     optimized = optimized.replace(/\bi\s+need\s+code\s+for\s+/gi, 'write code for ');
     
+    // CRITICAL: Rewrite slow target nouns (the actual problem)
+    optimized = optimized.replace(/\bscreen\b/gi, 'interface');
+    optimized = optimized.replace(/\bapp\b/gi, 'application code');
+    optimized = optimized.replace(/\bpage\b/gi, 'component');
+    optimized = optimized.replace(/\bplatform\b/gi, 'system');
+    optimized = optimized.replace(/\bauthentication system\b/gi, 'auth code');
+    optimized = optimized.replace(/\be-commerce\s+/gi, 'shop ');
+    optimized = optimized.replace(/\bsocial media\s+/gi, 'social ');
+    optimized = optimized.replace(/\bfull-stack\s+/gi, '');
+    optimized = optimized.replace(/\bcomplete\s+/gi, '');
+    
     return optimized.trim();
   }
 
-  // ENHANCEMENT #1: 10-second Timeout Guard with helpful message
   private async fetchWithTimeout(
     url: string, 
     options: RequestInit, 
@@ -52,15 +60,13 @@ export class OpenAIProvider extends BaseProvider {
     } catch (error: any) {
       clearTimeout(timeoutId);
       if (error.name === 'AbortError') {
-        throw new Error('TIMEOUT: This request is taking too long. Try rephrasing as: build a login screen');
+        throw new Error('TIMEOUT: Request took too long. Try a simpler prompt.');
       }
       throw error;
     }
   }
 
-  // ENHANCEMENT #3: Model Fallback with 2-second stream start check
   async *generateStream(message: string, options?: ExtendedRouterOptions): AsyncIterator<string> {
-    // ENHANCEMENT #2: Optimize prompt before sending
     const optimizedMessage = this.optimizePrompt(message);
     
     console.log('[OpenAI] Original:', message);
@@ -74,12 +80,10 @@ export class OpenAIProvider extends BaseProvider {
     
     messages.push({ role: 'user', content: optimizedMessage });
 
-    // Try primary model first
     let modelToUse = this.model;
     let attemptedFallback = false;
 
     try {
-      // ENHANCEMENT #1: 10-second timeout protection
       const response = await this.fetchWithTimeout(
         'https://api.openai.com/v1/chat/completions',
         {
@@ -96,13 +100,12 @@ export class OpenAIProvider extends BaseProvider {
             stream: true,
           }),
         },
-        10000 // 10 second timeout
+        10000
       );
 
       if (!response.ok) {
-        // ENHANCEMENT #3: If primary model fails, try fallback
         if (!attemptedFallback && response.status === 429) {
-          console.log('[OpenAI] Rate limit hit, trying fallback model...');
+          console.log('[OpenAI] Rate limit, trying fallback...');
           attemptedFallback = true;
           modelToUse = this.fallbackModel;
           
@@ -139,7 +142,6 @@ export class OpenAIProvider extends BaseProvider {
       yield* this.processStream(response, modelToUse, optimizedMessage);
 
     } catch (error: any) {
-      // ENHANCEMENT #4: Improved error logging
       console.error('[OpenAI] Error:', {
         originalPrompt: message,
         rewrittenPrompt: optimizedMessage,
@@ -148,9 +150,8 @@ export class OpenAIProvider extends BaseProvider {
         error: error.message
       });
       
-      // ENHANCEMENT #3: Fallback on timeout
       if (error.message?.includes('TIMEOUT') && !attemptedFallback) {
-        console.log('[OpenAI] Timeout on primary model, trying fallback...');
+        console.log('[OpenAI] Timeout, trying fallback...');
         attemptedFallback = true;
         modelToUse = this.fallbackModel;
         
@@ -171,7 +172,7 @@ export class OpenAIProvider extends BaseProvider {
                 stream: true,
               }),
             },
-            8000 // Shorter timeout for fallback
+            8000
           );
           
           if (fallbackResponse.ok) {
@@ -179,7 +180,7 @@ export class OpenAIProvider extends BaseProvider {
             return;
           }
         } catch (fallbackError) {
-          console.error('[OpenAI] Fallback also failed:', fallbackError);
+          console.error('[OpenAI] Fallback failed:', fallbackError);
         }
       }
       
@@ -187,7 +188,6 @@ export class OpenAIProvider extends BaseProvider {
     }
   }
 
-  // Helper: Process SSE stream
   private async *processStream(
     response: Response, 
     modelUsed: string,
@@ -219,9 +219,9 @@ export class OpenAIProvider extends BaseProvider {
         if (line.startsWith('data: ')) {
           const data = line.slice(6);
           if (data === '[DONE]') {
-            console.log('[OpenAI] Stream complete:', {
+            console.log('[OpenAI] Complete:', {
               modelUsed,
-              rewrittenPrompt: optimizedPrompt.substring(0, 50)
+              prompt: optimizedPrompt.substring(0, 50)
             });
             return;
           }
