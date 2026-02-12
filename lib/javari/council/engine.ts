@@ -2,11 +2,16 @@
 import { getProvider, getProviderApiKey, ALL_PROVIDERS } from '../providers';
 import { AIProvider } from '../router/types';
 import { calculateProviderScore, ReliabilityTracker } from './weights';
+import { COUNCIL_ROLES, getProviderRole, getActiveCouncil, addRoleContext, RoleConfig } from './roles';
 
 export interface CouncilResult {
   provider: AIProvider;
+  role: string;
   response: string;
   confidence: number;
+  roleWeight: number;
+  weightedScore: number;
+  reasoning?: string;
   error?: string;
   latency: number;
   tokens?: number;
@@ -18,7 +23,9 @@ export interface CouncilMetadata {
   failedProviders: number;
   agreementScore: number;
   selectedProvider: AIProvider;
+  selectedRole: string;
   selectionReason: string;
+  roleDistribution: Record<string, number>;
 }
 
 const reliabilityTracker = new ReliabilityTracker();
@@ -43,34 +50,53 @@ export async function runCouncil(
     throw new Error('No providers configured');
   }
 
+  // Get active council with roles
+  const activeCouncil = getActiveCouncil(availableProviders);
+
+  if (activeCouncil.length === 0) {
+    throw new Error('No council members available');
+  }
+
   const results: CouncilResult[] = [];
 
-  // Run all providers in parallel
-  const promises = availableProviders.map(async (providerName) => {
+  // Run all council members in parallel with role-specific prompts
+  const promises = activeCouncil.map(async (roleConfig: RoleConfig) => {
     const startTime = Date.now();
     let fullResponse = '';
     
     try {
-      const apiKey = getProviderApiKey(providerName);
-      const provider = getProvider(providerName, apiKey);
+      const apiKey = getProviderApiKey(roleConfig.provider);
+      const provider = getProvider(roleConfig.provider, apiKey);
 
-      // Stream tokens
-      for await (const chunk of provider.generateStream(message, { timeout: 30000 })) {
+      // Add role context to message
+      const roleMessage = addRoleContext(message, roleConfig);
+
+      // Stream tokens with role prompt
+      for await (const chunk of provider.generateStream(roleMessage, { 
+        timeout: 30000,
+        rolePrompt: roleConfig.systemPrompt 
+      })) {
         fullResponse += chunk;
         if (onStream) {
-          onStream(providerName, chunk, fullResponse);
+          onStream(roleConfig.provider, chunk, fullResponse);
         }
       }
 
       const latency = Date.now() - startTime;
-      const confidence = calculateProviderScore(providerName, latency, fullResponse.length);
+      const baseConfidence = calculateProviderScore(roleConfig.provider, latency, fullResponse.length);
+      
+      // Apply role weight to confidence
+      const weightedScore = baseConfidence * roleConfig.weight;
 
-      reliabilityTracker.record(providerName, true, latency);
+      reliabilityTracker.record(roleConfig.provider, true, latency);
 
       const result: CouncilResult = {
-        provider: providerName,
+        provider: roleConfig.provider,
+        role: roleConfig.displayName,
         response: fullResponse,
-        confidence,
+        confidence: baseConfidence,
+        roleWeight: roleConfig.weight,
+        weightedScore,
         latency,
       };
 
@@ -82,12 +108,15 @@ export async function runCouncil(
 
     } catch (error: any) {
       const latency = Date.now() - startTime;
-      reliabilityTracker.record(providerName, false, latency);
+      reliabilityTracker.record(roleConfig.provider, false, latency);
 
       return {
-        provider: providerName,
+        provider: roleConfig.provider,
+        role: roleConfig.displayName,
         response: '',
         confidence: 0,
+        roleWeight: roleConfig.weight,
+        weightedScore: 0,
         error: error.message,
         latency,
       };
@@ -100,22 +129,36 @@ export async function runCouncil(
   const successful = allResults.filter(r => !r.error && r.response);
   const failed = allResults.filter(r => r.error || !r.response);
   
+  // Calculate role distribution
+  const roleDistribution: Record<string, number> = {};
+  for (const result of successful) {
+    roleDistribution[result.role] = (roleDistribution[result.role] || 0) + 1;
+  }
+
+  // Select best response based on weighted score
+  let selectedProvider: AIProvider = 'openai';
+  let selectedRole = 'General';
+  let selectionReason = 'Default';
+
+  if (successful.length > 0) {
+    const best = successful.reduce((prev, curr) => 
+      curr.weightedScore > prev.weightedScore ? curr : prev
+    );
+    selectedProvider = best.provider;
+    selectedRole = best.role;
+    selectionReason = `Highest weighted score (${best.weightedScore.toFixed(2)}) - Role: ${best.role}`;
+  }
+
   const metadata: CouncilMetadata = {
     totalProviders: allResults.length,
     successfulProviders: successful.length,
     failedProviders: failed.length,
     agreementScore: calculateAgreement(successful),
-    selectedProvider: successful[0]?.provider || 'openai',
-    selectionReason: 'Highest confidence score'
+    selectedProvider,
+    selectedRole,
+    selectionReason,
+    roleDistribution
   };
-
-  // Select best response
-  if (successful.length > 0) {
-    const best = successful.reduce((prev, curr) => 
-      curr.confidence > prev.confidence ? curr : prev
-    );
-    metadata.selectedProvider = best.provider;
-  }
 
   return { results: allResults, metadata };
 }
@@ -123,8 +166,6 @@ export async function runCouncil(
 function calculateAgreement(results: CouncilResult[]): number {
   if (results.length < 2) return 1.0;
 
-  // Simple agreement: compare response similarity
-  // More sophisticated: use semantic similarity
   const responses = results.map(r => r.response.toLowerCase());
   
   let totalSimilarity = 0;
