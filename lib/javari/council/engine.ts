@@ -3,6 +3,7 @@ import { getProvider, getProviderApiKey, ALL_PROVIDERS } from '../providers';
 import { AIProvider } from '../router/types';
 import { calculateProviderScore, ReliabilityTracker } from './weights';
 import { COUNCIL_ROLES, getProviderRole, getActiveCouncil, addRoleContext, RoleConfig } from './roles';
+import { preprocessPrompt } from '../utils/preprocessPrompt'; // FIXED: Added import
 
 export interface CouncilResult {
   provider: AIProvider;
@@ -36,6 +37,18 @@ export async function runCouncil(
   onProviderComplete?: (result: CouncilResult) => void
 ): Promise<{ results: CouncilResult[]; metadata: CouncilMetadata }> {
   
+  // FIXED: Preprocess prompt BEFORE council execution
+  const preprocessed = preprocessPrompt(message);
+  const processedMessage = preprocessed.rewrittenPrompt;
+  const preferredModel = preprocessed.modelToUse;
+  
+  console.log('[Council] Preprocessed:', {
+    original: message.substring(0, 50),
+    rewritten: processedMessage.substring(0, 50),
+    model: preferredModel,
+    nounTrigger: preprocessed.nounTrigger
+  });
+  
   // Get available providers (those with configured API keys)
   const availableProviders = ALL_PROVIDERS.filter(provider => {
     try {
@@ -68,13 +81,14 @@ export async function runCouncil(
       const apiKey = getProviderApiKey(roleConfig.provider);
       const provider = getProvider(roleConfig.provider, apiKey);
 
-      // Add role context to message
-      const roleMessage = addRoleContext(message, roleConfig);
+      // Add role context to PROCESSED message
+      const roleMessage = addRoleContext(processedMessage, roleConfig);
 
-      // Stream tokens with role prompt
+      // FIXED: Pass preferredModel to provider
       for await (const chunk of provider.generateStream(roleMessage, { 
         timeout: 30000,
-        rolePrompt: roleConfig.systemPrompt 
+        rolePrompt: roleConfig.systemPrompt,
+        preferredModel: preferredModel // Pass model selection
       })) {
         fullResponse += chunk;
         if (onStream) {
