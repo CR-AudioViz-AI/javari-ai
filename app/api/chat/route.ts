@@ -2,10 +2,6 @@ import { NextRequest } from "next/server";
 
 export const runtime = "edge";
 
-/**
- * Main chat endpoint that consumes the SSE stream from /api/javari/router
- * and returns a final JSON response for the frontend.
- */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -31,25 +27,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Validate mode
-    const validModes = ['single', 'advanced', 'super', 'roadmap'];
-    if (!validModes.includes(mode)) {
-      return new Response(
-        JSON.stringify({ 
-          error: `Invalid mode. Must be one of: ${validModes.join(', ')}` 
-        }),
-        { 
-          status: 400,
-          headers: { "Content-Type": "application/json" }
-        }
-      );
-    }
-
-    // Get base URL from request
+    // Get base URL
     const url = new URL(req.url);
     const baseUrl = `${url.protocol}//${url.host}`;
 
-    // Call the router endpoint (which returns SSE stream)
+    console.log('[/api/chat] Calling router:', { message: message.substring(0, 50), mode, provider });
+
+    // Call router
     const routerRes = await fetch(
       `${baseUrl}/api/javari/router`,
       {
@@ -73,8 +57,7 @@ export async function POST(req: NextRequest) {
       return new Response(
         JSON.stringify({
           error: "Router request failed",
-          details: errorText,
-          status: routerRes.status
+          details: errorText
         }),
         { 
           status: 500,
@@ -83,16 +66,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // The router returns an SSE stream - we need to consume it
-    // and extract the final response
+    // Get reader
     const reader = routerRes.body?.getReader();
     const decoder = new TextDecoder();
     
     if (!reader) {
       return new Response(
-        JSON.stringify({
-          error: "No response body from router"
-        }),
+        JSON.stringify({ error: "No response body from router" }),
         { 
           status: 500,
           headers: { "Content-Type": "application/json" }
@@ -103,117 +83,124 @@ export async function POST(req: NextRequest) {
     let finalResponse = '';
     let metadata: any = {};
     let responseProvider = provider;
-    let councilVotes: any[] = [];
-    let roadmap: any = null;
+    let error: string | null = null;
 
     try {
+      let buffer = '';
+      
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          console.log('[/api/chat] Stream complete. Final response length:', finalResponse.length);
+          break;
+        }
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
+        // Decode chunk
+        buffer += decoder.decode(value, { stream: true });
+        
+        // Process complete lines
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep incomplete line in buffer
 
         for (const line of lines) {
           if (!line.trim() || !line.startsWith('data: ')) continue;
 
           try {
-            const data = JSON.parse(line.slice(6)); // Remove 'data: ' prefix
+            const eventData = JSON.parse(line.slice(6));
             
-            switch (data.type) {
+            switch (eventData.type) {
               case 'token':
-                // Accumulate tokens for final response
-                if (data.data && typeof data.data === 'string') {
-                  finalResponse += data.data;
+                if (eventData.data && typeof eventData.data === 'string') {
+                  finalResponse += eventData.data;
                 }
                 break;
 
               case 'final':
-                // Final event with complete response
-                if (data.data) {
-                  finalResponse = data.data.response || finalResponse;
-                  metadata = data.data.metadata || metadata;
-                  responseProvider = data.data.provider || responseProvider;
-                  roadmap = data.data.roadmap || roadmap;
-                }
-                break;
-
-              case 'council':
-                // Council events from SuperMode
-                if (data.data) {
-                  if (data.data.provider && data.data.complete) {
-                    councilVotes.push({
-                      provider: data.data.provider,
-                      confidence: data.data.confidence,
-                      latency: data.data.latency,
-                      error: data.data.error
-                    });
+                if (eventData.data) {
+                  // Use final response if provided, otherwise keep accumulated
+                  if (eventData.data.response) {
+                    finalResponse = eventData.data.response;
                   }
-                  if (data.data.merged) {
-                    metadata.councilMetadata = data.data;
-                  }
+                  metadata = eventData.data.metadata || metadata;
+                  responseProvider = eventData.data.provider || responseProvider;
                 }
                 break;
 
               case 'error':
-                console.error('[/api/chat] Stream error:', data.data);
-                return new Response(
-                  JSON.stringify({
-                    error: data.data?.message || 'Stream error',
-                    details: data.data?.details
-                  }),
-                  { 
-                    status: 500,
-                    headers: { "Content-Type": "application/json" }
-                  }
-                );
+                error = eventData.data?.message || 'Stream error';
+                console.error('[/api/chat] Stream error event:', eventData.data);
+                break;
             }
           } catch (parseError) {
-            // Skip malformed SSE events
-            console.warn('[/api/chat] Failed to parse SSE event:', line);
+            console.warn('[/api/chat] Failed to parse SSE:', line.substring(0, 100));
           }
         }
       }
+      
+      // Process any remaining buffer
+      if (buffer.trim() && buffer.startsWith('data: ')) {
+        try {
+          const eventData = JSON.parse(buffer.slice(6));
+          if (eventData.type === 'token' && eventData.data) {
+            finalResponse += eventData.data;
+          }
+        } catch (e) {
+          // Ignore
+        }
+      }
+      
     } finally {
       reader.releaseLock();
     }
 
-    // Build final response object
-    const responseData: any = {
-      response: finalResponse || 'No response generated',
-      provider: responseProvider,
-      mode,
-      metadata: {
-        ...metadata,
-        sessionId
-      }
-    };
-
-    // Add mode-specific data
-    if (mode === 'super' && councilVotes.length > 0) {
-      responseData.metadata.councilVotes = councilVotes;
+    // Check if we got an error
+    if (error) {
+      return new Response(
+        JSON.stringify({ error, details: 'Router reported an error' }),
+        { 
+          status: 500,
+          headers: { "Content-Type": "application/json" }
+        }
+      );
     }
 
-    if (mode === 'roadmap' && roadmap) {
-      responseData.roadmap = roadmap;
+    // Check if we got any response
+    if (!finalResponse || finalResponse.trim().length === 0) {
+      console.error('[/api/chat] Empty response from router');
+      return new Response(
+        JSON.stringify({ 
+          error: "Empty response from AI",
+          details: "The AI provider returned no content. Check API keys and quotas."
+        }),
+        { 
+          status: 500,
+          headers: { "Content-Type": "application/json" }
+        }
+      );
     }
 
+    // Success
+    console.log('[/api/chat] Success. Response length:', finalResponse.length);
+    
     return new Response(
-      JSON.stringify(responseData),
+      JSON.stringify({
+        response: finalResponse,
+        provider: responseProvider,
+        mode,
+        metadata
+      }),
       {
         status: 200,
-        headers: {
-          "Content-Type": "application/json"
-        }
+        headers: { "Content-Type": "application/json" }
       }
     );
 
   } catch (err: any) {
-    console.error('[/api/chat] Error:', err);
+    console.error('[/api/chat] Fatal error:', err);
     return new Response(
       JSON.stringify({
         error: "Server error",
-        details: err?.message || "Unknown error occurred"
+        details: err?.message || "Unknown error"
       }),
       { 
         status: 500,
