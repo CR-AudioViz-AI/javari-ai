@@ -36,11 +36,10 @@ export class OpenAIProvider extends BaseProvider {
   }
 
   async *generateStream(message: string, options?: ExtendedRouterOptions): AsyncIterator<string> {
-    // Use preferredModel from router (set by preprocessPrompt)
-    // @ts-ignore - preferredModel added dynamically
+    // FIXED: No @ts-ignore needed - preferredModel now in interface
     const modelToUse = options?.preferredModel || 'gpt-4-turbo-preview';
     
-    console.log('[OpenAI] Using model:', modelToUse);
+    console.log('[OpenAI] Model selected:', modelToUse);
     
     const messages: Array<{role: string; content: string}> = [];
     
