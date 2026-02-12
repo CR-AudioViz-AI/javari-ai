@@ -17,9 +17,10 @@ try {
 }
 
 export const runtime = 'edge';
+export const maxDuration = 25; // Vercel edge limit
 
 // FIXED: Add timeout wrapper for SuperMode to prevent 504 errors
-async function withCouncilTimeout<T>(promise: Promise<T>, timeoutMs: number = 25000): Promise<T> {
+async function withCouncilTimeout<T>(promise: Promise<T>, timeoutMs: number = 12000): Promise<T> {
   return Promise.race([
     promise,
     new Promise<T>((_, reject) =>
