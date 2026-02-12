@@ -5,207 +5,88 @@ export const runtime = "edge";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    const { message, mode = 'single', provider = 'openai' } = body;
 
-    const {
-      message,
-      mode = 'single',
-      provider = 'openai',
-      sessionId,
-      history = []
-    } = body;
-
-    // Validation
-    if (!message || typeof message !== 'string' || !message.trim()) {
-      return new Response(
-        JSON.stringify({ 
-          error: "Message is required and must be a non-empty string" 
-        }),
-        { 
-          status: 400,
-          headers: { "Content-Type": "application/json" }
-        }
-      );
+    if (!message?.trim()) {
+      return Response.json({ error: "Message required" }, { status: 400 });
     }
-
-    // Get base URL
-    const url = new URL(req.url);
-    const baseUrl = `${url.protocol}//${url.host}`;
-
-    console.log('[/api/chat] Calling router:', { message: message.substring(0, 50), mode, provider });
 
     // Call router
-    const routerRes = await fetch(
-      `${baseUrl}/api/javari/router`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          message,
-          mode,
-          provider,
-          sessionId,
-          history
-        })
-      }
-    );
+    const url = new URL(req.url);
+    const routerUrl = `${url.protocol}//${url.host}/api/javari/router`;
+    
+    const routerRes = await fetch(routerUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, mode, provider, ...body })
+    });
 
     if (!routerRes.ok) {
-      const errorText = await routerRes.text();
-      console.error('[/api/chat] Router error:', errorText);
-      return new Response(
-        JSON.stringify({
-          error: "Router request failed",
-          details: errorText
-        }),
-        { 
-          status: 500,
-          headers: { "Content-Type": "application/json" }
-        }
-      );
+      return Response.json({ error: "Router failed", status: routerRes.status }, { status: 500 });
     }
 
-    // Get reader
+    // Read SSE stream
     const reader = routerRes.body?.getReader();
-    const decoder = new TextDecoder();
-    
     if (!reader) {
-      return new Response(
-        JSON.stringify({ error: "No response body from router" }),
-        { 
-          status: 500,
-          headers: { "Content-Type": "application/json" }
-        }
-      );
+      return Response.json({ error: "No stream" }, { status: 500 });
     }
 
+    const decoder = new TextDecoder();
+    let accumulated = '';
     let finalResponse = '';
-    let metadata: any = {};
-    let responseProvider = provider;
-    let error: string | null = null;
+    let finalData: any = null;
 
     try {
-      let buffer = '';
-      
       while (true) {
         const { done, value } = await reader.read();
-        if (done) {
-          console.log('[/api/chat] Stream complete. Final response length:', finalResponse.length);
-          break;
-        }
-
-        // Decode chunk
-        buffer += decoder.decode(value, { stream: true });
         
-        // Process complete lines
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+        if (done) break;
+
+        // Accumulate chunks
+        accumulated += decoder.decode(value, { stream: true });
+        
+        // Process lines
+        const lines = accumulated.split('\n');
+        
+        // Keep last incomplete line
+        accumulated = lines.pop() || '';
 
         for (const line of lines) {
-          if (!line.trim() || !line.startsWith('data: ')) continue;
+          if (!line.startsWith('data: ')) continue;
 
           try {
-            const eventData = JSON.parse(line.slice(6));
+            const event = JSON.parse(line.substring(6));
             
-            switch (eventData.type) {
-              case 'token':
-                if (eventData.data && typeof eventData.data === 'string') {
-                  finalResponse += eventData.data;
-                }
-                break;
-
-              case 'final':
-                if (eventData.data) {
-                  // Use final response if provided, otherwise keep accumulated
-                  if (eventData.data.response) {
-                    finalResponse = eventData.data.response;
-                  }
-                  metadata = eventData.data.metadata || metadata;
-                  responseProvider = eventData.data.provider || responseProvider;
-                }
-                break;
-
-              case 'error':
-                error = eventData.data?.message || 'Stream error';
-                console.error('[/api/chat] Stream error event:', eventData.data);
-                break;
+            if (event.type === 'token' && event.data) {
+              finalResponse += event.data;
+            } else if (event.type === 'final') {
+              finalData = event.data;
+              // Use final response if provided
+              if (finalData.response) {
+                finalResponse = finalData.response;
+              }
+            } else if (event.type === 'error') {
+              reader.releaseLock();
+              return Response.json({ error: event.data?.message || 'Stream error' }, { status: 500 });
             }
-          } catch (parseError) {
-            console.warn('[/api/chat] Failed to parse SSE:', line.substring(0, 100));
+          } catch (e) {
+            // Skip bad JSON
           }
         }
       }
-      
-      // Process any remaining buffer
-      if (buffer.trim() && buffer.startsWith('data: ')) {
-        try {
-          const eventData = JSON.parse(buffer.slice(6));
-          if (eventData.type === 'token' && eventData.data) {
-            finalResponse += eventData.data;
-          }
-        } catch (e) {
-          // Ignore
-        }
-      }
-      
     } finally {
       reader.releaseLock();
     }
 
-    // Check if we got an error
-    if (error) {
-      return new Response(
-        JSON.stringify({ error, details: 'Router reported an error' }),
-        { 
-          status: 500,
-          headers: { "Content-Type": "application/json" }
-        }
-      );
-    }
-
-    // Check if we got any response
-    if (!finalResponse || finalResponse.trim().length === 0) {
-      console.error('[/api/chat] Empty response from router');
-      return new Response(
-        JSON.stringify({ 
-          error: "Empty response from AI",
-          details: "The AI provider returned no content. Check API keys and quotas."
-        }),
-        { 
-          status: 500,
-          headers: { "Content-Type": "application/json" }
-        }
-      );
-    }
-
-    // Success
-    console.log('[/api/chat] Success. Response length:', finalResponse.length);
-    
-    return new Response(
-      JSON.stringify({
-        response: finalResponse,
-        provider: responseProvider,
-        mode,
-        metadata
-      }),
-      {
-        status: 200,
-        headers: { "Content-Type": "application/json" }
-      }
-    );
+    // Return response
+    return Response.json({
+      response: finalResponse || 'No response',
+      provider: finalData?.provider || provider,
+      mode,
+      metadata: finalData?.metadata || {}
+    });
 
   } catch (err: any) {
-    console.error('[/api/chat] Fatal error:', err);
-    return new Response(
-      JSON.stringify({
-        error: "Server error",
-        details: err?.message || "Unknown error"
-      }),
-      { 
-        status: 500,
-        headers: { "Content-Type": "application/json" }
-      }
-    );
+    return Response.json({ error: "Server error", details: err.message }, { status: 500 });
   }
 }
