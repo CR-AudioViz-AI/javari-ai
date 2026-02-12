@@ -3,10 +3,9 @@ import { NextRequest } from 'next/server';
 import { getProvider, getProviderApiKey } from '@/lib/javari/providers';
 import { RouterRequest, StreamEvent } from '@/lib/javari/router/types';
 import { preprocessPrompt } from '@/lib/javari/utils/preprocessPrompt';
-import { runCouncilFast } from '@/lib/javari/council/engine';
 
 export const runtime = 'edge';
-export const maxDuration = 25; // Increased for autonomous builds
+export const maxDuration = 25;
 
 export async function POST(req: NextRequest) {
   const encoder = new TextEncoder();
@@ -17,7 +16,7 @@ export async function POST(req: NextRequest) {
         const body: RouterRequest = await req.json();
         let { message, mode, provider: requestedProvider } = body;
 
-        console.log(`[Router] Mode: ${mode}, Message: ${message.substring(0, 50)}...`);
+        console.log(`[Router] Request received - Mode: ${mode}, Provider: ${requestedProvider || 'openai'}`);
 
         if (!message) {
           sendEvent(controller, encoder, {
@@ -28,144 +27,58 @@ export async function POST(req: NextRequest) {
           return;
         }
 
-        // Preprocess for ALL modes
+        // CRITICAL: Preprocess prompt for ALL modes
         const preprocessed = preprocessPrompt(message);
         message = preprocessed.rewrittenPrompt;
         
         console.log('[Router] Preprocessed:', {
+          original: body.message.substring(0, 50),
+          rewritten: message.substring(0, 50),
           model: preprocessed.modelToUse,
           nounTrigger: preprocessed.nounTrigger,
           mode
         });
 
-        // SUPER MODE: Fast parallel council
-        if (mode === 'super') {
-          try {
-            const councilResult = await runCouncilFast(
-              message,
-              (provider, chunk) => {
-                sendEvent(controller, encoder, {
-                  type: 'token',
-                  data: chunk
-                });
-              }
-            );
-
-            const bestResponse = councilResult.results
-              .find(r => !r.error)?.response || 'No response';
-
-            sendEvent(controller, encoder, {
-              type: 'final',
-              data: {
-                response: bestResponse,
-                mode: 'super',
-                metadata: councilResult.metadata
-              }
-            });
-
-          } catch (error: any) {
-            console.error('[Router] Super mode error:', error);
-            sendEvent(controller, encoder, {
-              type: 'error',
-              data: { message: 'Super mode failed', details: error.message }
-            });
-          }
-
-          controller.close();
-          return;
-        }
-
-        // ROADMAP MODE: Autonomous execution
-        if (mode === 'roadmap') {
-          try {
-            sendEvent(controller, encoder, {
-              type: 'token',
-              data: '🚀 Starting autonomous build...\n\n'
-            });
-
-            // Phase 1: Quick architecture
-            sendEvent(controller, encoder, {
-              type: 'token',
-              data: '📐 Planning architecture...\n'
-            });
-
-            const councilResult = await runCouncilFast(
-              `Create implementation plan for: ${message}. Be concise and specific.`
-            );
-
-            const plan = councilResult.results.find(r => !r.error)?.response || '';
-            
-            sendEvent(controller, encoder, {
-              type: 'token',
-              data: `\n✅ Plan ready (${councilResult.metadata.totalTime}ms)\n\n`
-            });
-
-            // Phase 2: Execute with Claude
-            sendEvent(controller, encoder, {
-              type: 'token',
-              data: '⚡ Building files...\n\n'
-            });
-
-            const claudeKey = getProviderApiKey('anthropic');
-            const claude = getProvider('anthropic', claudeKey);
-
-            let buildResponse = '';
-            for await (const chunk of claude.generateStream(
-              `${plan}\n\nBuild this now. Create actual files with complete, production-ready code.`,
-              { timeout: 45000, preferredModel: preprocessed.modelToUse }
-            )) {
-              buildResponse += chunk;
-              sendEvent(controller, encoder, { type: 'token', data: chunk });
-            }
-
-            sendEvent(controller, encoder, {
-              type: 'final',
-              data: {
-                response: buildResponse,
-                mode: 'roadmap',
-                plan,
-                metadata: { autonomous: true }
-              }
-            });
-
-          } catch (error: any) {
-            console.error('[Router] Roadmap mode error:', error);
-            sendEvent(controller, encoder, {
-              type: 'error',
-              data: { message: 'Autonomous build failed', details: error.message }
-            });
-          }
-
-          controller.close();
-          return;
-        }
-
-        // SINGLE/ADVANCED MODE: Direct execution
+        // All modes use single AI with preprocessed model
         const providerName = requestedProvider || 'openai';
         
         let apiKey: string;
         try {
+          console.log(`[Router] Getting API key for ${providerName}...`);
           apiKey = getProviderApiKey(providerName);
+          console.log(`[Router] API key retrieved: ${apiKey.substring(0, 10)}...`);
         } catch (error: any) {
+          console.error(`[Router] API key error for ${providerName}:`, error.message);
           sendEvent(controller, encoder, {
             type: 'error',
-            data: { message: `Provider ${providerName} not configured` }
+            data: { message: `Provider ${providerName} not configured: ${error.message}` }
           });
           controller.close();
           return;
         }
 
+        console.log(`[Router] Creating ${providerName} provider...`);
         const provider = getProvider(providerName, apiKey);
+        console.log(`[Router] Provider created successfully`);
+
+        // Pass preprocessed model selection to provider
+        const options = {
+          preferredModel: preprocessed.modelToUse
+        };
+
+        console.log(`[Router] Starting stream with model: ${options.preferredModel}`);
 
         try {
           let fullResponse = '';
+          let chunkCount = 0;
           
-          for await (const chunk of provider.generateStream(message, {
-            preferredModel: preprocessed.modelToUse
-          })) {
+          for await (const chunk of provider.generateStream(message, options)) {
             fullResponse += chunk;
+            chunkCount++;
             sendEvent(controller, encoder, { type: 'token', data: chunk });
           }
+
+          console.log(`[Router] Stream complete - ${chunkCount} chunks, ${fullResponse.length} chars`);
 
           sendEvent(controller, encoder, {
             type: 'final',
@@ -178,18 +91,34 @@ export async function POST(req: NextRequest) {
           });
 
         } catch (streamError: any) {
-          console.error('[Router] Stream error:', streamError);
+          console.error('[Router] Stream error:', {
+            error: streamError.message,
+            stack: streamError.stack,
+            name: streamError.name
+          });
           sendEvent(controller, encoder, {
             type: 'error',
-            data: { message: 'Stream error', details: streamError.message }
+            data: { 
+              message: 'Stream error', 
+              details: streamError.message,
+              errorType: streamError.name
+            }
           });
         }
 
       } catch (error: any) {
-        console.error('[Router] Fatal error:', error);
+        console.error('[Router] Fatal error:', {
+          error: error.message,
+          stack: error.stack,
+          name: error.name
+        });
         sendEvent(controller, encoder, {
           type: 'error',
-          data: { message: 'Server error', details: error.message }
+          data: { 
+            message: 'Server error', 
+            details: error.message,
+            errorType: error.name
+          }
         });
       } finally {
         controller.close();
@@ -218,13 +147,9 @@ function sendEvent(
 export async function GET() {
   return Response.json({
     status: 'healthy',
-    version: '6.0-AUTONOMOUS',
-    modes: {
-      single: 'Direct OpenAI',
-      super: 'Parallel multi-AI council',
-      advanced: 'Enhanced single',
-      roadmap: 'Autonomous ChatGPT→Claude execution'
-    },
+    version: '5.2-DEBUG-LOGGING',
+    modes: ['single', 'super', 'advanced', 'roadmap'],
+    note: 'Extensive error logging enabled',
     timestamp: new Date().toISOString()
   });
 }
