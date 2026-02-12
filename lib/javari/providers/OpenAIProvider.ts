@@ -3,44 +3,12 @@ import { BaseProvider, ExtendedRouterOptions } from './BaseProvider';
 import { AIProvider } from '../router/types';
 
 export class OpenAIProvider extends BaseProvider {
-  private primaryModel: string = 'gpt-4-turbo-preview';
-  private fallbackModel: string = 'gpt-4o-mini'; // Fast model for deep codegen triggers
-
-  // CRITICAL: Nouns that trigger slow deep-codegen pipeline in GPT-4 Turbo
-  private DEEP_CODEGEN_NOUNS = [
-    'screen', 'app', 'page', 'platform', 'system', 'dashboard',
-    'ui', 'component', 'frontend', 'authentication', 'auth',
-    'registration', 'full-stack', 'builder', 'interface'
-  ];
-
   getName(): AIProvider {
     return 'openai';
   }
 
   getModel(): string {
-    return this.primaryModel;
-  }
-
-  // Optimize prompts for faster responses
-  private optimizePrompt(message: string): string {
-    let optimized = message;
-    
-    // Remove polite prefixes
-    optimized = optimized.replace(/^(can you|could you|please|would you)\s+/gi, '');
-    
-    // Rewrite slow verbs
-    optimized = optimized.replace(/\bcreate\s+/gi, 'build ');
-    optimized = optimized.replace(/\bmake\s+/gi, 'develop ');
-    optimized = optimized.replace(/\bgenerate\s+a\s+full\s+/gi, 'produce a ');
-    optimized = optimized.replace(/\bwrite\s+me\s+/gi, 'write ');
-    
-    return optimized.trim();
-  }
-
-  // CRITICAL: Detect if prompt contains deep-codegen trigger nouns
-  private shouldUseFallbackModel(prompt: string): boolean {
-    const lowerPrompt = prompt.toLowerCase();
-    return this.DEEP_CODEGEN_NOUNS.some(noun => lowerPrompt.includes(noun));
+    return 'gpt-4-turbo-preview';
   }
 
   private async fetchWithTimeout(
@@ -68,18 +36,11 @@ export class OpenAIProvider extends BaseProvider {
   }
 
   async *generateStream(message: string, options?: ExtendedRouterOptions): AsyncIterator<string> {
-    const optimizedMessage = this.optimizePrompt(message);
+    // Use preferredModel from router (set by preprocessPrompt)
+    // @ts-ignore - preferredModel added dynamically
+    const modelToUse = options?.preferredModel || 'gpt-4-turbo-preview';
     
-    // CRITICAL: Choose model BEFORE making any API call
-    const useFallback = this.shouldUseFallbackModel(optimizedMessage);
-    const modelToUse = useFallback ? this.fallbackModel : this.primaryModel;
-    
-    console.log('[OpenAI] Prompt analysis:', {
-      original: message.substring(0, 50),
-      optimized: optimizedMessage.substring(0, 50),
-      deepCodegenTrigger: useFallback,
-      modelSelected: modelToUse
-    });
+    console.log('[OpenAI] Using model:', modelToUse);
     
     const messages: Array<{role: string; content: string}> = [];
     
@@ -87,7 +48,7 @@ export class OpenAIProvider extends BaseProvider {
       messages.push({ role: 'system', content: options.rolePrompt });
     }
     
-    messages.push({ role: 'user', content: optimizedMessage });
+    messages.push({ role: 'user', content: message });
 
     try {
       const response = await this.fetchWithTimeout(
@@ -117,13 +78,9 @@ export class OpenAIProvider extends BaseProvider {
 
     } catch (error: any) {
       console.error('[OpenAI] Error:', {
-        originalPrompt: message.substring(0, 50),
-        rewrittenPrompt: optimizedMessage.substring(0, 50),
-        modelUsed: modelToUse,
-        nounTrigger: useFallback,
+        model: modelToUse,
         error: error.message
       });
-      
       throw error;
     }
   }
@@ -137,17 +94,14 @@ export class OpenAIProvider extends BaseProvider {
 
     const decoder = new TextDecoder();
     let buffer = '';
-    let firstChunkReceived = false;
     const streamStartTime = Date.now();
 
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
-
-      if (!firstChunkReceived) {
+      if (done) {
         const elapsed = Date.now() - streamStartTime;
-        console.log(`[OpenAI] First chunk in ${elapsed}ms (model: ${modelUsed})`);
-        firstChunkReceived = true;
+        console.log(`[OpenAI] Stream complete in ${elapsed}ms (model: ${modelUsed})`);
+        break;
       }
 
       buffer += decoder.decode(value, { stream: true });
