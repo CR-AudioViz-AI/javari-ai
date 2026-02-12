@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
     const routerUrl = `${url.protocol}//${url.host}/api/javari/router`;
     
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s timeout
+    const timeoutId = setTimeout(() => controller.abort(), 22000); // Increased to 22s
     
     try {
       const routerRes = await fetch(routerUrl, {
@@ -50,11 +50,10 @@ export async function POST(req: NextRequest) {
       let accumulated = '';
       let finalResponse = '';
       let finalData: any = null;
-      let streamTimeout: NodeJS.Timeout | null = null;
 
       try {
-        // 15 second timeout for stream reading
-        const streamDeadline = Date.now() + 15000;
+        // FIXED: Increased from 15s to 23s to match router maxDuration
+        const streamDeadline = Date.now() + 23000;
         
         while (true) {
           if (Date.now() > streamDeadline) {
@@ -136,7 +135,7 @@ export async function POST(req: NextRequest) {
 export async function GET() {
   return Response.json({
     status: "healthy",
-    version: "4.4-TIMEOUT-PROTECTED",
+    version: "4.5-TIMEOUT-FIXED",
     timestamp: new Date().toISOString()
   });
 }
