@@ -6,7 +6,7 @@ import { preprocessPrompt } from '@/lib/javari/utils/preprocessPrompt';
 import { runCouncilFast } from '@/lib/javari/council/engine';
 
 export const runtime = 'edge';
-export const maxDuration = 60; // Increased for autonomous builds
+export const maxDuration = 25; // Increased for autonomous builds
 
 export async function POST(req: NextRequest) {
   const encoder = new TextEncoder();
