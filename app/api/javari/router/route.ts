@@ -2,22 +2,10 @@
 import { NextRequest } from 'next/server';
 import { getProvider, getProviderApiKey } from '@/lib/javari/providers';
 import { RouterRequest, StreamEvent } from '@/lib/javari/router/types';
+import { preprocessPrompt } from '@/lib/javari/utils/preprocessPrompt';
 
 export const runtime = 'edge';
 export const maxDuration = 25;
-
-// Optimize prompts to avoid slow OpenAI responses
-function optimizePrompt(message: string): string {
-  let optimized = message;
-  
-  // Replace words that trigger slow OpenAI responses
-  optimized = optimized.replace(/\bcreate\s+a\s+/gi, 'build a ');
-  optimized = optimized.replace(/\bmake\s+a\s+/gi, 'develop a ');
-  optimized = optimized.replace(/\bcreate\s+an\s+/gi, 'build an ');
-  optimized = optimized.replace(/\bmake\s+an\s+/gi, 'develop an ');
-  
-  return optimized;
-}
 
 export async function POST(req: NextRequest) {
   const encoder = new TextEncoder();
@@ -37,10 +25,18 @@ export async function POST(req: NextRequest) {
           return;
         }
 
-        // Optimize prompt to avoid slow responses
-        message = optimizePrompt(message);
+        // CRITICAL: Preprocess prompt for ALL modes
+        const preprocessed = preprocessPrompt(message);
+        message = preprocessed.rewrittenPrompt;
+        
+        console.log('[Router] Preprocessed:', {
+          original: body.message.substring(0, 50),
+          rewritten: message.substring(0, 50),
+          model: preprocessed.modelToUse,
+          nounTrigger: preprocessed.nounTrigger
+        });
 
-        // All modes use single AI (council disabled due to timeout issues)
+        // All modes use single AI
         const providerName = requestedProvider || 'openai';
         
         let apiKey: string;
@@ -57,10 +53,15 @@ export async function POST(req: NextRequest) {
 
         const provider = getProvider(providerName, apiKey);
 
+        // Pass preprocessed model selection to provider
+        const options = {
+          preferredModel: preprocessed.modelToUse
+        };
+
         try {
           let fullResponse = '';
           
-          for await (const chunk of provider.generateStream(message)) {
+          for await (const chunk of provider.generateStream(message, options)) {
             fullResponse += chunk;
             sendEvent(controller, encoder, { type: 'token', data: chunk });
           }
@@ -70,7 +71,7 @@ export async function POST(req: NextRequest) {
             data: { 
               response: fullResponse, 
               provider: providerName, 
-              model: provider.getModel(), 
+              model: preprocessed.modelToUse, 
               mode 
             }
           });
@@ -114,9 +115,9 @@ function sendEvent(
 export async function GET() {
   return Response.json({
     status: 'healthy',
-    version: '4.5-PROMPT-OPTIMIZED',
+    version: '4.6-GLOBAL-PREPROCESS',
     modes: ['single', 'super', 'advanced', 'roadmap'],
-    note: 'All modes use single AI with prompt optimization',
+    note: 'All modes use shared preprocessPrompt with noun-based fallback',
     timestamp: new Date().toISOString()
   });
 }
