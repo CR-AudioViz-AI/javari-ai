@@ -1,13 +1,14 @@
-// lib/javari/multi-ai/router-universe.ts
-// Enhanced router with Universe-30 support (optional mode)
+// lib/javari/multi-ai/router-universe-updated.ts
+// Enhanced router with HuggingFace support
 
 import { ModelMetadata, selectModelByTask, getModel as getOriginalModel } from './model-registry';
 import { UniversalModelMetadata, UNIVERSE_MODELS, getFastestFreeModel, getUniverseModel } from './model-registry-universe';
+import { callHuggingFace } from '../providers/huggingface';
 
 export interface UniverseRoutingContext {
   prompt: string;
   mode: 'single' | 'super' | 'advanced' | 'roadmap' | 'council';
-  useUniverse?: boolean; // Enable Universe-30 models
+  useUniverse?: boolean;
   policy?: {
     maxCostPerRequest?: number;
     preferredProviders?: string[];
@@ -26,43 +27,32 @@ export interface UniverseRoutingDecision {
   overrideApplied?: string;
 }
 
-// Task detection from prompt
+// Task detection
 function detectTaskType(prompt: string): 'chat' | 'code' | 'summarize' | 'classify' | 'translate' | 'math' | undefined {
   const lower = prompt.toLowerCase();
   
-  // Code detection
   if (/\b(code|function|class|debug|implement|script|program|api)\b/.test(lower)) {
     return 'code';
   }
-  
-  // Summarization detection
   if (/\b(summarize|summary|tldr|brief|condense|shorten)\b/.test(lower)) {
     return 'summarize';
   }
-  
-  // Translation detection
   if (/\b(translate|translation|in (french|german|spanish|chinese|japanese))\b/.test(lower)) {
     return 'translate';
   }
-  
-  // Math detection
   if (/\b(calculate|math|equation|solve|algebra|geometry)\b/.test(lower)) {
     return 'math';
   }
-  
-  // Classification detection
   if (/\b(classify|categorize|label|sentiment|category)\b/.test(lower)) {
     return 'classify';
   }
   
-  // Default to chat
   return 'chat';
 }
 
 export function routeWithUniverse(context: UniverseRoutingContext): UniverseRoutingDecision {
   // If Universe mode not enabled, use original routing
   if (!context.useUniverse) {
-    // Fallback to original model registry
     const originalModel = selectModelByTask({
       needsReasoning: /analyze|explain|why/.test(context.prompt.toLowerCase()),
       needsSpeed: /quick|fast|urgent/.test(context.prompt.toLowerCase()),
@@ -96,7 +86,6 @@ export function routeWithUniverse(context: UniverseRoutingContext): UniverseRout
       };
     }
     
-    // Try original registry
     const originalModel = getOriginalModel(context.userOverride);
     if (originalModel) {
       return {
@@ -128,7 +117,7 @@ export function routeWithUniverse(context: UniverseRoutingContext): UniverseRout
     };
   }
   
-  // Fallback to original registry if no Universe model found
+  // Fallback to original registry
   const fallbackModel = selectModelByTask({
     needsReasoning: detectedType === 'chat',
     needsCoding: detectedType === 'code',
@@ -145,7 +134,109 @@ export function routeWithUniverse(context: UniverseRoutingContext): UniverseRout
   };
 }
 
-// Universe model stats
+/**
+ * Execute model request using appropriate provider
+ */
+export async function executeUniverseModel(
+  model: UniversalModelMetadata,
+  prompt: string
+): Promise<string> {
+  switch (model.provider) {
+    case 'huggingface':
+      return await callHuggingFace(model.id, prompt);
+    
+    case 'groq':
+      return await executeGroq(model.id, prompt);
+    
+    case 'openrouter':
+      return await executeOpenRouter(model.id, prompt);
+    
+    case 'deepseek':
+      return await executeDeepSeek(model.id, prompt);
+    
+    default:
+      throw new Error(`Provider ${model.provider} not implemented`);
+  }
+}
+
+// Provider execution functions
+async function executeGroq(modelId: string, prompt: string): Promise<string> {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) throw new Error('Groq API key not configured');
+  
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: modelId,
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 500
+    })
+  });
+  
+  if (!response.ok) {
+    throw new Error(`Groq error: ${response.statusText}`);
+  }
+  
+  const data = await response.json();
+  return data.choices[0].message.content;
+}
+
+async function executeOpenRouter(modelId: string, prompt: string): Promise<string> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) throw new Error('OpenRouter API key not configured');
+  
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+      'HTTP-Referer': 'https://javariai.com',
+      'X-Title': 'Javari AI'
+    },
+    body: JSON.stringify({
+      model: modelId,
+      messages: [{ role: 'user', content: prompt }]
+    })
+  });
+  
+  if (!response.ok) {
+    throw new Error(`OpenRouter error: ${response.statusText}`);
+  }
+  
+  const data = await response.json();
+  return data.choices[0].message.content;
+}
+
+async function executeDeepSeek(modelId: string, prompt: string): Promise<string> {
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  if (!apiKey) throw new Error('DeepSeek API key not configured');
+  
+  const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: modelId,
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 500
+    })
+  });
+  
+  if (!response.ok) {
+    throw new Error(`DeepSeek error: ${response.statusText}`);
+  }
+  
+  const data = await response.json();
+  return data.choices[0].message.content;
+}
+
+// Universe stats
 export function getUniverseStats() {
   const typeCount: Record<string, number> = {};
   const providerCount: Record<string, number> = {};
@@ -163,12 +254,10 @@ export function getUniverseStats() {
   };
 }
 
-// Check if model is from Universe registry
 export function isUniverseModel(modelId: string): boolean {
   return getUniverseModel(modelId) !== null;
 }
 
-// Get model (checks both registries)
 export function getAnyModel(modelId: string): ModelMetadata | UniversalModelMetadata | null {
   return getUniverseModel(modelId) || getOriginalModel(modelId);
 }
