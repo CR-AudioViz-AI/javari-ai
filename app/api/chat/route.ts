@@ -1,23 +1,38 @@
+// app/api/chat/route.ts
+// EDGE RUNTIME - Fast Multi-AI Chat Mode
+// Handles: Single, Super, Advanced, Roadmap modes
+// Max Duration: 25 seconds
+
 import { NextRequest } from "next/server";
 
 export const runtime = "edge";
-export const maxDuration = 25; // Vercel edge limit
+export const maxDuration = 25;
+
+interface ChatRequest {
+  message: string;
+  mode?: 'single' | 'super' | 'advanced' | 'roadmap';
+  provider?: string;
+  history?: any[];
+}
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const body: ChatRequest = await req.json();
     const { message, mode = 'single', provider = 'openai' } = body;
 
     if (!message?.trim()) {
-      return Response.json({ error: "Message required" }, { status: 400 });
+      return Response.json({ 
+        error: "Message required",
+        response: "Please provide a message"
+      }, { status: 400 });
     }
 
-    // Call router with 20 second timeout
+    // Call router with streaming support
     const url = new URL(req.url);
     const routerUrl = `${url.protocol}//${url.host}/api/javari/router`;
     
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 22000); // Increased to 22s
+    const timeoutId = setTimeout(() => controller.abort(), 22000);
     
     try {
       const routerRes = await fetch(routerUrl, {
@@ -32,8 +47,9 @@ export async function POST(req: NextRequest) {
       if (!routerRes.ok) {
         return Response.json({ 
           error: "Router failed", 
-          status: routerRes.status,
-          response: "I'm having trouble processing that request. Please try a simpler question or try again."
+          response: "I'm having trouble processing that request. Please try again.",
+          provider,
+          mode
         }, { status: 500 });
       }
 
@@ -42,7 +58,9 @@ export async function POST(req: NextRequest) {
       if (!reader) {
         return Response.json({ 
           error: "No stream",
-          response: "Stream error - please try again."
+          response: "Stream error - please try again.",
+          provider,
+          mode
         }, { status: 500 });
       }
 
@@ -52,7 +70,6 @@ export async function POST(req: NextRequest) {
       let finalData: any = null;
 
       try {
-        // FIXED: Increased from 15s to 23s to match router maxDuration
         const streamDeadline = Date.now() + 23000;
         
         while (true) {
@@ -81,7 +98,9 @@ export async function POST(req: NextRequest) {
                 } else if (event.type === 'error') {
                   return Response.json({
                     error: event.data.message,
-                    response: "I encountered an error. Please try again with a simpler request."
+                    response: "I encountered an error. Please try again.",
+                    provider,
+                    mode
                   }, { status: 500 });
                 }
               } catch (e) {
@@ -91,10 +110,17 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        if (finalData) {
-          return Response.json(finalData);
+        // Return final data if available, otherwise construct response
+        if (finalData && finalData.response) {
+          return Response.json({
+            response: finalData.response,
+            provider: finalData.provider || provider,
+            mode: finalData.mode || mode,
+            metadata: finalData.metadata
+          });
         }
 
+        // Fallback to accumulated response
         return Response.json({
           response: finalResponse || "No response received",
           provider,
@@ -104,8 +130,9 @@ export async function POST(req: NextRequest) {
       } catch (streamError: any) {
         return Response.json({
           error: "Stream timeout",
-          response: "The response took too long. Please try a shorter or simpler question.",
-          details: streamError.message
+          response: "The response took too long. Please try a shorter question.",
+          provider,
+          mode
         }, { status: 500 });
       }
 
@@ -115,7 +142,9 @@ export async function POST(req: NextRequest) {
       if (fetchError.name === 'AbortError') {
         return Response.json({
           error: "Request timeout",
-          response: "Your request took too long to process. Please try a shorter or simpler question."
+          response: "Your request took too long to process.",
+          provider,
+          mode
         }, { status: 504 });
       }
       
@@ -127,7 +156,8 @@ export async function POST(req: NextRequest) {
     return Response.json({
       error: "Server error",
       response: "Something went wrong. Please try again.",
-      details: error.message
+      provider: "unknown",
+      mode: "single"
     }, { status: 500 });
   }
 }
@@ -135,7 +165,10 @@ export async function POST(req: NextRequest) {
 export async function GET() {
   return Response.json({
     status: "healthy",
-    version: "4.5-TIMEOUT-FIXED",
+    runtime: "edge",
+    version: "7.0-HYBRID-CHAT",
+    modes: ["single", "super", "advanced", "roadmap"],
+    maxDuration: 25,
     timestamp: new Date().toISOString()
   });
 }
