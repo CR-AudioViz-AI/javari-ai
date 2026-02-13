@@ -8,12 +8,52 @@
  */
 
 import { testHuggingFaceConnection } from '../providers/huggingface';
-import { testGroqConnection } from '../providers/groq';
-import { testOpenRouterConnection } from '../providers/openrouter';
-import { testDeepSeekConnection } from '../providers/deepseek';
 import { testReplicateConnection } from '../providers/replicate';
 import { testTogetherConnection } from '../providers/together';
 import { testCohereConnection } from '../providers/cohere';
+
+// Helper test functions for providers without exported test methods
+async function testGroqConnection(): Promise<boolean> {
+  try {
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) return false;
+    
+    const response = await fetch('https://api.groq.com/openai/v1/models', {
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function testOpenRouterConnection(): Promise<boolean> {
+  try {
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) return false;
+    
+    const response = await fetch('https://openrouter.ai/api/v1/models', {
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function testDeepSeekConnection(): Promise<boolean> {
+  try {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) return false;
+    
+    const response = await fetch('https://api.deepseek.com/v1/models', {
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
 
 export interface ProviderHealth {
   provider: string;
