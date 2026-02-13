@@ -1,7 +1,8 @@
-// lib/javari/multi-ai/universe-health.ts
-// Health monitoring for Universe-30 models
+// lib/javari/multi-ai/universe-health-updated.ts
+// Enhanced health monitoring with HuggingFace support
 
 import { UNIVERSE_MODELS, UniversalModelMetadata } from './model-registry-universe';
+import { checkModelAvailability } from '../providers/huggingface';
 
 export interface HealthCheckResult {
   modelId: string;
@@ -22,18 +23,32 @@ export interface UniverseHealthReport {
   results: HealthCheckResult[];
 }
 
-// Simple health check (non-intrusive)
+/**
+ * Check health of a single model
+ */
 export async function checkModelHealth(model: UniversalModelMetadata): Promise<HealthCheckResult> {
   const startTime = Date.now();
   
   try {
-    // For Universe models, we just check endpoint accessibility
-    // Actual model invocation requires API keys which may not be configured
+    // HuggingFace models - actual health check
+    if (model.provider === 'huggingface') {
+      const result = await checkModelAvailability(model.id);
+      
+      return {
+        modelId: model.id,
+        provider: model.provider,
+        status: result.available ? 'healthy' : 'down',
+        responseTime: Date.now() - startTime,
+        error: result.error,
+        lastChecked: new Date().toISOString()
+      };
+    }
     
+    // Other providers - assume healthy if in registry
     return {
       modelId: model.id,
       provider: model.provider,
-      status: 'healthy', // Assume healthy if in registry
+      status: 'healthy',
       responseTime: Date.now() - startTime,
       lastChecked: new Date().toISOString()
     };
@@ -49,21 +64,32 @@ export async function checkModelHealth(model: UniversalModelMetadata): Promise<H
   }
 }
 
-// Generate health report for all Universe models
-export async function generateUniverseHealthReport(): Promise<UniverseHealthReport> {
+/**
+ * Generate comprehensive health report
+ */
+export async function generateUniverseHealthReport(
+  checkHuggingFace: boolean = true
+): Promise<UniverseHealthReport> {
   const results: HealthCheckResult[] = [];
   
-  // For initial deployment, mark all as untested
-  // Real health checks will be implemented after API key configuration
+  // Check all models
   for (const model of UNIVERSE_MODELS) {
-    results.push({
-      modelId: model.id,
-      provider: model.provider,
-      status: 'untested',
-      lastChecked: new Date().toISOString()
-    });
+    // Only check HuggingFace if enabled and API key available
+    if (model.provider === 'huggingface' && checkHuggingFace) {
+      const result = await checkModelHealth(model);
+      results.push(result);
+    } else {
+      // Mark as untested or assume healthy
+      results.push({
+        modelId: model.id,
+        provider: model.provider,
+        status: model.provider === 'huggingface' ? 'untested' : 'healthy',
+        lastChecked: new Date().toISOString()
+      });
+    }
   }
   
+  // Calculate stats
   const statusCount = results.reduce((acc, r) => {
     acc[r.status] = (acc[r.status] || 0) + 1;
     return acc;
@@ -80,16 +106,81 @@ export async function generateUniverseHealthReport(): Promise<UniverseHealthRepo
   };
 }
 
-// Get models by health status
-export function getModelsByStatus(status: 'healthy' | 'degraded' | 'down' | 'untested'): UniversalModelMetadata[] {
-  // For now, return all models as they're all untested initially
-  if (status === 'untested') {
-    return UNIVERSE_MODELS;
+/**
+ * Quick health check for HuggingFace connectivity
+ */
+export async function checkHuggingFaceHealth(): Promise<{
+  available: boolean;
+  latency?: number;
+  error?: string;
+}> {
+  const startTime = Date.now();
+  
+  try {
+    const testModel = UNIVERSE_MODELS.find(m => 
+      m.provider === 'huggingface' && m.type === 'chat'
+    );
+    
+    if (!testModel) {
+      return { available: false, error: 'No HuggingFace models configured' };
+    }
+    
+    const result = await checkModelAvailability(testModel.id);
+    
+    return {
+      available: result.available,
+      latency: Date.now() - startTime,
+      error: result.error
+    };
+  } catch (error: any) {
+    return {
+      available: false,
+      latency: Date.now() - startTime,
+      error: error.message
+    };
   }
-  return [];
 }
 
-// Quick stats
+/**
+ * Get models by health status
+ */
+export function getModelsByStatus(
+  status: 'healthy' | 'degraded' | 'down' | 'untested',
+  results: HealthCheckResult[]
+): UniversalModelMetadata[] {
+  const modelIds = results
+    .filter(r => r.status === status)
+    .map(r => r.modelId);
+  
+  return UNIVERSE_MODELS.filter(m => modelIds.includes(m.id));
+}
+
+/**
+ * Get provider health summary
+ */
+export function getProviderHealthSummary(results: HealthCheckResult[]): Record<string, {
+  total: number;
+  healthy: number;
+  down: number;
+  untested: number;
+}> {
+  const summary: Record<string, any> = {};
+  
+  results.forEach(result => {
+    if (!summary[result.provider]) {
+      summary[result.provider] = { total: 0, healthy: 0, down: 0, untested: 0 };
+    }
+    
+    summary[result.provider].total++;
+    summary[result.provider][result.status]++;
+  });
+  
+  return summary;
+}
+
+/**
+ * Quick stats
+ */
 export function getQuickStats() {
   return {
     total: UNIVERSE_MODELS.length,
