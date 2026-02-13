@@ -1,12 +1,9 @@
+// components/chat/ChatInterface.tsx
 'use client';
-// DEFENSIVE FIX - Ensures setMode is always a function
 
-import { useState, useEffect } from 'react';
-import { create } from 'zustand';
-import MessageList from './MessageList';
-import InputBar from './InputBar';
-import ConversationHistory from './ConversationHistory';
-import CouncilPanel from './CouncilPanel';
+import { useState, useRef, useEffect } from 'react';
+import ChatMessage from './ChatMessage';
+import ChatInput from './ChatInput';
 import ModeToggle from './ModeToggle';
 
 // Type Definitions
@@ -26,82 +23,64 @@ export interface ChatMessage {
       confidence: number;
       reasoning: string;
     }>;
-    [key: string]: any;
+    files?: Array<{ name: string; content: string }>;
+    autonomous?: boolean;
+    executionSteps?: any[];
   };
 }
 
-export interface ChatSession {
-  id: string;
-  title: string;
-  messages: ChatMessage[];
-  mode: ChatMode;
-  provider: string;
-  createdAt: number;
-  updatedAt: number;
+interface ChatInterfaceProps {
+  initialMode?: ChatMode;
 }
 
-// Zustand Store (in-memory, no localStorage)
-interface ChatStore {
-  sessions: ChatSession[];
-  currentSessionId: string;
-  addSession: (session: ChatSession) => void;
-  updateSession: (id: string, session: ChatSession) => void;
-  setCurrentSessionId: (id: string) => void;
-  clearSessions: () => void;
+// SMART ROUTER - Determines if message needs autonomous execution
+function needsAutonomous(message: string): boolean {
+  const autonomousKeywords = [
+    'create', 'build', 'generate', 'make',
+    'file', 'files', 'system', 'application',
+    'component', 'api', 'database',
+    'orchestrate', 'scaffold', 'develop',
+    'implement', 'setup', 'configure'
+  ];
+
+  const lowerMessage = message.toLowerCase();
+  
+  // Check if message contains autonomous keywords
+  const hasKeyword = autonomousKeywords.some(keyword => 
+    lowerMessage.includes(keyword)
+  );
+
+  // Additional context checks
+  const hasCodeIntent = lowerMessage.includes('code') || 
+                        lowerMessage.includes('script') ||
+                        lowerMessage.includes('function');
+
+  const hasFileIntent = lowerMessage.includes('file') ||
+                        lowerMessage.includes('project') ||
+                        lowerMessage.includes('folder');
+
+  return hasKeyword && (hasCodeIntent || hasFileIntent || lowerMessage.split(' ').length > 5);
 }
 
-const useChatStore = create<ChatStore>((set) => ({
-  sessions: [],
-  currentSessionId: '',
-  addSession: (session) =>
-    set((state) => ({
-      sessions: [...state.sessions.filter((s) => s.id !== session.id), session],
-    })),
-  updateSession: (id, session) =>
-    set((state) => ({
-      sessions: state.sessions.map((s) => (s.id === id ? session : s)),
-    })),
-  setCurrentSessionId: (id) => set({ currentSessionId: id }),
-  clearSessions: () => set({ sessions: [], currentSessionId: '' }),
-}));
-
-export default function ChatInterface() {
+export default function ChatInterface({ initialMode = 'single' }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [mode, setMode] = useState<ChatMode>('single');
+  const [mode, setMode] = useState<ChatMode>(initialMode);
   const [provider, setProvider] = useState('openai');
-  const [loading, setLoading] = useState(false);
-  const [showCouncil, setShowCouncil] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const { sessions, currentSessionId, addSession, setCurrentSessionId } = useChatStore();
-
-  // DEFENSIVE: Ensure setMode is defined
-  console.log('[ChatInterface] setMode type:', typeof setMode);
-  console.log('[ChatInterface] Current mode:', mode);
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
 
   useEffect(() => {
-    // Initialize new session
-    const newSessionId = `session-${Date.now()}`;
-    setCurrentSessionId(newSessionId);
-  }, [setCurrentSessionId]);
+    scrollToBottom();
+  }, [messages]);
 
-  const saveSession = (updatedMessages: ChatMessage[]) => {
-    const session: ChatSession = {
-      id: currentSessionId,
-      title: updatedMessages[0]?.content.slice(0, 50) || 'New Chat',
-      messages: updatedMessages,
-      mode,
-      provider,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
+  const handleSendMessage = async (content: string) => {
+    if (!content.trim() || isLoading) return;
 
-    addSession(session);
-  };
-
-  const sendMessage = async (content: string) => {
-    if (!content.trim() || loading) return;
-
-    setLoading(true);
+    setIsLoading(true);
 
     const userMessage: ChatMessage = {
       id: `msg-${Date.now()}`,
@@ -114,12 +93,18 @@ export default function ChatInterface() {
     setMessages(updatedMessages);
 
     try {
-      const res = await fetch('/api/chat', {
+      // SMART ROUTING: Determine endpoint
+      const useAutonomous = needsAutonomous(content);
+      const endpoint = useAutonomous ? '/api/autonomous/execute' : '/api/chat';
+
+      console.log(`[ChatInterface] Routing to ${endpoint} (autonomous: ${useAutonomous})`);
+
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: content,
-          mode,
+          mode: useAutonomous ? 'autonomous' : mode,
           provider,
           history: messages,
         }),
@@ -131,96 +116,90 @@ export default function ChatInterface() {
 
       const data = await res.json();
 
+      // Ensure we always have a response string
+      const responseContent = data.response || 'No response received';
+
+      // Create assistant message
       const assistantMessage: ChatMessage = {
-        id: `msg-${Date.now()}-ai`,
+        id: `msg-${Date.now()}-assistant`,
         role: 'assistant',
-        content: data.response || 'No response received',
-        provider: data.provider,
-        mode,
+        content: responseContent,
         timestamp: Date.now(),
-        metadata: data.metadata,
+        provider: useAutonomous ? 'autonomous' : (data.provider || provider),
+        mode: useAutonomous ? 'roadmap' : (data.mode || mode),
+        metadata: {
+          ...(data.metadata || {}),
+          ...(useAutonomous ? {
+            autonomous: true,
+            files: data.files || [],
+            executionSteps: data.steps || []
+          } : {})
+        }
       };
 
-      const finalMessages = [...updatedMessages, assistantMessage];
-      setMessages(finalMessages);
-      saveSession(finalMessages);
+      setMessages([...updatedMessages, assistantMessage]);
 
-      if (mode === 'super' && data.metadata?.councilVotes) {
-        setShowCouncil(true);
-      }
-    } catch (error) {
-      console.error('Chat error:', error);
+    } catch (error: any) {
+      console.error('Error sending message:', error);
+
       const errorMessage: ChatMessage = {
         id: `msg-${Date.now()}-error`,
         role: 'assistant',
-        content: `Error: ${error instanceof Error ? error.message : 'Failed to get response'}`,
+        content: `Error: ${error.message || 'Failed to get response'}`,
         timestamp: Date.now(),
       };
-      const errorMessages = [...updatedMessages, errorMessage];
-      setMessages(errorMessages);
-      saveSession(errorMessages);
+
+      setMessages([...updatedMessages, errorMessage]);
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
 
-  const loadSession = (session: ChatSession) => {
-    setCurrentSessionId(session.id);
-    setMessages(session.messages);
-    setMode(session.mode);
-    setProvider(session.provider);
-    setShowCouncil(false);
-  };
-
-  const newChat = () => {
-    const newSessionId = `session-${Date.now()}`;
-    setCurrentSessionId(newSessionId);
-    setMessages([]);
-    setShowCouncil(false);
-  };
-
-  // DEFENSIVE: Wrapper function that ALWAYS works
-  const handleModeChange = (newMode: ChatMode) => {
-    console.log('[ChatInterface] handleModeChange called with:', newMode);
-    setMode(newMode);
-  };
-
   return (
-    <div className="flex h-full">
-      {/* Left Sidebar - Conversation History */}
-      <ConversationHistory
-        sessions={sessions}
-        currentSessionId={currentSessionId}
-        onSelectSession={loadSession}
-        onNewChat={newChat}
-      />
-
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col">
-        {/* Header */}
-        <div className="bg-slate-800/50 border-b border-purple-500/30 p-4">
-          <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-400 to-pink-600 bg-clip-text text-transparent">
-              Javari AI Chat
-            </h1>
-            <ModeToggle mode={mode} onChange={handleModeChange} />
-          </div>
+    <div className="flex h-screen flex-col bg-gray-50">
+      {/* Header */}
+      <div className="border-b bg-white px-6 py-4">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-gray-900">Javari AI Chat</h1>
+          <ModeToggle mode={mode} onModeChange={setMode} />
         </div>
-
-        {/* Messages */}
-        <MessageList messages={messages} loading={loading} />
-
-        {/* Input */}
-        <InputBar onSendMessage={sendMessage} disabled={loading} mode={mode} />
       </div>
 
-      {/* Right Sidebar - Council Panel (SuperMode) */}
-      {showCouncil && mode === 'super' && (
-        <CouncilPanel
-          votes={messages[messages.length - 1]?.metadata?.councilVotes || []}
-          onClose={() => setShowCouncil(false)}
-        />
-      )}
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-6 py-4">
+        <div className="mx-auto max-w-4xl space-y-4">
+          {messages.map((message) => (
+            <ChatMessage key={message.id} message={message} />
+          ))}
+          {isLoading && (
+            <div className="flex items-center space-x-2 text-gray-500">
+              <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400"></div>
+              <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400 delay-75"></div>
+              <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400 delay-150"></div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+      </div>
+
+      {/* Input */}
+      <div className="border-t bg-white px-6 py-4">
+        <div className="mx-auto max-w-4xl">
+          <ChatInput
+            onSend={handleSendMessage}
+            disabled={isLoading}
+            placeholder={
+              mode === 'roadmap' 
+                ? 'Describe what you want to build...'
+                : 'Type your message...'
+            }
+          />
+          <p className="mt-2 text-xs text-gray-500">
+            Current mode: {mode}
+            {mode === 'roadmap' && ' • Autonomous builds enabled for file generation requests'}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
