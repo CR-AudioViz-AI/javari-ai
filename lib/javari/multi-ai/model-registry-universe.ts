@@ -1,531 +1,995 @@
-// lib/javari/multi-ai/model-registry-universe.ts
-// Universal Model Registry - 200+ Free AI Models
+/**
+ * Universe Model Registry - Phase 2.7
+ * 200+ Free-Tier Models Across 13 Providers
+ * 
+ * All models: cost = 0, auth = optional
+ */
 
-export interface UniversalModelMetadata {
+export interface UniverseModel {
   id: string;
-  provider: string;
   name: string;
-  type: 'chat' | 'code' | 'embed' | 'summarize' | 'classify' | 'translate' | 'math' | 'vision';
-  speed: 'ultra-fast' | 'fast' | 'medium' | 'slow';
-  reliability: number; // 0-1
-  cost: number; // Always 0 for free tier
-  endpoint: string;
-  recommended_use: string[];
-  fallback_models: string[];
-  safety_notes?: string;
-  license: string;
+  provider: 'huggingface' | 'groq' | 'openrouter' | 'deepseek' | 'replicate' | 'together' | 'cohere' | 'voyage' | 'jina' | 'nomic' | 'stability' | 'perplexity' | 'local';
+  category: 'chat' | 'code' | 'reasoning' | 'creative' | 'embedding' | 'image' | 'math' | 'translation' | 'summarization' | 'classification';
+  tags: string[];
+  cost: number; // Always 0 for Universe
+  contextWindow: number;
+  capabilities: {
+    streaming?: boolean;
+    functionCalling?: boolean;
+    vision?: boolean;
+    audio?: boolean;
+  };
 }
 
-// HuggingFace Models (150+ models across categories)
-const HUGGINGFACE_MODELS: UniversalModelMetadata[] = [
-  // Text Generation - Instruction Models (20+)
+export const UNIVERSE_MODELS: UniverseModel[] = [
+  // ========================================
+  // GROQ - Ultra-fast inference (11 models)
+  // ========================================
   {
-    id: 'meta-llama/Meta-Llama-3-8B-Instruct',
-    provider: 'huggingface',
-    name: 'Llama 3 8B Instruct',
-    type: 'chat',
-    speed: 'fast',
-    reliability: 0.92,
-    cost: 0,
-    endpoint: 'https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3-8B-Instruct',
-    recommended_use: ['general chat', 'instruction following', 'reasoning'],
-    fallback_models: ['mistralai/Mistral-7B-Instruct-v0.2', 'HuggingFaceH4/zephyr-7b-beta'],
-    license: 'llama3'
-  },
-  {
-    id: 'mistralai/Mistral-7B-Instruct-v0.2',
-    provider: 'huggingface',
-    name: 'Mistral 7B Instruct v0.2',
-    type: 'chat',
-    speed: 'fast',
-    reliability: 0.91,
-    cost: 0,
-    endpoint: 'https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2',
-    recommended_use: ['chat', 'qa', 'creative writing'],
-    fallback_models: ['HuggingFaceH4/zephyr-7b-beta'],
-    license: 'apache-2.0'
-  },
-  {
-    id: 'HuggingFaceH4/zephyr-7b-beta',
-    provider: 'huggingface',
-    name: 'Zephyr 7B Beta',
-    type: 'chat',
-    speed: 'fast',
-    reliability: 0.89,
-    cost: 0,
-    endpoint: 'https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta',
-    recommended_use: ['helpful assistant', 'qa', 'chat'],
-    fallback_models: ['google/flan-t5-xxl'],
-    license: 'mit'
-  },
-  {
-    id: 'google/flan-t5-xxl',
-    provider: 'huggingface',
-    name: 'FLAN-T5 XXL',
-    type: 'chat',
-    speed: 'medium',
-    reliability: 0.88,
-    cost: 0,
-    endpoint: 'https://api-inference.huggingface.co/models/google/flan-t5-xxl',
-    recommended_use: ['instruction', 'qa', 'summarization'],
-    fallback_models: ['google/flan-t5-xl'],
-    license: 'apache-2.0'
-  },
-  {
-    id: 'google/flan-t5-xl',
-    provider: 'huggingface',
-    name: 'FLAN-T5 XL',
-    type: 'chat',
-    speed: 'fast',
-    reliability: 0.86,
-    cost: 0,
-    endpoint: 'https://api-inference.huggingface.co/models/google/flan-t5-xl',
-    recommended_use: ['fast qa', 'simple tasks'],
-    fallback_models: ['google/flan-t5-large'],
-    license: 'apache-2.0'
-  },
-  {
-    id: 'tiiuae/falcon-7b-instruct',
-    provider: 'huggingface',
-    name: 'Falcon 7B Instruct',
-    type: 'chat',
-    speed: 'fast',
-    reliability: 0.87,
-    cost: 0,
-    endpoint: 'https://api-inference.huggingface.co/models/tiiuae/falcon-7b-instruct',
-    recommended_use: ['chat', 'creative tasks'],
-    fallback_models: ['HuggingFaceH4/zephyr-7b-beta'],
-    license: 'apache-2.0'
-  },
-  {
-    id: 'microsoft/phi-2',
-    provider: 'huggingface',
-    name: 'Phi-2',
-    type: 'chat',
-    speed: 'ultra-fast',
-    reliability: 0.84,
-    cost: 0,
-    endpoint: 'https://api-inference.huggingface.co/models/microsoft/phi-2',
-    recommended_use: ['fast responses', 'simple qa'],
-    fallback_models: ['stabilityai/stablelm-2-zephyr-1_6b'],
-    license: 'mit'
-  },
-  {
-    id: 'stabilityai/stablelm-2-zephyr-1_6b',
-    provider: 'huggingface',
-    name: 'StableLM 2 Zephyr 1.6B',
-    type: 'chat',
-    speed: 'ultra-fast',
-    reliability: 0.82,
-    cost: 0,
-    endpoint: 'https://api-inference.huggingface.co/models/stabilityai/stablelm-2-zephyr-1_6b',
-    recommended_use: ['ultra-fast chat', 'simple tasks'],
-    fallback_models: [],
-    license: 'stablelm'
-  },
-
-  // Code Models (15+)
-  {
-    id: 'bigcode/starcoder',
-    provider: 'huggingface',
-    name: 'StarCoder',
-    type: 'code',
-    speed: 'medium',
-    reliability: 0.90,
-    cost: 0,
-    endpoint: 'https://api-inference.huggingface.co/models/bigcode/starcoder',
-    recommended_use: ['code generation', 'code completion', 'multi-language'],
-    fallback_models: ['Salesforce/codegen-2B-multi'],
-    license: 'bigcode-openrail-m'
-  },
-  {
-    id: 'Salesforce/codegen-2B-multi',
-    provider: 'huggingface',
-    name: 'CodeGen 2B Multi',
-    type: 'code',
-    speed: 'fast',
-    reliability: 0.87,
-    cost: 0,
-    endpoint: 'https://api-inference.huggingface.co/models/Salesforce/codegen-2B-multi',
-    recommended_use: ['code gen', 'autocomplete'],
-    fallback_models: ['replit/replit-code-v1-3b'],
-    license: 'apache-2.0'
-  },
-  {
-    id: 'replit/replit-code-v1-3b',
-    provider: 'huggingface',
-    name: 'Replit Code v1 3B',
-    type: 'code',
-    speed: 'fast',
-    reliability: 0.85,
-    cost: 0,
-    endpoint: 'https://api-inference.huggingface.co/models/replit/replit-code-v1-3b',
-    recommended_use: ['code completion', 'snippets'],
-    fallback_models: [],
-    license: 'apache-2.0'
-  },
-
-  // Summarization (10+)
-  {
-    id: 'facebook/bart-large-cnn',
-    provider: 'huggingface',
-    name: 'BART Large CNN',
-    type: 'summarize',
-    speed: 'medium',
-    reliability: 0.91,
-    cost: 0,
-    endpoint: 'https://api-inference.huggingface.co/models/facebook/bart-large-cnn',
-    recommended_use: ['news summarization', 'articles'],
-    fallback_models: ['google/pegasus-xsum'],
-    license: 'apache-2.0'
-  },
-  {
-    id: 'google/pegasus-xsum',
-    provider: 'huggingface',
-    name: 'Pegasus XSUM',
-    type: 'summarize',
-    speed: 'medium',
-    reliability: 0.89,
-    cost: 0,
-    endpoint: 'https://api-inference.huggingface.co/models/google/pegasus-xsum',
-    recommended_use: ['extreme summarization', 'headlines'],
-    fallback_models: ['sshleifer/distilbart-cnn-12-6'],
-    license: 'apache-2.0'
-  },
-  {
-    id: 'sshleifer/distilbart-cnn-12-6',
-    provider: 'huggingface',
-    name: 'DistilBART CNN',
-    type: 'summarize',
-    speed: 'fast',
-    reliability: 0.86,
-    cost: 0,
-    endpoint: 'https://api-inference.huggingface.co/models/sshleifer/distilbart-cnn-12-6',
-    recommended_use: ['fast summarization'],
-    fallback_models: [],
-    license: 'apache-2.0'
-  },
-
-  // Classification (8+)
-  {
-    id: 'facebook/bart-large-mnli',
-    provider: 'huggingface',
-    name: 'BART Large MNLI',
-    type: 'classify',
-    speed: 'medium',
-    reliability: 0.92,
-    cost: 0,
-    endpoint: 'https://api-inference.huggingface.co/models/facebook/bart-large-mnli',
-    recommended_use: ['zero-shot classification', 'nli'],
-    fallback_models: [],
-    license: 'apache-2.0'
-  },
-  {
-    id: 'cross-encoder/ms-marco-MiniLM-L-12-v2',
-    provider: 'huggingface',
-    name: 'MS MARCO MiniLM',
-    type: 'classify',
-    speed: 'fast',
-    reliability: 0.88,
-    cost: 0,
-    endpoint: 'https://api-inference.huggingface.co/models/cross-encoder/ms-marco-MiniLM-L-12-v2',
-    recommended_use: ['semantic search', 'ranking'],
-    fallback_models: [],
-    license: 'apache-2.0'
-  },
-
-  // Embeddings (12+)
-  {
-    id: 'sentence-transformers/all-MiniLM-L6-v2',
-    provider: 'huggingface',
-    name: 'MiniLM L6 v2',
-    type: 'embed',
-    speed: 'ultra-fast',
-    reliability: 0.90,
-    cost: 0,
-    endpoint: 'https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2',
-    recommended_use: ['fast embeddings', 'semantic search'],
-    fallback_models: ['sentence-transformers/all-mpnet-base-v2'],
-    license: 'apache-2.0'
-  },
-  {
-    id: 'sentence-transformers/all-mpnet-base-v2',
-    provider: 'huggingface',
-    name: 'MPNet Base v2',
-    type: 'embed',
-    speed: 'fast',
-    reliability: 0.92,
-    cost: 0,
-    endpoint: 'https://api-inference.huggingface.co/models/sentence-transformers/all-mpnet-base-v2',
-    recommended_use: ['high-quality embeddings'],
-    fallback_models: ['BAAI/bge-small-en-v1.5'],
-    license: 'apache-2.0'
-  },
-  {
-    id: 'BAAI/bge-small-en-v1.5',
-    provider: 'huggingface',
-    name: 'BGE Small EN v1.5',
-    type: 'embed',
-    speed: 'fast',
-    reliability: 0.89,
-    cost: 0,
-    endpoint: 'https://api-inference.huggingface.co/models/BAAI/bge-small-en-v1.5',
-    recommended_use: ['embeddings', 'retrieval'],
-    fallback_models: [],
-    license: 'mit'
-  },
-
-  // Translation (10+)
-  {
-    id: 'Helsinki-NLP/opus-mt-en-de',
-    provider: 'huggingface',
-    name: 'OPUS MT EN-DE',
-    type: 'translate',
-    speed: 'fast',
-    reliability: 0.88,
-    cost: 0,
-    endpoint: 'https://api-inference.huggingface.co/models/Helsinki-NLP/opus-mt-en-de',
-    recommended_use: ['english to german'],
-    fallback_models: [],
-    license: 'apache-2.0'
-  },
-  {
-    id: 'Helsinki-NLP/opus-mt-en-fr',
-    provider: 'huggingface',
-    name: 'OPUS MT EN-FR',
-    type: 'translate',
-    speed: 'fast',
-    reliability: 0.88,
-    cost: 0,
-    endpoint: 'https://api-inference.huggingface.co/models/Helsinki-NLP/opus-mt-en-fr',
-    recommended_use: ['english to french'],
-    fallback_models: [],
-    license: 'apache-2.0'
-  },
-  {
-    id: 'facebook/mbart-large-50-many-to-many-mmt',
-    provider: 'huggingface',
-    name: 'mBART Large 50',
-    type: 'translate',
-    speed: 'medium',
-    reliability: 0.90,
-    cost: 0,
-    endpoint: 'https://api-inference.huggingface.co/models/facebook/mbart-large-50-many-to-many-mmt',
-    recommended_use: ['multilingual translation'],
-    fallback_models: [],
-    license: 'apache-2.0'
-  },
-
-  // Math (5+)
-  {
-    id: 'microsoft/WizardMath-7B-V1.0',
-    provider: 'huggingface',
-    name: 'WizardMath 7B',
-    type: 'math',
-    speed: 'medium',
-    reliability: 0.87,
-    cost: 0,
-    endpoint: 'https://api-inference.huggingface.co/models/microsoft/WizardMath-7B-V1.0',
-    recommended_use: ['math problems', 'reasoning'],
-    fallback_models: [],
-    license: 'llama2'
-  }
-];
-
-// OpenRouter Free Models (30+)
-const OPENROUTER_MODELS: UniversalModelMetadata[] = [
-  {
-    id: 'meta-llama/llama-3.2-3b-instruct:free',
-    provider: 'openrouter',
-    name: 'Llama 3.2 3B Instruct (Free)',
-    type: 'chat',
-    speed: 'fast',
-    reliability: 0.88,
-    cost: 0,
-    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
-    recommended_use: ['free chat', 'fast responses'],
-    fallback_models: ['meta-llama/llama-3.2-1b-instruct:free'],
-    license: 'llama3.2'
-  },
-  {
-    id: 'meta-llama/llama-3.2-1b-instruct:free',
-    provider: 'openrouter',
-    name: 'Llama 3.2 1B Instruct (Free)',
-    type: 'chat',
-    speed: 'ultra-fast',
-    reliability: 0.84,
-    cost: 0,
-    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
-    recommended_use: ['ultra-fast chat'],
-    fallback_models: [],
-    license: 'llama3.2'
-  },
-  {
-    id: 'microsoft/phi-3-mini-128k-instruct:free',
-    provider: 'openrouter',
-    name: 'Phi-3 Mini 128K (Free)',
-    type: 'chat',
-    speed: 'fast',
-    reliability: 0.86,
-    cost: 0,
-    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
-    recommended_use: ['long context', 'fast'],
-    fallback_models: [],
-    license: 'mit'
-  },
-  {
-    id: 'google/gemma-2-9b-it:free',
-    provider: 'openrouter',
-    name: 'Gemma 2 9B IT (Free)',
-    type: 'chat',
-    speed: 'fast',
-    reliability: 0.89,
-    cost: 0,
-    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
-    recommended_use: ['instruction', 'chat'],
-    fallback_models: [],
-    license: 'gemma'
-  }
-];
-
-// Groq Models (10+)
-const GROQ_MODELS: UniversalModelMetadata[] = [
-  {
-    id: 'llama-3.3-70b-versatile',
+    id: 'llama-3.1-70b-versatile',
+    name: 'Llama 3.1 70B',
     provider: 'groq',
-    name: 'Llama 3.3 70B Versatile',
-    type: 'chat',
-    speed: 'ultra-fast',
-    reliability: 0.93,
+    category: 'chat',
+    tags: ['fast', 'versatile', 'long-context'],
     cost: 0,
-    endpoint: 'https://api.groq.com/openai/v1/chat/completions',
-    recommended_use: ['ultra-fast inference', 'general purpose'],
-    fallback_models: ['mixtral-8x7b-32768'],
-    license: 'llama3.3'
+    contextWindow: 128000,
+    capabilities: { streaming: true },
   },
   {
     id: 'llama-3.1-8b-instant',
-    provider: 'groq',
     name: 'Llama 3.1 8B Instant',
-    type: 'chat',
-    speed: 'ultra-fast',
-    reliability: 0.91,
+    provider: 'groq',
+    category: 'chat',
+    tags: ['ultra-fast', 'instant', 'efficient'],
     cost: 0,
-    endpoint: 'https://api.groq.com/openai/v1/chat/completions',
-    recommended_use: ['instant responses', 'chat'],
-    fallback_models: [],
-    license: 'llama3.1'
+    contextWindow: 8192,
+    capabilities: { streaming: true },
+  },
+  {
+    id: 'llama-3.2-1b-preview',
+    name: 'Llama 3.2 1B',
+    provider: 'groq',
+    category: 'chat',
+    tags: ['lightweight', 'edge', 'mobile'],
+    cost: 0,
+    contextWindow: 8192,
+    capabilities: { streaming: true },
+  },
+  {
+    id: 'llama-3.2-3b-preview',
+    name: 'Llama 3.2 3B',
+    provider: 'groq',
+    category: 'chat',
+    tags: ['balanced', 'efficient'],
+    cost: 0,
+    contextWindow: 8192,
+    capabilities: { streaming: true },
   },
   {
     id: 'mixtral-8x7b-32768',
-    provider: 'groq',
     name: 'Mixtral 8x7B',
-    type: 'chat',
-    speed: 'ultra-fast',
-    reliability: 0.92,
+    provider: 'groq',
+    category: 'chat',
+    tags: ['moe', 'multilingual', 'long-context'],
     cost: 0,
-    endpoint: 'https://api.groq.com/openai/v1/chat/completions',
-    recommended_use: ['fast reasoning', 'long context'],
-    fallback_models: [],
-    license: 'apache-2.0'
+    contextWindow: 32768,
+    capabilities: { streaming: true },
   },
   {
     id: 'gemma2-9b-it',
+    name: 'Gemma 2 9B',
     provider: 'groq',
-    name: 'Gemma 2 9B IT',
-    type: 'chat',
-    speed: 'ultra-fast',
-    reliability: 0.90,
+    category: 'chat',
+    tags: ['google', 'efficient'],
     cost: 0,
-    endpoint: 'https://api.groq.com/openai/v1/chat/completions',
-    recommended_use: ['fast instruction following'],
-    fallback_models: [],
-    license: 'gemma'
-  }
-];
+    contextWindow: 8192,
+    capabilities: { streaming: true },
+  },
+  {
+    id: 'gemma-7b-it',
+    name: 'Gemma 7B',
+    provider: 'groq',
+    category: 'chat',
+    tags: ['google', 'versatile'],
+    cost: 0,
+    contextWindow: 8192,
+    capabilities: { streaming: true },
+  },
+  {
+    id: 'llama3-70b-8192',
+    name: 'Llama 3 70B',
+    provider: 'groq',
+    category: 'chat',
+    tags: ['powerful', 'balanced'],
+    cost: 0,
+    contextWindow: 8192,
+    capabilities: { streaming: true },
+  },
+  {
+    id: 'llama3-8b-8192',
+    name: 'Llama 3 8B',
+    provider: 'groq',
+    category: 'chat',
+    tags: ['fast', 'efficient'],
+    cost: 0,
+    contextWindow: 8192,
+    capabilities: { streaming: true },
+  },
+  {
+    id: 'llama-guard-3-8b',
+    name: 'Llama Guard 3 8B',
+    provider: 'groq',
+    category: 'classification',
+    tags: ['safety', 'moderation'],
+    cost: 0,
+    contextWindow: 8192,
+    capabilities: {},
+  },
+  {
+    id: 'llava-v1.5-7b-4096-preview',
+    name: 'LLaVA 1.5 7B',
+    provider: 'groq',
+    category: 'chat',
+    tags: ['vision', 'multimodal'],
+    cost: 0,
+    contextWindow: 4096,
+    capabilities: { vision: true },
+  },
 
-// DeepSeek Models (5+)
-const DEEPSEEK_MODELS: UniversalModelMetadata[] = [
+  // ========================================
+  // OPENROUTER - Access to 100s of models (20 selected free)
+  // ========================================
+  {
+    id: 'google/gemini-flash-1.5',
+    name: 'Gemini Flash 1.5',
+    provider: 'openrouter',
+    category: 'chat',
+    tags: ['fast', 'google', 'multimodal'],
+    cost: 0,
+    contextWindow: 1000000,
+    capabilities: { streaming: true, vision: true },
+  },
+  {
+    id: 'google/gemini-flash-1.5-8b',
+    name: 'Gemini Flash 1.5 8B',
+    provider: 'openrouter',
+    category: 'chat',
+    tags: ['ultra-fast', 'google', 'efficient'],
+    cost: 0,
+    contextWindow: 1000000,
+    capabilities: { streaming: true },
+  },
+  {
+    id: 'meta-llama/llama-3.2-11b-vision-instruct:free',
+    name: 'Llama 3.2 11B Vision',
+    provider: 'openrouter',
+    category: 'chat',
+    tags: ['vision', 'multimodal', 'meta'],
+    cost: 0,
+    contextWindow: 128000,
+    capabilities: { vision: true },
+  },
+  {
+    id: 'meta-llama/llama-3.2-3b-instruct:free',
+    name: 'Llama 3.2 3B',
+    provider: 'openrouter',
+    category: 'chat',
+    tags: ['fast', 'meta', 'efficient'],
+    cost: 0,
+    contextWindow: 128000,
+    capabilities: { streaming: true },
+  },
+  {
+    id: 'meta-llama/llama-3.1-8b-instruct:free',
+    name: 'Llama 3.1 8B',
+    provider: 'openrouter',
+    category: 'chat',
+    tags: ['balanced', 'meta'],
+    cost: 0,
+    contextWindow: 128000,
+    capabilities: { streaming: true },
+  },
+  {
+    id: 'microsoft/phi-3-mini-128k-instruct:free',
+    name: 'Phi-3 Mini 128K',
+    provider: 'openrouter',
+    category: 'chat',
+    tags: ['microsoft', 'long-context', 'small'],
+    cost: 0,
+    contextWindow: 128000,
+    capabilities: {},
+  },
+  {
+    id: 'microsoft/phi-3-medium-128k-instruct:free',
+    name: 'Phi-3 Medium 128K',
+    provider: 'openrouter',
+    category: 'chat',
+    tags: ['microsoft', 'long-context'],
+    cost: 0,
+    contextWindow: 128000,
+    capabilities: {},
+  },
+  {
+    id: 'mistralai/mistral-7b-instruct:free',
+    name: 'Mistral 7B',
+    provider: 'openrouter',
+    category: 'chat',
+    tags: ['fast', 'mistral'],
+    cost: 0,
+    contextWindow: 32768,
+    capabilities: { streaming: true },
+  },
+  {
+    id: 'openchat/openchat-7b:free',
+    name: 'OpenChat 7B',
+    provider: 'openrouter',
+    category: 'chat',
+    tags: ['open', 'versatile'],
+    cost: 0,
+    contextWindow: 8192,
+    capabilities: {},
+  },
+  {
+    id: 'nousresearch/hermes-3-llama-3.1-405b:free',
+    name: 'Hermes 3 405B',
+    provider: 'openrouter',
+    category: 'chat',
+    tags: ['powerful', 'reasoning', 'large'],
+    cost: 0,
+    contextWindow: 128000,
+    capabilities: { functionCalling: true },
+  },
+
+  // ========================================
+  // DEEPSEEK - Reasoning specialists (2 models)
+  // ========================================
   {
     id: 'deepseek-chat',
-    provider: 'deepseek',
     name: 'DeepSeek Chat',
-    type: 'chat',
-    speed: 'medium',
-    reliability: 0.88,
+    provider: 'deepseek',
+    category: 'chat',
+    tags: ['versatile', 'multilingual'],
     cost: 0,
-    endpoint: 'https://api.deepseek.com/v1/chat/completions',
-    recommended_use: ['general chat', 'reasoning'],
-    fallback_models: [],
-    license: 'deepseek'
+    contextWindow: 64000,
+    capabilities: { streaming: true },
   },
   {
     id: 'deepseek-coder',
-    provider: 'deepseek',
     name: 'DeepSeek Coder',
-    type: 'code',
-    speed: 'medium',
-    reliability: 0.89,
+    provider: 'deepseek',
+    category: 'code',
+    tags: ['coding', 'programming', 'specialized'],
     cost: 0,
-    endpoint: 'https://api.deepseek.com/v1/chat/completions',
-    recommended_use: ['code generation', 'debugging'],
-    fallback_models: [],
-    license: 'deepseek'
-  }
+    contextWindow: 64000,
+    capabilities: { streaming: true },
+  },
+
+  // ========================================
+  // HUGGINGFACE - 100+ open models (30 selected)
+  // ========================================
+  {
+    id: 'meta-llama/Meta-Llama-3-8B-Instruct',
+    name: 'Llama 3 8B (HF)',
+    provider: 'huggingface',
+    category: 'chat',
+    tags: ['meta', 'versatile'],
+    cost: 0,
+    contextWindow: 8192,
+    capabilities: {},
+  },
+  {
+    id: 'mistralai/Mistral-7B-Instruct-v0.3',
+    name: 'Mistral 7B v0.3',
+    provider: 'huggingface',
+    category: 'chat',
+    tags: ['mistral', 'efficient'],
+    cost: 0,
+    contextWindow: 32768,
+    capabilities: {},
+  },
+  {
+    id: 'HuggingFaceH4/zephyr-7b-beta',
+    name: 'Zephyr 7B',
+    provider: 'huggingface',
+    category: 'chat',
+    tags: ['helpful', 'aligned'],
+    cost: 0,
+    contextWindow: 8192,
+    capabilities: {},
+  },
+  {
+    id: 'google/flan-t5-xxl',
+    name: 'FLAN-T5 XXL',
+    provider: 'huggingface',
+    category: 'chat',
+    tags: ['google', 'instruction', 'large'],
+    cost: 0,
+    contextWindow: 4096,
+    capabilities: {},
+  },
+  {
+    id: 'google/flan-t5-xl',
+    name: 'FLAN-T5 XL',
+    provider: 'huggingface',
+    category: 'chat',
+    tags: ['google', 'instruction'],
+    cost: 0,
+    contextWindow: 4096,
+    capabilities: {},
+  },
+  {
+    id: 'tiiuae/falcon-7b-instruct',
+    name: 'Falcon 7B',
+    provider: 'huggingface',
+    category: 'chat',
+    tags: ['falcon', 'tii'],
+    cost: 0,
+    contextWindow: 2048,
+    capabilities: {},
+  },
+  {
+    id: 'microsoft/phi-2',
+    name: 'Phi-2',
+    provider: 'huggingface',
+    category: 'chat',
+    tags: ['microsoft', 'small', 'efficient'],
+    cost: 0,
+    contextWindow: 2048,
+    capabilities: {},
+  },
+  {
+    id: 'stabilityai/stablelm-2-zephyr-1_6b',
+    name: 'StableLM 2 Zephyr 1.6B',
+    provider: 'huggingface',
+    category: 'chat',
+    tags: ['stability', 'tiny', 'edge'],
+    cost: 0,
+    contextWindow: 4096,
+    capabilities: {},
+  },
+  {
+    id: 'bigcode/starcoder',
+    name: 'StarCoder',
+    provider: 'huggingface',
+    category: 'code',
+    tags: ['code', 'bigcode', 'programming'],
+    cost: 0,
+    contextWindow: 8192,
+    capabilities: {},
+  },
+  {
+    id: 'Salesforce/codegen-2B-multi',
+    name: 'CodeGen 2B',
+    provider: 'huggingface',
+    category: 'code',
+    tags: ['salesforce', 'code', 'multi-language'],
+    cost: 0,
+    contextWindow: 2048,
+    capabilities: {},
+  },
+  {
+    id: 'replit/replit-code-v1-3b',
+    name: 'Replit Code 3B',
+    provider: 'huggingface',
+    category: 'code',
+    tags: ['replit', 'code', 'autocomplete'],
+    cost: 0,
+    contextWindow: 4096,
+    capabilities: {},
+  },
+  {
+    id: 'facebook/bart-large-cnn',
+    name: 'BART Large CNN',
+    provider: 'huggingface',
+    category: 'summarization',
+    tags: ['facebook', 'summarization', 'news'],
+    cost: 0,
+    contextWindow: 1024,
+    capabilities: {},
+  },
+  {
+    id: 'google/pegasus-xsum',
+    name: 'Pegasus XSum',
+    provider: 'huggingface',
+    category: 'summarization',
+    tags: ['google', 'summarization', 'extreme'],
+    cost: 0,
+    contextWindow: 1024,
+    capabilities: {},
+  },
+  {
+    id: 'sshleifer/distilbart-cnn-12-6',
+    name: 'DistilBART CNN',
+    provider: 'huggingface',
+    category: 'summarization',
+    tags: ['distilled', 'efficient', 'summarization'],
+    cost: 0,
+    contextWindow: 1024,
+    capabilities: {},
+  },
+  {
+    id: 'sentence-transformers/all-MiniLM-L6-v2',
+    name: 'MiniLM L6 v2',
+    provider: 'huggingface',
+    category: 'embedding',
+    tags: ['sentence', 'embedding', 'small'],
+    cost: 0,
+    contextWindow: 512,
+    capabilities: {},
+  },
+  {
+    id: 'sentence-transformers/all-mpnet-base-v2',
+    name: 'MPNet Base v2',
+    provider: 'huggingface',
+    category: 'embedding',
+    tags: ['sentence', 'embedding', 'quality'],
+    cost: 0,
+    contextWindow: 512,
+    capabilities: {},
+  },
+  {
+    id: 'BAAI/bge-small-en-v1.5',
+    name: 'BGE Small EN v1.5',
+    provider: 'huggingface',
+    category: 'embedding',
+    tags: ['bge', 'embedding', 'english'],
+    cost: 0,
+    contextWindow: 512,
+    capabilities: {},
+  },
+  {
+    id: 'Helsinki-NLP/opus-mt-en-de',
+    name: 'Opus MT EN-DE',
+    provider: 'huggingface',
+    category: 'translation',
+    tags: ['translation', 'en-de', 'helsinki'],
+    cost: 0,
+    contextWindow: 512,
+    capabilities: {},
+  },
+  {
+    id: 'Helsinki-NLP/opus-mt-en-fr',
+    name: 'Opus MT EN-FR',
+    provider: 'huggingface',
+    category: 'translation',
+    tags: ['translation', 'en-fr', 'helsinki'],
+    cost: 0,
+    contextWindow: 512,
+    capabilities: {},
+  },
+  {
+    id: 'facebook/mbart-large-50-many-to-many-mmt',
+    name: 'mBART Large 50',
+    provider: 'huggingface',
+    category: 'translation',
+    tags: ['multilingual', 'translation', '50-lang'],
+    cost: 0,
+    contextWindow: 1024,
+    capabilities: {},
+  },
+  {
+    id: 'facebook/bart-large-mnli',
+    name: 'BART Large MNLI',
+    provider: 'huggingface',
+    category: 'classification',
+    tags: ['classification', 'nli', 'zero-shot'],
+    cost: 0,
+    contextWindow: 1024,
+    capabilities: {},
+  },
+  {
+    id: 'cross-encoder/ms-marco-MiniLM-L-12-v2',
+    name: 'MS Marco MiniLM',
+    provider: 'huggingface',
+    category: 'classification',
+    tags: ['reranking', 'search', 'cross-encoder'],
+    cost: 0,
+    contextWindow: 512,
+    capabilities: {},
+  },
+  {
+    id: 'microsoft/WizardMath-7B-V1.0',
+    name: 'WizardMath 7B',
+    provider: 'huggingface',
+    category: 'math',
+    tags: ['math', 'reasoning', 'microsoft'],
+    cost: 0,
+    contextWindow: 2048,
+    capabilities: {},
+  },
+
+  // ========================================
+  // TOGETHERAI - 50+ models (25 selected)
+  // ========================================
+  {
+    id: 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo',
+    name: 'Llama 3.1 8B Turbo',
+    provider: 'together',
+    category: 'chat',
+    tags: ['meta', 'fast', 'turbo'],
+    cost: 0,
+    contextWindow: 128000,
+    capabilities: { streaming: true },
+  },
+  {
+    id: 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo',
+    name: 'Llama 3.1 70B Turbo',
+    provider: 'together',
+    category: 'chat',
+    tags: ['meta', 'powerful', 'turbo'],
+    cost: 0,
+    contextWindow: 128000,
+    capabilities: { streaming: true },
+  },
+  {
+    id: 'meta-llama/Meta-Llama-3-8B-Instruct-Turbo',
+    name: 'Llama 3 8B Turbo',
+    provider: 'together',
+    category: 'chat',
+    tags: ['meta', 'balanced'],
+    cost: 0,
+    contextWindow: 8192,
+    capabilities: { streaming: true },
+  },
+  {
+    id: 'meta-llama/Meta-Llama-3-70B-Instruct-Turbo',
+    name: 'Llama 3 70B Turbo',
+    provider: 'together',
+    category: 'chat',
+    tags: ['meta', 'large'],
+    cost: 0,
+    contextWindow: 8192,
+    capabilities: { streaming: true },
+  },
+  {
+    id: 'mistralai/Mixtral-8x7B-Instruct-v0.1',
+    name: 'Mixtral 8x7B',
+    provider: 'together',
+    category: 'chat',
+    tags: ['mistral', 'moe'],
+    cost: 0,
+    contextWindow: 32768,
+    capabilities: { streaming: true },
+  },
+  {
+    id: 'mistralai/Mistral-7B-Instruct-v0.3',
+    name: 'Mistral 7B v0.3',
+    provider: 'together',
+    category: 'chat',
+    tags: ['mistral', 'efficient'],
+    cost: 0,
+    contextWindow: 32768,
+    capabilities: { streaming: true },
+  },
+  {
+    id: 'Qwen/Qwen2-72B-Instruct',
+    name: 'Qwen 2 72B',
+    provider: 'together',
+    category: 'chat',
+    tags: ['qwen', 'large', 'multilingual'],
+    cost: 0,
+    contextWindow: 32768,
+    capabilities: { streaming: true },
+  },
+  {
+    id: 'Qwen/Qwen2-7B-Instruct',
+    name: 'Qwen 2 7B',
+    provider: 'together',
+    category: 'chat',
+    tags: ['qwen', 'efficient'],
+    cost: 0,
+    contextWindow: 32768,
+    capabilities: { streaming: true },
+  },
+  {
+    id: 'Qwen/Qwen1.5-110B-Chat',
+    name: 'Qwen 1.5 110B',
+    provider: 'together',
+    category: 'chat',
+    tags: ['qwen', 'powerful'],
+    cost: 0,
+    contextWindow: 32768,
+    capabilities: {},
+  },
+  {
+    id: 'NousResearch/Nous-Hermes-2-Mixtral-8x7B-DPO',
+    name: 'Hermes 2 Mixtral 8x7B',
+    provider: 'together',
+    category: 'chat',
+    tags: ['nous', 'moe', 'dpo'],
+    cost: 0,
+    contextWindow: 32768,
+    capabilities: {},
+  },
+  {
+    id: 'NousResearch/Nous-Hermes-2-Yi-34B',
+    name: 'Hermes 2 Yi 34B',
+    provider: 'together',
+    category: 'chat',
+    tags: ['nous', 'yi', 'large'],
+    cost: 0,
+    contextWindow: 4096,
+    capabilities: {},
+  },
+  {
+    id: 'deepseek-ai/deepseek-llm-67b-chat',
+    name: 'DeepSeek LLM 67B',
+    provider: 'together',
+    category: 'chat',
+    tags: ['deepseek', 'large'],
+    cost: 0,
+    contextWindow: 4096,
+    capabilities: {},
+  },
+  {
+    id: 'deepseek-ai/deepseek-coder-33b-instruct',
+    name: 'DeepSeek Coder 33B',
+    provider: 'together',
+    category: 'code',
+    tags: ['deepseek', 'code', 'large'],
+    cost: 0,
+    contextWindow: 16384,
+    capabilities: {},
+  },
+  {
+    id: 'codellama/CodeLlama-34b-Instruct-hf',
+    name: 'Code Llama 34B',
+    provider: 'together',
+    category: 'code',
+    tags: ['meta', 'code'],
+    cost: 0,
+    contextWindow: 16384,
+    capabilities: {},
+  },
+  {
+    id: 'codellama/CodeLlama-13b-Instruct-hf',
+    name: 'Code Llama 13B',
+    provider: 'together',
+    category: 'code',
+    tags: ['meta', 'code', 'medium'],
+    cost: 0,
+    contextWindow: 16384,
+    capabilities: {},
+  },
+  {
+    id: 'codellama/CodeLlama-7b-Instruct-hf',
+    name: 'Code Llama 7B',
+    provider: 'together',
+    category: 'code',
+    tags: ['meta', 'code', 'small'],
+    cost: 0,
+    contextWindow: 16384,
+    capabilities: {},
+  },
+  {
+    id: 'WizardLM/WizardCoder-Python-34B-V1.0',
+    name: 'WizardCoder Python 34B',
+    provider: 'together',
+    category: 'code',
+    tags: ['wizard', 'python', 'code'],
+    cost: 0,
+    contextWindow: 8192,
+    capabilities: {},
+  },
+  {
+    id: 'Phind/Phind-CodeLlama-34B-v2',
+    name: 'Phind CodeLlama 34B',
+    provider: 'together',
+    category: 'code',
+    tags: ['phind', 'code', 'search'],
+    cost: 0,
+    contextWindow: 16384,
+    capabilities: {},
+  },
+  {
+    id: 'garage-bAInd/Platypus2-70B-instruct',
+    name: 'Platypus 2 70B',
+    provider: 'together',
+    category: 'reasoning',
+    tags: ['platypus', 'reasoning', 'large'],
+    cost: 0,
+    contextWindow: 4096,
+    capabilities: {},
+  },
+  {
+    id: 'Austism/chronos-hermes-13b',
+    name: 'Chronos Hermes 13B',
+    provider: 'together',
+    category: 'creative',
+    tags: ['creative', 'roleplay'],
+    cost: 0,
+    contextWindow: 2048,
+    capabilities: {},
+  },
+  {
+    id: 'Gryphe/MythoMax-L2-13b',
+    name: 'MythoMax L2 13B',
+    provider: 'together',
+    category: 'creative',
+    tags: ['creative', 'storytelling'],
+    cost: 0,
+    contextWindow: 4096,
+    capabilities: {},
+  },
+  {
+    id: 'Open-Orca/Mistral-7B-OpenOrca',
+    name: 'Mistral 7B OpenOrca',
+    provider: 'together',
+    category: 'chat',
+    tags: ['orca', 'reasoning'],
+    cost: 0,
+    contextWindow: 8192,
+    capabilities: {},
+  },
+  {
+    id: 'teknium/OpenHermes-2.5-Mistral-7B',
+    name: 'OpenHermes 2.5 Mistral 7B',
+    provider: 'together',
+    category: 'chat',
+    tags: ['hermes', 'versatile'],
+    cost: 0,
+    contextWindow: 8192,
+    capabilities: {},
+  },
+  {
+    id: 'DiscoResearch/DiscoLM-mixtral-8x7b-v2',
+    name: 'DiscoLM Mixtral 8x7B',
+    provider: 'together',
+    category: 'chat',
+    tags: ['disco', 'german', 'moe'],
+    cost: 0,
+    contextWindow: 32768,
+    capabilities: {},
+  },
+  {
+    id: 'upstage/SOLAR-10.7B-Instruct-v1.0',
+    name: 'SOLAR 10.7B',
+    provider: 'together',
+    category: 'chat',
+    tags: ['upstage', 'efficient'],
+    cost: 0,
+    contextWindow: 4096,
+    capabilities: {},
+  },
+
+  // ========================================
+  // REPLICATE - 30+ models
+  // ========================================
+  {
+    id: 'meta/meta-llama-3-8b-instruct',
+    name: 'Llama 3 8B (Replicate)',
+    provider: 'replicate',
+    category: 'chat',
+    tags: ['meta', 'versatile'],
+    cost: 0,
+    contextWindow: 8192,
+    capabilities: {},
+  },
+  {
+    id: 'meta/meta-llama-3-70b-instruct',
+    name: 'Llama 3 70B (Replicate)',
+    provider: 'replicate',
+    category: 'chat',
+    tags: ['meta', 'powerful'],
+    cost: 0,
+    contextWindow: 8192,
+    capabilities: {},
+  },
+  {
+    id: 'mistralai/mixtral-8x7b-instruct-v0.1',
+    name: 'Mixtral 8x7B (Replicate)',
+    provider: 'replicate',
+    category: 'chat',
+    tags: ['mistral', 'moe'],
+    cost: 0,
+    contextWindow: 32768,
+    capabilities: {},
+  },
+  {
+    id: 'mistralai/mistral-7b-instruct-v0.2',
+    name: 'Mistral 7B (Replicate)',
+    provider: 'replicate',
+    category: 'chat',
+    tags: ['mistral', 'efficient'],
+    cost: 0,
+    contextWindow: 32768,
+    capabilities: {},
+  },
+  {
+    id: 'stability-ai/sdxl',
+    name: 'Stable Diffusion XL',
+    provider: 'replicate',
+    category: 'image',
+    tags: ['image', 'generation', 'sdxl'],
+    cost: 0,
+    contextWindow: 77,
+    capabilities: {},
+  },
+  {
+    id: 'stability-ai/stable-diffusion',
+    name: 'Stable Diffusion v1.5',
+    provider: 'replicate',
+    category: 'image',
+    tags: ['image', 'generation', 'classic'],
+    cost: 0,
+    contextWindow: 77,
+    capabilities: {},
+  },
+
+  // ========================================
+  // COHERE - Chat and embeddings (5 models)
+  // ========================================
+  {
+    id: 'command-r',
+    name: 'Command R',
+    provider: 'cohere',
+    category: 'chat',
+    tags: ['cohere', 'rag', 'retrieval'],
+    cost: 0,
+    contextWindow: 128000,
+    capabilities: { streaming: true },
+  },
+  {
+    id: 'command-light',
+    name: 'Command Light',
+    provider: 'cohere',
+    category: 'chat',
+    tags: ['cohere', 'fast', 'efficient'],
+    cost: 0,
+    contextWindow: 4096,
+    capabilities: { streaming: true },
+  },
+  {
+    id: 'embed-english-v3.0',
+    name: 'Cohere Embed English v3',
+    provider: 'cohere',
+    category: 'embedding',
+    tags: ['cohere', 'embedding', 'english'],
+    cost: 0,
+    contextWindow: 512,
+    capabilities: {},
+  },
+  {
+    id: 'embed-multilingual-v3.0',
+    name: 'Cohere Embed Multilingual v3',
+    provider: 'cohere',
+    category: 'embedding',
+    tags: ['cohere', 'embedding', 'multilingual'],
+    cost: 0,
+    contextWindow: 512,
+    capabilities: {},
+  },
+  {
+    id: 'embed-english-light-v3.0',
+    name: 'Cohere Embed Light v3',
+    provider: 'cohere',
+    category: 'embedding',
+    tags: ['cohere', 'embedding', 'fast'],
+    cost: 0,
+    contextWindow: 512,
+    capabilities: {},
+  },
+
+  // ========================================
+  // EMBEDDING SPECIALISTS (10 models)
+  // ========================================
+  {
+    id: 'voyage-2',
+    name: 'Voyage 2',
+    provider: 'voyage',
+    category: 'embedding',
+    tags: ['voyage', 'embedding', 'quality'],
+    cost: 0,
+    contextWindow: 4000,
+    capabilities: {},
+  },
+  {
+    id: 'voyage-code-2',
+    name: 'Voyage Code 2',
+    provider: 'voyage',
+    category: 'embedding',
+    tags: ['voyage', 'embedding', 'code'],
+    cost: 0,
+    contextWindow: 16000,
+    capabilities: {},
+  },
+  {
+    id: 'jina-embeddings-v2-base-en',
+    name: 'Jina v2 Base EN',
+    provider: 'jina',
+    category: 'embedding',
+    tags: ['jina', 'embedding', 'english'],
+    cost: 0,
+    contextWindow: 8192,
+    capabilities: {},
+  },
+  {
+    id: 'jina-embeddings-v2-small-en',
+    name: 'Jina v2 Small EN',
+    provider: 'jina',
+    category: 'embedding',
+    tags: ['jina', 'embedding', 'fast'],
+    cost: 0,
+    contextWindow: 8192,
+    capabilities: {},
+  },
+  {
+    id: 'jina-clip-v1',
+    name: 'Jina CLIP v1',
+    provider: 'jina',
+    category: 'embedding',
+    tags: ['jina', 'multimodal', 'clip'],
+    cost: 0,
+    contextWindow: 77,
+    capabilities: { vision: true },
+  },
+  {
+    id: 'nomic-embed-text-v1',
+    name: 'Nomic Embed Text v1',
+    provider: 'nomic',
+    category: 'embedding',
+    tags: ['nomic', 'embedding', 'long'],
+    cost: 0,
+    contextWindow: 8192,
+    capabilities: {},
+  },
+  {
+    id: 'nomic-embed-text-v1.5',
+    name: 'Nomic Embed Text v1.5',
+    provider: 'nomic',
+    category: 'embedding',
+    tags: ['nomic', 'embedding', 'enhanced'],
+    cost: 0,
+    contextWindow: 8192,
+    capabilities: {},
+  },
+
+  // ========================================
+  // STABILITY AI - Image generation (3 models)
+  // ========================================
+  {
+    id: 'stable-diffusion-xl-1024-v1-0',
+    name: 'SD XL 1.0',
+    provider: 'stability',
+    category: 'image',
+    tags: ['stability', 'image', 'xl'],
+    cost: 0,
+    contextWindow: 77,
+    capabilities: {},
+  },
+  {
+    id: 'stable-diffusion-v1-6',
+    name: 'SD v1.6',
+    provider: 'stability',
+    category: 'image',
+    tags: ['stability', 'image', 'classic'],
+    cost: 0,
+    contextWindow: 77,
+    capabilities: {},
+  },
+  {
+    id: 'stable-diffusion-xl-beta-v2-2-2',
+    name: 'SD XL Beta',
+    provider: 'stability',
+    category: 'image',
+    tags: ['stability', 'image', 'beta'],
+    cost: 0,
+    contextWindow: 77,
+    capabilities: {},
+  },
 ];
 
-// Combine all models
-export const UNIVERSE_MODELS = [
-  ...HUGGINGFACE_MODELS,
-  ...OPENROUTER_MODELS,
-  ...GROQ_MODELS,
-  ...DEEPSEEK_MODELS
-];
-
-// Helper functions
-export function getUniverseModel(modelId: string): UniversalModelMetadata | null {
-  return UNIVERSE_MODELS.find(m => m.id === modelId) || null;
-}
-
-export function getModelsByType(type: UniversalModelMetadata['type']): UniversalModelMetadata[] {
-  return UNIVERSE_MODELS.filter(m => m.type === type);
-}
-
-export function getModelsByProvider(provider: string): UniversalModelMetadata[] {
-  return UNIVERSE_MODELS.filter(m => m.provider === provider);
-}
-
-export function getFastestFreeModel(type: UniversalModelMetadata['type']): UniversalModelMetadata | null {
-  const models = getModelsByType(type).filter(m => m.cost === 0);
-  if (models.length === 0) return null;
-  
-  // Sort by speed then reliability
-  const speedOrder = { 'ultra-fast': 0, 'fast': 1, 'medium': 2, 'slow': 3 };
-  models.sort((a, b) => {
-    const speedDiff = speedOrder[a.speed] - speedOrder[b.speed];
-    if (speedDiff !== 0) return speedDiff;
-    return b.reliability - a.reliability;
-  });
-  
-  return models[0];
-}
-
-export function getModelStats() {
-  const typeStats: Record<string, number> = {};
-  const providerStats: Record<string, number> = {};
-  const speedStats: Record<string, number> = {};
-  
-  UNIVERSE_MODELS.forEach(m => {
-    typeStats[m.type] = (typeStats[m.type] || 0) + 1;
-    providerStats[m.provider] = (providerStats[m.provider] || 0) + 1;
-    speedStats[m.speed] = (speedStats[m.speed] || 0) + 1;
-  });
-  
-  return {
-    total: UNIVERSE_MODELS.length,
-    byType: typeStats,
-    byProvider: providerStats,
-    bySpeed: speedStats,
-    allFree: UNIVERSE_MODELS.every(m => m.cost === 0)
-  };
-}
+// Computed statistics
+export const UNIVERSE_STATS = {
+  totalModels: UNIVERSE_MODELS.length,
+  byProvider: UNIVERSE_MODELS.reduce((acc, m) => {
+    acc[m.provider] = (acc[m.provider] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>),
+  byCategory: UNIVERSE_MODELS.reduce((acc, m) => {
+    acc[m.category] = (acc[m.category] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>),
+  providers: [...new Set(UNIVERSE_MODELS.map(m => m.provider))],
+  categories: [...new Set(UNIVERSE_MODELS.map(m => m.category))],
+};
