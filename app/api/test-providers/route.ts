@@ -102,7 +102,7 @@ async function testGemini(): Promise<TestResult> {
   const start = Date.now();
   try {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -124,7 +124,7 @@ async function testGemini(): Promise<TestResult> {
     return { 
       status: 'success', 
       response: data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response',
-      model: 'gemini-1.5-pro',
+      model: 'gemini-1.5-flash',
       latencyMs
     };
   } catch (error: any) {
