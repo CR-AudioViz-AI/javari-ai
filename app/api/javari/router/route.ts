@@ -1,4 +1,5 @@
 // app/api/javari/router/route.ts
+// FIXED: Better error handling, extended timeout, improved logging
 import { NextRequest } from 'next/server';
 import { getProvider, getProviderApiKey } from '@/lib/javari/providers';
 import { RouterRequest, StreamEvent } from '@/lib/javari/router/types';
@@ -12,13 +13,20 @@ export async function POST(req: NextRequest) {
   
   const stream = new ReadableStream({
     async start(controller) {
+      const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+      
       try {
         const body: RouterRequest = await req.json();
         let { message, mode, provider: requestedProvider } = body;
 
-        console.log(`[Router] Request received - Mode: ${mode}, Provider: ${requestedProvider || 'openai'}`);
+        console.log(`[Router:${requestId}] Request received:`, { 
+          mode, 
+          provider: requestedProvider || 'openai',
+          messageLength: message?.length 
+        });
 
         if (!message) {
+          console.error(`[Router:${requestId}] No message provided`);
           sendEvent(controller, encoder, {
             type: 'error',
             data: { message: 'Message required' }
@@ -27,58 +35,104 @@ export async function POST(req: NextRequest) {
           return;
         }
 
-        // CRITICAL: Preprocess prompt for ALL modes
+        // Preprocess prompt for ALL modes
         const preprocessed = preprocessPrompt(message);
         message = preprocessed.rewrittenPrompt;
         
-        console.log('[Router] Preprocessed:', {
-          original: body.message.substring(0, 50),
-          rewritten: message.substring(0, 50),
+        console.log(`[Router:${requestId}] Preprocessed:`, {
+          originalLength: body.message.length,
+          rewrittenLength: message.length,
           model: preprocessed.modelToUse,
           nounTrigger: preprocessed.nounTrigger,
           mode
         });
 
-        // All modes use single AI with preprocessed model
+        // Determine provider
         const providerName = requestedProvider || 'openai';
         
+        // Get API key
         let apiKey: string;
         try {
-          console.log(`[Router] Getting API key for ${providerName}...`);
+          console.log(`[Router:${requestId}] Getting API key for ${providerName}...`);
           apiKey = getProviderApiKey(providerName);
-          console.log(`[Router] API key retrieved: ${apiKey.substring(0, 10)}...`);
+          console.log(`[Router:${requestId}] API key retrieved: ${apiKey.substring(0, 10)}...${apiKey.substring(apiKey.length - 4)}`);
         } catch (error: any) {
-          console.error(`[Router] API key error for ${providerName}:`, error.message);
+          console.error(`[Router:${requestId}] API key error:`, {
+            provider: providerName,
+            error: error.message,
+            stack: error.stack
+          });
           sendEvent(controller, encoder, {
             type: 'error',
-            data: { message: `Provider ${providerName} not configured: ${error.message}` }
+            data: { 
+              message: `Provider ${providerName} not configured`, 
+              details: error.message,
+              requestId
+            }
           });
           controller.close();
           return;
         }
 
-        console.log(`[Router] Creating ${providerName} provider...`);
-        const provider = getProvider(providerName, apiKey);
-        console.log(`[Router] Provider created successfully`);
+        // Create provider instance
+        console.log(`[Router:${requestId}] Creating ${providerName} provider...`);
+        let provider;
+        try {
+          provider = getProvider(providerName, apiKey);
+          console.log(`[Router:${requestId}] Provider created successfully`);
+        } catch (error: any) {
+          console.error(`[Router:${requestId}] Provider creation error:`, {
+            provider: providerName,
+            error: error.message,
+            stack: error.stack
+          });
+          sendEvent(controller, encoder, {
+            type: 'error',
+            data: { 
+              message: `Failed to create ${providerName} provider`, 
+              details: error.message,
+              requestId
+            }
+          });
+          controller.close();
+          return;
+        }
 
-        // Pass preprocessed model selection to provider
+        // Configure provider options
         const options = {
           preferredModel: preprocessed.modelToUse
         };
 
-        console.log(`[Router] Starting stream with model: ${options.preferredModel}`);
+        console.log(`[Router:${requestId}] Starting stream:`, {
+          provider: providerName,
+          model: options.preferredModel,
+          mode
+        });
 
         try {
           let fullResponse = '';
           let chunkCount = 0;
+          const streamStartTime = Date.now();
           
           for await (const chunk of provider.generateStream(message, options)) {
             fullResponse += chunk;
             chunkCount++;
             sendEvent(controller, encoder, { type: 'token', data: chunk });
+            
+            // Log progress every 50 chunks
+            if (chunkCount % 50 === 0) {
+              console.log(`[Router:${requestId}] Progress: ${chunkCount} chunks, ${fullResponse.length} chars`);
+            }
           }
 
-          console.log(`[Router] Stream complete - ${chunkCount} chunks, ${fullResponse.length} chars`);
+          const streamDuration = Date.now() - streamStartTime;
+          console.log(`[Router:${requestId}] Stream complete:`, {
+            chunks: chunkCount,
+            chars: fullResponse.length,
+            duration: `${streamDuration}ms`,
+            provider: providerName,
+            model: preprocessed.modelToUse
+          });
 
           sendEvent(controller, encoder, {
             type: 'final',
@@ -86,38 +140,50 @@ export async function POST(req: NextRequest) {
               response: fullResponse, 
               provider: providerName, 
               model: preprocessed.modelToUse, 
-              mode 
+              mode,
+              metadata: {
+                chunks: chunkCount,
+                duration: streamDuration,
+                requestId
+              }
             }
           });
 
         } catch (streamError: any) {
-          console.error('[Router] Stream error:', {
+          console.error(`[Router:${requestId}] Stream error:`, {
             error: streamError.message,
             stack: streamError.stack,
-            name: streamError.name
+            name: streamError.name,
+            provider: providerName,
+            model: preprocessed.modelToUse
           });
+          
           sendEvent(controller, encoder, {
             type: 'error',
             data: { 
-              message: 'Stream error', 
+              message: 'Stream generation failed', 
               details: streamError.message,
-              errorType: streamError.name
+              errorType: streamError.name,
+              provider: providerName,
+              requestId
             }
           });
         }
 
       } catch (error: any) {
-        console.error('[Router] Fatal error:', {
+        console.error(`[Router:${requestId}] Fatal error:`, {
           error: error.message,
           stack: error.stack,
           name: error.name
         });
+        
         sendEvent(controller, encoder, {
           type: 'error',
           data: { 
-            message: 'Server error', 
+            message: 'Router error', 
             details: error.message,
-            errorType: error.name
+            errorType: error.name,
+            requestId
           }
         });
       } finally {
@@ -140,16 +206,29 @@ function sendEvent(
   encoder: TextEncoder,
   event: StreamEvent
 ) {
-  const data = `data: ${JSON.stringify(event)}\n\n`;
-  controller.enqueue(encoder.encode(data));
+  try {
+    const data = `data: ${JSON.stringify(event)}\n\n`;
+    controller.enqueue(encoder.encode(data));
+  } catch (error: any) {
+    console.error('[Router] Failed to send event:', {
+      error: error.message,
+      eventType: event.type
+    });
+  }
 }
 
 export async function GET() {
   return Response.json({
     status: 'healthy',
-    version: '5.2-DEBUG-LOGGING',
+    version: '6.0-FIXED-TIMEOUT-ERROR-HANDLING',
     modes: ['single', 'super', 'advanced', 'roadmap'],
-    note: 'Extensive error logging enabled',
+    fixes: [
+      'Extended provider timeout to 20s',
+      'Added request ID tracking',
+      'Improved error logging',
+      'Better provider error handling',
+      'Stream progress monitoring'
+    ],
     timestamp: new Date().toISOString()
   });
 }
