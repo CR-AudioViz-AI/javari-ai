@@ -27,6 +27,7 @@ import { GroqProvider } from './GroqProvider';
 import { XAIProvider } from './XAIProvider';
 import { DeepSeekProvider } from './DeepSeekProvider';
 import { CohereProvider } from './CohereProvider';
+import { OpenRouterProvider } from './OpenRouterProvider';
 import { AIProvider } from '../router/types';
 
 // Re-export all providers
@@ -39,7 +40,8 @@ export {
   GroqProvider,
   XAIProvider,
   DeepSeekProvider,
-  CohereProvider
+  CohereProvider,
+  OpenRouterProvider
 };
 
 /**
@@ -69,6 +71,8 @@ export function getProvider(provider: AIProvider, apiKey: string): BaseProvider 
       return new DeepSeekProvider(apiKey);
     case 'cohere':
       return new CohereProvider(apiKey);
+    case 'openrouter':
+      return new OpenRouterProvider(apiKey);
     default:
       throw new Error(`Provider ${provider} not implemented`);
   }
@@ -91,6 +95,7 @@ export function getProviderApiKey(provider: AIProvider): string {
     'xai': 'XAI_API_KEY',
     'deepseek': 'DEEPSEEK_API_KEY',
     'cohere': 'COHERE_API_KEY',
+    'openrouter': 'OPENROUTER_API_KEY',
   };
 
   const envKey = keyMap[provider];
@@ -116,6 +121,9 @@ export const ALL_PROVIDERS: AIProvider[] = [
   'anthropic',
   'perplexity',
   'mistral',
+  
+  // Core+ (Meta-provider with 200+ models)
+  'openrouter',
   
   // Extended providers
   'groq',
@@ -151,6 +159,12 @@ export const PROVIDER_METADATA = {
     models: ['mistral-large-latest', 'mistral-medium', 'mistral-small'],
     capabilities: ['chat', 'multilingual', 'code'],
     tier: 'core',
+  },
+  openrouter: {
+    name: 'OpenRouter',
+    models: ['200+ models via unified API'],
+    capabilities: ['chat', 'streaming', 'multi-model', 'cost-optimization', 'dynamic-routing', 'free-tier'],
+    tier: 'core+',
   },
   groq: {
     name: 'Groq',
