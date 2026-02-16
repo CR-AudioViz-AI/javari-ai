@@ -69,6 +69,13 @@ export default function ChatInterface({ initialMode = 'single' }: ChatInterfaceP
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Debug mode changes
+  const handleModeChange = (newMode: ChatMode) => {
+    console.log('[ChatInterface] Mode change requested:', mode, '→', newMode);
+    setMode(newMode);
+    console.log('[ChatInterface] Mode state updated to:', newMode);
+  };
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -76,6 +83,10 @@ export default function ChatInterface({ initialMode = 'single' }: ChatInterfaceP
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    console.log('[ChatInterface] Mode state changed to:', mode);
+  }, [mode]);
 
   const handleSendMessage = async (content: string) => {
     if (!content.trim() || isLoading) return;
@@ -161,7 +172,7 @@ export default function ChatInterface({ initialMode = 'single' }: ChatInterfaceP
       <div className="border-b bg-white px-6 py-4">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-900">Javari AI Chat</h1>
-          <ModeToggle mode={mode} onChange={setMode} />
+          <ModeToggle mode={mode} onChange={handleModeChange} />
         </div>
       </div>
 
