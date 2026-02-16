@@ -1,6 +1,6 @@
 // lib/javari/providers/XAIProvider.ts
-import { BaseProvider } from './BaseProvider';
-import { AIProvider, RouterOptions } from '../router/types';
+import { BaseProvider, ExtendedExtendedRouterOptions } from './BaseProvider';
+import { AIProvider, ExtendedRouterOptions } from '../router/types';
 
 export class XAIProvider extends BaseProvider {
   private model: string = 'grok-beta';
@@ -13,7 +13,7 @@ export class XAIProvider extends BaseProvider {
     return this.model;
   }
 
-  async *generateStream(message: string, options?: RouterOptions): AsyncIterator<string> {
+  async *generateStream(message: string, options?: ExtendedRouterOptions): AsyncIterator<string> {
     const response = await this.withTimeout(
       fetch('https://api.x.ai/v1/chat/completions', {
         method: 'POST',

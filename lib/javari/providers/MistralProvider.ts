@@ -1,6 +1,6 @@
 // lib/javari/providers/MistralProvider.ts
-import { BaseProvider } from './BaseProvider';
-import { AIProvider, RouterOptions } from '../router/types';
+import { BaseProvider, ExtendedExtendedRouterOptions } from './BaseProvider';
+import { AIProvider, ExtendedRouterOptions } from '../router/types';
 
 export class MistralProvider extends BaseProvider {
   private model: string = 'mistral-large-latest';
@@ -13,7 +13,7 @@ export class MistralProvider extends BaseProvider {
     return this.model;
   }
 
-  async *generateStream(message: string, options?: RouterOptions): AsyncIterator<string> {
+  async *generateStream(message: string, options?: ExtendedRouterOptions): AsyncIterator<string> {
     const response = await this.withTimeout(
       fetch('https://api.mistral.ai/v1/chat/completions', {
         method: 'POST',

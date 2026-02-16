@@ -1,6 +1,6 @@
 // lib/javari/providers/GroqProvider.ts
-import { BaseProvider } from './BaseProvider';
-import { AIProvider, RouterOptions } from '../router/types';
+import { BaseProvider, ExtendedExtendedRouterOptions } from './BaseProvider';
+import { AIProvider, ExtendedRouterOptions } from '../router/types';
 
 export class GroqProvider extends BaseProvider {
   private model: string = 'llama-3.1-70b-versatile';
@@ -13,7 +13,7 @@ export class GroqProvider extends BaseProvider {
     return this.model;
   }
 
-  async *generateStream(message: string, options?: RouterOptions): AsyncIterator<string> {
+  async *generateStream(message: string, options?: ExtendedRouterOptions): AsyncIterator<string> {
     const response = await this.withTimeout(
       fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
