@@ -1,17 +1,19 @@
 // lib/javari/providers/OpenRouterProvider.ts
 /**
- * OpenRouter Provider - Access to 200+ AI Models
+ * OpenRouter Provider - HARDENED FOR PRODUCTION
  * 
- * JAAE Full Activation - Universal AI Router
+ * Access to 342+ AI Models with 5xx Fallback Bypass
  * Tier: CORE+ (Meta-provider with dynamic routing)
  * 
  * Features:
- * - 200+ models from multiple providers
+ * - 342+ models from multiple providers
  * - Unified REST endpoint
  * - Dynamic model selection
  * - Cost optimization
  * - Speed routing
  * - Streaming support
+ * - 5xx error detection for automatic fallback
+ * - Enhanced error handling
  */
 
 import { BaseProvider, ExtendedRouterOptions } from './BaseProvider';
@@ -31,28 +33,21 @@ export interface OpenRouterModel {
     max_completion_tokens?: number;
     is_moderated: boolean;
   };
-  per_request_limits?: {
-    prompt_tokens?: string;
-    completion_tokens?: string;
-  };
 }
 
-// Popular models curated for different use cases
+// Featured models for different use cases
 const OPENROUTER_FEATURED_MODELS = {
-  // FREE models
   free: {
     chat: 'deepseek/deepseek-chat',
     reasoning: 'deepseek/deepseek-r1:free',
     fast: 'meta-llama/llama-3.1-8b-instruct:free',
     efficient: 'mistralai/mistral-7b-instruct:free',
   },
-  // Premium models
   premium: {
     claude: 'anthropic/claude-3.5-sonnet',
     gpt4: 'openai/gpt-4-turbo',
     reasoning: 'openai/o1-preview',
   },
-  // Specialized
   specialized: {
     code: 'deepseek/deepseek-coder',
     vision: 'openai/gpt-4-vision-preview',
@@ -61,7 +56,7 @@ const OPENROUTER_FEATURED_MODELS = {
 };
 
 export class OpenRouterProvider extends BaseProvider {
-  private model: string = OPENROUTER_FEATURED_MODELS.free.chat; // Default to free model
+  private model: string = OPENROUTER_FEATURED_MODELS.free.chat;
   protected timeout: number = 20000; // 20s provider timeout
   private baseURL: string = 'https://openrouter.ai/api/v1';
   private modelCache: OpenRouterModel[] = [];
@@ -81,6 +76,20 @@ export class OpenRouterProvider extends BaseProvider {
    */
   setModel(modelId: string): void {
     this.model = modelId;
+  }
+
+  /**
+   * Check if error is a 5xx server error requiring fallback
+   */
+  private is5xxError(error: any): boolean {
+    if (error instanceof Error) {
+      const status = error.message.match(/HTTP (\d{3})/);
+      if (status && status[1]) {
+        const code = parseInt(status[1]);
+        return code >= 500 && code < 600;
+      }
+    }
+    return false;
   }
 
   /**
@@ -187,15 +196,18 @@ export class OpenRouterProvider extends BaseProvider {
           const errorJson = JSON.parse(errorText);
           errorMessage = `OpenRouter: ${errorJson.error?.message || errorText}`;
         } catch {
-          errorMessage = `OpenRouter: ${errorText.substring(0, 200)}`;
+          errorMessage = `OpenRouter: HTTP ${response.status} - ${errorText.substring(0, 100)}`;
         }
         
-        throw new Error(errorMessage);
+        // Create error with status code for 5xx detection
+        const error = new Error(errorMessage);
+        (error as any).statusCode = response.status;
+        throw error;
       }
 
       const reader = response.body?.getReader();
       if (!reader) {
-        throw new Error('No response body from OpenRouter API');
+        throw new Error('OpenRouter: No response body received');
       }
 
       const decoder = new TextDecoder();
@@ -223,6 +235,7 @@ export class OpenRouterProvider extends BaseProvider {
                   yield content;
                 }
               } catch (parseError) {
+                // Log but continue - don't break stream
                 console.error('[OpenRouter] Failed to parse chunk:', parseError);
               }
             }
@@ -234,9 +247,20 @@ export class OpenRouterProvider extends BaseProvider {
 
     } catch (error) {
       if (error instanceof Error) {
+        // Check for timeout
         if (error.message === 'Provider timeout') {
           throw new Error(`OpenRouter provider timeout after ${timeoutMs}ms`);
         }
+        
+        // Check for 5xx errors - mark for fallback
+        if (this.is5xxError(error)) {
+          const wrappedError: any = new Error(error.message);
+          wrappedError.requiresFallback = true;
+          wrappedError.statusCode = (error as any).statusCode;
+          throw wrappedError;
+        }
+        
+        // Re-throw other errors
         throw error;
       }
       throw new Error(`OpenRouter provider error: ${String(error)}`);
@@ -272,7 +296,8 @@ export class OpenRouterProvider extends BaseProvider {
       'cost-optimization',
       'dynamic-routing',
       'free-tier',
-      '200+-models',
+      '342+-models',
+      '5xx-bypass',
     ];
   }
 

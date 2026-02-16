@@ -3,16 +3,18 @@ import { BaseProvider, ExtendedRouterOptions } from './BaseProvider';
 import { AIProvider } from '../router/types';
 
 /**
- * Anthropic Claude Provider
+ * Anthropic Claude Provider - HARDENED FOR PRODUCTION
  * 
- * MODEL: claude-3-5-sonnet-20241022
+ * MODEL: claude-3-5-sonnet-20241022 (explicitly set)
  * TIMEOUT CHAIN: provider(20s) < router(23s) < chat(25s)
  * 
- * Supports:
+ * Features:
  * - Streaming responses via Server-Sent Events (SSE)
  * - ExtendedRouterOptions with rolePrompt and preferredModel
  * - Automatic timeout handling with 20s provider-level timeout
  * - Cost estimation for Sonnet 3.5
+ * - Enhanced error handling and fallback support
+ * - 5xx error detection for failover
  */
 export class AnthropicProvider extends BaseProvider {
   private model: string = 'claude-3-5-sonnet-20241022';
@@ -26,6 +28,20 @@ export class AnthropicProvider extends BaseProvider {
     return this.model;
   }
 
+  /**
+   * Check if error is a 5xx server error requiring fallback
+   */
+  private is5xxError(error: any): boolean {
+    if (error instanceof Error) {
+      const status = error.message.match(/HTTP (\d{3})/);
+      if (status && status[1]) {
+        const code = parseInt(status[1]);
+        return code >= 500 && code < 600;
+      }
+    }
+    return false;
+  }
+
   async *generateStream(
     message: string, 
     options?: ExtendedRouterOptions
@@ -33,12 +49,12 @@ export class AnthropicProvider extends BaseProvider {
     // Apply timeout from options or use provider default (20s)
     const timeoutMs = options?.timeout || this.timeout;
     
-    // Build system messages if rolePrompt provided
+    // Build messages array for Anthropic API
     const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
     
+    // Anthropic doesn't support system messages in messages array
+    // We include rolePrompt as part of the user message
     if (options?.rolePrompt) {
-      // Anthropic doesn't support system messages in messages array
-      // We prepend the role prompt to the user message
       messages.push({ 
         role: 'user', 
         content: `${options.rolePrompt}\n\n${message}` 
@@ -47,7 +63,7 @@ export class AnthropicProvider extends BaseProvider {
       messages.push({ role: 'user', content: message });
     }
 
-    // Use preferredModel if provided, otherwise use default
+    // Use preferredModel if provided, otherwise use default (claude-3-5-sonnet-20241022)
     const modelToUse = options?.preferredModel || this.model;
 
     try {
@@ -76,17 +92,20 @@ export class AnthropicProvider extends BaseProvider {
         
         try {
           const errorJson = JSON.parse(errorText);
-          errorMessage = `Anthropic API error: ${errorJson.error?.message || errorText}`;
+          errorMessage = `Anthropic: ${errorJson.error?.message || errorJson.error?.type || errorText}`;
         } catch {
-          errorMessage = `Anthropic API error: ${errorText.substring(0, 200)}`;
+          errorMessage = `Anthropic: HTTP ${response.status} - ${errorText.substring(0, 100)}`;
         }
         
-        throw new Error(errorMessage);
+        // Create error with status code for 5xx detection
+        const error = new Error(errorMessage);
+        (error as any).statusCode = response.status;
+        throw error;
       }
 
       const reader = response.body?.getReader();
       if (!reader) {
-        throw new Error('No response body from Anthropic API');
+        throw new Error('Anthropic: No response body received');
       }
 
       const decoder = new TextDecoder();
@@ -121,18 +140,8 @@ export class AnthropicProvider extends BaseProvider {
                     yield content;
                   }
                 } catch (parseError) {
-                  console.error('[AnthropicProvider] Failed to parse SSE data:', parseError);
-                  // Continue processing other events
-                }
-              }
-              
-              // Handle errors in stream
-              if (event === 'error') {
-                try {
-                  const json = JSON.parse(data);
-                  throw new Error(`Anthropic stream error: ${json.error?.message || 'Unknown error'}`);
-                } catch (parseError) {
-                  throw new Error(`Anthropic stream error: ${data}`);
+                  // Log but continue - don't break stream for parse errors
+                  console.error('[Anthropic] Failed to parse delta:', parseError);
                 }
               }
             }
@@ -141,27 +150,62 @@ export class AnthropicProvider extends BaseProvider {
       } finally {
         reader.releaseLock();
       }
-      
+
     } catch (error) {
       if (error instanceof Error) {
-        // Enhance timeout errors
+        // Check for timeout
         if (error.message === 'Provider timeout') {
           throw new Error(`Anthropic provider timeout after ${timeoutMs}ms`);
         }
+        
+        // Check for 5xx errors - mark for fallback
+        if (this.is5xxError(error)) {
+          const wrappedError: any = new Error(error.message);
+          wrappedError.requiresFallback = true;
+          wrappedError.statusCode = (error as any).statusCode;
+          throw wrappedError;
+        }
+        
+        // Re-throw other errors as-is
         throw error;
       }
+      
       throw new Error(`Anthropic provider error: ${String(error)}`);
     }
   }
 
   /**
-   * Cost estimation for Claude 3.5 Sonnet
-   * Input: $3 per 1M tokens
-   * Output: $15 per 1M tokens
+   * Estimate cost for Claude 3.5 Sonnet
+   * Pricing: $3 per 1M input tokens, $15 per 1M output tokens
    */
-  estimateCost(inputTokens: number, outputTokens: number): number {
+  async estimateCost(inputTokens: number, outputTokens: number): Promise<number> {
     const inputCost = (inputTokens / 1_000_000) * 3;
     const outputCost = (outputTokens / 1_000_000) * 15;
     return inputCost + outputCost;
+  }
+
+  /**
+   * Get provider capabilities
+   */
+  getCapabilities(): string[] {
+    return [
+      'chat',
+      'streaming',
+      'long-context',  // 200K tokens
+      'analysis',
+      'code-review',
+      'validation',
+    ];
+  }
+
+  /**
+   * Get available models
+   */
+  getAvailableModels(): string[] {
+    return [
+      'claude-3-5-sonnet-20241022',
+      'claude-3-opus-20240229',
+      'claude-3-haiku-20240307',
+    ];
   }
 }
