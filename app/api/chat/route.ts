@@ -9,7 +9,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 
-export const runtime = "edge";
+export const runtime = "nodejs";
 export const maxDuration = 25;
 
 interface ChatRequest {
@@ -120,7 +120,7 @@ async function handleSingleMode(
   startTime: number
 ): Promise<NextResponse> {
   try {
-    const { routeAndExecute } = await import('@/lib/javari/router/router');
+    const { routeAndExecute } = await import('@/lib/javari/multi-ai/router');
     
     const result = await routeAndExecute({
       message,
@@ -155,7 +155,7 @@ async function handleSuperMode(
   startTime: number
 ): Promise<NextResponse> {
   try {
-    const { routeAndExecute } = await import('@/lib/javari/router/router');
+    const { routeAndExecute } = await import('@/lib/javari/multi-ai/router');
     
     const result = await routeAndExecute({
       message,
@@ -189,7 +189,7 @@ async function handleAdvancedMode(
   startTime: number
 ): Promise<NextResponse> {
   try {
-    const { routeAndExecute } = await import('@/lib/javari/router/router');
+    const { routeAndExecute } = await import('@/lib/javari/multi-ai/router');
     
     const result = await routeAndExecute({
       message,
