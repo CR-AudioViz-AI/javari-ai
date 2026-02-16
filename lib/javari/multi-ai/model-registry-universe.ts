@@ -33,7 +33,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['fast', 'versatile', 'long-context'],
     cost: 0,
     contextWindow: 128000,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
   {
     id: 'llama-3.1-8b-instant',
@@ -43,7 +43,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['ultra-fast', 'instant', 'efficient'],
     cost: 0,
     contextWindow: 8192,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
   {
     id: 'llama-3.2-1b-preview',
@@ -53,7 +53,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['lightweight', 'edge', 'mobile'],
     cost: 0,
     contextWindow: 8192,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
   {
     id: 'llama-3.2-3b-preview',
@@ -63,7 +63,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['balanced', 'efficient'],
     cost: 0,
     contextWindow: 8192,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
   {
     id: 'mixtral-8x7b-32768',
@@ -73,7 +73,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['moe', 'multilingual', 'long-context'],
     cost: 0,
     contextWindow: 32768,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
   {
     id: 'gemma2-9b-it',
@@ -83,7 +83,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['google', 'efficient'],
     cost: 0,
     contextWindow: 8192,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
   {
     id: 'gemma-7b-it',
@@ -93,7 +93,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['google', 'versatile'],
     cost: 0,
     contextWindow: 8192,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
   {
     id: 'llama3-70b-8192',
@@ -103,7 +103,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['powerful', 'balanced'],
     cost: 0,
     contextWindow: 8192,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
   {
     id: 'llama3-8b-8192',
@@ -113,7 +113,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['fast', 'efficient'],
     cost: 0,
     contextWindow: 8192,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
   {
     id: 'llama-guard-3-8b',
@@ -123,7 +123,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['safety', 'moderation'],
     cost: 0,
     contextWindow: 8192,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'llava-v1.5-7b-4096-preview',
@@ -133,31 +133,31 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['vision', 'multimodal'],
     cost: 0,
     contextWindow: 4096,
-    capabilities: { vision: true },
+    capabilities: { vision: true }
   },
 
   // ========================================
   // OPENROUTER - Access to 100s of models (20 selected free)
   // ========================================
   {
-    id: 'google/gemini-flash-1.5',
-    name: 'Gemini Flash 1.5',
+    id: 'google/-flash-1.5',
+    name: 'Flash 1.5',
     provider: 'openrouter',
     category: 'chat',
     tags: ['fast', 'google', 'multimodal'],
     cost: 0,
     contextWindow: 1000000,
-    capabilities: { streaming: true, vision: true },
+    capabilities: { streaming: true, vision: true }
   },
   {
-    id: 'google/gemini-flash-1.5-8b',
-    name: 'Gemini Flash 1.5 8B',
+    id: 'google/-flash-1.5-8b',
+    name: 'Flash 1.5 8B',
     provider: 'openrouter',
     category: 'chat',
     tags: ['ultra-fast', 'google', 'efficient'],
     cost: 0,
     contextWindow: 1000000,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
   {
     id: 'meta-llama/llama-3.2-11b-vision-instruct:free',
@@ -167,7 +167,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['vision', 'multimodal', 'meta'],
     cost: 0,
     contextWindow: 128000,
-    capabilities: { vision: true },
+    capabilities: { vision: true }
   },
   {
     id: 'meta-llama/llama-3.2-3b-instruct:free',
@@ -177,7 +177,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['fast', 'meta', 'efficient'],
     cost: 0,
     contextWindow: 128000,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
   {
     id: 'meta-llama/llama-3.1-8b-instruct:free',
@@ -187,7 +187,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['balanced', 'meta'],
     cost: 0,
     contextWindow: 128000,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
   {
     id: 'microsoft/phi-3-mini-128k-instruct:free',
@@ -197,7 +197,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['microsoft', 'long-context', 'small'],
     cost: 0,
     contextWindow: 128000,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'microsoft/phi-3-medium-128k-instruct:free',
@@ -207,7 +207,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['microsoft', 'long-context'],
     cost: 0,
     contextWindow: 128000,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'mistralai/mistral-7b-instruct:free',
@@ -217,7 +217,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['fast', 'mistral'],
     cost: 0,
     contextWindow: 32768,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
   {
     id: 'openchat/openchat-7b:free',
@@ -227,7 +227,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['open', 'versatile'],
     cost: 0,
     contextWindow: 8192,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'nousresearch/hermes-3-llama-3.1-405b:free',
@@ -237,7 +237,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['powerful', 'reasoning', 'large'],
     cost: 0,
     contextWindow: 128000,
-    capabilities: { functionCalling: true },
+    capabilities: { functionCalling: true }
   },
 
   // ========================================
@@ -251,7 +251,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['versatile', 'multilingual'],
     cost: 0,
     contextWindow: 64000,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
   {
     id: 'deepseek-coder',
@@ -261,7 +261,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['coding', 'programming', 'specialized'],
     cost: 0,
     contextWindow: 64000,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
 
   // ========================================
@@ -275,7 +275,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['meta', 'versatile'],
     cost: 0,
     contextWindow: 8192,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'mistralai/Mistral-7B-Instruct-v0.3',
@@ -285,7 +285,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['mistral', 'efficient'],
     cost: 0,
     contextWindow: 32768,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'HuggingFaceH4/zephyr-7b-beta',
@@ -295,7 +295,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['helpful', 'aligned'],
     cost: 0,
     contextWindow: 8192,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'google/flan-t5-xxl',
@@ -305,7 +305,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['google', 'instruction', 'large'],
     cost: 0,
     contextWindow: 4096,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'google/flan-t5-xl',
@@ -315,7 +315,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['google', 'instruction'],
     cost: 0,
     contextWindow: 4096,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'tiiuae/falcon-7b-instruct',
@@ -325,7 +325,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['falcon', 'tii'],
     cost: 0,
     contextWindow: 2048,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'microsoft/phi-2',
@@ -335,7 +335,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['microsoft', 'small', 'efficient'],
     cost: 0,
     contextWindow: 2048,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'stabilityai/stablelm-2-zephyr-1_6b',
@@ -345,7 +345,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['stability', 'tiny', 'edge'],
     cost: 0,
     contextWindow: 4096,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'bigcode/starcoder',
@@ -355,7 +355,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['code', 'bigcode', 'programming'],
     cost: 0,
     contextWindow: 8192,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'Salesforce/codegen-2B-multi',
@@ -365,7 +365,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['salesforce', 'code', 'multi-language'],
     cost: 0,
     contextWindow: 2048,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'replit/replit-code-v1-3b',
@@ -375,7 +375,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['replit', 'code', 'autocomplete'],
     cost: 0,
     contextWindow: 4096,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'facebook/bart-large-cnn',
@@ -385,7 +385,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['facebook', 'summarization', 'news'],
     cost: 0,
     contextWindow: 1024,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'google/pegasus-xsum',
@@ -395,7 +395,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['google', 'summarization', 'extreme'],
     cost: 0,
     contextWindow: 1024,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'sshleifer/distilbart-cnn-12-6',
@@ -405,7 +405,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['distilled', 'efficient', 'summarization'],
     cost: 0,
     contextWindow: 1024,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'sentence-transformers/all-MiniLM-L6-v2',
@@ -415,7 +415,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['sentence', 'embedding', 'small'],
     cost: 0,
     contextWindow: 512,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'sentence-transformers/all-mpnet-base-v2',
@@ -425,7 +425,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['sentence', 'embedding', 'quality'],
     cost: 0,
     contextWindow: 512,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'BAAI/bge-small-en-v1.5',
@@ -435,7 +435,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['bge', 'embedding', 'english'],
     cost: 0,
     contextWindow: 512,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'Helsinki-NLP/opus-mt-en-de',
@@ -445,7 +445,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['translation', 'en-de', 'helsinki'],
     cost: 0,
     contextWindow: 512,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'Helsinki-NLP/opus-mt-en-fr',
@@ -455,7 +455,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['translation', 'en-fr', 'helsinki'],
     cost: 0,
     contextWindow: 512,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'facebook/mbart-large-50-many-to-many-mmt',
@@ -465,7 +465,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['multilingual', 'translation', '50-lang'],
     cost: 0,
     contextWindow: 1024,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'facebook/bart-large-mnli',
@@ -475,7 +475,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['classification', 'nli', 'zero-shot'],
     cost: 0,
     contextWindow: 1024,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'cross-encoder/ms-marco-MiniLM-L-12-v2',
@@ -485,7 +485,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['reranking', 'search', 'cross-encoder'],
     cost: 0,
     contextWindow: 512,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'microsoft/WizardMath-7B-V1.0',
@@ -495,7 +495,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['math', 'reasoning', 'microsoft'],
     cost: 0,
     contextWindow: 2048,
-    capabilities: {},
+    capabilities: {}
   },
 
   // ========================================
@@ -509,7 +509,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['meta', 'fast', 'turbo'],
     cost: 0,
     contextWindow: 128000,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
   {
     id: 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo',
@@ -519,7 +519,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['meta', 'powerful', 'turbo'],
     cost: 0,
     contextWindow: 128000,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
   {
     id: 'meta-llama/Meta-Llama-3-8B-Instruct-Turbo',
@@ -529,7 +529,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['meta', 'balanced'],
     cost: 0,
     contextWindow: 8192,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
   {
     id: 'meta-llama/Meta-Llama-3-70B-Instruct-Turbo',
@@ -539,7 +539,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['meta', 'large'],
     cost: 0,
     contextWindow: 8192,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
   {
     id: 'mistralai/Mixtral-8x7B-Instruct-v0.1',
@@ -549,7 +549,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['mistral', 'moe'],
     cost: 0,
     contextWindow: 32768,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
   {
     id: 'mistralai/Mistral-7B-Instruct-v0.3',
@@ -559,7 +559,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['mistral', 'efficient'],
     cost: 0,
     contextWindow: 32768,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
   {
     id: 'Qwen/Qwen2-72B-Instruct',
@@ -569,7 +569,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['qwen', 'large', 'multilingual'],
     cost: 0,
     contextWindow: 32768,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
   {
     id: 'Qwen/Qwen2-7B-Instruct',
@@ -579,7 +579,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['qwen', 'efficient'],
     cost: 0,
     contextWindow: 32768,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
   {
     id: 'Qwen/Qwen1.5-110B-Chat',
@@ -589,7 +589,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['qwen', 'powerful'],
     cost: 0,
     contextWindow: 32768,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'NousResearch/Nous-Hermes-2-Mixtral-8x7B-DPO',
@@ -599,7 +599,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['nous', 'moe', 'dpo'],
     cost: 0,
     contextWindow: 32768,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'NousResearch/Nous-Hermes-2-Yi-34B',
@@ -609,7 +609,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['nous', 'yi', 'large'],
     cost: 0,
     contextWindow: 4096,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'deepseek-ai/deepseek-llm-67b-chat',
@@ -619,7 +619,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['deepseek', 'large'],
     cost: 0,
     contextWindow: 4096,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'deepseek-ai/deepseek-coder-33b-instruct',
@@ -629,7 +629,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['deepseek', 'code', 'large'],
     cost: 0,
     contextWindow: 16384,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'codellama/CodeLlama-34b-Instruct-hf',
@@ -639,7 +639,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['meta', 'code'],
     cost: 0,
     contextWindow: 16384,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'codellama/CodeLlama-13b-Instruct-hf',
@@ -649,7 +649,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['meta', 'code', 'medium'],
     cost: 0,
     contextWindow: 16384,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'codellama/CodeLlama-7b-Instruct-hf',
@@ -659,7 +659,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['meta', 'code', 'small'],
     cost: 0,
     contextWindow: 16384,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'WizardLM/WizardCoder-Python-34B-V1.0',
@@ -669,7 +669,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['wizard', 'python', 'code'],
     cost: 0,
     contextWindow: 8192,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'Phind/Phind-CodeLlama-34B-v2',
@@ -679,7 +679,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['phind', 'code', 'search'],
     cost: 0,
     contextWindow: 16384,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'garage-bAInd/Platypus2-70B-instruct',
@@ -689,7 +689,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['platypus', 'reasoning', 'large'],
     cost: 0,
     contextWindow: 4096,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'Austism/chronos-hermes-13b',
@@ -699,7 +699,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['creative', 'roleplay'],
     cost: 0,
     contextWindow: 2048,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'Gryphe/MythoMax-L2-13b',
@@ -709,7 +709,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['creative', 'storytelling'],
     cost: 0,
     contextWindow: 4096,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'Open-Orca/Mistral-7B-OpenOrca',
@@ -719,7 +719,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['orca', 'reasoning'],
     cost: 0,
     contextWindow: 8192,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'teknium/OpenHermes-2.5-Mistral-7B',
@@ -729,7 +729,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['hermes', 'versatile'],
     cost: 0,
     contextWindow: 8192,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'DiscoResearch/DiscoLM-mixtral-8x7b-v2',
@@ -739,7 +739,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['disco', 'german', 'moe'],
     cost: 0,
     contextWindow: 32768,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'upstage/SOLAR-10.7B-Instruct-v1.0',
@@ -749,7 +749,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['upstage', 'efficient'],
     cost: 0,
     contextWindow: 4096,
-    capabilities: {},
+    capabilities: {}
   },
 
   // ========================================
@@ -763,7 +763,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['meta', 'versatile'],
     cost: 0,
     contextWindow: 8192,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'meta/meta-llama-3-70b-instruct',
@@ -773,7 +773,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['meta', 'powerful'],
     cost: 0,
     contextWindow: 8192,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'mistralai/mixtral-8x7b-instruct-v0.1',
@@ -783,7 +783,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['mistral', 'moe'],
     cost: 0,
     contextWindow: 32768,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'mistralai/mistral-7b-instruct-v0.2',
@@ -793,7 +793,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['mistral', 'efficient'],
     cost: 0,
     contextWindow: 32768,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'stability-ai/sdxl',
@@ -803,7 +803,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['image', 'generation', 'sdxl'],
     cost: 0,
     contextWindow: 77,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'stability-ai/stable-diffusion',
@@ -813,7 +813,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['image', 'generation', 'classic'],
     cost: 0,
     contextWindow: 77,
-    capabilities: {},
+    capabilities: {}
   },
 
   // ========================================
@@ -827,7 +827,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['cohere', 'rag', 'retrieval'],
     cost: 0,
     contextWindow: 128000,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
   {
     id: 'command-light',
@@ -837,7 +837,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['cohere', 'fast', 'efficient'],
     cost: 0,
     contextWindow: 4096,
-    capabilities: { streaming: true },
+    capabilities: { streaming: true }
   },
   {
     id: 'embed-english-v3.0',
@@ -847,7 +847,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['cohere', 'embedding', 'english'],
     cost: 0,
     contextWindow: 512,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'embed-multilingual-v3.0',
@@ -857,7 +857,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['cohere', 'embedding', 'multilingual'],
     cost: 0,
     contextWindow: 512,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'embed-english-light-v3.0',
@@ -867,7 +867,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['cohere', 'embedding', 'fast'],
     cost: 0,
     contextWindow: 512,
-    capabilities: {},
+    capabilities: {}
   },
 
   // ========================================
@@ -881,7 +881,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['voyage', 'embedding', 'quality'],
     cost: 0,
     contextWindow: 4000,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'voyage-code-2',
@@ -891,7 +891,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['voyage', 'embedding', 'code'],
     cost: 0,
     contextWindow: 16000,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'jina-embeddings-v2-base-en',
@@ -901,7 +901,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['jina', 'embedding', 'english'],
     cost: 0,
     contextWindow: 8192,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'jina-embeddings-v2-small-en',
@@ -911,7 +911,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['jina', 'embedding', 'fast'],
     cost: 0,
     contextWindow: 8192,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'jina-clip-v1',
@@ -921,7 +921,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['jina', 'multimodal', 'clip'],
     cost: 0,
     contextWindow: 77,
-    capabilities: { vision: true },
+    capabilities: { vision: true }
   },
   {
     id: 'nomic-embed-text-v1',
@@ -931,7 +931,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['nomic', 'embedding', 'long'],
     cost: 0,
     contextWindow: 8192,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'nomic-embed-text-v1.5',
@@ -941,7 +941,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['nomic', 'embedding', 'enhanced'],
     cost: 0,
     contextWindow: 8192,
-    capabilities: {},
+    capabilities: {}
   },
 
   // ========================================
@@ -955,7 +955,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['stability', 'image', 'xl'],
     cost: 0,
     contextWindow: 77,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'stable-diffusion-v1-6',
@@ -965,7 +965,7 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['stability', 'image', 'classic'],
     cost: 0,
     contextWindow: 77,
-    capabilities: {},
+    capabilities: {}
   },
   {
     id: 'stable-diffusion-xl-beta-v2-2-2',
@@ -975,8 +975,8 @@ export const UNIVERSE_MODELS: UniverseModel[] = [
     tags: ['stability', 'image', 'beta'],
     cost: 0,
     contextWindow: 77,
-    capabilities: {},
-  },
+    capabilities: {}
+  }
 ];
 
 // Computed statistics
@@ -991,5 +991,5 @@ export const UNIVERSE_STATS = {
     return acc;
   }, {} as Record<string, number>),
   providers: [...new Set(UNIVERSE_MODELS.map(m => m.provider))],
-  categories: [...new Set(UNIVERSE_MODELS.map(m => m.category))],
+  categories: [...new Set(UNIVERSE_MODELS.map(m => m.category))]
 };

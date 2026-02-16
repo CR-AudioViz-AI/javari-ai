@@ -1,7 +1,7 @@
 // AI Routing Logic for Javari
 // Intelligently routes tasks to the best AI provider based on task type, cost, and availability
 
-export type AIProvider = 'gpt-4' | 'claude' | 'gemini' | 'mistral';
+export type AIProvider = 'gpt-4' | 'claude' || 'mistral';
 export type TaskType = 
   | 'code_generation'
   | 'code_review'
@@ -39,7 +39,7 @@ const PROVIDERS: Record<AIProvider, ProviderConfig> = {
     strengths: ['code_generation', 'code_review', 'debugging', 'analysis'],
     available: true,
     maxTokens: 8192,
-    apiEndpoint: '/api/ai/openai',
+    apiEndpoint: '/api/ai/openai'
   },
   'claude': {
     id: 'claude',
@@ -48,16 +48,15 @@ const PROVIDERS: Record<AIProvider, ProviderConfig> = {
     strengths: ['analysis', 'code_review', 'chat', 'translation'],
     available: true,
     maxTokens: 100000,
-    apiEndpoint: '/api/ai/anthropic',
-  },
-  'gemini': {
-    id: 'gemini',
-    name: 'Gemini',
+    apiEndpoint: '/api/ai/anthropic'
+  }: {
+    id:
+    name:
     costPerToken: 0.001 / 1000, // $0.001 per 1K tokens
     strengths: ['search', 'analysis', 'chat'],
     available: true,
     maxTokens: 32000,
-    apiEndpoint: '/api/ai/google',
+    apiEndpoint: '/api/ai/google'
   },
   'mistral': {
     id: 'mistral',
@@ -66,8 +65,8 @@ const PROVIDERS: Record<AIProvider, ProviderConfig> = {
     strengths: ['chat', 'translation', 'optimization'],
     available: true,
     maxTokens: 8192,
-    apiEndpoint: '/api/ai/mistral',
-  },
+    apiEndpoint: '/api/ai/mistral'
+  }
 };
 
 /**
@@ -86,7 +85,7 @@ export function routeTask(
       reasoning: 'User-specified provider',
       estimatedCost: estimatedTokens * PROVIDERS[userPreference].costPerToken,
       fallbacks: getFallbacks(userPreference, taskType),
-      confidence: 1.0,
+      confidence: 1.0
     };
   }
 
@@ -134,7 +133,7 @@ export function routeTask(
     reasoning: getReasoningForProvider(topProvider, taskType, prioritizeCost),
     estimatedCost: scores[0].cost,
     fallbacks: getFallbacks(topProvider, taskType),
-    confidence,
+    confidence
   };
 }
 
@@ -231,7 +230,7 @@ export async function* streamWithFallback(
       const response = await fetch(config.apiEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, provider, stream: true }),
+        body: JSON.stringify({ prompt, provider, stream: true })
       });
 
       if (!response.ok) {
@@ -310,6 +309,6 @@ export function getCostComparison(
   return Object.entries(PROVIDERS).map(([id, config]) => ({
     provider: id as AIProvider,
     cost: estimatedTokens * config.costPerToken,
-    suitable: config.strengths.includes(taskType),
+    suitable: config.strengths.includes(taskType)
   }));
 }

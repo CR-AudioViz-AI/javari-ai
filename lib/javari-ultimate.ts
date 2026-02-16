@@ -310,9 +310,7 @@ export async function chat(request: ChatRequest): Promise<ChatResponse> {
       case 'perplexity':
         result = await callPerplexity(request.messages, systemPrompt);
         break;
-      case 'gemini':
-        result = await callGemini(request.messages, systemPrompt);
-        break;
+      
       default:
         result = await callGPT4(request.messages, systemPrompt);
     }

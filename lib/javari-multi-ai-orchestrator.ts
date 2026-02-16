@@ -80,10 +80,9 @@ const AI_PROVIDERS: Record<string, AIProvider> = {
     supportsVision: true,
     supportsStreaming: true,
     avgResponseTimeMs: 3000
-  },
-  'gemini-pro': {
+  }: {
     name: 'Google Gemini Pro',
-    model: 'gemini-pro',
+    model:,
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent',
     strengths: ['speed', 'multimodal', 'google_integration'],
     costPer1kTokens: 0.00025,
@@ -91,10 +90,9 @@ const AI_PROVIDERS: Record<string, AIProvider> = {
     supportsVision: false,
     supportsStreaming: true,
     avgResponseTimeMs: 800
-  },
-  'gemini-1.5-pro': {
+  }: {
     name: 'Google Gemini 1.5 Pro',
-    model: 'gemini-1.5-pro',
+    model:,
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent',
     strengths: ['long_context', 'multimodal', 'video', 'audio'],
     costPer1kTokens: 0.00125,
@@ -193,7 +191,7 @@ function selectBestProvider(analysis: TaskAnalysis, economyMode: boolean = false
 
   // If requires very long context
   if (analysis.requiresLongContext) {
-    return 'gemini-1.5-pro';
+    return;
   }
 
   // Economy mode routing
@@ -201,7 +199,7 @@ function selectBestProvider(analysis: TaskAnalysis, economyMode: boolean = false
     if (analysis.complexity === 'simple') {
       return 'gpt-3.5-turbo';
     }
-    return 'gemini-pro';
+    return;
   }
 
   // Task-based routing
@@ -300,7 +298,7 @@ export class MultiAIOrchestrator {
     } else if (analysis.taskType === 'research') {
       fallbacks.push('gpt-4-turbo', 'claude-3.5-sonnet');
     } else {
-      fallbacks.push('gpt-4o', 'claude-3.5-sonnet', 'gemini-pro');
+      fallbacks.push('gpt-4o', 'claude-3.5-sonnet');
     }
 
     // Always add GPT-3.5 as last resort
@@ -461,7 +459,7 @@ export class MultiAIOrchestrator {
   async getConsensus(
     messages: Message[],
     systemPrompt: string,
-    providers: string[] = ['gpt-4o', 'claude-3.5-sonnet', 'gemini-1.5-pro']
+    providers: string[] = ['gpt-4o', 'claude-3.5-sonnet']
   ): Promise<{
     consensus: string;
     individualResponses: Record<string, string>;

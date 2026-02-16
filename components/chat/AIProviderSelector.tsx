@@ -24,7 +24,7 @@ const AI_PROVIDERS = [
     description: 'Smart routing - Javari picks the best AI',
     icon: '🤖',
     color: 'bg-gradient-to-r from-purple-500 to-pink-500',
-    free: true,
+    free: true
   },
   {
     id: 'anthropic',
@@ -33,7 +33,7 @@ const AI_PROVIDERS = [
     icon: '🧠',
     color: 'bg-orange-500',
     free: false,
-    models: ['claude-sonnet-4', 'claude-haiku-3.5', 'claude-opus-4'],
+    models: ['claude-sonnet-4', 'claude-haiku-3.5', 'claude-opus-4']
   },
   {
     id: 'openai',
@@ -42,7 +42,7 @@ const AI_PROVIDERS = [
     icon: '💚',
     color: 'bg-green-500',
     free: true, // Free with data sharing!
-    models: ['gpt-4o', 'gpt-4o-mini', 'o1'],
+    models: ['gpt-4o', 'gpt-4o-mini', 'o1']
   },
   {
     id: 'groq',
@@ -51,16 +51,16 @@ const AI_PROVIDERS = [
     icon: '⚡',
     color: 'bg-blue-500',
     free: true,
-    models: ['llama-3.3-70b-versatile'],
+    models: ['llama-3.3-70b-versatile']
   },
   {
     id: 'google',
-    name: 'Gemini',
+    name:
     description: 'Google AI, great for long docs',
     icon: '🔷',
     color: 'bg-blue-600',
     free: true,
-    models: ['gemini-1.5-flash', 'gemini-1.5-pro'],
+    models: ['-1.5-flash', '-1.5-pro']
   },
   {
     id: 'mistral',
@@ -69,7 +69,7 @@ const AI_PROVIDERS = [
     icon: '🌊',
     color: 'bg-indigo-500',
     free: true,
-    models: ['mistral-large', 'mistral-small'],
+    models: ['mistral-large', 'mistral-small']
   },
   {
     id: 'perplexity',
@@ -78,7 +78,7 @@ const AI_PROVIDERS = [
     icon: '🔍',
     color: 'bg-teal-500',
     free: false,
-    models: ['sonar-pro'],
+    models: ['sonar-pro']
   },
   {
     id: 'together',
@@ -87,7 +87,7 @@ const AI_PROVIDERS = [
     icon: '🤝',
     color: 'bg-yellow-500',
     free: false,
-    models: ['llama-3.3-70b'],
+    models: ['llama-3.3-70b']
   },
   {
     id: 'cohere',
@@ -96,8 +96,8 @@ const AI_PROVIDERS = [
     icon: '🔗',
     color: 'bg-red-500',
     free: true,
-    models: ['command-r-plus'],
-  },
+    models: ['command-r-plus']
+  }
 ];
 
 interface AIProviderSelectorProps {
@@ -113,7 +113,7 @@ export function AIProviderSelector({
   onProviderChange,
   userId,
   showSetDefault = true,
-  compact = false,
+  compact = false
 }: AIProviderSelectorProps) {
   const [userDefault, setUserDefault] = useState<string>('auto');
   const [saving, setSaving] = useState(false);
@@ -159,9 +159,9 @@ export function AIProviderSelector({
         .upsert({
           user_id: userId,
           default_ai_provider: selectedProvider,
-          updated_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
         }, {
-          onConflict: 'user_id',
+          onConflict: 'user_id'
         });
       
       if (!error) {
