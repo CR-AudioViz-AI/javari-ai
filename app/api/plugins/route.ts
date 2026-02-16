@@ -291,7 +291,7 @@ const HANDLERS: Record<string, (params: any, config: any) => Promise<any>> = {
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || '' });
     
     const response = await client.messages.create({
-      model: 'claude-3-5-sonnet-20241022',
+      model: 'claude-3-5-sonnet-latest',
       max_tokens: 4000,
       system: 'You are a senior code reviewer. Review this PR diff and provide constructive feedback on code quality, potential bugs, and improvements.',
       messages: [{ role: 'user', content: `Review this PR:\n\n${diff.slice(0, 10000)}` }]
@@ -308,7 +308,7 @@ const HANDLERS: Record<string, (params: any, config: any) => Promise<any>> = {
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || '' });
     
     const response = await client.messages.create({
-      model: 'claude-3-5-sonnet-20241022',
+      model: 'claude-3-5-sonnet-latest',
       max_tokens: 200,
       system: 'Generate a concise, conventional commit message for this diff. Use format: type(scope): description',
       messages: [{ role: 'user', content: params.diff.slice(0, 5000) }]
@@ -402,7 +402,7 @@ const HANDLERS: Record<string, (params: any, config: any) => Promise<any>> = {
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || '' });
     
     const response = await client.messages.create({
-      model: 'claude-3-5-sonnet-20241022',
+      model: 'claude-3-5-sonnet-latest',
       max_tokens: 4000,
       system: `Generate ${params.style || 'tsdoc'} documentation for this code. Include function descriptions, parameter types, return types, and examples.`,
       messages: [{ role: 'user', content: content }]
@@ -435,7 +435,7 @@ const HANDLERS: Record<string, (params: any, config: any) => Promise<any>> = {
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || '' });
     
     const response = await client.messages.create({
-      model: 'claude-3-5-sonnet-20241022',
+      model: 'claude-3-5-sonnet-latest',
       max_tokens: 4000,
       system: 'You are a security expert. Analyze this code structure for potential security vulnerabilities. Focus on: XSS, SQL injection, authentication issues, exposed secrets, insecure dependencies.',
       messages: [{ role: 'user', content: JSON.stringify(files, null, 2) }]

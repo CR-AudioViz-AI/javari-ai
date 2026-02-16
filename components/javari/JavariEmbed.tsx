@@ -33,7 +33,7 @@ interface Message {
 
 export default function JavariEmbed({
   mode = 'widget',
-  initialModel = 'claude-3-5-sonnet-20241022',
+  initialModel = 'claude-3-5-sonnet-latest',
   apiEndpoint = '/api/javari/chat',
   userId,
   theme = 'auto',

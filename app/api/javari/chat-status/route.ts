@@ -15,7 +15,7 @@ const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 // Context limits by model
 const MODEL_LIMITS: Record<string, number> = {
   'gpt-4-turbo-preview': 128000,
-  'claude-3-5-sonnet-20241022': 200000,
+  'claude-3-5-sonnet-latest': 200000,
   'gemini-1.5-pro': 1000000,
   'default': 128000,
 };

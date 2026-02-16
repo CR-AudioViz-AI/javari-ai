@@ -28,7 +28,7 @@ async function testClaude(): Promise<TestResult> {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-3-5-sonnet-20241022',
+        model: 'claude-3-5-sonnet-latest',
         max_tokens: 50,
         messages: [{ role: 'user', content: 'Say "Claude works!" in 3 words or less.' }]
       })
@@ -45,7 +45,7 @@ async function testClaude(): Promise<TestResult> {
     return { 
       status: 'success', 
       response: data.content?.[0]?.text || 'No response',
-      model: 'claude-3-5-sonnet-20241022',
+      model: 'claude-3-5-sonnet-latest',
       latencyMs
     };
   } catch (error: any) {

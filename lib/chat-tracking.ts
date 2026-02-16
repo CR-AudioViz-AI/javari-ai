@@ -13,7 +13,7 @@ const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   'gpt-4-turbo-preview': 128000,
   'gpt-4': 8192,
   'gpt-3.5-turbo': 16384,
-  'claude-3-5-sonnet-20241022': 200000,
+  'claude-3-5-sonnet-latest': 200000,
   'claude-sonnet-4-5-20250929': 200000,
   'claude-opus-4-20250514': 200000,
   'gemini-1.5-pro': 1000000,

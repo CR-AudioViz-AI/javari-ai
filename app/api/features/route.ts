@@ -88,7 +88,7 @@ const DEFAULT_FLAGS: Omit<FeatureFlag, 'createdAt' | 'updatedAt'>[] = [
     rolloutPercentage: 100,
     allowedUsers: [],
     blockedUsers: [],
-    metadata: { model: 'claude-3-5-sonnet-20241022' }
+    metadata: { model: 'claude-3-5-sonnet-latest' }
   },
   {
     id: 'gpt4_enabled',

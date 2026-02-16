@@ -135,7 +135,7 @@ async function analyzeWithClaude(
       };
   
   const response = await client.messages.create({
-    model: 'claude-3-5-sonnet-20241022',
+    model: 'claude-3-5-sonnet-latest',
     max_tokens: 4000,
     messages: [{
       role: 'user',
@@ -242,7 +242,7 @@ async function analyzeImage(request: VisionRequest): Promise<VisionResult> {
   
   // Try providers in order
   const providers = [
-    { name: 'Claude', model: 'claude-3-5-sonnet-20241022', fn: analyzeWithClaude },
+    { name: 'Claude', model: 'claude-3-5-sonnet-latest', fn: analyzeWithClaude },
     { name: 'OpenAI', model: 'gpt-4o', fn: analyzeWithOpenAI },
     { name: 'Gemini', model: 'gemini-1.5-pro', fn: analyzeWithGemini }
   ];
@@ -369,7 +369,7 @@ export async function GET() {
       description: prompt.split('\n')[0]
     })),
     providers: [
-      { name: 'Claude', model: 'claude-3-5-sonnet-20241022', priority: 1 },
+      { name: 'Claude', model: 'claude-3-5-sonnet-latest', priority: 1 },
       { name: 'OpenAI', model: 'gpt-4o', priority: 2 },
       { name: 'Gemini', model: 'gemini-1.5-pro', priority: 3 }
     ],

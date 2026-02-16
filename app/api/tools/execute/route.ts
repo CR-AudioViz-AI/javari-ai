@@ -426,7 +426,7 @@ For React: use 'use client', Tailwind CSS, modern hooks.
 Output ONLY code in a single code block - no explanations.`;
   
   const response = await client.messages.create({
-    model: 'claude-3-5-sonnet-20241022',
+    model: 'claude-3-5-sonnet-latest',
     max_tokens: 8000,
     system: systemPrompt,
     messages: [{ role: 'user', content: prompt }]
