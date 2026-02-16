@@ -7,6 +7,7 @@ import { MistralProvider } from './MistralProvider';
 import { XAIProvider } from './XAIProvider';
 import { DeepSeekProvider } from './DeepSeekProvider';
 import { CohereProvider } from './CohereProvider';
+import { GeminiProvider } from './GeminiProvider';
 import { AIProvider } from '../router/types';
 
 export { 
@@ -17,7 +18,8 @@ export {
   MistralProvider,
   XAIProvider,
   DeepSeekProvider,
-  CohereProvider
+  CohereProvider,
+  GeminiProvider
 };
 
 export function getProvider(provider: AIProvider, apiKey: string): BaseProvider {
@@ -36,6 +38,8 @@ export function getProvider(provider: AIProvider, apiKey: string): BaseProvider 
       return new DeepSeekProvider(apiKey);
     case 'cohere':
       return new CohereProvider(apiKey);
+    case 'gemini':
+      return new GeminiProvider(apiKey);
     default:
       throw new Error(`Provider ${provider} not implemented`);
   }
@@ -50,6 +54,7 @@ export function getProviderApiKey(provider: AIProvider): string {
     'xai': 'XAI_API_KEY',
     'deepseek': 'DEEPSEEK_API_KEY',
     'cohere': 'COHERE_API_KEY',
+    'gemini': 'GEMINI_API_KEY',
   };
 
   const envKey = keyMap[provider];
@@ -69,5 +74,6 @@ export const ALL_PROVIDERS: AIProvider[] = [
   'mistral',
   'xai',
   'deepseek',
-  'cohere'
+  'cohere',
+  'gemini'
 ];
