@@ -1,10 +1,13 @@
 // app/api/chat/route.ts
 /**
- * Main Chat API - HARDENED FOR PRODUCTION
+ * Main Chat API - EMERGENCY HARDENED
  * 
- * Handles: Single, Super, Advanced, Roadmap modes
- * Guarantees: Proper JSON responses, No 400 errors, Structured output
- * Features: Validated input, Normalized errors, Fallback routing
+ * GUARANTEES:
+ * - No empty JSON responses ({})
+ * - All errors return structured format with message + stack
+ * - All mode handlers return valid JSON
+ * - Comprehensive error logging
+ * - UI always receives valid assistant message or error
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -24,11 +27,15 @@ interface ChatResponse {
   response: string;
   mode: string;
   provider: string;
-  error?: string;
+  error?: {
+    message: string;
+    stack?: string | null;
+  };
   metadata?: {
     timestamp: string;
     duration?: number;
     fallbackUsed?: boolean;
+    requestId?: string;
   };
 }
 
@@ -41,15 +48,23 @@ export async function POST(req: NextRequest) {
     try {
       body = await req.json();
     } catch (parseError) {
+      console.error('[Chat] JSON parse error:', parseError);
       return NextResponse.json(
         {
           success: false,
           response: "Invalid request format. Please send valid JSON.",
           mode: "unknown",
           provider: "unknown",
-          error: "JSON parse error",
+          error: {
+            message: parseError instanceof Error ? parseError.message : 'JSON parse failed',
+            stack: parseError instanceof Error ? parseError.stack : null,
+          },
+          metadata: {
+            timestamp: new Date().toISOString(),
+            duration: Date.now() - startTime,
+          },
         } as ChatResponse,
-        { status: 200 } // Return 200 even for errors to avoid 400
+        { status: 200 }
       );
     }
 
@@ -57,24 +72,30 @@ export async function POST(req: NextRequest) {
 
     // Validate message
     if (!message || typeof message !== 'string' || !message.trim()) {
+      console.error('[Chat] Empty or invalid message received');
       return NextResponse.json(
         {
           success: false,
           response: "Please provide a message to get started.",
           mode,
           provider,
-          error: "Empty message",
+          error: {
+            message: 'Message field is required and must be a non-empty string',
+            stack: null,
+          },
           metadata: {
             timestamp: new Date().toISOString(),
             duration: Date.now() - startTime,
           },
         } as ChatResponse,
-        { status: 200 } // Return 200, not 400
+        { status: 200 }
       );
     }
 
     // Route to appropriate handler based on mode
     try {
+      console.log(`[Chat] Routing to mode: ${mode}, provider: ${provider}`);
+      
       if (mode === 'roadmap') {
         return await handleRoadmapMode(message, body, startTime);
       } else if (mode === 'advanced') {
@@ -85,14 +106,14 @@ export async function POST(req: NextRequest) {
         return await handleSingleMode(message, body, startTime);
       }
     } catch (modeError) {
-      console.error('[Chat] Mode handler error:', modeError);
+      console.error(`[Chat] Mode handler (${mode}) error:`, modeError);
       
       // Fallback to simple router
-      return await fallbackToSimpleRouter(message, mode, provider, startTime);
+      return await fallbackToSimpleRouter(message, mode, provider, startTime, modeError);
     }
 
   } catch (error) {
-    console.error('[Chat] Top-level error:', error);
+    console.error('[Chat] Top-level catastrophic error:', error);
     
     return NextResponse.json(
       {
@@ -100,13 +121,16 @@ export async function POST(req: NextRequest) {
         response: "I encountered an unexpected error. Please try again.",
         mode: "unknown",
         provider: "unknown",
-        error: error instanceof Error ? error.message : String(error),
+        error: {
+          message: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : null,
+        },
         metadata: {
           timestamp: new Date().toISOString(),
           duration: Date.now() - startTime,
         },
       } as ChatResponse,
-      { status: 200 } // Always return 200 to avoid client errors
+      { status: 200 }
     );
   }
 }
@@ -120,6 +144,7 @@ async function handleSingleMode(
   startTime: number
 ): Promise<NextResponse> {
   try {
+    console.log('[Chat] handleSingleMode: Starting');
     const { routeAndExecute } = await import('@/lib/javari/multi-ai/router');
     
     const result = await routeAndExecute({
@@ -128,10 +153,18 @@ async function handleSingleMode(
       provider: body.provider || 'anthropic',
     });
 
+    console.log('[Chat] handleSingleMode: Success');
+    
+    // GUARANTEE: Always return valid response string
+    const responseText = result.content || result.response || result.text || '';
+    if (!responseText || typeof responseText !== 'string') {
+      throw new Error('Router returned empty or invalid response');
+    }
+
     return NextResponse.json(
       {
         success: true,
-        response: result.content || result.response || 'Response generated successfully',
+        response: responseText,
         mode: 'single',
         provider: result.provider || body.provider || 'anthropic',
         metadata: {
@@ -142,6 +175,7 @@ async function handleSingleMode(
       { status: 200 }
     );
   } catch (error) {
+    console.error('[Chat] handleSingleMode error:', error);
     throw error; // Re-throw to trigger fallback
   }
 }
@@ -155,6 +189,7 @@ async function handleSuperMode(
   startTime: number
 ): Promise<NextResponse> {
   try {
+    console.log('[Chat] handleSuperMode: Starting');
     const { routeAndExecute } = await import('@/lib/javari/multi-ai/router');
     
     const result = await routeAndExecute({
@@ -162,10 +197,18 @@ async function handleSuperMode(
       mode: 'super',
     });
 
+    console.log('[Chat] handleSuperMode: Success');
+    
+    // GUARANTEE: Always return valid response string
+    const responseText = result.content || result.response || result.text || '';
+    if (!responseText || typeof responseText !== 'string') {
+      throw new Error('Router returned empty or invalid response');
+    }
+
     return NextResponse.json(
       {
         success: true,
-        response: result.content || result.response || 'Consensus response generated',
+        response: responseText,
         mode: 'super',
         provider: 'multi-provider',
         metadata: {
@@ -176,6 +219,7 @@ async function handleSuperMode(
       { status: 200 }
     );
   } catch (error) {
+    console.error('[Chat] handleSuperMode error:', error);
     throw error; // Re-throw to trigger fallback
   }
 }
@@ -189,6 +233,7 @@ async function handleAdvancedMode(
   startTime: number
 ): Promise<NextResponse> {
   try {
+    console.log('[Chat] handleAdvancedMode: Starting');
     const { routeAndExecute } = await import('@/lib/javari/multi-ai/router');
     
     const result = await routeAndExecute({
@@ -196,10 +241,18 @@ async function handleAdvancedMode(
       mode: 'advanced',
     });
 
+    console.log('[Chat] handleAdvancedMode: Success');
+    
+    // GUARANTEE: Always return valid response string
+    const responseText = result.content || result.response || result.text || '';
+    if (!responseText || typeof responseText !== 'string') {
+      throw new Error('Router returned empty or invalid response');
+    }
+
     return NextResponse.json(
       {
         success: true,
-        response: result.content || result.response || 'Advanced analysis complete',
+        response: responseText,
         mode: 'advanced',
         provider: result.provider || 'multi-provider',
         metadata: {
@@ -210,6 +263,7 @@ async function handleAdvancedMode(
       { status: 200 }
     );
   } catch (error) {
+    console.error('[Chat] handleAdvancedMode error:', error);
     throw error; // Re-throw to trigger fallback
   }
 }
@@ -223,6 +277,7 @@ async function handleRoadmapMode(
   startTime: number
 ): Promise<NextResponse> {
   try {
+    console.log('[Chat] handleRoadmapMode: Starting');
     const { runJavariChatRequest } = await import('@/javari/chat/runJavariChatRequest');
     
     const result = await runJavariChatRequest(
@@ -239,10 +294,22 @@ async function handleRoadmapMode(
       }
     );
 
+    console.log('[Chat] handleRoadmapMode: Success');
+    
+    // GUARANTEE: Always return valid response string
+    const responseText = result.executionResult?.response || 
+                        result.response || 
+                        result.content || 
+                        '';
+    
+    if (!responseText || typeof responseText !== 'string') {
+      throw new Error('Roadmap execution returned empty or invalid response');
+    }
+
     return NextResponse.json(
       {
         success: true,
-        response: result.executionResult?.response || 'Roadmap execution initiated',
+        response: responseText,
         mode: 'roadmap',
         provider: result.primaryModel || 'anthropic',
         metadata: {
@@ -254,7 +321,7 @@ async function handleRoadmapMode(
       { status: 200 }
     );
   } catch (error) {
-    console.error('[Chat] Roadmap mode error:', error);
+    console.error('[Chat] handleRoadmapMode error:', error);
     throw error; // Re-throw to trigger fallback
   }
 }
@@ -266,13 +333,20 @@ async function fallbackToSimpleRouter(
   message: string,
   mode: string,
   provider: string,
-  startTime: number
+  startTime: number,
+  originalError?: any
 ): Promise<NextResponse> {
   try {
+    console.log('[Chat] fallbackToSimpleRouter: Starting');
+    
     // Try to use provider directly as last resort
     const { getProvider, getProviderApiKey } = await import('@/lib/javari/providers');
     
     const apiKey = getProviderApiKey('anthropic'); // Default to Claude
+    if (!apiKey) {
+      throw new Error('No API key available for fallback provider');
+    }
+    
     const providerInstance = getProvider('anthropic', apiKey);
     
     let response = '';
@@ -280,10 +354,17 @@ async function fallbackToSimpleRouter(
       response += chunk;
     }
 
+    console.log('[Chat] fallbackToSimpleRouter: Success');
+    
+    // GUARANTEE: Always return valid response string
+    if (!response || typeof response !== 'string' || !response.trim()) {
+      throw new Error('Fallback provider returned empty response');
+    }
+
     return NextResponse.json(
       {
         success: true,
-        response: response || 'Response generated via fallback',
+        response: response,
         mode,
         provider: 'anthropic',
         metadata: {
@@ -296,21 +377,26 @@ async function fallbackToSimpleRouter(
     );
   } catch (fallbackError) {
     console.error('[Chat] Fallback also failed:', fallbackError);
+    console.error('[Chat] Original error was:', originalError);
     
+    // FINAL FALLBACK: Return structured error with both error details
     return NextResponse.json(
       {
         success: false,
         response: "I'm currently experiencing technical difficulties. Please try again in a moment.",
         mode,
         provider,
-        error: 'All routing methods failed',
+        error: {
+          message: fallbackError instanceof Error ? fallbackError.message : 'All routing methods failed',
+          stack: fallbackError instanceof Error ? fallbackError.stack : null,
+        },
         metadata: {
           timestamp: new Date().toISOString(),
           duration: Date.now() - startTime,
           fallbackUsed: true,
         },
       } as ChatResponse,
-      { status: 200 } // Still return 200
+      { status: 200 }
     );
   }
 }
@@ -319,17 +405,22 @@ async function fallbackToSimpleRouter(
  * Handle unsupported methods - returns 200 with error message
  */
 export async function GET() {
+  console.error('[Chat] GET request received - method not allowed');
+  
   return NextResponse.json(
     {
       success: false,
       response: "This endpoint requires POST. Please send your message via POST request.",
       mode: "unknown",
       provider: "unknown",
-      error: "Method not allowed - use POST",
+      error: {
+        message: "Method not allowed - use POST",
+        stack: null,
+      },
       metadata: {
         timestamp: new Date().toISOString(),
       },
     } as ChatResponse,
-    { status: 200 } // Return 200, not 405
+    { status: 200 }
   );
 }
