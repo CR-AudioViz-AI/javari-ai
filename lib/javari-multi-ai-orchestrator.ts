@@ -61,7 +61,7 @@ const AI_PROVIDERS: Record<string, AIProvider> = {
   },
   'claude-3.5-sonnet': {
     name: 'Anthropic Claude 3.5 Sonnet',
-    model: 'claude-3-5-sonnet-latest',
+    model: 'claude-3-5-sonnet-20241022',
     endpoint: 'https://api.anthropic.com/v1/messages',
     strengths: ['coding', 'analysis', 'safety', 'long_context', 'nuance'],
     costPer1kTokens: 0.003,

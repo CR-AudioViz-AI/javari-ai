@@ -157,7 +157,7 @@ async function handleOpenAIPowerhouse(
 
 async function handleAnthropicPowerhouse(
   messages: any[],
-  model: string = 'claude-3-5-sonnet-latest',
+  model: string = 'claude-3-5-sonnet-20241022',
   stream: boolean,
   temperature: number
 ) {

@@ -161,7 +161,7 @@ async function askClaude(messages: any[], system: string): Promise<string> {
       'anthropic-version': '2023-06-01'
     },
     body: JSON.stringify({
-      model: 'claude-3-5-sonnet-latest',
+      model: 'claude-3-5-sonnet-20241022',
       max_tokens: 8000,
       system,
       messages: messages.map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content }))

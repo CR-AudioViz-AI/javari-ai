@@ -15,7 +15,7 @@ export type AIModel =
   | 'gpt-4-turbo'
   | 'gpt-4'
   | 'gpt-3.5-turbo'
-  | 'claude-3-5-sonnet-latest'
+  | 'claude-3-5-sonnet-20241022'
   | 'claude-3-opus-20240229'
   | 'claude-3-sonnet-20240229';
 
@@ -81,8 +81,8 @@ export const AVAILABLE_MODELS: Record<AIModel, ModelConfig> = {
     recommended: false,
     description: 'Fast and cost-effective for most tasks'
   },
-  'claude-3-5-sonnet-latest': {
-    id: 'claude-3-5-sonnet-latest',
+  'claude-3-5-sonnet-20241022': {
+    id: 'claude-3-5-sonnet-20241022',
     name: 'Claude 3.5 Sonnet',
     provider: 'anthropic',
     contextWindow: 200000,
@@ -390,7 +390,7 @@ export class JavariMultiModel {
         return 'gpt-3.5-turbo';
       case 'general':
       default:
-        return 'claude-3-5-sonnet-latest';
+        return 'claude-3-5-sonnet-20241022';
     }
   }
 }

@@ -95,7 +95,7 @@ export const PROVIDERS: Record<AIProvider, Omit<ProviderConfig, 'apiKey'>> = {
   'claude-3-5-sonnet': {
     provider: 'claude-3-5-sonnet',
     endpoint: 'https://api.anthropic.com/v1/messages',
-    model: 'claude-3-5-sonnet-latest',
+    model: 'claude-3-5-sonnet-20241022',
     maxTokens: 8192,
     costPerInputToken: 0.000003,
     costPerOutputToken: 0.000015,

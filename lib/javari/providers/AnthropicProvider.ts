@@ -4,7 +4,7 @@ import { AIProvider, RouterOptions } from '../router/types';
 
 export class AnthropicProvider extends BaseProvider {
   // Using Claude 3.5 Sonnet latest version
-  private model: string = 'claude-3-5-sonnet-latest';
+  private model: string = 'claude-3-5-sonnet-20241022';
 
   getName(): AIProvider {
     return 'anthropic';
