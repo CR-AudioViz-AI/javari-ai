@@ -161,7 +161,7 @@ export default function ChatInterface({ initialMode = 'single' }: ChatInterfaceP
       <div className="border-b bg-white px-6 py-4">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-900">Javari AI Chat</h1>
-          <ModeToggle mode={mode} onModeChange={setMode} />
+          <ModeToggle mode={mode} onChange={setMode} />
         </div>
       </div>
 
