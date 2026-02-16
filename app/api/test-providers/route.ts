@@ -1,4 +1,16 @@
 // app/api/test-providers/route.ts
+/**
+ * PROVIDER HEALTH & FAILOVER TEST ENDPOINT - COMPREHENSIVE CERTIFICATION
+ * 
+ * Tests all registered providers for:
+ * - API connectivity
+ * - Streaming functionality  
+ * - Error handling
+ * - Timeout compliance (20s < 23s < 25s)
+ * - Cost estimation
+ * - Model availability
+ * - Failover behavior
+ */
 // Diagnostic endpoint to test AI provider connectivity
 // Timestamp: 2025-12-12 10:55 AM EST
 // Version: 1.1 - Updated models and API key order
