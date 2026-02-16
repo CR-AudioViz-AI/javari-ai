@@ -316,7 +316,7 @@ async function fallbackToSimpleRouter(
 }
 
 /**
- * Handle unsupported methods
+ * Handle unsupported methods - returns 200 with error message
  */
 export async function GET() {
   return NextResponse.json(
@@ -325,8 +325,11 @@ export async function GET() {
       response: "This endpoint requires POST. Please send your message via POST request.",
       mode: "unknown",
       provider: "unknown",
-      error: "Method not allowed",
+      error: "Method not allowed - use POST",
+      metadata: {
+        timestamp: new Date().toISOString(),
+      },
     } as ChatResponse,
-    { status: 405 }
+    { status: 200 } // Return 200, not 405
   );
 }
