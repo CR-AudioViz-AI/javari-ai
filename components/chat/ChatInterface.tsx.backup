@@ -110,21 +110,15 @@ export default function ChatInterface({ initialMode = 'single' }: ChatInterfaceP
 
       console.log(`[ChatInterface] Routing to ${endpoint} (autonomous: ${useAutonomous})`);
 
-      // Build payload matching backend ChatRequest interface
-      const payload = {
-        message: content,                    // backend requires single message string
-        mode: useAutonomous ? 'roadmap' : mode,  // 'single' | 'super' | 'advanced' | 'roadmap'
-        provider,                            // provider selection
-        history: messages.map(m => ({        // message history for context
-          role: m.role,
-          content: m.content
-        }))
-      };
-
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          message: content,
+          mode: useAutonomous ? 'autonomous' : mode,
+          provider,
+          history: messages,
+        }),
       });
 
       if (!res.ok) {

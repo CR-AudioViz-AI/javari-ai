@@ -460,22 +460,24 @@ useEffect(() => {
     setMessages(prev => [...prev, aiResponse]);
 
     try {
+      // Build payload matching backend ChatRequest interface
+      const payload = {
+        message: userMessage,                // backend requires single message string
+        mode: 'single',                      // default mode for this interface
+        provider: aiToUse,                   // AI provider selection
+        history: messages.map(m => ({        // message history for context
+          role: m.role,
+          content: m.content
+        })),
+        conversationId: isGuest ? undefined : convId  // optional conversation tracking
+      };
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          messages: [
-            ...messages.map(m => ({
-              role: m.role,
-              content: m.content
-            })),
-            { role: 'user', content: userMessage }
-          ],
-          aiProvider: aiToUse,
-          conversationId: isGuest ? undefined : convId
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -612,18 +614,23 @@ useEffect(() => {
     setVoiceChatActive(true);
     
     try {
+      // Build payload matching backend ChatRequest interface
+      const payload = {
+        message: userMsg.content,            // backend requires single message string
+        mode: 'single',                      // default mode for voice chat
+        provider: selectedProvider,          // AI provider selection
+        model: selectedModel,                // specific model selection
+        history: messages.map(m => ({        // message history for context
+          role: m.role,
+          content: m.content
+        }))
+      };
+
       // Get AI response
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: [...messages, userMsg].map(m => ({
-            role: m.role,
-            content: m.content
-          })),
-          provider: selectedProvider,
-          model: selectedModel,
-        }),
+        body: JSON.stringify(payload),
       });
       
       const data = await response.json();
