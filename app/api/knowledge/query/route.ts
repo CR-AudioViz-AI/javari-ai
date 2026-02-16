@@ -94,7 +94,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 async function fallbackToChat(prompt: string): Promise<NextResponse> {
   try {
     // Call the router directly
-    const { routeAndExecute } = await import('@/lib/javari/router/router');
+    const { routeAndExecute } = await import('@/lib/javari/multi-ai/router');
     
     const response = await routeAndExecute({
       message: prompt,
