@@ -20,8 +20,8 @@ export type AIProvider =
   | 'gpt-4-turbo'
   | 'gpt-4o'
   | 'gpt-3.5-turbo'
-  | 'gemini-1.5-pro'
-  | 'gemini-1.5-flash'
+  | '-1.5-pro'
+  | '-1.5-flash'
   | 'mistral-large'
   | 'mistral-medium'
   | 'perplexity-sonar';
@@ -102,7 +102,7 @@ export const PROVIDERS: Record<AIProvider, Omit<ProviderConfig, 'apiKey'>> = {
     strengths: ['code_generation', 'code_debugging', 'code_review', 'data_analysis', 'conversation'],
     avgLatency: 1200,
     successRate: 0.98,
-    enabled: true,
+    enabled: true
   },
   'claude-3-opus': {
     provider: 'claude-3-opus',
@@ -114,7 +114,7 @@ export const PROVIDERS: Record<AIProvider, Omit<ProviderConfig, 'apiKey'>> = {
     strengths: ['code_generation', 'data_analysis', 'long_document'],
     avgLatency: 3000,
     successRate: 0.97,
-    enabled: true,
+    enabled: true
   },
   'claude-3-haiku': {
     provider: 'claude-3-haiku',
@@ -126,7 +126,7 @@ export const PROVIDERS: Record<AIProvider, Omit<ProviderConfig, 'apiKey'>> = {
     strengths: ['quick_question', 'summarization'],
     avgLatency: 400,
     successRate: 0.99,
-    enabled: true,
+    enabled: true
   },
   'gpt-4-turbo': {
     provider: 'gpt-4-turbo',
@@ -138,7 +138,7 @@ export const PROVIDERS: Record<AIProvider, Omit<ProviderConfig, 'apiKey'>> = {
     strengths: ['creative_writing', 'math_calculation', 'code_generation'],
     avgLatency: 2000,
     successRate: 0.96,
-    enabled: true,
+    enabled: true
   },
   'gpt-4o': {
     provider: 'gpt-4o',
@@ -150,7 +150,7 @@ export const PROVIDERS: Record<AIProvider, Omit<ProviderConfig, 'apiKey'>> = {
     strengths: ['image_analysis', 'quick_question', 'conversation'],
     avgLatency: 800,
     successRate: 0.97,
-    enabled: true,
+    enabled: true
   },
   'gpt-3.5-turbo': {
     provider: 'gpt-3.5-turbo',
@@ -162,31 +162,31 @@ export const PROVIDERS: Record<AIProvider, Omit<ProviderConfig, 'apiKey'>> = {
     strengths: ['quick_question', 'summarization'],
     avgLatency: 300,
     successRate: 0.99,
-    enabled: true,
+    enabled: true
   },
-  'gemini-1.5-pro': {
-    provider: 'gemini-1.5-pro',
+  '-1.5-pro': {
+    provider: '-1.5-pro',
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/models',
-    model: 'gemini-1.5-pro',
+    model: '-1.5-pro',
     maxTokens: 8192,
     costPerInputToken: 0.0000005,
     costPerOutputToken: 0.0000015,
     strengths: ['long_document', 'image_analysis', 'research'],
     avgLatency: 1500,
     successRate: 0.95,
-    enabled: true,
+    enabled: true
   },
-  'gemini-1.5-flash': {
-    provider: 'gemini-1.5-flash',
+  '-1.5-flash': {
+    provider: '-1.5-flash',
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/models',
-    model: 'gemini-1.5-flash',
+    model: '-1.5-flash',
     maxTokens: 8192,
     costPerInputToken: 0.00000025,
     costPerOutputToken: 0.0000005,
     strengths: ['quick_question', 'summarization'],
     avgLatency: 500,
     successRate: 0.96,
-    enabled: true,
+    enabled: true
   },
   'mistral-large': {
     provider: 'mistral-large',
@@ -198,7 +198,7 @@ export const PROVIDERS: Record<AIProvider, Omit<ProviderConfig, 'apiKey'>> = {
     strengths: ['translation', 'code_generation'],
     avgLatency: 1000,
     successRate: 0.94,
-    enabled: true,
+    enabled: true
   },
   'mistral-medium': {
     provider: 'mistral-medium',
@@ -210,7 +210,7 @@ export const PROVIDERS: Record<AIProvider, Omit<ProviderConfig, 'apiKey'>> = {
     strengths: ['quick_question', 'translation'],
     avgLatency: 600,
     successRate: 0.95,
-    enabled: true,
+    enabled: true
   },
   'perplexity-sonar': {
     provider: 'perplexity-sonar',
@@ -222,8 +222,8 @@ export const PROVIDERS: Record<AIProvider, Omit<ProviderConfig, 'apiKey'>> = {
     strengths: ['research'],
     avgLatency: 2500,
     successRate: 0.92,
-    enabled: true,
-  },
+    enabled: true
+  }
 };
 
 // ============================================================
@@ -231,20 +231,20 @@ export const PROVIDERS: Record<AIProvider, Omit<ProviderConfig, 'apiKey'>> = {
 // ============================================================
 
 export const ROUTING_MATRIX: Record<TaskType, AIProvider[]> = {
-  code_generation: ['claude-3-5-sonnet', 'gpt-4-turbo', 'gemini-1.5-pro', 'mistral-large'],
+  code_generation: ['claude-3-5-sonnet', 'gpt-4-turbo', '-1.5-pro', 'mistral-large'],
   code_debugging: ['claude-3-5-sonnet', 'gpt-4-turbo', 'mistral-large'],
-  code_review: ['claude-3-5-sonnet', 'gpt-4-turbo', 'gemini-1.5-pro'],
-  creative_writing: ['gpt-4-turbo', 'claude-3-5-sonnet', 'gemini-1.5-pro'],
-  research: ['perplexity-sonar', 'gemini-1.5-pro', 'gpt-4-turbo'],
-  math_calculation: ['gpt-4-turbo', 'claude-3-5-sonnet', 'gemini-1.5-pro'],
-  translation: ['mistral-large', 'gpt-4-turbo', 'gemini-1.5-pro'],
-  image_analysis: ['gemini-1.5-pro', 'gpt-4o', 'claude-3-5-sonnet'],
-  long_document: ['gemini-1.5-pro', 'claude-3-5-sonnet', 'gpt-4-turbo'],
-  quick_question: ['gpt-3.5-turbo', 'claude-3-haiku', 'gemini-1.5-flash'],
-  conversation: ['claude-3-5-sonnet', 'gpt-4o', 'gemini-1.5-pro'],
-  data_analysis: ['claude-3-5-sonnet', 'gpt-4-turbo', 'gemini-1.5-pro'],
-  summarization: ['claude-3-haiku', 'gpt-3.5-turbo', 'gemini-1.5-flash'],
-  unknown: ['claude-3-5-sonnet', 'gpt-4-turbo', 'gemini-1.5-pro'],
+  code_review: ['claude-3-5-sonnet', 'gpt-4-turbo', '-1.5-pro'],
+  creative_writing: ['gpt-4-turbo', 'claude-3-5-sonnet', '-1.5-pro'],
+  research: ['perplexity-sonar', '-1.5-pro', 'gpt-4-turbo'],
+  math_calculation: ['gpt-4-turbo', 'claude-3-5-sonnet', '-1.5-pro'],
+  translation: ['mistral-large', 'gpt-4-turbo', '-1.5-pro'],
+  image_analysis: ['-1.5-pro', 'gpt-4o', 'claude-3-5-sonnet'],
+  long_document: ['-1.5-pro', 'claude-3-5-sonnet', 'gpt-4-turbo'],
+  quick_question: ['gpt-3.5-turbo', 'claude-3-haiku', '-1.5-flash'],
+  conversation: ['claude-3-5-sonnet', 'gpt-4o', '-1.5-pro'],
+  data_analysis: ['claude-3-5-sonnet', 'gpt-4-turbo', '-1.5-pro'],
+  summarization: ['claude-3-haiku', 'gpt-3.5-turbo', '-1.5-flash'],
+  unknown: ['claude-3-5-sonnet', 'gpt-4-turbo', '-1.5-pro']
 };
 
 // ============================================================
@@ -265,7 +265,7 @@ const TASK_KEYWORDS: Record<TaskType, string[]> = {
   conversation: ['chat', 'talk', 'discuss', 'help me think', 'advice'],
   data_analysis: ['data', 'analyze', 'statistics', 'trends', 'numbers', 'csv', 'spreadsheet'],
   summarization: ['summarize', 'summary', 'tldr', 'brief', 'shorten', 'condense'],
-  unknown: [],
+  unknown: []
 };
 
 export function classifyTask(message: string): TaskType {
@@ -337,7 +337,7 @@ export class JavariAIRouter {
         fallbacks: anyAvailable.slice(1, 4),
         reason: 'Emergency fallback - preferred providers unavailable',
         estimatedCost: 0.01,
-        estimatedLatency: 2000,
+        estimatedLatency: 2000
       };
     }
     
@@ -383,7 +383,7 @@ export class JavariAIRouter {
       fallbacks,
       reason: `${taskType} task - ${primary.provider} scored highest (${primary.score.toFixed(1)})`,
       estimatedCost: primary.config.costPerInputToken * 1000 + primary.config.costPerOutputToken * 500,
-      estimatedLatency: primary.config.avgLatency,
+      estimatedLatency: primary.config.avgLatency
     };
   }
   
@@ -412,7 +412,7 @@ export class JavariAIRouter {
           ...response,
           provider,
           latency,
-          success: true,
+          success: true
         };
       } catch (error: any) {
         // Log failure and try next
@@ -432,7 +432,7 @@ export class JavariAIRouter {
       cost: 0,
       latency: 0,
       success: false,
-      error: 'All AI providers failed',
+      error: 'All AI providers failed'
     };
   }
   
@@ -457,8 +457,8 @@ export class JavariAIRouter {
       return this.callAnthropic(config, apiKey, message, systemPrompt, options);
     } else if (provider.startsWith('gpt')) {
       return this.callOpenAI(config, apiKey, message, systemPrompt, options);
-    } else if (provider.startsWith('gemini')) {
-      return this.callGemini(config, apiKey, message, systemPrompt, options);
+    } else if (provider.startsWith()) {
+      return this.call(config, apiKey, message, systemPrompt, options);
     } else if (provider.startsWith('mistral')) {
       return this.callMistral(config, apiKey, message, systemPrompt, options);
     } else if (provider.startsWith('perplexity')) {
@@ -483,15 +483,15 @@ export class JavariAIRouter {
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
+        'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
         model: config.model,
         max_tokens: options?.maxTokens || config.maxTokens,
         temperature: options?.temperature || 0.7,
         system: systemPrompt || 'You are Javari, a helpful AI assistant.',
-        messages: [{ role: 'user', content: message }],
-      }),
+        messages: [{ role: 'user', content: message }]
+      })
     });
     
     if (!response.ok) {
@@ -508,7 +508,7 @@ export class JavariAIRouter {
       model: config.model,
       inputTokens,
       outputTokens,
-      cost: inputTokens * config.costPerInputToken + outputTokens * config.costPerOutputToken,
+      cost: inputTokens * config.costPerInputToken + outputTokens * config.costPerOutputToken
     };
   }
   
@@ -526,7 +526,7 @@ export class JavariAIRouter {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
         model: config.model,
@@ -534,9 +534,9 @@ export class JavariAIRouter {
         temperature: options?.temperature || 0.7,
         messages: [
           { role: 'system', content: systemPrompt || 'You are Javari, a helpful AI assistant.' },
-          { role: 'user', content: message },
-        ],
-      }),
+          { role: 'user', content: message }
+        ]
+      })
     });
     
     if (!response.ok) {
@@ -553,14 +553,14 @@ export class JavariAIRouter {
       model: config.model,
       inputTokens,
       outputTokens,
-      cost: inputTokens * config.costPerInputToken + outputTokens * config.costPerOutputToken,
+      cost: inputTokens * config.costPerInputToken + outputTokens * config.costPerOutputToken
     };
   }
   
   /**
-   * Call Google Gemini API
+   * Call GoogleAPI
    */
-  private async callGemini(
+  private async call(
     config: Omit<ProviderConfig, 'apiKey'>,
     apiKey: string,
     message: string,
@@ -572,21 +572,21 @@ export class JavariAIRouter {
     const response = await fetch(url, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         contents: [{ parts: [{ text: message }] }],
         systemInstruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
         generationConfig: {
           maxOutputTokens: options?.maxTokens || config.maxTokens,
-          temperature: options?.temperature || 0.7,
-        },
-      }),
+          temperature: options?.temperature || 0.7
+        }
+      })
     });
     
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`Gemini API error: ${response.status} - ${error}`);
+      throw new Error(`API error: ${response.status} - ${error}`);
     }
     
     const data = await response.json();
@@ -599,7 +599,7 @@ export class JavariAIRouter {
       model: config.model,
       inputTokens,
       outputTokens,
-      cost: inputTokens * config.costPerInputToken + outputTokens * config.costPerOutputToken,
+      cost: inputTokens * config.costPerInputToken + outputTokens * config.costPerOutputToken
     };
   }
   
@@ -617,7 +617,7 @@ export class JavariAIRouter {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
         model: config.model,
@@ -625,9 +625,9 @@ export class JavariAIRouter {
         temperature: options?.temperature || 0.7,
         messages: [
           { role: 'system', content: systemPrompt || 'You are Javari, a helpful AI assistant.' },
-          { role: 'user', content: message },
-        ],
-      }),
+          { role: 'user', content: message }
+        ]
+      })
     });
     
     if (!response.ok) {
@@ -644,7 +644,7 @@ export class JavariAIRouter {
       model: config.model,
       inputTokens,
       outputTokens,
-      cost: inputTokens * config.costPerInputToken + outputTokens * config.costPerOutputToken,
+      cost: inputTokens * config.costPerInputToken + outputTokens * config.costPerOutputToken
     };
   }
   
@@ -662,7 +662,7 @@ export class JavariAIRouter {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
         model: config.model,
@@ -670,9 +670,9 @@ export class JavariAIRouter {
         temperature: options?.temperature || 0.7,
         messages: [
           { role: 'system', content: systemPrompt || 'You are Javari, a helpful AI assistant.' },
-          { role: 'user', content: message },
-        ],
-      }),
+          { role: 'user', content: message }
+        ]
+      })
     });
     
     if (!response.ok) {
@@ -689,7 +689,7 @@ export class JavariAIRouter {
       model: config.model,
       inputTokens,
       outputTokens,
-      cost: inputTokens * config.costPerInputToken + outputTokens * config.costPerOutputToken,
+      cost: inputTokens * config.costPerInputToken + outputTokens * config.costPerOutputToken
     };
   }
   
@@ -712,7 +712,7 @@ export class JavariAIRouter {
       totalLatency: 0,
       totalCost: 0,
       avgQualityScore: 0,
-      lastUpdated: new Date(),
+      lastUpdated: new Date()
     };
     
     if (success) {

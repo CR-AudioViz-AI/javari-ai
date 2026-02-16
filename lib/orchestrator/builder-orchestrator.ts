@@ -103,7 +103,7 @@ export class AIRouter {
     build_website: [
       { provider: 'claude', model: 'claude-sonnet-4-20250514', cost: 0.015 },
       { provider: 'openai', model: 'gpt-4-turbo', cost: 0.02 },
-      { provider: 'gemini', model: 'gemini-1.5-pro', cost: 0.01 }
+      { provider: 'gemini', model:, cost: 0.01 }
     ],
     build_mobile_app: [
       { provider: 'claude', model: 'claude-sonnet-4-20250514', cost: 0.015 },
@@ -116,7 +116,7 @@ export class AIRouter {
     generate_code: [
       { provider: 'claude', model: 'claude-sonnet-4-20250514', cost: 0.015 },
       { provider: 'openai', model: 'gpt-4-turbo', cost: 0.02 },
-      { provider: 'gemini', model: 'gemini-1.5-flash', cost: 0.005 }
+      { provider: 'gemini', model:, cost: 0.005 }
     ],
     debug_code: [
       { provider: 'claude', model: 'claude-sonnet-4-20250514', cost: 0.015 },
@@ -135,14 +135,14 @@ export class AIRouter {
     
     // Documentation: Gemini (good quality, cheap)
     write_documentation: [
-      { provider: 'gemini', model: 'gemini-1.5-pro', cost: 0.01 },
+      { provider: 'gemini', model:, cost: 0.01 },
       { provider: 'claude', model: 'claude-sonnet-4-20250514', cost: 0.015 }
     ],
     
     // Design/Creative: Gemini or Claude
     create_ui_design: [
       { provider: 'claude', model: 'claude-sonnet-4-20250514', cost: 0.015 },
-      { provider: 'gemini', model: 'gemini-1.5-pro', cost: 0.01 }
+      { provider: 'gemini', model:, cost: 0.01 }
     ],
     
     // Analysis tasks: Perplexity for research, Claude for reasoning
@@ -184,7 +184,7 @@ export class AIRouter {
     
     // Content generation: Gemini (cheap) or Claude (quality)
     generate_content: [
-      { provider: 'gemini', model: 'gemini-1.5-flash', cost: 0.005 },
+      { provider: 'gemini', model:, cost: 0.005 },
       { provider: 'claude', model: 'claude-sonnet-4-20250514', cost: 0.015 }
     ],
     
@@ -403,8 +403,7 @@ Return a JSON object with this structure:
       case 'claude':
         return await this.executeWithClaude(model, prompt);
       
-      case 'gemini':
-        return await this.executeWithGemini(model, prompt);
+      
       
       case 'perplexity':
         return await this.executeWithPerplexity(model, prompt);

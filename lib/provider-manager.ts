@@ -88,14 +88,14 @@ export class ProviderManager {
     // OpenAI
     if (process.env.OPENAI_API_KEY) {
       this.openai = new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY,
+        apiKey: process.env.OPENAI_API_KEY
       });
     }
 
     // Claude (Anthropic)
     if (process.env.ANTHROPIC_API_KEY) {
       this.claude = new Anthropic({
-        apiKey: process.env.ANTHROPIC_API_KEY,
+        apiKey: process.env.ANTHROPIC_API_KEY
       });
     }
 
@@ -108,7 +108,7 @@ export class ProviderManager {
     // Mistral
     if (process.env.MISTRAL_API_KEY) {
       this.mistral = new Mistral({
-        apiKey: process.env.MISTRAL_API_KEY,
+        apiKey: process.env.MISTRAL_API_KEY
       });
     }
   }
@@ -131,7 +131,7 @@ export class ProviderManager {
         success: true,
         tokens: response.tokens.total,
         cost: response.cost,
-        latency: response.latency,
+        latency: response.latency
       });
 
       return response;
@@ -146,7 +146,7 @@ export class ProviderManager {
         tokens: 0,
         cost: 0,
         latency: Date.now() - startTime,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: error instanceof Error ? error.message : 'Unknown error'
       });
 
       // Try fallback
@@ -191,7 +191,7 @@ export class ProviderManager {
         success: true,
         tokens: totalTokens,
         cost: this.estimateCost(request.provider, request.model, totalTokens),
-        latency,
+        latency
       });
 
     } catch (error: unknown) {
@@ -205,7 +205,7 @@ export class ProviderManager {
         tokens: 0,
         cost: 0,
         latency: Date.now() - startTime,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: error instanceof Error ? error.message : 'Unknown error'
       });
 
       throw error;
@@ -224,9 +224,7 @@ export class ProviderManager {
       case 'claude':
         yield* this.streamClaude(request);
         break;
-      case 'gemini':
-        yield* this.streamGemini(request);
-        break;
+      
       case 'mistral':
         yield* this.streamMistral(request);
         break;
@@ -243,7 +241,7 @@ export class ProviderManager {
       messages: request.messages,
       temperature: request.temperature ?? 0.7,
       max_tokens: request.maxTokens ?? 4000,
-      stream: true,
+      stream: true
     });
 
     for await (const chunk of stream) {
@@ -270,9 +268,9 @@ export class ProviderManager {
       system: systemMessage?.content,
       messages: conversationMessages.map(m => ({
         role: m.role as 'user' | 'assistant',
-        content: m.content,
+        content: m.content
       })),
-      stream: true,
+      stream: true
     });
 
     for await (const chunk of stream) {
@@ -292,7 +290,7 @@ export class ProviderManager {
     // Convert messages to Gemini format
     const history = request.messages.slice(0, -1).map(m => ({
       role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }],
+      parts: [{ text: m.content }]
     }));
 
     const chat = model.startChat({ history });
@@ -317,7 +315,7 @@ export class ProviderManager {
       model: request.model,
       messages: request.messages,
       temperature: request.temperature ?? 0.7,
-      maxTokens: request.maxTokens ?? 4000,
+      maxTokens: request.maxTokens ?? 4000
     });
 
     for await (const chunk of stream) {
@@ -342,8 +340,7 @@ export class ProviderManager {
         return await this.chatWithOpenAI(request, startTime);
       case 'claude':
         return await this.chatWithClaude(request, startTime);
-      case 'gemini':
-        return await this.chatWithGemini(request, startTime);
+      
       case 'mistral':
         return await this.chatWithMistral(request, startTime);
       default:
@@ -358,14 +355,14 @@ export class ProviderManager {
       model: request.model,
       messages: request.messages,
       temperature: request.temperature ?? 0.7,
-      max_tokens: request.maxTokens ?? 4000,
+      max_tokens: request.maxTokens ?? 4000
     });
 
     const latency = Date.now() - startTime;
     const tokens = {
       input: completion.usage?.prompt_tokens ?? 0,
       output: completion.usage?.completion_tokens ?? 0,
-      total: completion.usage?.total_tokens ?? 0,
+      total: completion.usage?.total_tokens ?? 0
     };
 
     return {
@@ -374,7 +371,7 @@ export class ProviderManager {
       model: request.model,
       tokens,
       cost: this.calculateCost('openai', request.model, tokens.input, tokens.output),
-      latency,
+      latency
     };
   }
 
@@ -391,15 +388,15 @@ export class ProviderManager {
       system: systemMessage?.content,
       messages: conversationMessages.map(m => ({
         role: m.role as 'user' | 'assistant',
-        content: m.content,
-      })),
+        content: m.content
+      }))
     });
 
     const latency = Date.now() - startTime;
     const tokens = {
       input: completion.usage.input_tokens,
       output: completion.usage.output_tokens,
-      total: completion.usage.input_tokens + completion.usage.output_tokens,
+      total: completion.usage.input_tokens + completion.usage.output_tokens
     };
 
     return {
@@ -408,7 +405,7 @@ export class ProviderManager {
       model: request.model,
       tokens,
       cost: this.calculateCost('claude', request.model, tokens.input, tokens.output),
-      latency,
+      latency
     };
   }
 
@@ -419,7 +416,7 @@ export class ProviderManager {
 
     const history = request.messages.slice(0, -1).map(m => ({
       role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }],
+      parts: [{ text: m.content }]
     }));
 
     const chat = model.startChat({ history });
@@ -435,7 +432,7 @@ export class ProviderManager {
     const tokens = {
       input: inputTokens,
       output: outputTokens,
-      total: inputTokens + outputTokens,
+      total: inputTokens + outputTokens
     };
 
     return {
@@ -444,7 +441,7 @@ export class ProviderManager {
       model: request.model,
       tokens,
       cost: this.calculateCost('gemini', request.model, tokens.input, tokens.output),
-      latency,
+      latency
     };
   }
 
@@ -455,14 +452,14 @@ export class ProviderManager {
       model: request.model,
       messages: request.messages,
       temperature: request.temperature ?? 0.7,
-      maxTokens: request.maxTokens ?? 4000,
+      maxTokens: request.maxTokens ?? 4000
     });
 
     const latency = Date.now() - startTime;
     const tokens = {
       input: completion.usage?.promptTokens ?? 0,
       output: completion.usage?.completionTokens ?? 0,
-      total: completion.usage?.totalTokens ?? 0,
+      total: completion.usage?.totalTokens ?? 0
     };
 
     return {
@@ -471,7 +468,7 @@ export class ProviderManager {
       model: request.model,
       tokens,
       cost: this.calculateCost('mistral', request.model, tokens.input, tokens.output),
-      latency,
+      latency
     };
   }
 
@@ -484,7 +481,7 @@ export class ProviderManager {
       openai: { input: 0.03 / 1000, output: 0.06 / 1000 },
       claude: { input: 0.003 / 1000, output: 0.015 / 1000 },
       gemini: { input: 0.00035 / 1000, output: 0.00105 / 1000 },
-      mistral: { input: 0.001 / 1000, output: 0.003 / 1000 },
+      mistral: { input: 0.001 / 1000, output: 0.003 / 1000 }
     };
 
     const rates = pricing[provider];
@@ -504,7 +501,7 @@ export class ProviderManager {
       openai: 'claude',
       claude: 'gemini',
       gemini: 'mistral',
-      mistral: 'openai',
+      mistral: 'openai'
     };
 
     return fallbacks[failedProvider] || null;
@@ -532,7 +529,7 @@ export class ProviderManager {
         cost: log.cost,
         latency: log.latency,
         error: log.error,
-        created_at: new Date().toISOString(),
+        created_at: new Date().toISOString()
       });
     } catch (error) {
       console.error('Failed to log performance:', error);

@@ -112,11 +112,11 @@ export const MODEL_REGISTRY: Record<string, ModelMetadata> = {
     fallbackPriority: 2
   },
   
-  // Google - Gemini series
-  'gemini-2-flash': {
-    id: 'gemini-2.0-flash-exp',
+  // Google -series
+  '-2-flash': {
+    id: '-2.0-flash-exp',
     provider: 'google',
-    name: 'Gemini 2.0 Flash',
+    name: '2.0 Flash',
     speed: 'ultra-fast',
     cost: 'free',
     reliability: 0.92,
@@ -126,10 +126,10 @@ export const MODEL_REGISTRY: Record<string, ModelMetadata> = {
     available: true,
     fallbackPriority: 1
   },
-  'gemini-pro': {
-    id: 'gemini-1.5-pro',
+  '-pro': {
+    id: '-1.5-pro',
     provider: 'google',
-    name: 'Gemini 1.5 Pro',
+    name: '1.5 Pro',
     speed: 'medium',
     cost: 'low',
     reliability: 0.93,

@@ -138,13 +138,13 @@ export const AI_PROVIDERS: AIProvider[] = [
   
   {
     id: 'google',
-    name: 'Google Gemini',
+    name: 'Google',
     description: 'Powerful multimodal AI with massive context window and FREE tier.',
     category: 'standard',
     models: [
       {
-        id: 'gemini-2.0-flash-exp',
-        name: 'Gemini 2.0 Flash (Experimental)',
+        id: '-2.0-flash-exp',
+        name: '2.0 Flash (Experimental)',
         contextWindow: 1000000,
         bestFor: ['FREE usage', 'fast responses', 'multimodal'],
         inputCostPer1M: 0, // FREE during experimental
@@ -152,8 +152,8 @@ export const AI_PROVIDERS: AIProvider[] = [
         speed: 'ultra-fast'
       },
       {
-        id: 'gemini-1.5-pro',
-        name: 'Gemini 1.5 Pro',
+        id: '-1.5-pro',
+        name: '1.5 Pro',
         contextWindow: 2000000,
         bestFor: ['massive documents', 'video analysis', 'complex reasoning'],
         inputCostPer1M: 1.25,
@@ -161,8 +161,8 @@ export const AI_PROVIDERS: AIProvider[] = [
         speed: 'medium'
       },
       {
-        id: 'gemini-1.5-flash',
-        name: 'Gemini 1.5 Flash',
+        id: '-1.5-flash',
+        name: '1.5 Flash',
         contextWindow: 1000000,
         bestFor: ['speed', 'cost-effective', 'high volume'],
         inputCostPer1M: 0.075,
@@ -173,7 +173,7 @@ export const AI_PROVIDERS: AIProvider[] = [
     strengths: ['FREE tier', 'Massive context', 'Multimodal', 'Google integration'],
     costTier: 'free',
     rateLimit: '1500 req/day free',
-    apiKeyEnv: 'GOOGLE_GEMINI_API_KEY',
+    apiKeyEnv: 'GOOGLE__API_KEY',
     status: 'active',
     priority: 3,
     trusted: true,
@@ -547,7 +547,7 @@ export const PROVIDER_STATS = {
   freeProviders: AI_PROVIDERS.filter(p => p.costTier === 'free').length,
   trustedProviders: AI_PROVIDERS.filter(p => p.trusted).length,
   usBasedProviders: AI_PROVIDERS.filter(p => p.region === 'us').length,
-  euBasedProviders: AI_PROVIDERS.filter(p => p.region === 'eu').length,
+  euBasedProviders: AI_PROVIDERS.filter(p => p.region === 'eu').length
 };
 
 // =============================================================================
@@ -577,22 +577,21 @@ export const BLOCKED_PROVIDERS = [
 export const ROUTING_RULES = {
   // Task type → Best provider
   taskRouting: {
-    'simple_chat': ['groq', 'gemini', 'mistral'],        // FREE/Fast first
+    'simple_chat': ['groq' 'mistral'],        // FREE/Fast first
     'coding': ['anthropic', 'mistral', 'openai'],        // Quality first
     'research': ['perplexity', 'anthropic', 'openai'],   // Real-time + quality
-    'image_analysis': ['openai', 'gemini', 'mistral'],   // Vision models
-    'document_analysis': ['gemini', 'anthropic'],         // Long context
+    'image_analysis': ['openai' 'mistral'],   // Vision models
+    'document_analysis': [ 'anthropic'],         // Long context
     'financial': ['huggingface', 'anthropic', 'openai'], // FinBERT + quality
     'embeddings': ['cohere', 'openai', 'huggingface'],   // Specialized
     'image_generation': ['replicate', 'openai'],         // DALL-E, SD
-    'high_volume': ['groq', 'gemini', 'fireworks'],      // Speed + FREE
+    'high_volume': ['groq' 'fireworks'],      // Speed + FREE
     'enterprise': ['anthropic', 'cohere', 'openai'],     // Security + quality
   },
   
   // Cost optimization
   costPriority: [
-    'groq',       // FREE - 14,400 req/day
-    'gemini',     // FREE - 1,500 req/day  
+    'groq',       // FREE - 14,400 req/day     // FREE - 1,500 req/day  
     'huggingface', // FREE - 1,000 req/day
     'mistral',    // FREE tier available
     'fireworks',  // $0.90/1M tokens
@@ -606,8 +605,7 @@ export const ROUTING_RULES = {
   // Quality priority  
   qualityPriority: [
     'anthropic',  // Best reasoning
-    'openai',     // Broad capabilities
-    'gemini',     // Multimodal leader
+    'openai',     // Broad capabilities     // Multimodal leader
     'mistral',    // Excellent coding
     'perplexity', // Real-time search
     'cohere',     // RAG specialist
@@ -627,10 +625,10 @@ export const REQUIRED_ENV_VARS = {
   existing: [
     'ANTHROPIC_API_KEY',
     'OPENAI_API_KEY', 
-    'GOOGLE_GEMINI_API_KEY',
+    'GOOGLE__API_KEY',
     'PERPLEXITY_API_KEY',
     'GROQ_API_KEY',
-    'HUGGINGFACE_API_KEY',
+    'HUGGINGFACE_API_KEY'
   ],
   
   // NEW - Need to add
@@ -649,14 +647,14 @@ export const REQUIRED_ENV_VARS = {
 
 export const MARKETING_COPY = {
   headline: "The ONLY AI Assistant with 11+ AI Brains",
-  subheadline: "Javari AI routes your questions to the perfect AI model - Claude, GPT-4, Gemini, Mistral, and 7 more",
+  subheadline: "Javari AI routes your questions to the perfect AI model - Claude, GPT-4 Mistral, and 7 more",
   features: [
     "🧠 11+ AI providers, 30+ models at your fingertips",
     "⚡ Automatic smart routing to the best AI for each task",
     "💰 Cost optimization - uses FREE APIs when possible",
     "🔒 100% US/EU providers only - your data stays secure",
     "🎯 Specialized models for coding, research, vision, finance",
-    "📚 Learns from every interaction across all models",
+    "📚 Learns from every interaction across all models"
   ],
   competitive_advantage: "While others use 1-2 AI models, Javari uses 11+ - giving you the combined intelligence of the world's best AI systems in one assistant."
 };

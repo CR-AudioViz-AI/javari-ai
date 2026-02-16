@@ -11,7 +11,7 @@ import {
   ChevronRight,
   Archive,
   RefreshCw,
-  Plus,
+  Plus
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -64,7 +64,7 @@ export default function HistoryPage() {
     
     try {
       const response = await fetch(`/api/conversations?id=${id}`, {
-        method: 'DELETE',
+        method: 'DELETE'
       });
       if (response.ok) {
         fetchConversations();
@@ -79,7 +79,7 @@ export default function HistoryPage() {
       const response = await fetch('/api/conversations', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversationId: id, isArchived: !isArchived }),
+        body: JSON.stringify({ conversationId: id, isArchived: !isArchived })
       });
       if (response.ok) {
         fetchConversations();
@@ -94,7 +94,7 @@ export default function HistoryPage() {
       const response = await fetch('/api/conversations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'create', title: 'New Conversation' }),
+        body: JSON.stringify({ action: 'create', title: 'New Conversation' })
       });
       if (response.ok) {
         const data = await response.json();
@@ -133,7 +133,7 @@ export default function HistoryPage() {
     switch (provider) {
       case 'openai': return 'bg-green-100 text-green-800';
       case 'anthropic': return 'bg-purple-100 text-purple-800';
-      case 'gemini': return 'bg-blue-100 text-blue-800';
+      
       default: return 'bg-gray-100 text-gray-800';
     }
   };

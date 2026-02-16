@@ -14,7 +14,7 @@
  * 5. Vision/images → Claude or GPT-4o
  * 
  * COST TIERS:
- * - FREE: Groq, OpenAI (with sharing), Gemini free tier
+ * - FREE: Groq, OpenAI (with sharing)free tier
  * - CHEAP: Mistral, Together, Claude Haiku
  * - PREMIUM: Claude Sonnet/Opus, GPT-4o
  */
@@ -24,7 +24,7 @@ export const AI_COSTS = {
   // FREE TIER
   'groq/llama-3.3-70b-versatile': { input: 0, output: 0, tier: 'free' },
   'openai/gpt-4o-mini': { input: 0, output: 0, tier: 'free' }, // FREE with sharing!
-  'google/gemini-1.5-flash': { input: 0, output: 0, tier: 'free' },
+  'google/-1.5-flash': { input: 0, output: 0, tier: 'free' },
   
   // CHEAP TIER
   'mistral/mistral-small-latest': { input: 0.1, output: 0.3, tier: 'cheap' },
@@ -37,7 +37,7 @@ export const AI_COSTS = {
   'anthropic/claude-sonnet-4': { input: 3, output: 15, tier: 'premium' },
   'anthropic/claude-opus-4': { input: 15, output: 75, tier: 'premium' },
   'openai/gpt-4o': { input: 2.5, output: 10, tier: 'premium' },
-  'openai/o1': { input: 15, output: 60, tier: 'premium' },
+  'openai/o1': { input: 15, output: 60, tier: 'premium' }
 } as const;
 
 // Query complexity classification
@@ -239,7 +239,7 @@ export function getFallbackChain(primaryProvider: string): string[] {
     'openai': ['groq/llama-3.3-70b-versatile', 'anthropic/claude-3-5-haiku', 'mistral/mistral-large-latest'],
     'anthropic': ['openai/gpt-4o', 'mistral/mistral-large-latest', 'groq/llama-3.3-70b-versatile'],
     'perplexity': ['openai/gpt-4o-mini', 'groq/llama-3.3-70b-versatile'],
-    'mistral': ['groq/llama-3.3-70b-versatile', 'openai/gpt-4o-mini', 'together/llama-3.3-70b'],
+    'mistral': ['groq/llama-3.3-70b-versatile', 'openai/gpt-4o-mini', 'together/llama-3.3-70b']
   };
   
   return chains[primaryProvider] || ['groq/llama-3.3-70b-versatile', 'openai/gpt-4o-mini'];
@@ -252,38 +252,38 @@ export const PROVIDER_CONFIGS = {
   groq: {
     baseUrl: 'https://api.groq.com/openai/v1',
     envKey: 'GROQ_API_KEY',
-    format: 'openai',
+    format: 'openai'
   },
   openai: {
     baseUrl: 'https://api.openai.com/v1',
     envKey: 'OPENAI_API_KEY',
-    format: 'openai',
+    format: 'openai'
   },
   anthropic: {
     baseUrl: 'https://api.anthropic.com/v1',
     envKey: 'ANTHROPIC_API_KEY',
-    format: 'anthropic',
+    format: 'anthropic'
   },
   perplexity: {
     baseUrl: 'https://api.perplexity.ai',
     envKey: 'PERPLEXITY_API_KEY',
-    format: 'openai',
+    format: 'openai'
   },
   mistral: {
     baseUrl: 'https://api.mistral.ai/v1',
     envKey: 'MISTRAL_API_KEY',
-    format: 'openai',
+    format: 'openai'
   },
   together: {
     baseUrl: 'https://api.together.xyz/v1',
     envKey: 'TOGETHER_API_KEY',
-    format: 'openai',
+    format: 'openai'
   },
   google: {
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-    envKey: 'GOOGLE_GEMINI_API_KEY',
-    format: 'google',
-  },
+    envKey: 'GOOGLE__API_KEY',
+    format: 'google'
+  }
 };
 
 /**
@@ -300,7 +300,7 @@ export function estimateMonthlyCost(
     simple: 500,
     medium: 1500,
     complex: 3000,
-    search: 2000,
+    search: 2000
   };
   
   // With free tiers enabled:
@@ -313,7 +313,7 @@ export function estimateMonthlyCost(
     simple: 0, // FREE
     medium: 0, // FREE with sharing
     complex: dailyComplex * 0.02,
-    search: dailySearch * 0.003,
+    search: dailySearch * 0.003
   };
   
   const totalDaily = Object.values(dailyCost).reduce((a, b) => a + b, 0);
@@ -324,7 +324,7 @@ export function estimateMonthlyCost(
       simple: 0,
       medium: 0,
       complex: Math.round(dailyCost.complex * 30 * 100) / 100,
-      search: Math.round(dailyCost.search * 30 * 100) / 100,
+      search: Math.round(dailyCost.search * 30 * 100) / 100
     }
   };
 }

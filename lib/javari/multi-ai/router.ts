@@ -96,8 +96,8 @@ function detectOverride(prompt: string): string | null {
     'o1': ['use o1', 'with o1', 'o-series', 'o1 model'],
     'claude-sonnet-4': ['use claude', 'with claude', 'claude sonnet'],
     'gpt-4o': ['use gpt-4o', 'with gpt-4o', 'gpt4o'],
-    'gemini-2-flash': ['use gemini', 'with gemini', 'gemini flash'],
-    'groq-llama': ['use groq', 'with groq', 'fast inference'],
+    '-2-flash': ['use', 'with', 'flash'],
+    'groq-llama': ['use groq', 'with groq', 'fast inference']
   };
   
   for (const [modelId, keywords] of Object.entries(overrides)) {
