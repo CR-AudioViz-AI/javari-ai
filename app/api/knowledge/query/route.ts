@@ -43,7 +43,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json(
         {
           success: false,
-          sources: [],
+          sources: [], // ALWAYS return array, never undefined
+          answer: '',
           fallbackUsed: false,
           error: 'Prompt is required',
         } as KnowledgeQueryResponse,
@@ -86,7 +87,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         fallbackUsed: true,
         error: error instanceof Error ? error.message : 'Unknown error',
       } as KnowledgeQueryResponse,
-      { status: 500 }
+      { status: 200 }
     );
   }
 }
@@ -131,7 +132,7 @@ async function fallbackToChat(prompt: string): Promise<NextResponse> {
         fallbackUsed: true,
         error: 'Both R2 query and fallback failed',
       } as KnowledgeQueryResponse,
-      { status: 500 }
+      { status: 200 }
     );
   }
 }
