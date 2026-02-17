@@ -1,12 +1,16 @@
 // app/api/chat/route.ts
 /**
- * Chat API - MATCHES FRONTEND EXPECTATIONS
+ * Chat API - DUAL FORMAT FOR MAXIMUM COMPATIBILITY
  * 
- * Frontend expects: data.response
- * Returns what ChatInterface line 137 needs
+ * Returns BOTH:
+ * - Frontend format: { response, success, error }
+ * - Normalized format: { messages, sources, answer }
+ * 
+ * CRITICAL PATCH: Uses normalizePayload for ALL responses
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { normalizePayload } from "@/lib/normalize-envelope";
 
 export const runtime = "nodejs";
 export const maxDuration = 25;
@@ -28,16 +32,25 @@ export async function POST(req: NextRequest) {
     // Validate message
     if (!message || typeof message !== 'string' || !message.trim()) {
       console.error('[Chat] Empty message');
-      return NextResponse.json({
-        response: "Please provide a message",
+      
+      const normalized = normalizePayload({
+        content: "Please provide a message",
         success: false,
+        fallbackUsed: true,
         error: "Empty or invalid message",
-        provider,
-        mode,
         metadata: {
           timestamp: new Date().toISOString(),
           duration: Date.now() - startTime,
-        },
+          reason: "validation_error"
+        }
+      });
+      
+      // Add frontend format fields
+      return NextResponse.json({
+        ...normalized,
+        response: "Please provide a message",
+        provider,
+        mode,
       }, { status: 200 });
     }
 
@@ -61,53 +74,85 @@ export async function POST(req: NextRequest) {
 
       console.log('[Chat] Success');
       
-      // Return format that frontend expects
-      return NextResponse.json({
-        response: response || 'No response generated',
+      const normalized = normalizePayload({
+        content: response || 'No response generated',
+        answer: response || 'No response generated',
         success: true,
-        provider,
-        mode,
+        fallbackUsed: false,
         metadata: {
           timestamp: new Date().toISOString(),
           duration: Date.now() - startTime,
-        },
+        }
+      });
+      
+      // Return format that frontend expects PLUS normalized fields
+      return NextResponse.json({
+        ...normalized,
+        response: response || 'No response generated',
+        provider,
+        mode,
       }, { status: 200 });
       
     } catch (providerError) {
       console.error('[Chat] Provider error:', providerError);
       
-      return NextResponse.json({
-        response: `I encountered an error: ${providerError instanceof Error ? providerError.message : 'Unknown error'}. Please try again.`,
+      const errorMsg = `I encountered an error: ${providerError instanceof Error ? providerError.message : 'Unknown error'}. Please try again.`;
+      
+      const normalized = normalizePayload({
+        content: errorMsg,
         success: false,
+        fallbackUsed: true,
         error: providerError instanceof Error ? providerError.message : 'Unknown error',
-        provider,
-        mode,
         metadata: {
           timestamp: new Date().toISOString(),
           duration: Date.now() - startTime,
-        },
+          reason: "provider_error"
+        }
+      });
+      
+      return NextResponse.json({
+        ...normalized,
+        response: errorMsg,
+        provider,
+        mode,
       }, { status: 200 });
     }
 
   } catch (error) {
     console.error('[Chat] Top-level error:', error);
     
-    return NextResponse.json({
-      response: "I encountered an unexpected error. Please try again.",
+    const normalized = normalizePayload({
+      content: "I encountered an unexpected error. Please try again.",
       success: false,
+      fallbackUsed: true,
       error: error instanceof Error ? error.message : 'Unknown error',
       metadata: {
         timestamp: new Date().toISOString(),
         duration: Date.now() - startTime,
-      },
+        reason: "top_level_error"
+      }
+    });
+    
+    return NextResponse.json({
+      ...normalized,
+      response: "I encountered an unexpected error. Please try again.",
     }, { status: 200 });
   }
 }
 
 export async function GET() {
-  return NextResponse.json({
-    response: "This endpoint requires POST",
+  const normalized = normalizePayload({
+    content: "This endpoint requires POST",
     success: false,
+    fallbackUsed: false,
     error: "Method not allowed",
+    metadata: {
+      reason: "method_not_allowed"
+    }
+  });
+  
+  return NextResponse.json({
+    ...normalized,
+    response: "This endpoint requires POST",
   }, { status: 200 });
 }
