@@ -1,19 +1,17 @@
 // app/api/knowledge/query/route.ts
 /**
- * Knowledge Query API - GUARANTEED MESSAGE STRUCTURE
+ * Knowledge Query API - FULL ENVELOPE NORMALIZATION
  * 
- * EVERY response returns:
- * {
- *   messages: [
- *     { role: "assistant", content: "..." }
- *   ]
- * }
+ * EVERY response includes ALL fields:
+ * - messages, results, sources, metadata
+ * - provider, model, latency_ms, tokens_in, tokens_out, usage
+ * - id, success, error
  * 
  * Status: ALWAYS 200
- * Never returns: undefined, {}, or missing messages field
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { normalizeEnvelope, NormalizedEnvelope } from "@/lib/normalize-envelope";
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -24,70 +22,44 @@ interface KnowledgeQueryRequest {
   question?: string;
 }
 
-interface NormalizedResponse {
-  messages: Array<{
-    role: "assistant";
-    content: string;
-  }>;
-}
-
-/**
- * Guaranteed response wrapper - NEVER fails
- */
-function createResponse(content: string): NextResponse {
-  return NextResponse.json(
-    {
-      messages: [
-        {
-          role: "assistant",
-          content: content || "No response generated",
-        },
-      ],
-    } as NormalizedResponse,
-    { status: 200 }
-  );
-}
-
-/**
- * Guaranteed error wrapper - NEVER fails
- */
-function createErrorResponse(error: string): NextResponse {
-  return NextResponse.json(
-    {
-      messages: [
-        {
-          role: "assistant",
-          content: `I encountered an error: ${error}. Please try again.`,
-        },
-      ],
-    } as NormalizedResponse,
-    { status: 200 }
-  );
-}
-
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  const startTime = Date.now();
+  
   try {
     console.log('[Knowledge] Query started');
     
-    // Parse request
     let body: KnowledgeQueryRequest;
     try {
       body = await req.json();
     } catch (parseError) {
       console.error('[Knowledge] JSON parse error:', parseError);
-      return createErrorResponse('Invalid request format');
+      const envelope = normalizeEnvelope(
+        "I encountered an error: Invalid request format. Please try again.",
+        {
+          success: false,
+          error: "Invalid JSON in request body",
+          latency: Date.now() - startTime,
+        }
+      );
+      return NextResponse.json(envelope, { status: 200 });
     }
     
-    // Accept multiple field names for compatibility
     const prompt = body.prompt || body.message || body.question || '';
 
     if (!prompt.trim()) {
       console.error('[Knowledge] Empty prompt');
-      return createErrorResponse('Please provide a question');
+      const envelope = normalizeEnvelope(
+        "I encountered an error: Please provide a question. Please try again.",
+        {
+          success: false,
+          error: "Empty prompt",
+          latency: Date.now() - startTime,
+        }
+      );
+      return NextResponse.json(envelope, { status: 200 });
     }
 
-    // R2 is not configured - go straight to AI
-    console.log('[Knowledge] Using AI fallback');
+    console.log('[Knowledge] Using AI provider');
     
     try {
       const { getProvider, getProviderApiKey } = await import('@/lib/javari/providers');
@@ -102,31 +74,67 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
       console.log('[Knowledge] Success');
       
-      // GUARANTEE: Return normalized structure
-      return createResponse(response || 'No response generated');
+      const envelope = normalizeEnvelope(response, {
+        success: true,
+        provider: 'anthropic',
+        model: 'claude-3-5-sonnet-20241022',
+        latency: Date.now() - startTime,
+        tokensIn: Math.ceil(prompt.length / 4),
+        tokensOut: Math.ceil(response.length / 4),
+        sources: [
+          {
+            title: 'AI Response',
+            content: response,
+            relevance: 1.0,
+          },
+        ],
+        metadata: {
+          fallbackUsed: true,
+          r2Configured: false,
+        },
+      });
+      
+      return NextResponse.json(envelope, { status: 200 });
       
     } catch (providerError) {
       console.error('[Knowledge] Provider error:', providerError);
-      return createErrorResponse('Failed to generate response');
+      const envelope = normalizeEnvelope(
+        "I encountered an error: Failed to generate response. Please try again.",
+        {
+          success: false,
+          error: providerError instanceof Error ? providerError.message : "Provider error",
+          latency: Date.now() - startTime,
+        }
+      );
+      return NextResponse.json(envelope, { status: 200 });
     }
 
   } catch (error) {
     console.error('[Knowledge] Top-level error:', error);
-    return createErrorResponse(error instanceof Error ? error.message : 'Unknown error');
+    const envelope = normalizeEnvelope(
+      "I encountered an error: Unknown error. Please try again.",
+      {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+        latency: Date.now() - startTime,
+      }
+    );
+    return NextResponse.json(envelope, { status: 200 });
   }
 }
 
-/**
- * GET method
- */
 export async function GET() {
   console.error('[Knowledge] GET request - method not allowed');
-  return createErrorResponse('This endpoint requires POST');
+  const envelope = normalizeEnvelope(
+    "I encountered an error: This endpoint requires POST. Please try again.",
+    {
+      success: false,
+      error: "Method not allowed - use POST",
+    }
+  );
+  return NextResponse.json(envelope, { status: 200 });
 }
 
-/**
- * Other unsupported methods
- */
 export async function PUT() {
   return GET();
 }
