@@ -62,7 +62,8 @@ export default function MessageList({ messages, loading }: Props) {
               <div className="mt-3 pt-3 border-t border-purple-500/30">
                 <div className="text-xs text-purple-300 mb-2">Reasoning Steps:</div>
                 <div className="space-y-2">
-                  {msg.metadata.steps.map((step: any, idx: number) => (
+                  {Array.isArray(msg.metadata?.steps) &&
+                   msg.metadata.steps.map((step: any, idx: number) => (
                     <div key={idx} className="text-sm bg-slate-900/50 p-2 rounded">
                       <div className="text-purple-400">Step {step.step}: {step.action}</div>
                       <div className="text-gray-300 text-xs mt-1">{step.result}</div>

@@ -33,7 +33,7 @@ export default function ChatMessage({ role, content, sources }: ChatMessageProps
         <div className="message-bubble">
           <div className="message-text">{content}</div>
 
-          {sources && sources.length > 0 && (
+          {Array.isArray(sources) && sources.length > 0 && (
             <div className="sources">
               <details>
                 <summary>📚 Knowledge Sources ({sources.length})</summary>
