@@ -17,7 +17,7 @@ import { AIProvider } from '../router/types';
  * - 5xx error detection for failover
  */
 export class AnthropicProvider extends BaseProvider {
-  private model: string = 'claude-3-5-sonnet-20241022';
+  private model: string = 'claude-sonnet-4-20250514';
   protected timeout: number = 20000; // 20s provider timeout < 23s router < 25s chat
 
   getName(): AIProvider {
