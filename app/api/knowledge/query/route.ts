@@ -34,7 +34,10 @@ interface KnowledgeQueryResponse {
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const body: KnowledgeQueryRequest = await req.json();
-    const { prompt, maxResults = 5, threshold = 0.7 } = body;
+    
+    // Accept both 'prompt' and 'message' for compatibility
+    const prompt = body.prompt || (body as any).message;
+    const { maxResults = 5, threshold = 0.7 } = body;
 
     if (!prompt?.trim()) {
       return NextResponse.json(
@@ -44,7 +47,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           fallbackUsed: false,
           error: 'Prompt is required',
         } as KnowledgeQueryResponse,
-        { status: 400 }
+        { status: 200 } // Return 200, not 400
       );
     }
 
