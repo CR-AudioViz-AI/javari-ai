@@ -85,7 +85,7 @@ export function normalizeEnvelope(
       ...options?.metadata,
     },
     provider: options?.provider || "anthropic",
-    model: options?.model || "claude-3-5-sonnet-20241022",
+    model: options?.model || "claude-sonnet-4-20250514",
     latency_ms: options?.latency || 0,
     tokens_in: tokensIn,
     tokens_out: tokensOut,
@@ -97,5 +97,48 @@ export function normalizeEnvelope(
     id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
     success: options?.success !== undefined ? options.success : true,
     error: options?.error || null,
+  };
+}
+
+/**
+ * CRITICAL PATCH: Normalize payload to guaranteed minimum message structure
+ * 
+ * GUARANTEES:
+ * - messages[] is NEVER empty
+ * - messages[0].content is ALWAYS a string
+ * - Prevents UI crashes on undefined access
+ */
+export function normalizePayload(payload: any): any {
+  // Extract messages array
+  let msgArray = Array.isArray(payload?.messages)
+    ? payload.messages
+    : [];
+  
+  // GUARANTEE: messages is never empty
+  if (msgArray.length === 0) {
+    msgArray = [
+      {
+        role: "assistant",
+        content:
+          payload?.content ??
+          payload?.answer ??
+          payload?.error ??
+          "No response available."
+      }
+    ];
+  }
+  
+  // GUARANTEE: All required fields present
+  return {
+    messages: msgArray,
+    sources: Array.isArray(payload?.sources) ? payload.sources : [],
+    results: Array.isArray(payload?.results) ? payload.results : [],
+    answer: payload?.answer || msgArray[0]?.content || "",
+    success: payload?.success !== undefined ? payload.success : false,
+    fallbackUsed: payload?.fallbackUsed !== undefined ? payload.fallbackUsed : true,
+    error: payload?.error || null,
+    metadata: payload?.metadata || {},
+    provider: payload?.provider || "anthropic",
+    model: payload?.model || "claude-sonnet-4-20250514",
   };
 }

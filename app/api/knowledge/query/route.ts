@@ -4,9 +4,12 @@
  * 
  * Since frontend is minified and can't be changed,
  * this endpoint receives the message and forwards it to chat logic.
+ * 
+ * CRITICAL PATCH: Uses normalizePayload to guarantee minimum message structure
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { normalizePayload } from "@/lib/normalize-envelope";
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -20,13 +23,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     if (!message.trim()) {
       console.error('[Knowledge/Proxy] Empty message');
-      return NextResponse.json({
-        messages: [],
-        sources: [],
-        answer: "",
+      
+      // CRITICAL: Use normalizePayload to guarantee structure
+      const normalized = normalizePayload({
+        content: "Please provide a message",
         success: false,
         fallbackUsed: true,
-      }, { status: 200 });
+        error: "Empty message"
+      });
+      
+      return NextResponse.json(normalized, { status: 200 });
     }
 
     // ACT AS CHAT PROXY - Call chat directly
@@ -44,42 +50,43 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     console.log('[Knowledge/Proxy] Success, returning chat response');
     
-    // Return in the format frontend expects from knowledge query
-    return NextResponse.json({
-      messages: [{
-        role: "assistant",
-        content: response || "No response generated"
-      }],
+    // CRITICAL: Use normalizePayload to guarantee structure
+    const normalized = normalizePayload({
+      content: response || "No response generated",
+      answer: response || "No response generated",
       sources: [{
         title: "AI Response",
         content: response || "No response generated",
         relevance: 1.0
       }],
-      answer: response || "No response generated",
       success: true,
-      fallbackUsed: false, // We handled it directly
-    }, { status: 200 });
+      fallbackUsed: false
+    });
+
+    return NextResponse.json(normalized, { status: 200 });
 
   } catch (error) {
     console.error('[Knowledge/Proxy] Error:', error);
     
-    return NextResponse.json({
-      messages: [],
-      sources: [],
-      answer: "",
+    // CRITICAL: Use normalizePayload to guarantee structure even on error
+    const normalized = normalizePayload({
+      content: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
       success: false,
       fallbackUsed: true,
       error: error instanceof Error ? error.message : "Unknown error"
-    }, { status: 200 });
+    });
+    
+    return NextResponse.json(normalized, { status: 200 });
   }
 }
 
 export async function GET() {
-  return NextResponse.json({
-    messages: [],
-    sources: [],
+  const normalized = normalizePayload({
+    content: "This endpoint requires POST",
     success: false,
-  }, { status: 200 });
+    error: "Method not allowed"
+  });
+  return NextResponse.json(normalized, { status: 200 });
 }
 
 export async function PUT() { return GET(); }
