@@ -20,6 +20,44 @@
 @tailwind components;
 @tailwind utilities;
 
+/* === JAVARI AVATAR ANIMATIONS === */
+
+@keyframes avatarIdle {
+  0% { box-shadow: 0 0 10px #4fa0ff40; }
+  50% { box-shadow: 0 0 16px #4fa0ff70; }
+  100% { box-shadow: 0 0 10px #4fa0ff40; }
+}
+
+@keyframes avatarListening {
+  0% { box-shadow: 0 0 20px #4fd1ff; }
+  50% { box-shadow: 0 0 35px #7fe7ff; }
+  100% { box-shadow: 0 0 20px #4fd1ff; }
+}
+
+@keyframes avatarThinking {
+  0% { box-shadow: 0 0 20px #7f5cff; }
+  50% { box-shadow: 0 0 35px #a68cff; transform: scale(1.015); }
+  100% { box-shadow: 0 0 20px #7f5cff; }
+}
+
+@keyframes avatarSpeaking {
+  0% { box-shadow: 0 0 18px #4cff7a; }
+  50% { box-shadow: 0 0 40px #7cff9b; transform: scale(1.02); }
+  100% { box-shadow: 0 0 18px #4cff7a; }
+}
+
+@keyframes avatarError {
+  0% { box-shadow: 0 0 20px #ff4d4d; }
+  50% { box-shadow: 0 0 40px #ff8080; }
+  100% { box-shadow: 0 0 20px #ff4d4d; }
+}
+
+.animate-avatarIdle { animation: avatarIdle 4s ease-in-out infinite; }
+.animate-avatarListening { animation: avatarListening 1.2s ease-in-out infinite; }
+.animate-avatarThinking { animation: avatarThinking 2.5s ease-in-out infinite; }
+.animate-avatarSpeaking { animation: avatarSpeaking 1.2s ease-in-out infinite; }
+.animate-avatarError { animation: avatarError 0.8s ease-in-out infinite; }
+
 /* ============================================
    DESIGN TOKENS — LIGHT MODE (Default)
    ============================================ */
