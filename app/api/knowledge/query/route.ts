@@ -97,13 +97,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 async function fallbackToChat(prompt: string): Promise<NextResponse> {
   try {
     // Call the router directly
-    const { routeAndExecute } = await import('@/lib/javari/multi-ai/router');
+    const { getProvider, getProviderApiKey } = await import("@/lib/javari/providers");
     
-    const response = await routeAndExecute({
-      message: prompt,
-      mode: 'single',
-      provider: 'anthropic', // Use Claude for knowledge queries
-    });
+    const apiKey = getProviderApiKey("anthropic");
+    const provider = getProvider("anthropic", apiKey);
+    
+    let response = "";
+    for await (const chunk of provider.generateStream(prompt)) {
+      response += chunk;
+    }
 
     return NextResponse.json(
       {
@@ -111,11 +113,11 @@ async function fallbackToChat(prompt: string): Promise<NextResponse> {
         sources: [
           {
             title: 'AI Response',
-            content: response.content || '',
+            content: response || '',
             relevance: 1.0,
           },
         ],
-        answer: response.content,
+        answer: response,
         fallbackUsed: true,
       } as KnowledgeQueryResponse,
       { status: 200 }

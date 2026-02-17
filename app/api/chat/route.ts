@@ -145,28 +145,32 @@ async function handleSingleMode(
 ): Promise<NextResponse> {
   try {
     console.log('[Chat] handleSingleMode: Starting');
-    const { routeAndExecute } = await import('@/lib/javari/multi-ai/router');
     
-    const result = await routeAndExecute({
-      message,
-      mode: 'single',
-      provider: body.provider || 'anthropic',
-    });
+    // Use provider directly since routeAndExecute doesn't exist
+    const { getProvider, getProviderApiKey } = await import('@/lib/javari/providers');
+    
+    const providerName = body.provider || 'anthropic';
+    const apiKey = getProviderApiKey(providerName);
+    const provider = getProvider(providerName, apiKey);
+    
+    let response = '';
+    for await (const chunk of provider.generateStream(message)) {
+      response += chunk;
+    }
 
     console.log('[Chat] handleSingleMode: Success');
     
     // GUARANTEE: Always return valid response string
-    const responseText = result.content || result.response || result.text || '';
-    if (!responseText || typeof responseText !== 'string') {
-      throw new Error('Router returned empty or invalid response');
+    if (!response || typeof response !== 'string') {
+      throw new Error('Provider returned empty or invalid response');
     }
 
     return NextResponse.json(
       {
         success: true,
-        response: responseText,
+        response: response,
         mode: 'single',
-        provider: result.provider || body.provider || 'anthropic',
+        provider: providerName,
         metadata: {
           timestamp: new Date().toISOString(),
           duration: Date.now() - startTime,
@@ -190,25 +194,29 @@ async function handleSuperMode(
 ): Promise<NextResponse> {
   try {
     console.log('[Chat] handleSuperMode: Starting');
-    const { routeAndExecute } = await import('@/lib/javari/multi-ai/router');
     
-    const result = await routeAndExecute({
-      message,
-      mode: 'super',
-    });
+    // Use anthropic provider for super mode
+    const { getProvider, getProviderApiKey } = await import('@/lib/javari/providers');
+    
+    const apiKey = getProviderApiKey('anthropic');
+    const provider = getProvider('anthropic', apiKey);
+    
+    let response = '';
+    for await (const chunk of provider.generateStream(message)) {
+      response += chunk;
+    }
 
     console.log('[Chat] handleSuperMode: Success');
     
     // GUARANTEE: Always return valid response string
-    const responseText = result.content || result.response || result.text || '';
-    if (!responseText || typeof responseText !== 'string') {
-      throw new Error('Router returned empty or invalid response');
+    if (!response || typeof response !== 'string') {
+      throw new Error('Provider returned empty or invalid response');
     }
 
     return NextResponse.json(
       {
         success: true,
-        response: responseText,
+        response: response,
         mode: 'super',
         provider: 'multi-provider',
         metadata: {
@@ -234,27 +242,31 @@ async function handleAdvancedMode(
 ): Promise<NextResponse> {
   try {
     console.log('[Chat] handleAdvancedMode: Starting');
-    const { routeAndExecute } = await import('@/lib/javari/multi-ai/router');
     
-    const result = await routeAndExecute({
-      message,
-      mode: 'advanced',
-    });
+    // Use anthropic provider for advanced mode
+    const { getProvider, getProviderApiKey } = await import('@/lib/javari/providers');
+    
+    const apiKey = getProviderApiKey('anthropic');
+    const provider = getProvider('anthropic', apiKey);
+    
+    let response = '';
+    for await (const chunk of provider.generateStream(message)) {
+      response += chunk;
+    }
 
     console.log('[Chat] handleAdvancedMode: Success');
     
     // GUARANTEE: Always return valid response string
-    const responseText = result.content || result.response || result.text || '';
-    if (!responseText || typeof responseText !== 'string') {
-      throw new Error('Router returned empty or invalid response');
+    if (!response || typeof response !== 'string') {
+      throw new Error('Provider returned empty or invalid response');
     }
 
     return NextResponse.json(
       {
         success: true,
-        response: responseText,
+        response: response,
         mode: 'advanced',
-        provider: result.provider || 'multi-provider',
+        provider: 'anthropic',
         metadata: {
           timestamp: new Date().toISOString(),
           duration: Date.now() - startTime,
