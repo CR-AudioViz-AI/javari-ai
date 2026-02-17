@@ -67,10 +67,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   } catch (error) {
     console.error('[Knowledge] Error:', error);
     
+    // Extract better error message
+    let errorMsg = 'I encountered an error. Please try again.';
+    if (error instanceof Error) {
+      if (error.message.includes('Missing') && error.message.includes('API_KEY')) {
+        errorMsg = 'The AI service is not configured. Please contact support.';
+      } else if (error.message.includes('Anthropic')) {
+        errorMsg = 'The AI service encountered an error. Please try a different mode or contact support.';
+      } else {
+        errorMsg = `Error: ${error.message}`;
+      }
+    }
+    
     return NextResponse.json({
       messages: [{
         role: "assistant",
-        content: "I encountered an error. Please try again."
+        content: errorMsg
       }],
       sources: [],
       answer: "",
