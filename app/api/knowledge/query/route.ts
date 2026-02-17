@@ -1,177 +1,140 @@
 // app/api/knowledge/query/route.ts
 /**
- * Knowledge Query Endpoint - POST ONLY
+ * Knowledge Query API - GUARANTEED MESSAGE STRUCTURE
  * 
- * Queries R2 documentation buckets for relevant information
- * Falls back to router.chat() if no relevant docs found
- * Always returns structured JSON
+ * EVERY response returns:
+ * {
+ *   messages: [
+ *     { role: "assistant", content: "..." }
+ *   ]
+ * }
+ * 
+ * Status: ALWAYS 200
+ * Never returns: undefined, {}, or missing messages field
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
 
 interface KnowledgeQueryRequest {
-  prompt: string;
-  maxResults?: number;
-  threshold?: number;
+  prompt?: string;
+  message?: string;
+  question?: string;
 }
 
-interface KnowledgeQueryResponse {
-  success: boolean;
-  sources: Array<{
-    title: string;
+interface NormalizedResponse {
+  messages: Array<{
+    role: "assistant";
     content: string;
-    relevance: number;
-    bucket?: string;
   }>;
-  answer?: string;
-  fallbackUsed: boolean;
-  error?: string;
+}
+
+/**
+ * Guaranteed response wrapper - NEVER fails
+ */
+function createResponse(content: string): NextResponse {
+  return NextResponse.json(
+    {
+      messages: [
+        {
+          role: "assistant",
+          content: content || "No response generated",
+        },
+      ],
+    } as NormalizedResponse,
+    { status: 200 }
+  );
+}
+
+/**
+ * Guaranteed error wrapper - NEVER fails
+ */
+function createErrorResponse(error: string): NextResponse {
+  return NextResponse.json(
+    {
+      messages: [
+        {
+          role: "assistant",
+          content: `I encountered an error: ${error}. Please try again.`,
+        },
+      ],
+    } as NormalizedResponse,
+    { status: 200 }
+  );
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
-    const body: KnowledgeQueryRequest = await req.json();
+    console.log('[Knowledge] Query started');
     
-    // Accept both 'prompt' and 'message' for compatibility
-    const prompt = body.prompt || (body as any).message;
-    const { maxResults = 5, threshold = 0.7 } = body;
-
-    if (!prompt?.trim()) {
-      return NextResponse.json(
-        {
-          success: false,
-          sources: [], // ALWAYS return array, never undefined
-          answer: '',
-          fallbackUsed: false,
-          error: 'Prompt is required',
-        } as KnowledgeQueryResponse,
-        { status: 200 } // Return 200, not 400
-      );
-    }
-
-    // R2 bucket configuration
-    const R2_BUCKET = process.env.R2_BUCKET;
-    const R2_ENDPOINT = process.env.R2_ENDPOINT;
-    const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
-    const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
-
-    // Check if R2 is configured
-    const r2Configured =
-      R2_BUCKET && R2_ENDPOINT && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY;
-
-    if (!r2Configured) {
-      console.warn('[Knowledge] R2 not configured, using fallback');
-      return await fallbackToChat(prompt);
-    }
-
+    // Parse request
+    let body: KnowledgeQueryRequest;
     try {
-      // Query R2 bucket for relevant documentation
-      // For now, we'll implement a simple fallback since we don't have vector search set up
-      console.log('[Knowledge] R2 configured but vector search not implemented yet');
-      console.log('[Knowledge] Falling back to router.chat()');
+      body = await req.json();
+    } catch (parseError) {
+      console.error('[Knowledge] JSON parse error:', parseError);
+      return createErrorResponse('Invalid request format');
+    }
+    
+    // Accept multiple field names for compatibility
+    const prompt = body.prompt || body.message || body.question || '';
+
+    if (!prompt.trim()) {
+      console.error('[Knowledge] Empty prompt');
+      return createErrorResponse('Please provide a question');
+    }
+
+    // R2 is not configured - go straight to AI
+    console.log('[Knowledge] Using AI fallback');
+    
+    try {
+      const { getProvider, getProviderApiKey } = await import('@/lib/javari/providers');
       
-      return await fallbackToChat(prompt);
-    } catch (error) {
-      console.error('[Knowledge] R2 query failed:', error);
-      return await fallbackToChat(prompt);
+      const apiKey = getProviderApiKey('anthropic');
+      const provider = getProvider('anthropic', apiKey);
+      
+      let response = '';
+      for await (const chunk of provider.generateStream(prompt)) {
+        response += chunk;
+      }
+
+      console.log('[Knowledge] Success');
+      
+      // GUARANTEE: Return normalized structure
+      return createResponse(response || 'No response generated');
+      
+    } catch (providerError) {
+      console.error('[Knowledge] Provider error:', providerError);
+      return createErrorResponse('Failed to generate response');
     }
+
   } catch (error) {
-    console.error('[Knowledge] Request processing error:', error);
-    return NextResponse.json(
-      {
-        success: false,
-        sources: [],
-        fallbackUsed: true,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      } as KnowledgeQueryResponse,
-      { status: 200 }
-    );
+    console.error('[Knowledge] Top-level error:', error);
+    return createErrorResponse(error instanceof Error ? error.message : 'Unknown error');
   }
 }
 
 /**
- * Fallback to router.chat() when R2 query fails or returns no results
- */
-async function fallbackToChat(prompt: string): Promise<NextResponse> {
-  try {
-    // Call the router directly
-    const { getProvider, getProviderApiKey } = await import("@/lib/javari/providers");
-    
-    const apiKey = getProviderApiKey("anthropic");
-    const provider = getProvider("anthropic", apiKey);
-    
-    let response = "";
-    for await (const chunk of provider.generateStream(prompt)) {
-      response += chunk;
-    }
-
-    return NextResponse.json(
-      {
-        success: true,
-        sources: [
-          {
-            title: 'AI Response',
-            content: response || '',
-            relevance: 1.0,
-          },
-        ],
-        answer: response,
-        fallbackUsed: true,
-      } as KnowledgeQueryResponse,
-      { status: 200 }
-    );
-  } catch (error) {
-    console.error('[Knowledge] Fallback to chat failed:', error);
-    return NextResponse.json(
-      {
-        success: false,
-        sources: [],
-        fallbackUsed: true,
-        error: 'Both R2 query and fallback failed',
-      } as KnowledgeQueryResponse,
-      { status: 200 }
-    );
-  }
-}
-
-/**
- * Handle unsupported HTTP methods
+ * GET method
  */
 export async function GET() {
-  return NextResponse.json(
-    {
-      error: 'Method not allowed. Use POST.',
-    },
-    { status: 405 }
-  );
+  console.error('[Knowledge] GET request - method not allowed');
+  return createErrorResponse('This endpoint requires POST');
 }
 
+/**
+ * Other unsupported methods
+ */
 export async function PUT() {
-  return NextResponse.json(
-    {
-      error: 'Method not allowed. Use POST.',
-    },
-    { status: 405 }
-  );
+  return GET();
 }
 
 export async function DELETE() {
-  return NextResponse.json(
-    {
-      error: 'Method not allowed. Use POST.',
-    },
-    { status: 405 }
-  );
+  return GET();
 }
 
 export async function PATCH() {
-  return NextResponse.json(
-    {
-      error: 'Method not allowed. Use POST.',
-    },
-    { status: 405 }
-  );
+  return GET();
 }
