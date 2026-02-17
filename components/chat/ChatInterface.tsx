@@ -133,8 +133,27 @@ export default function ChatInterface({ initialMode = 'single' }: ChatInterfaceP
 
       const data = await res.json();
 
+      // CRITICAL: Safe array guards to prevent UI crashes
+      const safeSources = Array.isArray(data?.sources) ? data.sources : [];
+      const safeResults = Array.isArray(data?.results) ? data.results : [];
+      const safeMessages = Array.isArray(data?.messages) ? data.messages : [];
+      
+      // CRITICAL: Ensure messages array is never empty
+      if (safeMessages.length === 0 && (data?.response || data?.content || data?.answer)) {
+        safeMessages.push({
+          role: "assistant",
+          content: data.response || data.content || data.answer || "No response available."
+        });
+      }
+
       // Ensure we always have a response string
-      const responseContent = data.response || 'No response received';
+      // Priority: data.response > messages[0].content > fallbacks
+      const responseContent = 
+        data.response || 
+        safeMessages[0]?.content || 
+        data.content ||
+        data.answer ||
+        'No response received';
 
       // Create assistant message
       const assistantMessage: ChatMessage = {
@@ -146,6 +165,8 @@ export default function ChatInterface({ initialMode = 'single' }: ChatInterfaceP
         mode: useAutonomous ? 'roadmap' : (data.mode || mode),
         metadata: {
           ...(data.metadata || {}),
+          sources: safeSources,
+          results: safeResults,
           ...(useAutonomous ? {
             autonomous: true,
             files: data.files || [],
