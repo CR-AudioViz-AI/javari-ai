@@ -1,20 +1,4 @@
 // app/api/test-providers/route.ts
-/**
- * PROVIDER HEALTH & FAILOVER TEST ENDPOINT - COMPREHENSIVE CERTIFICATION
- * 
- * Tests all registered providers for:
- * - API connectivity
- * - Streaming functionality  
- * - Error handling
- * - Timeout compliance (20s < 23s < 25s)
- * - Cost estimation
- * - Model availability
- * - Failover behavior
- */
-// Diagnostic endpoint to test AI provider connectivity
-// Timestamp: 2025-12-12 10:55 AM EST
-// Version: 1.1 - Updated models and API key order
-
 import { NextResponse } from 'next/server';
 
 interface TestResult {
@@ -40,24 +24,24 @@ async function testClaude(): Promise<TestResult> {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-3-5-sonnet-20241022',
+        model: 'claude-3-5-haiku-20241022',
         max_tokens: 50,
         messages: [{ role: 'user', content: 'Say "Claude works!" in 3 words or less.' }]
       })
     });
 
     const latencyMs = Date.now() - start;
-    
+
     if (!res.ok) {
       const errorText = await res.text();
       return { status: 'error', httpStatus: res.status, message: errorText.substring(0, 200), latencyMs };
     }
 
     const data = await res.json();
-    return { 
-      status: 'success', 
+    return {
+      status: 'success',
       response: data.content?.[0]?.text || 'No response',
-      model: 'claude-3-5-sonnet-20241022',
+      model: 'claude-3-5-haiku-20241022',
       latencyMs
     };
   } catch (error: any) {
@@ -92,8 +76,8 @@ async function testOpenAI(): Promise<TestResult> {
     }
 
     const data = await res.json();
-    return { 
-      status: 'success', 
+    return {
+      status: 'success',
       response: data.choices?.[0]?.message?.content || 'No response',
       model: 'gpt-4-turbo-preview',
       latencyMs
@@ -116,7 +100,6 @@ async function testPerplexity(): Promise<TestResult> {
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        // FIXED v4.2: Updated from deprecated 'llama-3.1-sonar-large-128k-online' to 'sonar-pro'
         model: 'sonar-pro',
         messages: [{ role: 'user', content: 'Say "Perplexity works!" in 3 words or less.' }],
         max_tokens: 50
@@ -131,8 +114,8 @@ async function testPerplexity(): Promise<TestResult> {
     }
 
     const data = await res.json();
-    return { 
-      status: 'success', 
+    return {
+      status: 'success',
       response: data.choices?.[0]?.message?.content || 'No response',
       model: 'sonar-pro',
       latencyMs
@@ -169,8 +152,8 @@ async function testMistral(): Promise<TestResult> {
     }
 
     const data = await res.json();
-    return { 
-      status: 'success', 
+    return {
+      status: 'success',
       response: data.choices?.[0]?.message?.content || 'No response',
       model: 'mistral-large-latest',
       latencyMs
@@ -181,9 +164,6 @@ async function testMistral(): Promise<TestResult> {
 }
 
 export async function GET() {
-  console.log('[Javari Diagnostic] Starting provider tests...');
-  
-  // Run all tests in parallel
   const [claude, openai, perplexity, mistral] = await Promise.all([
     testClaude(),
     testOpenAI(),
@@ -193,13 +173,8 @@ export async function GET() {
 
   const results = {
     timestamp: new Date().toISOString(),
-    version: '5.0',
-    tests: {
-      claude,
-      openai,
-      perplexity,
-      mistral
-    },
+    version: '5.1',
+    tests: { claude, openai, perplexity, mistral },
     summary: {
       total: 4,
       success: [claude, openai, perplexity, mistral].filter(t => t.status === 'success').length,
@@ -213,10 +188,5 @@ export async function GET() {
     }
   };
 
-  console.log('[Javari Diagnostic] Results:', JSON.stringify(results.summary));
-  
   return NextResponse.json(results);
 }
-// Deployment trigger: 1771256525
-// Final deployment: 1771256929
-// Production deployment: 1771258134
