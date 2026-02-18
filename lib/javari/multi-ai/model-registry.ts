@@ -123,7 +123,7 @@ export const MODEL_REGISTRY: Record<string, ModelMetadata> = {
     capabilities: { reasoning: 7, coding: 7, analysis: 8, speed: 10 },
     limits: { rpm: 15, tpm: 1000000, contextWindow: 1000000 },
     pricing: { inputPerMillion: 0.00, outputPerMillion: 0.00 },
-    available: true,
+    available: false, // provider not implemented
     fallbackPriority: 1
   },
   '-pro': {
@@ -136,7 +136,7 @@ export const MODEL_REGISTRY: Record<string, ModelMetadata> = {
     capabilities: { reasoning: 8, coding: 7, analysis: 8, speed: 6 },
     limits: { rpm: 360, tpm: 4000000, contextWindow: 2000000 },
     pricing: { inputPerMillion: 1.25, outputPerMillion: 5.00 },
-    available: true,
+    available: false, // provider not implemented
     fallbackPriority: 6
   },
   
