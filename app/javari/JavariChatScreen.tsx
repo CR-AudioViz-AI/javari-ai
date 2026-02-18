@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useCallback } from "react";
+import { useCallback } from "react";
 import { useJavariState } from "./state/useJavariState";
 import { useJavariSettings } from "./state/useJavariSettings";
 import MessageFeed from "./components/MessageFeed/MessageFeed";
@@ -8,7 +8,7 @@ import ChatInput from "./components/Input/ChatInput";
 import VoiceInput from "./components/Input/VoiceInput";
 import UploadZone from "./components/Input/UploadZone";
 import VoiceOutput from "./components/Input/VoiceOutput";
-import { RealtimeClient } from "@/lib/javari/realtime/realtime-client";
+import type { RealtimeClient } from "@/lib/javari/realtime/realtime-client";
 
 export default function JavariChatScreen() {
   const {
@@ -23,28 +23,32 @@ export default function JavariChatScreen() {
 
   const { avatarEnabled, voiceEnabled, realtimeEnabled } = useJavariSettings();
 
-  // Realtime client ref — shared with AvatarContainer via window ref
-  const realtimeRef = useRef<RealtimeClient | null>(null);
-  // Accumulate realtime text deltas into a full reply
-  const realtimeBufRef = useRef<string>("");
-
   const handleSend = useCallback(
     async (content: string) => {
       addUserMessage(content);
       setStreaming(true);
 
-      // ── PATH A: Realtime WebSocket (when enabled + connected) ────────────
-      const rt = realtimeRef.current;
+      // ── PATH A: OpenAI Realtime (when connected) ────────────────────────
+      const rt = typeof window !== "undefined"
+        ? (window as unknown as Record<string, unknown>).__javariRT__ as RealtimeClient | null
+        : null;
+
       if (realtimeEnabled && rt?.isConnected()) {
-        realtimeBufRef.current = "";
+        let rtBuf = "";
+
         rt.onTextDelta = (chunk: string) => {
-          realtimeBufRef.current += chunk;
-          if (avatarEnabled && voiceEnabled) setPendingSpeech(chunk);
+          rtBuf += chunk;
+          // Pipe each chunk to voice for streaming TTS
+          if (avatarEnabled && voiceEnabled) {
+            setPendingSpeech(chunk);
+          }
         };
+
         rt.onResponseCompleted = (full: string) => {
-          addAssistantMessage(full || realtimeBufRef.current);
+          addAssistantMessage(full || rtBuf);
           setStreaming(false);
         };
+
         rt.sendText(content);
         return;
       }
@@ -63,7 +67,7 @@ export default function JavariChatScreen() {
 
         if (!res.ok) {
           addAssistantMessage(
-            "I\'m Javari — something went wrong. Please try again."
+            "I\'m Javari — something went wrong on my end. Please try again."
           );
           return;
         }
