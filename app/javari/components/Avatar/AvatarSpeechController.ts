@@ -14,7 +14,34 @@ export class AvatarSpeechController {
     this.onStateChange = onStateChange;
   }
 
-  setEnabled(enabled: boolean) {
+  // ── Public state transition methods ────────────────────────────────────────
+  thinking(): void {
+    if (this.enabled) this.onStateChange("thinking");
+  }
+
+  speaking(): void {
+    if (this.enabled) this.onStateChange("speaking");
+  }
+
+  idle(): void {
+    this.onStateChange("idle");
+  }
+
+  // ── Convenience aliases ────────────────────────────────────────────────────
+  setListening(): void {
+    if (this.enabled) this.onStateChange("listening");
+  }
+
+  setThinking(): void {
+    this.thinking();
+  }
+
+  setIdle(): void {
+    this.idle();
+  }
+
+  // ── Voice playback ─────────────────────────────────────────────────────────
+  setEnabled(enabled: boolean): void {
     this.enabled = enabled;
     if (!enabled) {
       this.stop();
@@ -24,8 +51,7 @@ export class AvatarSpeechController {
 
   async speakText(text: string): Promise<void> {
     if (!this.enabled) return;
-
-    this.onStateChange("thinking");
+    this.thinking();
 
     try {
       const res = await fetch("/api/javari/voice", {
@@ -36,51 +62,37 @@ export class AvatarSpeechController {
 
       if (!res.ok) {
         console.warn("[AvatarSpeechController] TTS API returned:", res.status);
-        this.onStateChange("idle");
+        this.idle();
         return;
       }
 
       const blob = await res.blob();
       const audioUrl = URL.createObjectURL(blob);
-
-      this.stop(); // stop any current audio
+      this.stop();
 
       this.currentAudio = new Audio(audioUrl);
-
-      this.currentAudio.onplay = () => this.onStateChange("speaking");
+      this.currentAudio.onplay = () => this.speaking();
       this.currentAudio.onended = () => {
-        this.onStateChange("idle");
+        this.idle();
         URL.revokeObjectURL(audioUrl);
         this.currentAudio = null;
       };
       this.currentAudio.onerror = () => {
-        this.onStateChange("idle");
+        this.idle();
         this.currentAudio = null;
       };
 
       await this.currentAudio.play();
     } catch (err) {
       console.error("[AvatarSpeechController] Error:", err);
-      this.onStateChange("idle");
+      this.idle();
     }
   }
 
-  stop() {
+  stop(): void {
     if (this.currentAudio) {
       this.currentAudio.pause();
       this.currentAudio = null;
     }
-  }
-
-  setListening() {
-    if (this.enabled) this.onStateChange("listening");
-  }
-
-  setThinking() {
-    if (this.enabled) this.onStateChange("thinking");
-  }
-
-  setIdle() {
-    this.onStateChange("idle");
   }
 }
