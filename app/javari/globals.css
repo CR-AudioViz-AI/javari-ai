@@ -13,3 +13,38 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ── Javari Avatar State Animations ──────────────────────────────────────── */
+
+.javari-speaking {
+  animation: pulseGlow 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes pulseGlow {
+  from {
+    filter: drop-shadow(0 0 4px #5dd4ff) drop-shadow(0 0 8px rgba(93,212,255,0.4));
+  }
+  to {
+    filter: drop-shadow(0 0 12px #5dd4ff) drop-shadow(0 0 24px rgba(93,212,255,0.7));
+  }
+}
+
+@keyframes avatarIdle {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.95; transform: scale(1.005); }
+}
+
+@keyframes avatarListening {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(59,130,246,0.6)); }
+  50%       { filter: drop-shadow(0 0 14px rgba(59,130,246,0.9)); }
+}
+
+@keyframes avatarThinking {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(99,102,241,0.5)); }
+  50%       { filter: drop-shadow(0 0 16px rgba(99,102,241,0.85)); }
+}
+
+.animate-avatarIdle     { animation: avatarIdle 3s ease-in-out infinite; }
+.animate-avatarListening { animation: avatarListening 1.2s ease-in-out infinite; }
+.animate-avatarThinking  { animation: avatarThinking 1s ease-in-out infinite; }
+.animate-avatarSpeaking  { animation: pulseGlow 0.8s ease-in-out infinite alternate; }
