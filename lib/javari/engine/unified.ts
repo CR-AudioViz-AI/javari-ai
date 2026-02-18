@@ -1,6 +1,7 @@
 import { normalizePayload } from "@/lib/normalize-envelope";
 import { routeRequest, type RoutingContext } from "@/lib/javari/multi-ai/router";
 import { getProvider } from "@/lib/javari/providers";
+import { JAVARI_SYSTEM_PROMPT } from "./systemPrompt";
 import type { Message } from "@/lib/types";
 
 export async function unifiedJavariEngine({
@@ -14,31 +15,41 @@ export async function unifiedJavariEngine({
   context?: Record<string, unknown>;
   files?: unknown[];
 }) {
-  // Persona templates determine tone & behavior
-  const personaPrompts: Record<string, string> = {
-    default: "You are Javari, an advanced AI assistant.",
-    friendly: "You are Javari, warm, friendly, conversational.",
-    developer: "You are Javari, a senior software engineer. Be precise.",
-    executive: "You are Javari, concise, strategic, outcome-driven.",
-    teacher: "You are Javari, patient, clear, educational."
-  };
-
-  const systemMessage: Message = {
+  // Javari identity system prompt — prepended to ALL provider calls.
+  // This ensures every underlying model responds as Javari, not as itself.
+  const javariSystemMessage: Message = {
     role: "system",
-    content: personaPrompts[persona] || personaPrompts.default
+    content: JAVARI_SYSTEM_PROMPT
   };
 
-  // Create full message array
-  const finalMessages: Message[] = [systemMessage, ...messages];
+  // Persona overlay appended after the identity lock
+  const personaOverlays: Record<string, string> = {
+    default: "",
+    friendly: "Tone: warm, conversational, encouraging.",
+    developer: "Tone: precise, technical, engineering-focused.",
+    executive: "Tone: concise, strategic, outcome-driven.",
+    teacher: "Tone: patient, clear, step-by-step educational."
+  };
+
+  const personaOverlay = personaOverlays[persona] ?? "";
+
+  // Build final message array: identity lock → persona → conversation
+  const finalMessages: Message[] = [
+    javariSystemMessage,
+    ...(personaOverlay
+      ? [{ role: "system" as const, content: personaOverlay }]
+      : []),
+    ...messages
+  ];
 
   // Build routing context from the latest user message
   const lastUserMessage = [...messages].reverse().find(m => m.role === "user");
   const routingContext: RoutingContext = {
     prompt: lastUserMessage?.content ?? "",
-    mode: "single",
+    mode: "single"
   };
 
-  // Route to best provider + model using routeRequest
+  // Route to best provider + model
   const routingDecision = routeRequest(routingContext);
   const providerName = routingDecision.selectedModel.provider;
   const modelName = routingDecision.selectedModel.id;
@@ -50,7 +61,7 @@ export async function unifiedJavariEngine({
       messages: [
         {
           role: "assistant",
-          content: "Provider unavailable. Please try again."
+          content: "Javari is temporarily unavailable. Please try again in a moment."
         }
       ],
       success: false,
@@ -58,14 +69,13 @@ export async function unifiedJavariEngine({
     });
   }
 
-  // === STREAMING HOOKS FOR AVATAR STATES ===
+  // Avatar state hooks
   const emitState = (state: string) => {
     console.log("AVATAR_STATE:", state);
   };
 
   emitState("thinking");
 
-  // === GENERATE RESPONSE USING PROVIDER ===
   const response = await provider.generateStream({
     messages: finalMessages,
     model: modelName,
@@ -74,7 +84,6 @@ export async function unifiedJavariEngine({
 
   emitState("speaking");
 
-  // === NORMALIZE OUTPUT FOR UI ===
   const normalized = normalizePayload({
     messages: response.messages,
     model: modelName,
