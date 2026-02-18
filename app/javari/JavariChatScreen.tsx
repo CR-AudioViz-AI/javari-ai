@@ -22,32 +22,39 @@ export default function JavariChatScreen() {
     setStreaming(true);
 
     try {
+      // identity field signals the API layer to enforce Javari persona.
+      // systemPrompt is locked server-side in unified.ts — UI never overrides it.
+      const payload = {
+        messages: [{ role: "user", content }],
+        persona: "default",
+        context: {},
+        files: [],
+        identity: "javari"
+      };
+
       const res = await fetch("/api/javari/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: [{ role: "user", content }],
-          persona: "default",
-          context: {},
-          files: []
-        }),
+        body: JSON.stringify(payload)
       });
 
       if (!res.ok) {
         const errText = await res.text();
-        console.error("Chat API error:", res.status, errText);
-        addAssistantMessage("An error occurred. Please try again.");
+        console.error("Javari chat error:", res.status, errText);
+        addAssistantMessage("Javari encountered an issue. Please try again.");
         return;
       }
 
       const data = await res.json();
-      const reply = data.messages?.find((m: { role: string }) => m.role === "assistant")?.content
-        ?? data.messages?.[0]?.content
-        ?? "No response received.";
+      const reply =
+        data.messages?.find((m: { role: string }) => m.role === "assistant")?.content ??
+        data.messages?.[0]?.content ??
+        "Javari did not return a response.";
+
       addAssistantMessage(reply);
     } catch (err) {
-      console.error("Network error:", err);
-      addAssistantMessage("Network error. Please check your connection.");
+      console.error("Javari network error:", err);
+      addAssistantMessage("Network error. Javari is unable to connect. Please check your connection.");
     } finally {
       setStreaming(false);
     }
