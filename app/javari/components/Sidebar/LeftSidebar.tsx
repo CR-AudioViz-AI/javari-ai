@@ -4,6 +4,7 @@ import ModelRouterPanel from "./ModelRouterPanel";
 import CouncilPanel from "./CouncilPanel";
 import PersonaPanel from "./PersonaPanel";
 import JavariLogo from "../JavariLogo";
+import AvatarModePanel from "./AvatarModePanel";
 
 export default function LeftSidebar() {
   return (
@@ -11,11 +12,12 @@ export default function LeftSidebar() {
       <div className="border-b border-white/10">
         <JavariLogo />
       </div>
-      
+
       <div className="p-4 border-b border-white/10 text-white/70 text-xs tracking-widest">
         JAVARI OS — CONTROL CENTER
       </div>
 
+      <AvatarModePanel />
       <ModelRouterPanel />
       <CouncilPanel />
       <PersonaPanel />
