@@ -21,14 +21,40 @@ export default function JavariChatScreen() {
     addUserMessage(content);
     setStreaming(true);
 
-    const res = await fetch("/api/chat", {
-      method: "POST",
-      body: JSON.stringify({ message: content }),
-    });
+    try {
+      const payload = {
+        messages: [{ role: "user", content }],
+        persona: "default",
+        context: {},
+        files: [],
+        identity: "javari",
+      };
 
-    const data = await res.json();
-    addAssistantMessage(data.messages?.[0]?.content || "");
-    setStreaming(false);
+      const res = await fetch("/api/javari/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error("Chat API error:", res.status, errText);
+        addAssistantMessage("I\'m Javari — something went wrong on my end. Please try again.");
+        return;
+      }
+
+      const data = await res.json();
+      const reply =
+        data.messages?.find((m: { role: string }) => m.role === "assistant")?.content ??
+        data.messages?.[0]?.content ??
+        "No response received.";
+      addAssistantMessage(reply);
+    } catch (err) {
+      console.error("Network error:", err);
+      addAssistantMessage("I\'m Javari — I couldn\'t reach my systems. Please check your connection.");
+    } finally {
+      setStreaming(false);
+    }
   };
 
   return (
