@@ -1,6 +1,7 @@
 "use client";
 
 import { useJavariState } from "./state/useJavariState";
+import { useJavariSettings } from "./state/useJavariSettings";
 import MessageFeed from "./components/MessageFeed/MessageFeed";
 import ChatInput from "./components/Input/ChatInput";
 import VoiceInput from "./components/Input/VoiceInput";
@@ -15,7 +16,10 @@ export default function JavariChatScreen() {
     setStreaming,
     audioUrl,
     setTranscript,
+    setPendingSpeech,
   } = useJavariState();
+
+  const { avatarEnabled, voiceEnabled } = useJavariSettings();
 
   const handleSend = async (content: string) => {
     addUserMessage(content);
@@ -39,19 +43,31 @@ export default function JavariChatScreen() {
       if (!res.ok) {
         const errText = await res.text();
         console.error("Chat API error:", res.status, errText);
-        addAssistantMessage("I\'m Javari — something went wrong on my end. Please try again.");
+        addAssistantMessage(
+          "I\'m Javari — something went wrong on my end. Please try again."
+        );
         return;
       }
 
       const data = await res.json();
       const reply =
-        data.messages?.find((m: { role: string }) => m.role === "assistant")?.content ??
+        data.messages?.find((m: { role: string }) => m.role === "assistant")
+          ?.content ??
+        data.answer ??
         data.messages?.[0]?.content ??
         "No response received.";
+
       addAssistantMessage(reply);
+
+      // Pipe reply to avatar speech if enabled
+      if (avatarEnabled && voiceEnabled && reply) {
+        setPendingSpeech(reply);
+      }
     } catch (err) {
       console.error("Network error:", err);
-      addAssistantMessage("I\'m Javari — I couldn\'t reach my systems. Please check your connection.");
+      addAssistantMessage(
+        "I\'m Javari — I couldn\'t reach my systems. Please check your connection."
+      );
     } finally {
       setStreaming(false);
     }
