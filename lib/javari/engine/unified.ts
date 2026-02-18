@@ -1,41 +1,36 @@
 import { normalizePayload } from "@/lib/normalize-envelope";
 import { routeRequest, type RoutingContext } from "@/lib/javari/multi-ai/router";
 import { MODEL_REGISTRY } from "@/lib/javari/multi-ai/model-registry";
-import { getProvider } from "@/lib/javari/providers";
+import { getProvider, getProviderApiKey } from "@/lib/javari/providers";
 import { JAVARI_SYSTEM_PROMPT } from "./systemPrompt";
 import type { Message } from "@/lib/types";
+import type { AIProvider } from "@/lib/javari/router/types";
 
 // Providers with confirmed working implementations.
-// Routing is constrained to this list — unimplemented providers (google, etc.)
-// are excluded to prevent "Provider X not implemented" runtime errors.
-const IMPLEMENTED_PROVIDERS = new Set(["openai", "anthropic", "groq", "mistral", "openrouter"]);
+const IMPLEMENTED_PROVIDERS = new Set<string>(["openai", "anthropic", "groq", "mistral", "openrouter"]);
+
+// Priority fallback chain when router selects an unimplemented provider
+const FALLBACK_CHAIN: Array<{ provider: AIProvider; model: string }> = [
+  { provider: "anthropic", model: "claude-3-5-haiku-20241022" },
+  { provider: "openai",    model: "gpt-4o-mini" },
+  { provider: "mistral",   model: "mistral-large-latest" },
+  { provider: "groq",      model: "llama3-8b-8192" }
+];
 
 /**
- * Select the best available model from implemented providers only.
- * Falls back through priority order: anthropic → openai → groq → mistral → openrouter
+ * Try each provider in the fallback chain until one works.
+ * Returns the first provider+key pair that resolves successfully.
  */
-function selectImplementedModel(): { providerName: string; modelName: string } {
-  // Prefer claude-3-5-haiku as primary — confirmed working
-  const preferred = [
-    { provider: "anthropic", model: "claude-3-5-haiku-20241022" },
-    { provider: "openai",    model: "gpt-4o-mini" },
-    { provider: "groq",      model: "llama3-8b-8192" },
-    { provider: "mistral",   model: "mistral-large-latest" },
-    { provider: "openrouter",model: "openai/gpt-4o-mini" }
-  ];
-
-  // Try registry first — find highest-priority model in implemented set
-  const registryModels = Object.values(MODEL_REGISTRY)
-    .filter(m => IMPLEMENTED_PROVIDERS.has(m.provider) && m.available)
-    .sort((a, b) => a.fallbackPriority - b.fallbackPriority);
-
-  if (registryModels.length > 0) {
-    const best = registryModels[0];
-    return { providerName: best.provider, modelName: best.id };
+function selectFallbackProvider(): { provider: AIProvider; model: string; apiKey: string } | null {
+  for (const candidate of FALLBACK_CHAIN) {
+    try {
+      const apiKey = getProviderApiKey(candidate.provider);
+      if (apiKey) return { ...candidate, apiKey };
+    } catch {
+      // key not set — try next
+    }
   }
-
-  // Hard fallback
-  return { providerName: preferred[0].provider, modelName: preferred[0].model };
+  return null;
 }
 
 export async function unifiedJavariEngine({
@@ -49,14 +44,12 @@ export async function unifiedJavariEngine({
   context?: Record<string, unknown>;
   files?: unknown[];
 }) {
-  // Javari identity lock — prepended to ALL provider calls.
-  // Every underlying model responds as Javari, never as itself.
+  // Javari identity lock — all providers respond as Javari
   const javariSystemMessage: Message = {
     role: "system",
     content: JAVARI_SYSTEM_PROMPT
   };
 
-  // Persona overlay
   const personaOverlays: Record<string, string> = {
     default: "",
     friendly: "Tone: warm, conversational, encouraging.",
@@ -69,13 +62,11 @@ export async function unifiedJavariEngine({
 
   const finalMessages: Message[] = [
     javariSystemMessage,
-    ...(personaOverlay
-      ? [{ role: "system" as const, content: personaOverlay }]
-      : []),
+    ...(personaOverlay ? [{ role: "system" as const, content: personaOverlay }] : []),
     ...messages
   ];
 
-  // Route — then validate provider is implemented before loading
+  // Route to best model
   const lastUserMessage = [...messages].reverse().find(m => m.role === "user");
   const routingContext: RoutingContext = {
     prompt: lastUserMessage?.content ?? "",
@@ -83,38 +74,44 @@ export async function unifiedJavariEngine({
   };
 
   const routingDecision = routeRequest(routingContext);
-  let providerName = routingDecision.selectedModel.provider;
+  let providerName = routingDecision.selectedModel.provider as AIProvider;
   let modelName = routingDecision.selectedModel.id;
 
-  // If router selected an unimplemented provider, fall back to known-good selection
+  // If router selected an unimplemented provider, fall back
   if (!IMPLEMENTED_PROVIDERS.has(providerName)) {
-    console.warn(`[Javari] Router selected unimplemented provider "${providerName}" — falling back`);
-    const fallback = selectImplementedModel();
-    providerName = fallback.providerName;
-    modelName = fallback.modelName;
-  }
-
-  const provider = await getProvider(providerName);
-  if (!provider) {
-    // Last resort: try anthropic directly
-    const lastResort = await getProvider("anthropic");
-    if (!lastResort) {
+    console.warn(`[Javari] Router selected unimplemented provider "${providerName}" — using fallback`);
+    const fallback = selectFallbackProvider();
+    if (!fallback) {
       return normalizePayload({
-        messages: [{ role: "assistant", content: "Javari is temporarily unavailable. Please try again in a moment." }],
+        messages: [{ role: "assistant", content: "Javari is temporarily unavailable. No providers are configured." }],
         success: false,
-        error: "No provider available"
+        error: "No implemented providers available"
       });
     }
-    providerName = "anthropic";
-    modelName = "claude-3-5-haiku-20241022";
-    const response = await lastResort.generateStream({ messages: finalMessages, model: modelName, files });
-    return normalizePayload({
-      messages: response.messages,
-      model: modelName,
-      provider: providerName,
-      metadata: { tokens: response.tokens, latency: response.latency, reasoning: [], sources: [], cost: null }
-    });
+    providerName = fallback.provider;
+    modelName = fallback.model;
   }
+
+  // Get API key — if missing for routed provider, fall back
+  let apiKey: string;
+  try {
+    apiKey = getProviderApiKey(providerName);
+  } catch {
+    console.warn(`[Javari] API key missing for "${providerName}" — using fallback`);
+    const fallback = selectFallbackProvider();
+    if (!fallback) {
+      return normalizePayload({
+        messages: [{ role: "assistant", content: "Javari is temporarily unavailable. API keys are not configured." }],
+        success: false,
+        error: "API key not configured"
+      });
+    }
+    providerName = fallback.provider;
+    modelName = fallback.model;
+    apiKey = fallback.apiKey;
+  }
+
+  const provider = getProvider(providerName, apiKey);
 
   const emitState = (state: string) => console.log("AVATAR_STATE:", state);
 
