@@ -1,12 +1,18 @@
 import { normalizePayload } from "@/lib/normalize-envelope";
-import { multiAIRouter } from "@/lib/javari/multi-ai/router";
+import { routeRequest, type RoutingContext } from "@/lib/javari/multi-ai/router";
 import { getProvider } from "@/lib/javari/providers";
 import type { Message } from "@/lib/types";
+
 export async function unifiedJavariEngine({
   messages = [],
   persona = "default",
   context = {},
   files = []
+}: {
+  messages?: Message[];
+  persona?: string;
+  context?: Record<string, unknown>;
+  files?: unknown[];
 }) {
   // Persona templates determine tone & behavior
   const personaPrompts: Record<string, string> = {
@@ -16,14 +22,27 @@ export async function unifiedJavariEngine({
     executive: "You are Javari, concise, strategic, outcome-driven.",
     teacher: "You are Javari, patient, clear, educational."
   };
-  const systemMessage = {
+
+  const systemMessage: Message = {
     role: "system",
     content: personaPrompts[persona] || personaPrompts.default
   };
+
   // Create full message array
   const finalMessages: Message[] = [systemMessage, ...messages];
-  // Multi-AI router selects best provider & model
-  const { providerName, modelName } = await multiAIRouter(finalMessages);
+
+  // Build routing context from the latest user message
+  const lastUserMessage = [...messages].reverse().find(m => m.role === "user");
+  const routingContext: RoutingContext = {
+    prompt: lastUserMessage?.content ?? "",
+    mode: "single",
+  };
+
+  // Route to best provider + model using routeRequest
+  const routingDecision = routeRequest(routingContext);
+  const providerName = routingDecision.selectedModel.provider;
+  const modelName = routingDecision.selectedModel.id;
+
   // Load provider instance
   const provider = await getProvider(providerName);
   if (!provider) {
@@ -38,21 +57,23 @@ export async function unifiedJavariEngine({
       error: "Missing provider instance"
     });
   }
+
   // === STREAMING HOOKS FOR AVATAR STATES ===
-  // These hooks power: listening → thinking → speaking animation
   const emitState = (state: string) => {
-    // Future:
-    // SSE or WebSocket broadcast to avatar state manager
     console.log("AVATAR_STATE:", state);
   };
+
   emitState("thinking");
+
   // === GENERATE RESPONSE USING PROVIDER ===
   const response = await provider.generateStream({
     messages: finalMessages,
     model: modelName,
     files
   });
+
   emitState("speaking");
+
   // === NORMALIZE OUTPUT FOR UI ===
   const normalized = normalizePayload({
     messages: response.messages,
@@ -66,6 +87,7 @@ export async function unifiedJavariEngine({
       cost: response.cost || null
     }
   });
+
   emitState("idle");
   return normalized;
 }
