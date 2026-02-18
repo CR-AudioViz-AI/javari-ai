@@ -1,6 +1,6 @@
 import { normalizePayload } from "@/lib/normalize-envelope";
 import { routeRequest, type RoutingContext } from "@/lib/javari/multi-ai/router";
-import { getProvider } from "@/lib/javari/providers";
+import { getProvider, getProviderApiKey } from "@/lib/javari/providers";
 import { JAVARI_SYSTEM_PROMPT } from "./systemPrompt";
 import type { Message } from "@/lib/types";
 
@@ -51,51 +51,75 @@ export async function unifiedJavariEngine({
   const providerName = routingDecision.selectedModel.provider;
   const modelName = routingDecision.selectedModel.id;
 
-  // Load provider instance
-  const provider = await getProvider(providerName);
-  if (!provider) {
-    return normalizePayload({
-      messages: [
-        {
-          role: "assistant",
-          content: "I\'m Javari — I\'m temporarily unavailable. Please try again in a moment."
-        }
-      ],
-      success: false,
-      error: "Missing provider instance"
-    });
+  // Get API key for selected provider
+  let apiKey: string;
+  try {
+    apiKey = getProviderApiKey(providerName as Parameters<typeof getProviderApiKey>[0]);
+  } catch {
+    // Fallback to anthropic if selected provider key is missing
+    try {
+      apiKey = getProviderApiKey("anthropic");
+      const fallbackProvider = getProvider("anthropic", apiKey);
+      return runProvider(fallbackProvider, "claude-3-5-haiku-20241022", finalMessages, "anthropic", files);
+    } catch {
+      return normalizePayload({
+        messages: [{ role: "assistant", content: "I'm Javari — no AI providers are currently available. Please check API keys." }],
+        success: false,
+        error: "No provider keys available"
+      });
+    }
   }
 
-  // === AVATAR STATE HOOKS ===
+  // Load provider instance
+  const provider = getProvider(providerName as Parameters<typeof getProvider>[0], apiKey);
+
+  return runProvider(provider, modelName, finalMessages, providerName, files);
+}
+
+async function runProvider(
+  provider: ReturnType<typeof getProvider>,
+  modelName: string,
+  finalMessages: Message[],
+  providerName: string,
+  files: unknown[]
+) {
   const emitState = (state: string) => {
     console.log("AVATAR_STATE:", state);
   };
 
   emitState("thinking");
 
-  // === GENERATE RESPONSE ===
-  const response = await provider.generateStream({
-    messages: finalMessages,
-    model: modelName,
-    files
-  });
+  try {
+    const response = await provider.generateStream({
+      messages: finalMessages,
+      model: modelName,
+      files
+    });
 
-  emitState("speaking");
+    emitState("speaking");
 
-  // === NORMALIZE OUTPUT ===
-  const normalized = normalizePayload({
-    messages: response.messages,
-    model: modelName,
-    provider: providerName,
-    metadata: {
-      tokens: response.tokens,
-      latency: response.latency,
-      reasoning: response.reasoningSteps || [],
-      sources: response.sources || [],
-      cost: response.cost || null
-    }
-  });
+    const normalized = normalizePayload({
+      messages: response.messages,
+      model: modelName,
+      provider: providerName,
+      metadata: {
+        tokens: response.tokens,
+        latency: response.latency,
+        reasoning: response.reasoningSteps || [],
+        sources: response.sources || [],
+        cost: response.cost || null
+      }
+    });
 
-  emitState("idle");
-  return normalized;
+    emitState("idle");
+    return normalized;
+  } catch (err: unknown) {
+    emitState("idle");
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return normalizePayload({
+      messages: [{ role: "assistant", content: "I'm Javari — I encountered an error processing your request. Please try again." }],
+      success: false,
+      error: message
+    });
+  }
 }
