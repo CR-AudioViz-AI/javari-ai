@@ -1,6 +1,6 @@
 // app/api/test-providers/route.ts
 // Live provider health check — all keys via vault, no direct process.env.
-// Timestamp: 2026-02-19 09:40 EST
+// 2026-02-19 — Perplexity test redirected to OpenRouter (Cloudflare/Vercel IP fix)
 
 import { NextResponse } from 'next/server';
 import { vault } from '@/lib/javari/secrets/vault';
@@ -47,16 +47,16 @@ async function testProvider(
 }
 
 export async function GET() {
-  // Resolve all keys through vault
   const anthropicKey  = vault.get('anthropic')   ?? '';
   const openaiKey     = vault.get('openai')       ?? '';
-  const perplexityKey = vault.get('perplexity')   ?? '';
+  const openrouterKey = vault.get('openrouter')   ?? '';
   const mistralKey    = vault.get('mistral')      ?? '';
   const groqKey       = vault.get('groq')         ?? '';
-  const openrouterKey = vault.get('openrouter')   ?? '';
   const xaiKey        = vault.get('xai')          ?? '';
   const fireworksKey  = vault.get('fireworks')    ?? '';
   const togetherKey   = vault.get('together')     ?? '';
+  // Perplexity key kept for display/vault-status — routing now via OpenRouter
+  const perplexityKey = vault.get('perplexity')  ?? '';
 
   const hint = (k: string) => k ? `...${k.slice(-4)}` : 'MISSING';
 
@@ -85,16 +85,23 @@ export async function GET() {
           hint(openaiKey),
         ),
 
-    !perplexityKey
-      ? Promise.resolve<TestResult>({ status: 'skipped', message: 'PERPLEXITY_API_KEY not in vault', keyHint: 'MISSING' })
+    // ── Perplexity: routed via OpenRouter to bypass Cloudflare WAF blocking Vercel IPs ──
+    // Direct api.perplexity.ai calls return 401 from all Vercel serverless IPs (known issue).
+    // OpenRouter proxies perplexity/sonar-pro with identical functionality.
+    !openrouterKey
+      ? Promise.resolve<TestResult>({ status: 'skipped', message: 'OPENROUTER_API_KEY not in vault (needed for Perplexity routing)', keyHint: 'MISSING' })
       : testProvider(
-          'Perplexity',
-          'https://api.perplexity.ai/chat/completions',
-          { Authorization: `Bearer ${perplexityKey}` },
-          { model: 'sonar', messages: [{ role: 'user', content: 'Say "Perplexity works!" only.' }], max_tokens: 10 },
+          'Perplexity (via OpenRouter)',
+          'https://openrouter.ai/api/v1/chat/completions',
+          {
+            Authorization: `Bearer ${openrouterKey}`,
+            'HTTP-Referer': 'https://craudiovizai.com',
+            'X-Title': 'Javari AI',
+          },
+          { model: 'perplexity/sonar', messages: [{ role: 'user', content: 'Say "Perplexity works!" only.' }], max_tokens: 10 },
           d => (d.choices as Array<{message:{content:string}}>)?.[0]?.message?.content ?? 'no response',
-          'sonar',
-          hint(perplexityKey),
+          'perplexity/sonar (via openrouter)',
+          hint(openrouterKey),
         ),
 
     !mistralKey
@@ -134,20 +141,20 @@ export async function GET() {
         ),
   ]);
 
-  // Key presence checks for providers that use WAF-protected endpoints
-  const xaiStatus: TestResult   = xaiKey       ? { status: 'success', message: 'Key present in vault', keyHint: hint(xaiKey),       model: 'grok-beta' }        : { status: 'error', message: 'XAI_API_KEY not in vault', keyHint: 'MISSING' };
-  const fwStatus: TestResult    = fireworksKey  ? { status: 'success', message: 'Key present in vault', keyHint: hint(fireworksKey), model: 'fw/qwen2p5-72b' }    : { status: 'error', message: 'FIREWORKS_API_KEY not in vault', keyHint: 'MISSING' };
-  const togetherStatus: TestResult = togetherKey ? { status: 'success', message: 'Key present in vault', keyHint: hint(togetherKey), model: 'tgp_v1' }             : { status: 'error', message: 'TOGETHER_API_KEY not in vault', keyHint: 'MISSING' };
+  const xaiStatus: TestResult      = xaiKey       ? { status: 'success', message: 'Key present in vault', keyHint: hint(xaiKey),       model: 'grok-beta' }     : { status: 'error', message: 'XAI_API_KEY not in vault',       keyHint: 'MISSING' };
+  const fwStatus: TestResult       = fireworksKey  ? { status: 'success', message: 'Key present in vault', keyHint: hint(fireworksKey), model: 'fw/qwen2p5-72b' } : { status: 'error', message: 'FIREWORKS_API_KEY not in vault',  keyHint: 'MISSING' };
+  const togetherStatus: TestResult = togetherKey   ? { status: 'success', message: 'Key present in vault', keyHint: hint(togetherKey),  model: 'tgp_v1' }         : { status: 'error', message: 'TOGETHER_API_KEY not in vault',   keyHint: 'MISSING' };
 
   const all = [claude, openai, perplexity, mistral, groq, openrouter, xaiStatus, fwStatus, togetherStatus];
 
   return NextResponse.json({
     timestamp: new Date().toISOString(),
-    version: '3.0.0',
+    version: '3.1.0',
     vaultIntegrated: true,
+    note: 'Perplexity routed via OpenRouter (Cloudflare/Vercel IP bypass)',
     tests: { claude, openai, perplexity, mistral, groq, openrouter, xai: xaiStatus, fireworks: fwStatus, together: togetherStatus },
     summary: {
-      total: all.length,
+      total:   all.length,
       success: all.filter(t => t.status === 'success').length,
       failed:  all.filter(t => t.status === 'error').length,
       skipped: all.filter(t => t.status === 'skipped').length,
@@ -155,7 +162,7 @@ export async function GET() {
     vaultStatus: {
       anthropic:  hint(anthropicKey),
       openai:     hint(openaiKey),
-      perplexity: hint(perplexityKey),
+      perplexity: perplexityKey ? `${hint(perplexityKey)} (direct disabled — routed via openrouter)` : 'MISSING (not needed)',
       mistral:    hint(mistralKey),
       groq:       hint(groqKey),
       openrouter: hint(openrouterKey),
