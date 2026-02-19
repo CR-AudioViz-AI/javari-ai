@@ -1,97 +1,80 @@
 // app/api/javari/credentials/status/route.ts
-// Credential Status Diagnostic Endpoint
-// Returns provider health status ONLY — no key values ever returned
-// Called by: Javari health checks, admin dashboard, autonomous monitors
+// Javari Credential Status — diagnostic endpoint
+// Returns provider health ONLY — never key values.
+// GET  ?live=true  → live provider tests
+// GET  (default)  → presence check (fast)
+// POST {secret}   → trigger full sync
+
+export const runtime = "nodejs";    // needs Buffer for JWT decode
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 import { NextResponse } from "next/server";
 import { vaultSync } from "@/lib/javari/secrets/credential-sync";
 import vault from "@/lib/javari/secrets/vault";
 
-export const maxDuration = 60;
-export const dynamic = "force-dynamic";
-
 export async function GET(req: Request): Promise<Response> {
-  try {
-    const url = new URL(req.url);
-    const detailed = url.searchParams.get("detailed") === "true";
-    const live = url.searchParams.get("live") === "true";
+  const url = new URL(req.url);
+  const live = url.searchParams.get("live") === "true";
 
-    if (live) {
-      // Full sync with live provider tests
-      const syncResult = await vaultSync();
+  if (live) {
+    const report = await vaultSync({ liveTests: true });
+    return NextResponse.json({
+      ok: report.validCount >= Math.floor(report.totalProviders * 0.7),
+      timestamp: report.timestamp,
+      summary: {
+        total: report.totalProviders,
+        valid: report.validCount,
+        missing: report.missingCount,
+        issues: report.issueCount,
+      },
+      providers: report.results.map(r => ({
+        provider: r.provider,
+        envVar: r.envVar,
+        status: r.status,
+        latencyMs: r.latencyMs,
+        note: r.note,
+      })),
+      namingMismatches: report.namingMismatches,
+      criticalIssues: report.criticalIssues,
+    });
+  }
 
-      return NextResponse.json({
-        ok: syncResult.validCount >= syncResult.totalProviders * 0.7,
-        timestamp: syncResult.timestamp,
-        summary: {
-          total: syncResult.totalProviders,
-          valid: syncResult.validCount,
-          missing: syncResult.missingCount,
-          issues: syncResult.issueCount,
-        },
-        providers: syncResult.results.map((r) => ({
-          provider: r.provider,
-          envVar: r.envVar,
-          status: r.status,
-          latencyMs: r.latencyMs,
-          note: r.note,
-        })),
-        namingMismatches: syncResult.namingMismatches,
-        criticalIssues: syncResult.criticalIssues,
-      });
-    }
+  // Fast: presence-only
+  const status = vault.status();
+  const entries = Object.entries(status);
+  const presentCount = entries.filter(([,v]) => v.present).length;
 
-    // Fast mode: just check presence
-    const status = vault.status();
-
-    const providers = Object.entries(status).map(([name, info]) => ({
+  return NextResponse.json({
+    ok: presentCount >= Math.floor(entries.length * 0.7),
+    timestamp: new Date().toISOString(),
+    summary: { total: entries.length, present: presentCount, missing: entries.length - presentCount },
+    providers: entries.map(([name, info]) => ({
       provider: name,
       envVar: info.envVar,
-      aliases: detailed ? info.aliases : undefined,
       status: info.present ? "present" : "missing",
-    }));
-
-    const presentCount = providers.filter((p) => p.status === "present").length;
-
-    return NextResponse.json({
-      ok: presentCount >= providers.length * 0.7,
-      timestamp: new Date().toISOString(),
-      summary: {
-        total: providers.length,
-        present: presentCount,
-        missing: providers.length - presentCount,
-      },
-      providers,
-    });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json(
-      { ok: false, error: msg, timestamp: new Date().toISOString() },
-      { status: 500 }
-    );
-  }
+    })),
+  });
 }
 
 export async function POST(req: Request): Promise<Response> {
-  // Trigger a full sync (admin use only)
   try {
-    const body = await req.json().catch(() => ({}));
-    const secret = body?.secret;
-    const expected = process.env.CRON_SECRET || process.env.ADMIN_SETUP_SECRET;
-    if (secret !== expected) {
+    const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+    const secret = body?.secret as string | undefined;
+    const expected = process.env.CRON_SECRET ?? process.env.ADMIN_SETUP_SECRET ?? "";
+    if (!expected || secret !== expected) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    const result = await vaultSync();
+    const report = await vaultSync({ liveTests: true });
     return NextResponse.json({
       success: true,
-      ...result,
-      // Strip any test details that might contain timing side-channels
-      results: result.results.map(r => ({
-        provider: r.provider, status: r.status, latencyMs: r.latencyMs, note: r.note
-      })),
+      timestamp: report.timestamp,
+      summary: { total: report.totalProviders, valid: report.validCount, issues: report.issueCount },
+      providers: report.results.map(r => ({ provider: r.provider, status: r.status, note: r.note })),
+      namingMismatches: report.namingMismatches,
+      criticalIssues: report.criticalIssues,
     });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ success: false, error: msg }, { status: 500 });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: String(err) }, { status: 500 });
   }
 }
