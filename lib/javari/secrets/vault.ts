@@ -12,7 +12,7 @@
  * - vault.getProviderKey() → raw key | null (alias for providers/index.ts)
  * - vault.sync()           → reconciles Vercel ↔ vault, fixes naming mismatches
  *
- * Timestamp: 2026-02-19 09:40 EST
+ * Timestamp: 2026-02-19 09:45 EST — OpenRouter key fixed
  */
 
 import crypto from 'crypto';
