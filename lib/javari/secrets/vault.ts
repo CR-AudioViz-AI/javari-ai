@@ -8,7 +8,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Timestamp: 2026-02-18 16:45 EST
 
-import crypto from "crypto";
+// node: prefix forces Next.js to treat as server-only Node built-in (not webpack-bundled)
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -267,8 +268,8 @@ export function encryptValue(plaintext: string): string | null {
   const key = getMasterKey();
   if (!key) return null; // no encryption key configured
   try {
-    const iv = crypto.randomBytes(IV_LENGTH);
-    const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+    const iv = randomBytes(IV_LENGTH);
+    const cipher = createCipheriv(ALGORITHM, key, iv);
     const encrypted = Buffer.concat([
       cipher.update(plaintext, "utf8"),
       cipher.final(),
@@ -290,7 +291,7 @@ export function decryptValue(ciphertext: string): string | null {
     const iv = buf.subarray(0, IV_LENGTH);
     const tag = buf.subarray(IV_LENGTH, IV_LENGTH + TAG_LENGTH);
     const encrypted = buf.subarray(IV_LENGTH + TAG_LENGTH);
-    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+    const decipher = createDecipheriv(ALGORITHM, key, iv);
     decipher.setAuthTag(tag);
     return decipher.update(encrypted) + decipher.final("utf8");
   } catch {
