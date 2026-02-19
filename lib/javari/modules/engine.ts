@@ -219,19 +219,22 @@ export async function runModuleFactory(
   const validation = validateModule(req, artifacts);
   module = { ...module, validation };
 
-  if (!validation.passed) {
-    pipeline = stepDone(pipeline, 'validate-artifacts', 'failed',
-      `${validation.errors.length} error(s): ${validation.errors.slice(0, 3).map((e) => e.message).join('; ')}`);
-    return { module: { ...module, status: 'failed' } as GeneratedModule, pipeline };
-  }
-  pipeline = stepDone(pipeline, 'validate-artifacts', 'complete');
-
-  // ── Step 5: Version ─────────────────────────────────────────────────────────
+  // ── Step 5: Version (always compute — needed for preview even on fail) ───────
   pipeline = stepStart(pipeline, 'version');
   const previousVersion = await fetchPreviousVersion(req.slug);
   const version = await buildVersion(req.slug, artifacts, previousVersion);
-  module = { ...module, version, status: 'ready' };
+  module = { ...module, version };
   pipeline = stepDone(pipeline, 'version', 'complete');
+
+  // Gate: only fail AFTER computing version so preview can return version info
+  if (!validation.passed) {
+    pipeline = stepDone(pipeline, 'validate-artifacts', 'failed',
+      `${validation.errors.length} error(s): ${validation.errors.slice(0, 3).map((e) => e.message).join('; ')}`);
+    module = { ...module, status: 'failed' };
+    return { module: module as GeneratedModule, pipeline };
+  }
+  pipeline = stepDone(pipeline, 'validate-artifacts', 'complete');
+  module = { ...module, status: 'ready' };
 
   // ── Step 6: Commit ──────────────────────────────────────────────────────────
   const shouldCommit = !opts.dryRun && (opts.forceCommit ?? req.autoCommit ?? false);
