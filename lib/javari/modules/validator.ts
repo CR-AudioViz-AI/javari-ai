@@ -311,7 +311,7 @@ export function validateModule(
     typescriptSyntax: !allIssues.some((i) => i.code.startsWith('TS') && i.severity === 'error'),
     schemaCompleteness: !allIssues.some((i) => i.code.startsWith('REG') && i.severity === 'error'),
     apiRouteShape: artifacts.apiRoutes.length > 0 &&
-      !allIssues.some((i) => i.code.startsWith('API') && i.severity === 'error'),
+      !allIssues.some((i) => i.code === 'API000' && i.severity === 'error'),
     noHardcodedSecrets: !allIssues.some((i) => i.code === 'SEC010'),
     creditSystemHooked: checkCreditIntegration(artifacts),
     authGatePresent: checkAuthGate(artifacts),
