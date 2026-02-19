@@ -1,192 +1,167 @@
 // app/api/test-providers/route.ts
+// Live provider health check — all keys via vault, no direct process.env.
+// Timestamp: 2026-02-19 09:40 EST
+
 import { NextResponse } from 'next/server';
+import { vault } from '@/lib/javari/secrets/vault';
+
+export const dynamic = 'force-dynamic';
 
 interface TestResult {
-  status: 'success' | 'error';
+  status: 'success' | 'error' | 'skipped';
   httpStatus?: number;
   message?: string;
   response?: string;
   model?: string;
   latencyMs?: number;
+  keyHint?: string;
 }
 
-async function testClaude(): Promise<TestResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return { status: 'error', message: 'ANTHROPIC_API_KEY not set' };
-
+async function testProvider(
+  name: string,
+  url: string,
+  headers: Record<string, string>,
+  body: unknown,
+  responsePath: (d: Record<string, unknown>) => string,
+  model: string,
+  keyHint: string,
+): Promise<TestResult> {
   const start = Date.now();
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-3-5-haiku-20241022',
-        max_tokens: 50,
-        messages: [{ role: 'user', content: 'Say "Claude works!" in 3 words or less.' }]
-      })
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15000),
     });
-
     const latencyMs = Date.now() - start;
-
     if (!res.ok) {
-      const errorText = await res.text();
-      return { status: 'error', httpStatus: res.status, message: errorText.substring(0, 200), latencyMs };
+      const text = await res.text();
+      return { status: 'error', httpStatus: res.status, message: text.slice(0, 200), latencyMs, keyHint };
     }
-
-    const data = await res.json();
-    return {
-      status: 'success',
-      response: data.content?.[0]?.text || 'No response',
-      model: 'claude-3-5-haiku-20241022',
-      latencyMs
-    };
-  } catch (error: any) {
-    return { status: 'error', message: error.message, latencyMs: Date.now() - start };
-  }
-}
-
-async function testOpenAI(): Promise<TestResult> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return { status: 'error', message: 'OPENAI_API_KEY not set' };
-
-  const start = Date.now();
-  try {
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-4-turbo-preview',
-        messages: [{ role: 'user', content: 'Say "GPT works!" in 3 words or less.' }],
-        max_tokens: 50
-      })
-    });
-
-    const latencyMs = Date.now() - start;
-
-    if (!res.ok) {
-      const errorText = await res.text();
-      return { status: 'error', httpStatus: res.status, message: errorText.substring(0, 200), latencyMs };
-    }
-
-    const data = await res.json();
-    return {
-      status: 'success',
-      response: data.choices?.[0]?.message?.content || 'No response',
-      model: 'gpt-4-turbo-preview',
-      latencyMs
-    };
-  } catch (error: any) {
-    return { status: 'error', message: error.message, latencyMs: Date.now() - start };
-  }
-}
-
-async function testPerplexity(): Promise<TestResult> {
-  const apiKey = process.env.PERPLEXITY_API_KEY;
-  if (!apiKey) return { status: 'error', message: 'PERPLEXITY_API_KEY not set' };
-
-  const start = Date.now();
-  try {
-    const res = await fetch('https://api.perplexity.ai/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'sonar-pro',
-        messages: [{ role: 'user', content: 'Say "Perplexity works!" in 3 words or less.' }],
-        max_tokens: 50
-      })
-    });
-
-    const latencyMs = Date.now() - start;
-
-    if (!res.ok) {
-      const errorText = await res.text();
-      return { status: 'error', httpStatus: res.status, message: errorText.substring(0, 200), latencyMs };
-    }
-
-    const data = await res.json();
-    return {
-      status: 'success',
-      response: data.choices?.[0]?.message?.content || 'No response',
-      model: 'sonar-pro',
-      latencyMs
-    };
-  } catch (error: any) {
-    return { status: 'error', message: error.message, latencyMs: Date.now() - start };
-  }
-}
-
-async function testMistral(): Promise<TestResult> {
-  const apiKey = process.env.MISTRAL_API_KEY;
-  if (!apiKey) return { status: 'error', message: 'MISTRAL_API_KEY not set' };
-
-  const start = Date.now();
-  try {
-    const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'mistral-large-latest',
-        messages: [{ role: 'user', content: 'Say "Mistral works!" in 3 words or less.' }],
-        max_tokens: 50
-      })
-    });
-
-    const latencyMs = Date.now() - start;
-
-    if (!res.ok) {
-      const errorText = await res.text();
-      return { status: 'error', httpStatus: res.status, message: errorText.substring(0, 200), latencyMs };
-    }
-
-    const data = await res.json();
-    return {
-      status: 'success',
-      response: data.choices?.[0]?.message?.content || 'No response',
-      model: 'mistral-large-latest',
-      latencyMs
-    };
-  } catch (error: any) {
-    return { status: 'error', message: error.message, latencyMs: Date.now() - start };
+    const data = await res.json() as Record<string, unknown>;
+    return { status: 'success', response: responsePath(data), model, latencyMs, keyHint };
+  } catch (e: unknown) {
+    return { status: 'error', message: e instanceof Error ? e.message : String(e), latencyMs: Date.now() - start, keyHint };
   }
 }
 
 export async function GET() {
-  const [claude, openai, perplexity, mistral] = await Promise.all([
-    testClaude(),
-    testOpenAI(),
-    testPerplexity(),
-    testMistral()
+  // Resolve all keys through vault
+  const anthropicKey  = vault.get('anthropic')   ?? '';
+  const openaiKey     = vault.get('openai')       ?? '';
+  const perplexityKey = vault.get('perplexity')   ?? '';
+  const mistralKey    = vault.get('mistral')      ?? '';
+  const groqKey       = vault.get('groq')         ?? '';
+  const openrouterKey = vault.get('openrouter')   ?? '';
+  const xaiKey        = vault.get('xai')          ?? '';
+  const fireworksKey  = vault.get('fireworks')    ?? '';
+  const togetherKey   = vault.get('together')     ?? '';
+
+  const hint = (k: string) => k ? `...${k.slice(-4)}` : 'MISSING';
+
+  const [claude, openai, perplexity, mistral, groq, openrouter] = await Promise.all([
+    !anthropicKey
+      ? Promise.resolve<TestResult>({ status: 'skipped', message: 'ANTHROPIC_API_KEY not in vault', keyHint: 'MISSING' })
+      : testProvider(
+          'Claude',
+          'https://api.anthropic.com/v1/messages',
+          { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01' },
+          { model: 'claude-haiku-4-5-20251001', max_tokens: 30, messages: [{ role: 'user', content: 'Say "Claude works!" only.' }] },
+          d => (d.content as Array<{text: string}>)?.[0]?.text ?? 'no response',
+          'claude-haiku-4-5-20251001',
+          hint(anthropicKey),
+        ),
+
+    !openaiKey
+      ? Promise.resolve<TestResult>({ status: 'skipped', message: 'OPENAI_API_KEY not in vault', keyHint: 'MISSING' })
+      : testProvider(
+          'OpenAI',
+          'https://api.openai.com/v1/chat/completions',
+          { Authorization: `Bearer ${openaiKey}` },
+          { model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'Say "GPT works!" only.' }], max_tokens: 10 },
+          d => (d.choices as Array<{message:{content:string}}>)?.[0]?.message?.content ?? 'no response',
+          'gpt-4o-mini',
+          hint(openaiKey),
+        ),
+
+    !perplexityKey
+      ? Promise.resolve<TestResult>({ status: 'skipped', message: 'PERPLEXITY_API_KEY not in vault', keyHint: 'MISSING' })
+      : testProvider(
+          'Perplexity',
+          'https://api.perplexity.ai/chat/completions',
+          { Authorization: `Bearer ${perplexityKey}` },
+          { model: 'sonar', messages: [{ role: 'user', content: 'Say "Perplexity works!" only.' }], max_tokens: 10 },
+          d => (d.choices as Array<{message:{content:string}}>)?.[0]?.message?.content ?? 'no response',
+          'sonar',
+          hint(perplexityKey),
+        ),
+
+    !mistralKey
+      ? Promise.resolve<TestResult>({ status: 'skipped', message: 'MISTRAL_API_KEY not in vault', keyHint: 'MISSING' })
+      : testProvider(
+          'Mistral',
+          'https://api.mistral.ai/v1/chat/completions',
+          { Authorization: `Bearer ${mistralKey}` },
+          { model: 'mistral-small-latest', messages: [{ role: 'user', content: 'Say "Mistral works!" only.' }], max_tokens: 10 },
+          d => (d.choices as Array<{message:{content:string}}>)?.[0]?.message?.content ?? 'no response',
+          'mistral-small-latest',
+          hint(mistralKey),
+        ),
+
+    !groqKey
+      ? Promise.resolve<TestResult>({ status: 'skipped', message: 'GROQ_API_KEY not in vault', keyHint: 'MISSING' })
+      : testProvider(
+          'Groq',
+          'https://api.groq.com/openai/v1/chat/completions',
+          { Authorization: `Bearer ${groqKey}` },
+          { model: 'llama-3.1-8b-instant', messages: [{ role: 'user', content: 'Say "Groq works!" only.' }], max_tokens: 10 },
+          d => (d.choices as Array<{message:{content:string}}>)?.[0]?.message?.content ?? 'no response',
+          'llama-3.1-8b-instant',
+          hint(groqKey),
+        ),
+
+    !openrouterKey
+      ? Promise.resolve<TestResult>({ status: 'skipped', message: 'OPENROUTER_API_KEY not in vault', keyHint: 'MISSING' })
+      : testProvider(
+          'OpenRouter',
+          'https://openrouter.ai/api/v1/chat/completions',
+          { Authorization: `Bearer ${openrouterKey}`, 'HTTP-Referer': 'https://craudiovizai.com', 'X-Title': 'Javari AI' },
+          { model: 'deepseek/deepseek-chat', messages: [{ role: 'user', content: 'Say "OpenRouter works!" only.' }], max_tokens: 10 },
+          d => (d.choices as Array<{message:{content:string}}>)?.[0]?.message?.content ?? 'no response',
+          'deepseek/deepseek-chat',
+          hint(openrouterKey),
+        ),
   ]);
 
-  const results = {
-    timestamp: new Date().toISOString(),
-    version: '5.1',
-    tests: { claude, openai, perplexity, mistral },
-    summary: {
-      total: 4,
-      success: [claude, openai, perplexity, mistral].filter(t => t.status === 'success').length,
-      failed: [claude, openai, perplexity, mistral].filter(t => t.status === 'error').length
-    },
-    envKeysPresent: {
-      ANTHROPIC_API_KEY: !!process.env.ANTHROPIC_API_KEY,
-      OPENAI_API_KEY: !!process.env.OPENAI_API_KEY,
-      PERPLEXITY_API_KEY: !!process.env.PERPLEXITY_API_KEY,
-      MISTRAL_API_KEY: !!process.env.MISTRAL_API_KEY
-    }
-  };
+  // Key presence checks for providers that use WAF-protected endpoints
+  const xaiStatus: TestResult   = xaiKey       ? { status: 'success', message: 'Key present in vault', keyHint: hint(xaiKey),       model: 'grok-beta' }        : { status: 'error', message: 'XAI_API_KEY not in vault', keyHint: 'MISSING' };
+  const fwStatus: TestResult    = fireworksKey  ? { status: 'success', message: 'Key present in vault', keyHint: hint(fireworksKey), model: 'fw/qwen2p5-72b' }    : { status: 'error', message: 'FIREWORKS_API_KEY not in vault', keyHint: 'MISSING' };
+  const togetherStatus: TestResult = togetherKey ? { status: 'success', message: 'Key present in vault', keyHint: hint(togetherKey), model: 'tgp_v1' }             : { status: 'error', message: 'TOGETHER_API_KEY not in vault', keyHint: 'MISSING' };
 
-  return NextResponse.json(results);
+  const all = [claude, openai, perplexity, mistral, groq, openrouter, xaiStatus, fwStatus, togetherStatus];
+
+  return NextResponse.json({
+    timestamp: new Date().toISOString(),
+    version: '3.0.0',
+    vaultIntegrated: true,
+    tests: { claude, openai, perplexity, mistral, groq, openrouter, xai: xaiStatus, fireworks: fwStatus, together: togetherStatus },
+    summary: {
+      total: all.length,
+      success: all.filter(t => t.status === 'success').length,
+      failed:  all.filter(t => t.status === 'error').length,
+      skipped: all.filter(t => t.status === 'skipped').length,
+    },
+    vaultStatus: {
+      anthropic:  hint(anthropicKey),
+      openai:     hint(openaiKey),
+      perplexity: hint(perplexityKey),
+      mistral:    hint(mistralKey),
+      groq:       hint(groqKey),
+      openrouter: hint(openrouterKey),
+      xai:        hint(xaiKey),
+      fireworks:  hint(fireworksKey),
+      together:   hint(togetherKey),
+    },
+  });
 }
