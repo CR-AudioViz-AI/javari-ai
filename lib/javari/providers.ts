@@ -1,8 +1,9 @@
 // lib/javari/providers.ts
 // Javari Provider Registry — vault-powered, edge-safe.
 // All API key access goes through vault.get() — no direct process.env calls.
+// Timestamp: 2026-02-19 09:50 EST — fixed named import
 
-import vault, { type ProviderName } from "./secrets/vault";
+import { vault, type ProviderName } from "./secrets/vault";
 
 export interface JavariProvider {
   name: string;
@@ -21,7 +22,7 @@ export function getProviderApiKey(
   return key;
 }
 
-// ── SSE stream helpers ────────────────────────────────────────────────────────
+// ── SSE stream helpers ─────────────────────────────────────────────────────
 async function* parseSSEStream(
   body: ReadableStream<Uint8Array>
 ): AsyncGenerator<string> {
@@ -49,7 +50,7 @@ async function* parseSSEStream(
   }
 }
 
-// ── OpenAI ────────────────────────────────────────────────────────────────────
+// ── OpenAI ────────────────────────────────────────────────────────────────
 function createOpenAIProvider(apiKey: string): JavariProvider {
   return {
     name: "openai",
@@ -69,7 +70,7 @@ function createOpenAIProvider(apiKey: string): JavariProvider {
   };
 }
 
-// ── Anthropic ─────────────────────────────────────────────────────────────────
+// ── Anthropic ─────────────────────────────────────────────────────────────
 function createAnthropicProvider(apiKey: string): JavariProvider {
   return {
     name: "anthropic",
@@ -106,7 +107,7 @@ function createAnthropicProvider(apiKey: string): JavariProvider {
   };
 }
 
-// ── Mistral ───────────────────────────────────────────────────────────────────
+// ── Mistral ───────────────────────────────────────────────────────────────
 function createMistralProvider(apiKey: string): JavariProvider {
   return {
     name: "mistral",
@@ -126,7 +127,7 @@ function createMistralProvider(apiKey: string): JavariProvider {
   };
 }
 
-// ── OpenRouter ────────────────────────────────────────────────────────────────
+// ── OpenRouter ────────────────────────────────────────────────────────────
 function createOpenRouterProvider(apiKey: string): JavariProvider {
   return {
     name: "openrouter",
@@ -137,7 +138,12 @@ function createOpenRouterProvider(apiKey: string): JavariProvider {
       messages.push({ role: "user", content: prompt });
       const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
-        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", "HTTP-Referer": "https://javariai.com", "X-Title": "Javari OS" },
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://craudiovizai.com",
+          "X-Title": "Javari AI",
+        },
         body: JSON.stringify({ model, messages, stream: true }),
       });
       if (!res.ok || !res.body) throw new Error(`OpenRouter ${res.status}`);
@@ -146,7 +152,7 @@ function createOpenRouterProvider(apiKey: string): JavariProvider {
   };
 }
 
-// ── Groq ──────────────────────────────────────────────────────────────────────
+// ── Groq ──────────────────────────────────────────────────────────────────
 function createGroqProvider(apiKey: string): JavariProvider {
   return {
     name: "groq",
@@ -177,6 +183,6 @@ export function getProvider(
     case "mistral":    return createMistralProvider(apiKey);
     case "groq":       return createGroqProvider(apiKey);
     case "openrouter": return createOpenRouterProvider(apiKey);
-    default:           return createOpenAIProvider(apiKey); // OpenAI-compat fallback
+    default:           return createOpenAIProvider(apiKey);
   }
 }
