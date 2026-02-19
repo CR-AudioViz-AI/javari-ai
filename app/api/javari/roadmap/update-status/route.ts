@@ -1,11 +1,22 @@
 // app/api/javari/roadmap/update-status/route.ts
-// POST /api/javari/roadmap/update-status — manually update task status from dashboard
-// 2026-02-19 — TASK-P0-006
+// POST /api/javari/roadmap/update-status — update task status directly in javari_tasks
+// 2026-02-19 — TASK-P0-006 (fixed to use javari_tasks table directly)
 
 import { NextRequest, NextResponse } from 'next/server';
-import { stateManager } from '@/lib/roadmap-engine/roadmap-state';
 
 export const dynamic = 'force-dynamic';
+
+function supabaseHeaders() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) throw new Error('Supabase not configured');
+  return { url, headers: {
+    apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || key,
+    Authorization: `Bearer ${key}`,
+    'Content-Type': 'application/json',
+    Prefer: 'return=representation',
+  }};
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -21,52 +32,68 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'taskId and status required' }, { status: 400 });
     }
 
-    const state = await stateManager.loadAsync('javari-os-v2');
-    if (!state) {
-      return NextResponse.json({ success: false, error: 'Roadmap not initialized. POST /api/javari/roadmap/activate first.' }, { status: 404 });
+    const validStatuses = ['pending', 'running', 'complete', 'failed', 'skipped', 'blocked'];
+    if (!validStatuses.includes(status)) {
+      return NextResponse.json({ success: false, error: `Invalid status: ${status}` }, { status: 400 });
     }
 
-    let found = false;
-    const phases = (state.phases || []) as Record<string, unknown>[];
+    const { url, headers } = supabaseHeaders();
 
-    for (const phase of phases) {
-      const tasks = ((phase.tasks || []) as Record<string, unknown>[]);
-      const task = tasks.find((t) => t.id === taskId);
-      if (task) {
-        const prev = task.status;
-        task.status = status;
-        if (note) task.result = note;
-        if (status === 'running' && !task.started_at) {
-          task.started_at = new Date().toISOString();
-        }
-        if (status === 'complete' || status === 'failed') {
-          task.completed_at = new Date().toISOString();
-        }
-        console.info(`[UpdateStatus] Task ${taskId}: ${prev} → ${status}`);
-        found = true;
-        break;
+    const updateBody: Record<string, unknown> = { status };
+    if (note) updateBody.result = note;
+    if (status === 'running') updateBody.started_at = new Date().toISOString();
+    if (status === 'complete' || status === 'failed') {
+      updateBody.completed_at = new Date().toISOString();
+    }
+    updateBody.updated_at = new Date().toISOString();
+
+    // Update the task
+    const res = await fetch(
+      `${url}/rest/v1/javari_tasks?id=eq.${taskId}&roadmap_id=eq.javari-os-v2`,
+      {
+        method: 'PATCH',
+        headers: { ...headers, Prefer: 'return=representation' },
+        body: JSON.stringify(updateBody),
       }
+    );
+
+    if (!res.ok) {
+      const errText = await res.text();
+      return NextResponse.json({ success: false, error: `DB error: ${errText.slice(0, 150)}` }, { status: 500 });
     }
 
-    if (!found) {
-      return NextResponse.json({ success: false, error: `Task ${taskId} not found` }, { status: 404 });
+    const updated = await res.json() as Record<string, unknown>[];
+    if (!updated || updated.length === 0) {
+      return NextResponse.json({
+        success: false,
+        error: `Task ${taskId} not found in roadmap javari-os-v2`,
+      }, { status: 404 });
     }
 
-    // Recompute progress
-    const allTasks = phases.flatMap((p) => ((p.tasks || []) as Record<string, unknown>[]));
+    // Get updated counts
+    const countRes = await fetch(
+      `${url}/rest/v1/javari_tasks?roadmap_id=eq.javari-os-v2&select=id,status`,
+      { headers }
+    );
+    const allTasks = countRes.ok ? await countRes.json() as Record<string, unknown>[] : [];
     const completedCount = allTasks.filter((t) => t.status === 'complete').length;
-    state.completed_count = completedCount;
-    state.progress = allTasks.length > 0 ? (completedCount / allTasks.length) * 100 : 0;
-    state.updated_at = new Date().toISOString();
-    state.phases = phases;
+    const progress = allTasks.length > 0 ? Math.round((completedCount / allTasks.length) * 100) : 0;
 
-    await stateManager.saveAsync(state);
+    // Update roadmap progress
+    await fetch(
+      `${url}/rest/v1/javari_roadmaps?id=eq.javari-os-v2`,
+      {
+        method: 'PATCH',
+        headers: { ...headers, Prefer: 'return=minimal' },
+        body: JSON.stringify({ completed_count: completedCount, progress, updated_at: new Date().toISOString() }),
+      }
+    );
 
     return NextResponse.json({
       success: true,
       taskId,
       status,
-      progress: Math.round(state.progress as number),
+      progress,
       completedTasks: completedCount,
       totalTasks: allTasks.length,
     });
