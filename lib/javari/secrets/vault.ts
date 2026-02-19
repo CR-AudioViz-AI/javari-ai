@@ -1,455 +1,182 @@
 // lib/javari/secrets/vault.ts
-// ─────────────────────────────────────────────────────────────────────────────
-// JAVARI OS — PERMANENT ENCRYPTED CREDENTIAL VAULT
-// ─────────────────────────────────────────────────────────────────────────────
-// AES-256-GCM encryption using CREDENTIAL_ENCRYPTION_KEY (server-side only)
-// Falls back to live process.env if no encryption key is set.
-// NEVER logs or returns raw key strings.
-// ─────────────────────────────────────────────────────────────────────────────
-// Timestamp: 2026-02-18 16:45 EST
+// Javari OS Unified Credential Vault
+// AES-256-GCM encryption, server-side only
+// Never expose raw keys — always use vault.get() / vault.assert()
 
-// node: prefix forces Next.js to treat as server-only Node built-in (not webpack-bundled)
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
 
-// ── Types ────────────────────────────────────────────────────────────────────
-
+// ── Types ─────────────────────────────────────────────────────────────────────
 export type ProviderName =
-  | "openai"
-  | "anthropic"
-  | "mistral"
-  | "groq"
-  | "perplexity"
-  | "elevenlabs"
-  | "openrouter"
-  | "xai"
-  | "deepseek"
-  | "cohere"
-  | "supabase_url"
-  | "supabase_anon_key"
-  | "supabase_service_role"
-  | "github_pat"
-  | "vercel_token"
-  | "stripe_secret"
-  | "stripe_webhook_secret"
-  | "paypal_client_id"
-  | "paypal_client_secret"
-  | "resend"
-  | "cron_secret"
-  | "ingest_secret"
-  | "admin_setup_key"
-  | "credential_encryption_key";
+  | "openai" | "anthropic" | "mistral" | "groq" | "elevenlabs"
+  | "perplexity" | "gemini" | "xai" | "openrouter" | "deepseek"
+  | "cohere" | "fireworks" | "together" | "replicate" | "huggingface"
+  | "supabase_url" | "supabase_anon" | "supabase_service"
+  | "github" | "vercel" | "stripe" | "paypal"
+  | "encryption_key" | "jwt_secret" | "cron_secret";
 
-export type KeyStatus = "ok" | "missing" | "invalid" | "expired";
+export type KeyStatus = "valid" | "missing" | "invalid" | "expired" | "no_credits" | "unchecked";
 
 export interface VaultEntry {
   provider: ProviderName;
-  envVar: string;           // canonical env var name
-  aliasEnvVars?: string[];  // alternate env var names (legacy/alias)
-  description: string;
-  required: boolean;        // will vault.assert() throw if missing?
-  category: "ai_provider" | "infrastructure" | "payment" | "communication" | "internal";
-}
-
-export interface VaultStatus {
-  provider: ProviderName;
-  status: KeyStatus;
   envVar: string;
-  present: boolean;
-  // NOTE: never includes the actual key value
+  aliases: string[];          // all env var names this value is known by
+  status: KeyStatus;
+  lastChecked?: string;       // ISO timestamp
+  note?: string;
 }
 
-// ── Canonical Provider Registry ───────────────────────────────────────────────
-// This is the single source of truth for every credential in Javari OS.
+// ── Provider → Env Var Map ────────────────────────────────────────────────────
+// This is the canonical truth: what env var name each provider actually uses
+const PROVIDER_MAP: Record<ProviderName, { primary: string; aliases: string[] }> = {
+  openai:          { primary: "OPENAI_API_KEY",                  aliases: ["OPENAI_KEY"] },
+  anthropic:       { primary: "ANTHROPIC_API_KEY",               aliases: ["ANTHROPIC_KEY"] },
+  mistral:         { primary: "MISTRAL_API_KEY",                  aliases: [] },
+  groq:            { primary: "GROQ_API_KEY",                     aliases: [] },
+  elevenlabs:      { primary: "ELEVENLABS_API_KEY",               aliases: ["ELEVEN_LABS_API_KEY"] },
+  perplexity:      { primary: "PERPLEXITY_API_KEY",               aliases: [] },
+  gemini:          { primary: "GEMINI_API_KEY",                   aliases: ["GOOGLE_AI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY"] },
+  xai:             { primary: "XAI_API_KEY",                      aliases: [] },
+  openrouter:      { primary: "OPENROUTER_API_KEY",               aliases: [] },
+  deepseek:        { primary: "DEEPSEEK_API_KEY",                 aliases: [] },
+  cohere:          { primary: "COHERE_API_KEY",                   aliases: [] },
+  fireworks:       { primary: "FIREWORKS_API_KEY",                aliases: [] },
+  together:        { primary: "TOGETHER_API_KEY",                 aliases: [] },
+  replicate:       { primary: "REPLICATE_API_KEY",                aliases: ["REPLICATE_API_TOKEN"] },
+  huggingface:     { primary: "HUGGINGFACE_API_KEY",              aliases: [] },
+  supabase_url:    { primary: "NEXT_PUBLIC_SUPABASE_URL",         aliases: ["SUPABASE_URL", "VITE_SUPABASE_URL"] },
+  supabase_anon:   { primary: "NEXT_PUBLIC_SUPABASE_ANON_KEY",   aliases: ["SUPABASE_ANON_KEY", "VITE_SUPABASE_ANON_KEY"] },
+  supabase_service:{ primary: "SUPABASE_SERVICE_ROLE_KEY",        aliases: [] },
+  github:          { primary: "GITHUB_TOKEN",                     aliases: ["GITHUB_WRITE_TOKEN", "GITHUB_READ_TOKEN", "GH_PAT"] },
+  vercel:          { primary: "VERCEL_TOKEN",                     aliases: ["VERCEL_API_TOKEN"] },
+  stripe:          { primary: "STRIPE_SECRET_KEY",                aliases: [] },
+  paypal:          { primary: "PAYPAL_CLIENT_SECRET",             aliases: [] },
+  encryption_key:  { primary: "CREDENTIAL_ENCRYPTION_KEY",        aliases: [] },
+  jwt_secret:      { primary: "JWT_SECRET",                       aliases: ["NEXTAUTH_SECRET"] },
+  cron_secret:     { primary: "CRON_SECRET",                      aliases: [] },
+};
 
-const REGISTRY: VaultEntry[] = [
-  // AI Providers
-  {
-    provider: "openai",
-    envVar: "OPENAI_API_KEY",
-    description: "OpenAI — GPT-4, embeddings, Realtime API, TTS, image gen",
-    required: true,
-    category: "ai_provider",
-  },
-  {
-    provider: "anthropic",
-    envVar: "ANTHROPIC_API_KEY",
-    description: "Anthropic — Claude Sonnet/Opus/Haiku",
-    required: true,
-    category: "ai_provider",
-  },
-  {
-    provider: "mistral",
-    envVar: "MISTRAL_API_KEY",
-    description: "Mistral AI — mistral-large, mistral-medium",
-    required: false,
-    category: "ai_provider",
-  },
-  {
-    provider: "groq",
-    envVar: "GROQ_API_KEY",
-    description: "Groq — llama-3.3-70b, ultra-fast inference",
-    required: false,
-    category: "ai_provider",
-  },
-  {
-    provider: "perplexity",
-    envVar: "PERPLEXITY_API_KEY",
-    description: "Perplexity — sonar-pro, real-time web search",
-    required: false,
-    category: "ai_provider",
-  },
-  {
-    provider: "elevenlabs",
-    envVar: "ELEVENLABS_API_KEY",
-    description: "ElevenLabs — Javari voice synthesis (Charlotte voice)",
-    required: false,
-    category: "ai_provider",
-  },
-  {
-    provider: "openrouter",
-    envVar: "OPENROUTER_API_KEY",
-    description: "OpenRouter — 200+ model meta-router, fallback provider",
-    required: false,
-    category: "ai_provider",
-  },
-  {
-    provider: "xai",
-    envVar: "XAI_API_KEY",
-    description: "xAI — Grok models",
-    required: false,
-    category: "ai_provider",
-  },
-  {
-    provider: "deepseek",
-    envVar: "DEEPSEEK_API_KEY",
-    description: "DeepSeek — deepseek-chat, deepseek-coder",
-    required: false,
-    category: "ai_provider",
-  },
-  {
-    provider: "cohere",
-    envVar: "COHERE_API_KEY",
-    description: "Cohere — Command models, embeddings",
-    required: false,
-    category: "ai_provider",
-  },
-
-  // Infrastructure
-  {
-    provider: "supabase_url",
-    envVar: "NEXT_PUBLIC_SUPABASE_URL",
-    aliasEnvVars: ["SUPABASE_URL"],
-    description: "Supabase project URL (kteobfyferrukqeolofj.supabase.co)",
-    required: true,
-    category: "infrastructure",
-  },
-  {
-    provider: "supabase_anon_key",
-    envVar: "NEXT_PUBLIC_SUPABASE_ANON_KEY",
-    aliasEnvVars: ["SUPABASE_ANON_KEY"],
-    description: "Supabase anonymous/public key for client-side queries",
-    required: true,
-    category: "infrastructure",
-  },
-  {
-    provider: "supabase_service_role",
-    envVar: "SUPABASE_SERVICE_ROLE_KEY",
-    description: "Supabase service role key — admin/server-side only",
-    required: true,
-    category: "infrastructure",
-  },
-  {
-    provider: "github_pat",
-    envVar: "GITHUB_TOKEN",
-    aliasEnvVars: ["GITHUB_PAT", "GH_PAT"],
-    description: "GitHub PAT — repo access, autonomous code pushes",
-    required: true,
-    category: "infrastructure",
-  },
-  {
-    provider: "vercel_token",
-    envVar: "VERCEL_TOKEN",
-    aliasEnvVars: ["VERCEL_API_TOKEN"],
-    description: "Vercel API token — autonomous deploy management",
-    required: false,
-    category: "infrastructure",
-  },
-  {
-    provider: "credential_encryption_key",
-    envVar: "CREDENTIAL_ENCRYPTION_KEY",
-    description: "AES-256 master key for vault encryption (32 hex bytes = 64 chars)",
-    required: false, // degrades gracefully to plaintext env reads
-    category: "internal",
-  },
-
-  // Payment
-  {
-    provider: "stripe_secret",
-    envVar: "STRIPE_SECRET_KEY",
-    description: "Stripe secret key — checkout, subscriptions, payouts",
-    required: false,
-    category: "payment",
-  },
-  {
-    provider: "stripe_webhook_secret",
-    envVar: "STRIPE_WEBHOOK_SECRET",
-    description: "Stripe webhook signing secret",
-    required: false,
-    category: "payment",
-  },
-  {
-    provider: "paypal_client_id",
-    envVar: "PAYPAL_CLIENT_ID",
-    description: "PayPal client ID for payment flows",
-    required: false,
-    category: "payment",
-  },
-  {
-    provider: "paypal_client_secret",
-    envVar: "PAYPAL_CLIENT_SECRET",
-    aliasEnvVars: ["PAYPAL_SECRET"],
-    description: "PayPal client secret",
-    required: false,
-    category: "payment",
-  },
-
-  // Communication
-  {
-    provider: "resend",
-    envVar: "RESEND_API_KEY",
-    description: "Resend — transactional email delivery",
-    required: false,
-    category: "communication",
-  },
-
-  // Internal
-  {
-    provider: "cron_secret",
-    envVar: "CRON_SECRET",
-    description: "Cron auth token for autonomous bot jobs",
-    required: false,
-    category: "internal",
-  },
-  {
-    provider: "ingest_secret",
-    envVar: "INGEST_SECRET",
-    description: "Auth token for /api/javari/ingest-r2 knowledge ingestion",
-    required: false,
-    category: "internal",
-  },
-  {
-    provider: "admin_setup_key",
-    envVar: "ADMIN_SETUP_KEY",
-    aliasEnvVars: ["ADMIN_SETUP_SECRET", "X_ADMIN_KEY"],
-    description: "Admin setup endpoint authorization key",
-    required: false,
-    category: "internal",
-  },
-];
-
-// ── Encryption Helpers ────────────────────────────────────────────────────────
-
+// ── AES-256-GCM Encryption ────────────────────────────────────────────────────
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 16;
-const TAG_LENGTH = 16;
+const AUTH_TAG_LENGTH = 16;
 
-function getMasterKey(): Buffer | null {
-  const raw = process.env.CREDENTIAL_ENCRYPTION_KEY;
-  if (!raw || raw.length < 64) return null;
-  try {
-    return Buffer.from(raw.slice(0, 64), "hex");
-  } catch {
-    return null;
-  }
+function getMasterKey(): Buffer {
+  const raw = process.env.CREDENTIAL_ENCRYPTION_KEY || "";
+  if (!raw) throw new Error("[Vault] CREDENTIAL_ENCRYPTION_KEY not set");
+  // Derive 32-byte key from the stored hex/string
+  const hex = raw.replace(/[^a-fA-F0-9]/g, "");
+  if (hex.length >= 64) return Buffer.from(hex.slice(0, 64), "hex");
+  // Pad if shorter
+  const padded = raw.padEnd(32, "0").slice(0, 32);
+  return Buffer.from(padded, "utf-8");
 }
 
-/** Encrypt plaintext value. Returns base64 ciphertext or null on failure. */
-export function encryptValue(plaintext: string): string | null {
+export function encrypt(plaintext: string): string {
   const key = getMasterKey();
-  if (!key) return null; // no encryption key configured
-  try {
-    const iv = randomBytes(IV_LENGTH);
-    const cipher = createCipheriv(ALGORITHM, key, iv);
-    const encrypted = Buffer.concat([
-      cipher.update(plaintext, "utf8"),
-      cipher.final(),
-    ]);
-    const tag = cipher.getAuthTag();
-    // Layout: iv(16) + tag(16) + ciphertext
-    return Buffer.concat([iv, tag, encrypted]).toString("base64");
-  } catch {
-    return null;
-  }
+  const iv = randomBytes(IV_LENGTH);
+  const cipher = createCipheriv(ALGORITHM, key, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, "utf-8"), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  // Format: iv:authTag:ciphertext (all hex)
+  return `${iv.toString("hex")}:${authTag.toString("hex")}:${encrypted.toString("hex")}`;
 }
 
-/** Decrypt base64 ciphertext. Returns plaintext or null on failure. */
-export function decryptValue(ciphertext: string): string | null {
+export function decrypt(ciphertext: string): string {
   const key = getMasterKey();
-  if (!key) return null;
-  try {
-    const buf = Buffer.from(ciphertext, "base64");
-    const iv = buf.subarray(0, IV_LENGTH);
-    const tag = buf.subarray(IV_LENGTH, IV_LENGTH + TAG_LENGTH);
-    const encrypted = buf.subarray(IV_LENGTH + TAG_LENGTH);
-    const decipher = createDecipheriv(ALGORITHM, key, iv);
-    decipher.setAuthTag(tag);
-    return decipher.update(encrypted) + decipher.final("utf8");
-  } catch {
-    return null;
-  }
+  const [ivHex, authTagHex, encHex] = ciphertext.split(":");
+  if (!ivHex || !authTagHex || !encHex) throw new Error("[Vault] Invalid ciphertext format");
+  const iv = Buffer.from(ivHex, "hex");
+  const authTag = Buffer.from(authTagHex, "hex");
+  const enc = Buffer.from(encHex, "hex");
+  const decipher = createDecipheriv(ALGORITHM, key, iv);
+  decipher.setAuthTag(authTag);
+  return decipher.update(enc).toString("utf-8") + decipher.final("utf-8");
 }
 
-// ── In-Memory Cache (server process lifetime) ─────────────────────────────────
-// Keys are read once at first access and cached. Never serialized to disk.
-
-const _cache = new Map<ProviderName, string>();
-
-// ── Core Vault API ────────────────────────────────────────────────────────────
+// ── Core Vault Functions ──────────────────────────────────────────────────────
 
 /**
- * Get a credential by provider name.
- * Resolution order:
- *   1. In-memory cache
- *   2. Encrypted env var (CREDENTIAL_ENCRYPTION_KEY must be set)
- *   3. Plaintext env var (primary envVar)
- *   4. Plaintext env var (aliasEnvVars in order)
- * Returns null if not found. NEVER throws.
+ * Get a credential value by provider name.
+ * Checks primary env var first, then all aliases.
+ * Returns null if not found (never throws).
  */
 export function vaultGet(provider: ProviderName): string | null {
-  // 1. Cache
-  if (_cache.has(provider)) return _cache.get(provider)!;
+  const map = PROVIDER_MAP[provider];
+  if (!map) return null;
 
-  const entry = REGISTRY.find((e) => e.provider === provider);
-  if (!entry) return null;
+  // Check primary first
+  const primary = process.env[map.primary];
+  if (primary) return primary;
 
-  // 2. Try encrypted variant: envVar + "_ENCRYPTED"
-  const encryptedEnvName = entry.envVar + "_ENCRYPTED";
-  const encryptedVal = process.env[encryptedEnvName];
-  if (encryptedVal) {
-    const decrypted = decryptValue(encryptedVal);
-    if (decrypted) {
-      _cache.set(provider, decrypted);
-      return decrypted;
-    }
-  }
-
-  // 3. Plaintext primary env var
-  const primary = process.env[entry.envVar];
-  if (primary) {
-    _cache.set(provider, primary);
-    return primary;
-  }
-
-  // 4. Alias env vars
-  for (const alias of entry.aliasEnvVars ?? []) {
+  // Check aliases in order
+  for (const alias of map.aliases) {
     const val = process.env[alias];
-    if (val) {
-      _cache.set(provider, val);
-      return val;
-    }
+    if (val) return val;
   }
 
   return null;
 }
 
 /**
- * Assert a credential exists. Throws a descriptive error if missing.
- * Use in server-side routes that cannot function without the key.
+ * Assert a credential exists or throw a detailed error.
+ * Use in critical paths where missing key should fail loudly.
  */
 export function vaultAssert(provider: ProviderName): string {
   const val = vaultGet(provider);
   if (!val) {
-    const entry = REGISTRY.find((e) => e.provider === provider);
-    const envVar = entry?.envVar ?? provider;
+    const map = PROVIDER_MAP[provider];
+    const checked = [map?.primary, ...(map?.aliases || [])].filter(Boolean).join(", ");
     throw new Error(
-      `[Vault] Missing required credential: ${provider} (env: ${envVar}). ` +
-        `Set ${envVar} in Vercel environment variables. ` +
-        `Description: ${entry?.description ?? "unknown"}`
+      `[Vault] Required credential missing: ${provider}. Checked: ${checked}`
     );
   }
   return val;
 }
 
 /**
- * Check status of all credentials. Returns array of status objects.
- * NEVER includes actual key values.
+ * Check if a credential is present (without asserting).
  */
-export function vaultStatus(): VaultStatus[] {
-  return REGISTRY.map((entry) => {
-    const val = vaultGet(entry.provider);
-    return {
-      provider: entry.provider,
-      envVar: entry.envVar,
-      present: !!val,
-      status: val ? "ok" : ("missing" as KeyStatus),
-    };
-  });
+export function vaultHas(provider: ProviderName): boolean {
+  return vaultGet(provider) !== null;
 }
 
 /**
- * Get status for a single provider. Safe to call from diagnostic endpoints.
+ * Get multiple credentials at once. Returns partial record (only found keys).
  */
-export function vaultGetStatus(provider: ProviderName): VaultStatus {
-  const entry = REGISTRY.find((e) => e.provider === provider);
-  if (!entry) {
-    return { provider, envVar: "unknown", present: false, status: "missing" };
+export function vaultGetMany(providers: ProviderName[]): Partial<Record<ProviderName, string>> {
+  const result: Partial<Record<ProviderName, string>> = {};
+  for (const p of providers) {
+    const val = vaultGet(p);
+    if (val) result[p] = val;
   }
-  const val = vaultGet(provider);
-  return {
-    provider,
-    envVar: entry.envVar,
-    present: !!val,
-    status: val ? "ok" : "missing",
-  };
+  return result;
 }
 
 /**
- * Get all registry entries (no values). Safe to expose to diagnostics.
+ * Get the status of all providers (for diagnostics — no key values returned).
  */
-export function vaultRegistry(): VaultEntry[] {
-  return REGISTRY;
+export function vaultStatus(): Record<string, { present: boolean; envVar: string; aliases: string[] }> {
+  const result: Record<string, { present: boolean; envVar: string; aliases: string[] }> = {};
+  for (const [provider, map] of Object.entries(PROVIDER_MAP)) {
+    result[provider] = {
+      present: vaultHas(provider as ProviderName),
+      envVar: map.primary,
+      aliases: map.aliases,
+    };
+  }
+  return result;
 }
 
-/**
- * Clear the in-memory cache. Call if env vars have been updated at runtime.
- */
-export function vaultClearCache(): void {
-  _cache.clear();
-}
-
-/**
- * Convenience: resolve key for a named AI provider.
- * Throws if key is not available and provider is required.
- */
-export function getProviderKey(provider: string): string | null {
-  const providerMap: Record<string, ProviderName> = {
-    openai:     "openai",
-    anthropic:  "anthropic",
-    mistral:    "mistral",
-    groq:       "groq",
-    perplexity: "perplexity",
-    elevenlabs: "elevenlabs",
-    openrouter: "openrouter",
-    xai:        "xai",
-    deepseek:   "deepseek",
-    cohere:     "cohere",
-  };
-  const vaultKey = providerMap[provider.toLowerCase()];
-  if (!vaultKey) return null;
-  return vaultGet(vaultKey);
-}
-
-// ── Named exports for direct import ──────────────────────────────────────────
+// ── Convenience shorthands ────────────────────────────────────────────────────
 export const vault = {
-  get:          vaultGet,
-  assert:       vaultAssert,
-  status:       vaultStatus,
-  getStatus:    vaultGetStatus,
-  registry:     vaultRegistry,
-  clearCache:   vaultClearCache,
-  getProviderKey,
-  encrypt:      encryptValue,
-  decrypt:      decryptValue,
+  get: vaultGet,
+  assert: vaultAssert,
+  has: vaultHas,
+  getMany: vaultGetMany,
+  status: vaultStatus,
+  encrypt,
+  decrypt,
+  PROVIDER_MAP,
 } as const;
 
 export default vault;
