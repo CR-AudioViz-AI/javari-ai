@@ -1,89 +1,143 @@
-// lib/javari/secrets/credential-loader.ts
-// Safe credential access — works in Edge and Node.js runtimes.
-// Imports only vault.ts (edge-safe). No crypto dependency.
+/**
+ * JAVARI CREDENTIAL LOADER
+ * Drop-in replacement for direct process.env access in all provider files.
+ *
+ * Usage:
+ *   // OLD: const key = process.env.OPENAI_API_KEY!
+ *   // NEW:
+ *   import { loadCredential } from '@/lib/javari/secrets/credential-loader'
+ *   const key = loadCredential('openai')
+ *
+ * For typed access with full provider configs:
+ *   import { providers } from '@/lib/javari/secrets/credential-loader'
+ *   const { apiKey, baseUrl } = providers.openai()
+ */
 
-import vault, { type ProviderName } from "./vault";
+import { vault, assertKey, type ProviderName } from './vault';
 
-// ── AI Provider accessors ──────────────────────────────────────────────────────
-export const getOpenAIKey      = () => vault.assert("openai");
-export const getAnthropicKey   = () => vault.assert("anthropic");
-export const getMistralKey     = () => vault.assert("mistral");
-export const getGroqKey        = () => vault.assert("groq");
-export const getElevenLabsKey  = () => vault.assert("elevenlabs");
-export const getPerplexityKey  = () => vault.assert("perplexity");
-export const getGeminiKey      = () => vault.get("gemini") ?? vault.assert("gemini");
-export const getXAIKey         = () => vault.assert("xai");
-export const getOpenRouterKey  = () => vault.assert("openrouter");
-export const getDeepSeekKey    = () => vault.assert("deepseek");
-export const getCohereKey      = () => vault.assert("cohere");
-export const getTogetherKey    = () => vault.assert("together");
-export const getReplicateKey   = () => vault.assert("replicate");
+// ─── Simple loader ─────────────────────────────────────────────────────────
 
-// ── Infrastructure accessors ───────────────────────────────────────────────────
-export const getSupabaseUrl        = () => vault.assert("supabase_url");
-export const getSupabaseAnonKey    = () => vault.assert("supabase_anon");
-export const getSupabaseServiceKey = () => vault.get("supabase_service") ?? null;
-export const getGitHubToken        = () => vault.assert("github");
-export const getVercelToken        = () => vault.assert("vercel");
-export const getStripeKey          = () => vault.get("stripe") ?? null;
+export function loadCredential(provider: ProviderName): string {
+  return assertKey(provider);
+}
 
-// ── Agent-scoped access ────────────────────────────────────────────────────────
-export type AgentName =
-  | "javari" | "claude" | "chatgpt" | "router"
-  | "autonomous-executor" | "voice-subsystem" | "ingest-worker";
+export function loadCredentialOptional(provider: ProviderName): string | null {
+  return vault.get(provider);
+}
 
-const AGENT_SCOPES: Record<AgentName, ProviderName[]> = {
-  "javari": [
-    "openai","anthropic","mistral","groq","gemini","xai","openrouter",
-    "perplexity","cohere","elevenlabs",
-    "supabase_url","supabase_anon","supabase_service","github","vercel",
-  ],
-  "claude":              ["anthropic","supabase_url","supabase_anon"],
-  "chatgpt":             ["openai","supabase_url","supabase_anon"],
-  "router":              ["openai","anthropic","mistral","groq","gemini","xai","openrouter","perplexity","cohere","fireworks","together"],
-  "autonomous-executor": ["openai","anthropic","supabase_url","supabase_anon","supabase_service","github","vercel"],
-  "voice-subsystem":     ["openai","elevenlabs"],
-  "ingest-worker":       ["openai","supabase_url","supabase_anon","supabase_service","github"],
+// ─── Typed provider configs ───────────────────────────────────────────────
+
+export const providers = {
+  openai: () => ({
+    apiKey: assertKey('openai'),
+    baseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
+    defaultModel: process.env.OPENAI_DEFAULT_MODEL ?? 'gpt-4o',
+  }),
+
+  anthropic: () => ({
+    apiKey: assertKey('anthropic'),
+    defaultModel: process.env.ANTHROPIC_DEFAULT_MODEL ?? 'claude-sonnet-4-20250514',
+  }),
+
+  gemini: () => ({
+    apiKey: assertKey('gemini'),
+    defaultModel: process.env.GEMINI_DEFAULT_MODEL ?? 'gemini-1.5-pro',
+  }),
+
+  groq: () => ({
+    apiKey: assertKey('groq'),
+    baseUrl: 'https://api.groq.com/openai/v1',
+    defaultModel: process.env.GROQ_DEFAULT_MODEL ?? 'llama-3.1-70b-versatile',
+  }),
+
+  mistral: () => ({
+    apiKey: assertKey('mistral'),
+    defaultModel: 'mistral-large-latest',
+  }),
+
+  perplexity: () => ({
+    apiKey: assertKey('perplexity'),
+    baseUrl: 'https://api.perplexity.ai',
+    defaultModel: 'sonar',
+  }),
+
+  openrouter: () => ({
+    apiKey: assertKey('openrouter'),
+    baseUrl: 'https://openrouter.ai/api/v1',
+  }),
+
+  xai: () => ({
+    apiKey: assertKey('xai'),
+    baseUrl: 'https://api.x.ai/v1',
+    defaultModel: 'grok-beta',
+  }),
+
+  together: () => ({
+    apiKey: assertKey('together'),
+    baseUrl: 'https://api.together.xyz/v1',
+  }),
+
+  elevenlabs: () => ({
+    apiKey: assertKey('elevenlabs'),
+    baseUrl: 'https://api.elevenlabs.io/v1',
+    defaultVoiceId: process.env.ELEVENLABS_DEFAULT_VOICE_ID ?? 'pNInz6obpgDQGcFmaJgB',
+  }),
+
+  supabase: () => ({
+    url: assertKey('supabase_url'),
+    anonKey: assertKey('supabase_anon'),
+    serviceKey: assertKey('supabase_service'),
+  }),
+
+  stripe: () => ({
+    secretKey: assertKey('stripe'),
+    webhookSecret: assertKey('stripe_webhook'),
+    publishableKey: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? '',
+    proPriceId: vault.get('stripe_pro_price') ?? '',
+    creatorPriceId: vault.get('stripe_creator_price') ?? '',
+  }),
+
+  paypal: () => ({
+    clientId: assertKey('paypal'),
+    clientSecret: assertKey('paypal_secret'),
+    mode: (process.env.PAYPAL_MODE ?? 'live') as 'live' | 'sandbox',
+  }),
+
+  github: () => ({
+    token: assertKey('github'),
+    org: process.env.GITHUB_DEFAULT_OWNER ?? process.env.GITHUB_ORG ?? 'CR-AudioViz-AI',
+    defaultRepo: process.env.GITHUB_DEFAULT_REPO ?? 'javari-ai',
+  }),
+
+  vercel: () => ({
+    token: assertKey('vercel'),
+    teamId: process.env.VERCEL_TEAM_ID ?? 'team_Z0yef7NlFu1coCJWz8UmUdI5',
+    projectId: process.env.VERCEL_PROJECT_ID ?? '',
+  }),
 };
 
-/**
- * Get a single credential for a named agent.
- * Returns null if agent is unknown or not authorized for that provider.
- * Server-side only — never call from client components.
- */
-export function getCredentialForAgent(
-  agentName: AgentName,
-  providerName: ProviderName
-): string | null {
-  const scope = AGENT_SCOPES[agentName];
-  if (!scope) {
-    console.warn(`[CredentialLoader] Unknown agent: "${agentName}"`);
-    return null;
-  }
-  if (!scope.includes(providerName)) {
-    console.warn(`[CredentialLoader] Agent "${agentName}" not authorized for "${providerName}"`);
-    return null;
-  }
-  return vault.get(providerName);
+// ─── Bulk multi-provider loader (for router) ──────────────────────────────
+
+export interface RouterCredentials {
+  openai?: string;
+  anthropic?: string;
+  gemini?: string;
+  groq?: string;
+  mistral?: string;
+  perplexity?: string;
+  openrouter?: string;
+  xai?: string;
+  together?: string;
 }
 
-/**
- * Get all available credentials for an agent as a safe partial record.
- */
-export function getAllCredentialsForAgent(
-  agentName: AgentName
-): Partial<Record<ProviderName, string>> {
-  return vault.getMany(AGENT_SCOPES[agentName] ?? []);
-}
-
-/**
- * Validate that all required credentials for an agent are present.
- */
-export function validateAgentCredentials(
-  agentName: AgentName,
-  required?: ProviderName[]
-): { ok: boolean; missing: string[] } {
-  const scope = required ?? AGENT_SCOPES[agentName] ?? [];
-  const missing = scope.filter(p => !vault.has(p)).map(String);
-  return { ok: missing.length === 0, missing };
+export function loadRouterCredentials(): RouterCredentials {
+  const aiProviders: ProviderName[] = [
+    'openai','anthropic','gemini','groq','mistral','perplexity','openrouter','xai','together'
+  ];
+  const result: RouterCredentials = {};
+  for (const provider of aiProviders) {
+    const key = vault.get(provider);
+    if (key) (result as Record<string, string>)[provider] = key;
+  }
+  return result;
 }
