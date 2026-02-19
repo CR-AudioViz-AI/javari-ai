@@ -1,139 +1,97 @@
 // app/api/javari/credentials/status/route.ts
-// ─────────────────────────────────────────────────────────────────────────────
-// JAVARI OS — CREDENTIAL STATUS DIAGNOSTIC ENDPOINT
-// ─────────────────────────────────────────────────────────────────────────────
-// Returns: provider name, status (ok|missing|invalid|expired)
-// NEVER returns actual key values.
-// Admin-protected: requires X-Admin-Key header or admin_setup_key vault credential.
-// ─────────────────────────────────────────────────────────────────────────────
-// Timestamp: 2026-02-18 16:45 EST
+// Credential Status Diagnostic Endpoint
+// Returns provider health status ONLY — no key values ever returned
+// Called by: Javari health checks, admin dashboard, autonomous monitors
 
-import { NextRequest, NextResponse } from "next/server";
-import { vault } from "@/lib/javari/secrets/vault";
-import { credentialSync } from "@/lib/javari/secrets/credential-sync";
-import { listAgents } from "@/lib/javari/secrets/credential-loader";
+import { NextResponse } from "next/server";
+import { vaultSync } from "@/lib/javari/secrets/credential-sync";
+import vault from "@/lib/javari/secrets/vault";
 
-export const runtime = "nodejs";
+export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
-// ── Auth helper ───────────────────────────────────────────────────────────────
-
-function isAuthorized(req: NextRequest): boolean {
-  // Allow in dev without auth
-  if (process.env.NODE_ENV === "development") return true;
-
-  const adminKey = vault.get("admin_setup_key");
-  const cronSecret = vault.get("cron_secret");
-
-  const headerKey =
-    req.headers.get("x-admin-key") ??
-    req.headers.get("x-api-key") ??
-    req.headers.get("authorization")?.replace("Bearer ", "");
-
-  if (!headerKey) return false;
-
-  // Match against known admin keys
-  if (adminKey && headerKey === adminKey) return true;
-  if (cronSecret && headerKey === cronSecret) return true;
-
-  return false;
-}
-
-// ── GET: Quick status (no live validation) ────────────────────────────────────
-
-export async function GET(req: NextRequest) {
-  if (!isAuthorized(req)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const statuses = vault.status();
-
-  // Group by category
-  const byCategory: Record<string, typeof statuses> = {};
-  for (const s of statuses) {
-    const entry = vault.registry().find((e) => e.provider === s.provider);
-    const category = entry?.category ?? "unknown";
-    if (!byCategory[category]) byCategory[category] = [];
-    byCategory[category].push(s);
-  }
-
-  const summary = {
-    total: statuses.length,
-    ok: statuses.filter((s) => s.status === "ok").length,
-    missing: statuses.filter((s) => s.status === "missing").length,
-    invalid: statuses.filter((s) => s.status === "invalid").length,
-    requiredAll: statuses
-      .filter((s) => vault.registry().find((e) => e.provider === s.provider)?.required)
-      .every((s) => s.status === "ok"),
-  };
-
-  return NextResponse.json({
-    generated: new Date().toISOString(),
-    summary,
-    byCategory,
-    // Safe: no key values returned
-    credentials: statuses.map((s) => ({
-      provider: s.provider,
-      envVar: s.envVar,
-      status: s.status,
-      present: s.present,
-      required: vault.registry().find((e) => e.provider === s.provider)?.required ?? false,
-      description: vault.registry().find((e) => e.provider === s.provider)?.description ?? "",
-    })),
-    agents: listAgents(),
-    note: "Key values are NEVER included in this response.",
-  });
-}
-
-// ── POST: Full sync with live provider validation ─────────────────────────────
-
-export async function POST(req: NextRequest) {
-  if (!isAuthorized(req)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  let body: { liveValidation?: boolean } = {};
+export async function GET(req: Request): Promise<Response> {
   try {
-    body = await req.json();
-  } catch {
-    // no body = defaults ok
-  }
+    const url = new URL(req.url);
+    const detailed = url.searchParams.get("detailed") === "true";
+    const live = url.searchParams.get("live") === "true";
 
-  const liveValidation = body.liveValidation !== false; // default: true
+    if (live) {
+      // Full sync with live provider tests
+      const syncResult = await vaultSync();
 
-  try {
-    const report = await credentialSync(liveValidation);
-
-    return NextResponse.json({
-      generated: new Date().toISOString(),
-      syncReport: {
-        timestamp: report.timestamp,
-        durationMs: report.durationMs,
-        totalProviders: report.totalProviders,
-        ok: report.ok,
-        missing: report.missing,
-        invalid: report.invalid,
-        allRequiredOk: report.allRequiredOk,
-        // Results: no key values
-        results: report.results.map((r) => ({
+      return NextResponse.json({
+        ok: syncResult.validCount >= syncResult.totalProviders * 0.7,
+        timestamp: syncResult.timestamp,
+        summary: {
+          total: syncResult.totalProviders,
+          valid: syncResult.validCount,
+          missing: syncResult.missingCount,
+          issues: syncResult.issueCount,
+        },
+        providers: syncResult.results.map((r) => ({
           provider: r.provider,
           envVar: r.envVar,
           status: r.status,
-          category: r.category,
-          required: r.required,
+          latencyMs: r.latencyMs,
           note: r.note,
-          testedAt: r.testedAt,
         })),
+        namingMismatches: syncResult.namingMismatches,
+        criticalIssues: syncResult.criticalIssues,
+      });
+    }
+
+    // Fast mode: just check presence
+    const status = vault.status();
+
+    const providers = Object.entries(status).map(([name, info]) => ({
+      provider: name,
+      envVar: info.envVar,
+      aliases: detailed ? info.aliases : undefined,
+      status: info.present ? "present" : "missing",
+    }));
+
+    const presentCount = providers.filter((p) => p.status === "present").length;
+
+    return NextResponse.json({
+      ok: presentCount >= providers.length * 0.7,
+      timestamp: new Date().toISOString(),
+      summary: {
+        total: providers.length,
+        present: presentCount,
+        missing: providers.length - presentCount,
       },
-      note: "Key values are NEVER included in this response.",
+      providers,
     });
-  } catch (error: unknown) {
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json(
-      {
-        error: "Sync failed",
-        message: error instanceof Error ? error.message : "unknown error",
-      },
+      { ok: false, error: msg, timestamp: new Date().toISOString() },
       { status: 500 }
     );
+  }
+}
+
+export async function POST(req: Request): Promise<Response> {
+  // Trigger a full sync (admin use only)
+  try {
+    const body = await req.json().catch(() => ({}));
+    const secret = body?.secret;
+    const expected = process.env.CRON_SECRET || process.env.ADMIN_SETUP_SECRET;
+    if (secret !== expected) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const result = await vaultSync();
+    return NextResponse.json({
+      success: true,
+      ...result,
+      // Strip any test details that might contain timing side-channels
+      results: result.results.map(r => ({
+        provider: r.provider, status: r.status, latencyMs: r.latencyMs, note: r.note
+      })),
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    return NextResponse.json({ success: false, error: msg }, { status: 500 });
   }
 }
