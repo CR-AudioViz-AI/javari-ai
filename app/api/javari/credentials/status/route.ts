@@ -1,80 +1,125 @@
-// app/api/javari/credentials/status/route.ts
-// Javari Credential Status — diagnostic endpoint
-// Returns provider health ONLY — never key values.
-// GET  ?live=true  → live provider tests
-// GET  (default)  → presence check (fast)
-// POST {secret}   → trigger full sync
+/**
+ * GET/POST /api/javari/credentials/status
+ *
+ * GET  → returns all provider statuses (ok | missing | invalid)
+ * POST → runs live validation tests against provider APIs
+ *
+ * SECURITY: Never returns real key strings.
+ * Only returns: provider name, status, key hint (last 4 chars), env var name
+ *
+ * Required: CRON_SECRET header for POST (prevents public abuse)
+ */
 
-export const runtime = "nodejs";    // needs Buffer for JWT decode
-export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+import { NextRequest, NextResponse } from 'next/server';
+import { vault } from '@/lib/javari/secrets/vault';
+import { credentialSync } from '@/lib/javari/secrets/credential-sync';
 
-import { NextResponse } from "next/server";
-import { vaultSync } from "@/lib/javari/secrets/credential-sync";
-import vault from "@/lib/javari/secrets/vault";
+// Critical providers checked in GET (subset for performance)
+const CRITICAL_PROVIDERS = [
+  'anthropic', 'openai', 'gemini', 'groq', 'mistral',
+  'perplexity', 'openrouter', 'elevenlabs',
+  'supabase_url', 'supabase_anon', 'supabase_service',
+  'stripe', 'paypal',
+  'github', 'vercel',
+] as const;
 
-export async function GET(req: Request): Promise<Response> {
-  const url = new URL(req.url);
-  const live = url.searchParams.get("live") === "true";
+export async function GET(req: NextRequest) {
+  // Require internal auth for full status
+  const authHeader = req.headers.get('Authorization');
+  const cronSecret = process.env.CRON_SECRET;
+  const isAuthorized = cronSecret && authHeader === `Bearer ${cronSecret}`;
 
-  if (live) {
-    const report = await vaultSync({ liveTests: true });
-    return NextResponse.json({
-      ok: report.validCount >= Math.floor(report.totalProviders * 0.7),
-      timestamp: report.timestamp,
-      summary: {
-        total: report.totalProviders,
-        valid: report.validCount,
-        missing: report.missingCount,
-        issues: report.issueCount,
-      },
-      providers: report.results.map(r => ({
-        provider: r.provider,
-        envVar: r.envVar,
-        status: r.status,
-        latencyMs: r.latencyMs,
-        note: r.note,
+  const providers = isAuthorized
+    ? (Object.keys(require('@/lib/javari/secrets/vault').PROVIDER_ENV_MAP))
+    : CRITICAL_PROVIDERS;
+
+  const statuses = (providers as string[]).map(p =>
+    vault.getSafe(p as Parameters<typeof vault.getSafe>[0])
+  );
+
+  const summary = {
+    total: statuses.length,
+    ok: statuses.filter(s => s.status === 'ok').length,
+    missing: statuses.filter(s => s.status === 'missing').length,
+    invalid: statuses.filter(s => s.status === 'invalid').length,
+    checkedAt: new Date().toISOString(),
+  };
+
+  return NextResponse.json(
+    {
+      summary,
+      providers: statuses.map(s => ({
+        provider: s.provider,
+        status: s.status,
+        hint: s.hint,
+        envVar: s.envVar,
       })),
-      namingMismatches: report.namingMismatches,
-      criticalIssues: report.criticalIssues,
-    });
-  }
-
-  // Fast: presence-only
-  const status = vault.status();
-  const entries = Object.entries(status);
-  const presentCount = entries.filter(([,v]) => v.present).length;
-
-  return NextResponse.json({
-    ok: presentCount >= Math.floor(entries.length * 0.7),
-    timestamp: new Date().toISOString(),
-    summary: { total: entries.length, present: presentCount, missing: entries.length - presentCount },
-    providers: entries.map(([name, info]) => ({
-      provider: name,
-      envVar: info.envVar,
-      status: info.present ? "present" : "missing",
-    })),
-  });
+    },
+    {
+      headers: {
+        'Cache-Control': 'no-store',
+        'X-Vault-Version': '1.0.0',
+      },
+    }
+  );
 }
 
-export async function POST(req: Request): Promise<Response> {
-  try {
-    const body = await req.json().catch(() => ({})) as Record<string, unknown>;
-    const secret = body?.secret as string | undefined;
-    const expected = process.env.CRON_SECRET ?? process.env.ADMIN_SETUP_SECRET ?? "";
-    if (!expected || secret !== expected) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    const report = await vaultSync({ liveTests: true });
-    return NextResponse.json({
-      success: true,
-      timestamp: report.timestamp,
-      summary: { total: report.totalProviders, valid: report.validCount, issues: report.issueCount },
-      providers: report.results.map(r => ({ provider: r.provider, status: r.status, note: r.note })),
-      namingMismatches: report.namingMismatches,
-      criticalIssues: report.criticalIssues,
-    });
-  } catch (err) {
-    return NextResponse.json({ success: false, error: String(err) }, { status: 500 });
+export async function POST(req: NextRequest) {
+  // Require auth for live tests (they make external API calls)
+  const authHeader = req.headers.get('Authorization');
+  const cronSecret = process.env.CRON_SECRET;
+
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  let body: { action?: string; dryRun?: boolean; projectId?: string } = {};
+  try {
+    body = await req.json();
+  } catch {
+    // empty body ok
+  }
+
+  const action = body.action ?? 'health-check';
+
+  if (action === 'sync') {
+    const result = await credentialSync.sync({
+      dryRun: body.dryRun ?? false,
+      projectId: body.projectId,
+      runLiveTests: true,
+    });
+
+    return NextResponse.json({
+      action: 'sync',
+      ...result,
+      // Strip key values from live test results
+      liveTests: result.liveTests.map(t => ({
+        provider: t.provider,
+        status: t.status,
+        latencyMs: t.latencyMs,
+        error: t.error,
+      })),
+    });
+  }
+
+  if (action === 'health-check') {
+    const liveTests = await credentialSync.healthCheck();
+    return NextResponse.json({
+      action: 'health-check',
+      checkedAt: new Date().toISOString(),
+      results: liveTests.map(t => ({
+        provider: t.provider,
+        status: t.status,
+        latencyMs: t.latencyMs,
+        error: t.error,
+      })),
+      summary: {
+        ok: liveTests.filter(t => t.status === 'ok').length,
+        invalid: liveTests.filter(t => t.status === 'invalid').length,
+        missing: liveTests.filter(t => t.status === 'missing').length,
+      },
+    });
+  }
+
+  return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
 }
