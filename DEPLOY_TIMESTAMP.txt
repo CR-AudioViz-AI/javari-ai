@@ -1,3 +1,1 @@
-# Deployment Timestamp: 1771260759
-# This file forces Vercel to create a completely fresh build
-# Commit: Nuclear deployment force
+2026-02-18T16:40:00-05:00 — memory retrieval layer active: lib/types.ts barrel created, unified engine + chat route wired to R2 semantic store
