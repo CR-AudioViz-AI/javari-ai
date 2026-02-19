@@ -1,122 +1,104 @@
 // lib/javari/providers.ts
-// Javari AI Provider Registry
-// All API key access goes through vault — never direct process.env
+// Javari Provider Registry — vault-powered, edge-safe.
+// All API key access goes through vault.get() — no direct process.env calls.
 
 import vault, { type ProviderName } from "./secrets/vault";
 
-// ── Provider Interface ────────────────────────────────────────────────────────
 export interface JavariProvider {
   name: string;
   generateStream(
     prompt: string,
-    options: { rolePrompt?: string; preferredModel?: string }
+    options?: { rolePrompt?: string; preferredModel?: string }
   ): AsyncIterable<string> | AsyncIterator<string>;
 }
 
-// ── Provider factory ──────────────────────────────────────────────────────────
+/** Resolve an API key by provider name — throws if missing. */
 export function getProviderApiKey(
   providerName: "openai" | "anthropic" | "mistral" | "groq" | "gemini" | "openrouter"
 ): string {
-  const vaultName = providerName as ProviderName;
-  const key = vault.get(vaultName);
-  if (!key) {
-    throw new Error(`[Providers] API key missing for provider: ${providerName}`);
-  }
+  const key = vault.get(providerName as ProviderName);
+  if (!key) throw new Error(`[Providers] API key missing for: ${providerName}`);
   return key;
 }
 
-// ── OpenAI Provider ───────────────────────────────────────────────────────────
+// ── SSE stream helpers ────────────────────────────────────────────────────────
+async function* parseSSEStream(
+  body: ReadableStream<Uint8Array>
+): AsyncGenerator<string> {
+  const reader = body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const data = line.slice(6).trim();
+      if (data === "[DONE]") return;
+      try {
+        const json = JSON.parse(data);
+        const content = json.choices?.[0]?.delta?.content
+          ?? json.delta?.text    // Anthropic streaming
+          ?? null;
+        if (content) yield content;
+      } catch { /* skip bad chunk */ }
+    }
+  }
+}
+
+// ── OpenAI ────────────────────────────────────────────────────────────────────
 function createOpenAIProvider(apiKey: string): JavariProvider {
   return {
     name: "openai",
     async *generateStream(prompt, { rolePrompt, preferredModel } = {}) {
-      const model = preferredModel || "gpt-4o-mini";
-      const messages = [];
+      const model = preferredModel ?? "gpt-4o-mini";
+      const messages: Array<{role:string;content:string}> = [];
       if (rolePrompt) messages.push({ role: "system", content: rolePrompt });
       messages.push({ role: "user", content: prompt });
-
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ model, messages, stream: true }),
       });
-
-      if (!res.ok) {
-        const err = await res.text();
-        throw new Error(`OpenAI error ${res.status}: ${err.slice(0, 120)}`);
-      }
-
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const data = line.slice(6).trim();
-          if (data === "[DONE]") return;
-          try {
-            const json = JSON.parse(data);
-            const content = json.choices?.[0]?.delta?.content;
-            if (content) yield content;
-          } catch { /* skip malformed chunk */ }
-        }
-      }
+      if (!res.ok || !res.body) throw new Error(`OpenAI ${res.status}`);
+      yield* parseSSEStream(res.body);
     },
   };
 }
 
-// ── Anthropic Provider ────────────────────────────────────────────────────────
+// ── Anthropic ─────────────────────────────────────────────────────────────────
 function createAnthropicProvider(apiKey: string): JavariProvider {
   return {
     name: "anthropic",
     async *generateStream(prompt, { rolePrompt, preferredModel } = {}) {
-      const model = preferredModel || "claude-sonnet-4-20250514";
+      const model = preferredModel ?? "claude-sonnet-4-20250514";
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: {
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-          "Content-Type": "application/json",
-        },
+        headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
         body: JSON.stringify({
-          model,
-          max_tokens: 4096,
-          system: rolePrompt || undefined,
+          model, max_tokens: 4096,
+          system: rolePrompt ?? undefined,
           messages: [{ role: "user", content: prompt }],
           stream: true,
         }),
       });
-
-      if (!res.ok) {
-        const err = await res.text();
-        throw new Error(`Anthropic error ${res.status}: ${err.slice(0, 120)}`);
-      }
-
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
+      if (!res.ok || !res.body) throw new Error(`Anthropic ${res.status}`);
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split("\n"); buf = lines.pop() ?? "";
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
-          const data = line.slice(6).trim();
           try {
-            const json = JSON.parse(data);
-            if (json.type === "content_block_delta") {
-              const text = json.delta?.text;
-              if (text) yield text;
-            }
+            const json = JSON.parse(line.slice(6).trim());
+            if (json.type === "content_block_delta" && json.delta?.text) yield json.delta.text;
           } catch { /* skip */ }
         }
       }
@@ -124,153 +106,77 @@ function createAnthropicProvider(apiKey: string): JavariProvider {
   };
 }
 
-// ── Mistral Provider ──────────────────────────────────────────────────────────
+// ── Mistral ───────────────────────────────────────────────────────────────────
 function createMistralProvider(apiKey: string): JavariProvider {
   return {
     name: "mistral",
     async *generateStream(prompt, { rolePrompt, preferredModel } = {}) {
-      const model = preferredModel || "mistral-small-latest";
-      const messages = [];
+      const model = preferredModel ?? "mistral-small-latest";
+      const messages: Array<{role:string;content:string}> = [];
       if (rolePrompt) messages.push({ role: "system", content: rolePrompt });
       messages.push({ role: "user", content: prompt });
-
       const res = await fetch("https://api.mistral.ai/v1/chat/completions", {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ model, messages, stream: true }),
       });
-
-      if (!res.ok) throw new Error(`Mistral error ${res.status}`);
-
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const data = line.slice(6).trim();
-          if (data === "[DONE]") return;
-          try {
-            const json = JSON.parse(data);
-            const content = json.choices?.[0]?.delta?.content;
-            if (content) yield content;
-          } catch { /* skip */ }
-        }
-      }
+      if (!res.ok || !res.body) throw new Error(`Mistral ${res.status}`);
+      yield* parseSSEStream(res.body);
     },
   };
 }
 
-// ── OpenRouter Provider (multi-model fallback) ────────────────────────────────
+// ── OpenRouter ────────────────────────────────────────────────────────────────
 function createOpenRouterProvider(apiKey: string): JavariProvider {
   return {
     name: "openrouter",
     async *generateStream(prompt, { rolePrompt, preferredModel } = {}) {
-      const model = preferredModel || "meta-llama/llama-3.3-70b-instruct";
-      const messages = [];
+      const model = preferredModel ?? "meta-llama/llama-3.3-70b-instruct";
+      const messages: Array<{role:string;content:string}> = [];
       if (rolePrompt) messages.push({ role: "system", content: rolePrompt });
       messages.push({ role: "user", content: prompt });
-
       const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": "https://javariai.com",
-          "X-Title": "Javari OS",
-        },
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", "HTTP-Referer": "https://javariai.com", "X-Title": "Javari OS" },
         body: JSON.stringify({ model, messages, stream: true }),
       });
-
-      if (!res.ok) throw new Error(`OpenRouter error ${res.status}`);
-
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const data = line.slice(6).trim();
-          if (data === "[DONE]") return;
-          try {
-            const json = JSON.parse(data);
-            const content = json.choices?.[0]?.delta?.content;
-            if (content) yield content;
-          } catch { /* skip */ }
-        }
-      }
+      if (!res.ok || !res.body) throw new Error(`OpenRouter ${res.status}`);
+      yield* parseSSEStream(res.body);
     },
   };
 }
 
-// ── Groq Provider ─────────────────────────────────────────────────────────────
+// ── Groq ──────────────────────────────────────────────────────────────────────
 function createGroqProvider(apiKey: string): JavariProvider {
   return {
     name: "groq",
     async *generateStream(prompt, { rolePrompt, preferredModel } = {}) {
-      const model = preferredModel || "llama-3.1-8b-instant";
-      const messages = [];
+      const model = preferredModel ?? "llama-3.1-8b-instant";
+      const messages: Array<{role:string;content:string}> = [];
       if (rolePrompt) messages.push({ role: "system", content: rolePrompt });
       messages.push({ role: "user", content: prompt });
-
       const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ model, messages, stream: true }),
       });
-
-      if (!res.ok) throw new Error(`Groq error ${res.status}`);
-
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const data = line.slice(6).trim();
-          if (data === "[DONE]") return;
-          try {
-            const json = JSON.parse(data);
-            const content = json.choices?.[0]?.delta?.content;
-            if (content) yield content;
-          } catch { /* skip */ }
-        }
-      }
+      if (!res.ok || !res.body) throw new Error(`Groq ${res.status}`);
+      yield* parseSSEStream(res.body);
     },
   };
 }
 
-// ── Provider Registry ─────────────────────────────────────────────────────────
+/** Get a provider instance by name with a provided API key. */
 export function getProvider(
   providerName: "openai" | "anthropic" | "mistral" | "groq" | "gemini" | "openrouter",
   apiKey: string
 ): JavariProvider {
   switch (providerName) {
-    case "openai":      return createOpenAIProvider(apiKey);
-    case "anthropic":   return createAnthropicProvider(apiKey);
-    case "mistral":     return createMistralProvider(apiKey);
-    case "groq":        return createGroqProvider(apiKey);
-    case "openrouter":  return createOpenRouterProvider(apiKey);
-    default:
-      // Fallback: treat as OpenAI-compatible
-      return createOpenAIProvider(apiKey);
+    case "openai":     return createOpenAIProvider(apiKey);
+    case "anthropic":  return createAnthropicProvider(apiKey);
+    case "mistral":    return createMistralProvider(apiKey);
+    case "groq":       return createGroqProvider(apiKey);
+    case "openrouter": return createOpenRouterProvider(apiKey);
+    default:           return createOpenAIProvider(apiKey); // OpenAI-compat fallback
   }
 }
