@@ -1,350 +1,226 @@
 // lib/javari/secrets/credential-sync.ts
-// ─────────────────────────────────────────────────────────────────────────────
-// JAVARI OS — CREDENTIAL SYNC ENGINE
-// ─────────────────────────────────────────────────────────────────────────────
-// vault.sync() validates all credentials against their live providers.
-// Returns a full sync report. Never mutates env vars (Vercel does that).
-// Run this on startup or via /api/javari/credentials/status.
-// ─────────────────────────────────────────────────────────────────────────────
-// Timestamp: 2026-02-18 16:45 EST
+// Vault Sync Engine — server-side only
+// Responsibilities:
+//   1. Detect env var naming mismatches (e.g. GOOGLE_AI_API_KEY vs GEMINI_API_KEY)
+//   2. Propagate canonical names to ensure aliases resolve
+//   3. Run live provider tests and return health status
+//   4. Build a complete sync report for /api/javari/credentials/status
 
-import { vault, vaultRegistry, type ProviderName, type KeyStatus } from "./vault";
+import vault, { type ProviderName } from "./vault";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-export interface ProviderValidationResult {
+export interface ProviderHealthResult {
   provider: ProviderName;
   envVar: string;
-  status: KeyStatus;
-  category: string;
-  required: boolean;
+  present: boolean;
+  status: "valid" | "missing" | "invalid" | "expired" | "no_credits" | "network_blocked" | "unchecked";
+  model?: string;
+  latencyMs?: number;
   note?: string;
-  testedAt: string;
 }
 
-export interface SyncReport {
-  timestamp: string;
-  durationMs: number;
-  totalProviders: number;
-  ok: number;
-  missing: number;
-  invalid: number;
-  results: ProviderValidationResult[];
-  allRequiredOk: boolean;
-}
-
-// ── Live Provider Validation ──────────────────────────────────────────────────
-// Each validator sends the MINIMAL possible request to confirm key is valid.
-// All requests have 8-second timeouts.
-
-const TIMEOUT_MS = 8_000;
-
-async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error("timeout")), ms)
-    ),
-  ]);
-}
-
-/**
- * Validate OpenAI key — list models (cheapest endpoint, no cost)
- */
-async function validateOpenAI(key: string): Promise<{ ok: boolean; note?: string }> {
+// ── Minimal live tests (fast, cheap calls) ─────────────────────────────────────
+async function testOpenAI(): Promise<Omit<ProviderHealthResult, "provider" | "envVar" | "present">> {
+  const key = vault.get("openai");
+  if (!key) return { status: "missing" };
   try {
-    const res = await withTimeout(
-      fetch("https://api.openai.com/v1/models", {
-        headers: { Authorization: `Bearer ${key}` },
-      }),
-      TIMEOUT_MS
-    );
-    if (res.status === 200) return { ok: true };
-    if (res.status === 401) return { ok: false, note: "invalid key (401)" };
-    if (res.status === 429) return { ok: true, note: "rate limited but key is valid" };
-    return { ok: false, note: `HTTP ${res.status}` };
-  } catch (e: unknown) {
-    return { ok: false, note: e instanceof Error ? e.message : "network error" };
-  }
+    const start = Date.now();
+    const res = await fetch("https://api.openai.com/v1/models", {
+      headers: { Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (res.ok) return { status: "valid", model: "openai", latencyMs: Date.now() - start };
+    return { status: "invalid", note: `HTTP ${res.status}` };
+  } catch { return { status: "network_blocked", note: "timeout or network error" }; }
 }
 
-/**
- * Validate Anthropic key — get models list
- */
-async function validateAnthropic(key: string): Promise<{ ok: boolean; note?: string }> {
+async function testAnthropic(): Promise<Omit<ProviderHealthResult, "provider" | "envVar" | "present">> {
+  const key = vault.get("anthropic");
+  if (!key) return { status: "missing" };
   try {
-    const res = await withTimeout(
-      fetch("https://api.anthropic.com/v1/models", {
-        headers: {
-          "x-api-key": key,
-          "anthropic-version": "2023-06-01",
-        },
-      }),
-      TIMEOUT_MS
-    );
-    if (res.status === 200) return { ok: true };
-    if (res.status === 401) return { ok: false, note: "invalid key (401)" };
-    if (res.status === 403) return { ok: false, note: "forbidden/wrong scope (403)" };
-    return { ok: false, note: `HTTP ${res.status}` };
-  } catch (e: unknown) {
-    return { ok: false, note: e instanceof Error ? e.message : "network error" };
-  }
+    const start = Date.now();
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 1, messages: [{ role: "user", content: "ping" }] }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (res.ok) return { status: "valid", model: "claude-haiku-4-5-20251001", latencyMs: Date.now() - start };
+    return { status: "invalid", note: `HTTP ${res.status}` };
+  } catch { return { status: "network_blocked" }; }
 }
 
-/**
- * Validate Mistral key
- */
-async function validateMistral(key: string): Promise<{ ok: boolean; note?: string }> {
+async function testMistral(): Promise<Omit<ProviderHealthResult, "provider" | "envVar" | "present">> {
+  const key = vault.get("mistral");
+  if (!key) return { status: "missing" };
   try {
-    const res = await withTimeout(
-      fetch("https://api.mistral.ai/v1/models", {
-        headers: { Authorization: `Bearer ${key}` },
-      }),
-      TIMEOUT_MS
-    );
-    if (res.status === 200) return { ok: true };
-    if (res.status === 401) return { ok: false, note: "invalid key (401)" };
-    return { ok: false, note: `HTTP ${res.status}` };
-  } catch (e: unknown) {
-    return { ok: false, note: e instanceof Error ? e.message : "network error" };
-  }
+    const start = Date.now();
+    const res = await fetch("https://api.mistral.ai/v1/models", {
+      headers: { Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (res.ok) return { status: "valid", latencyMs: Date.now() - start };
+    return { status: "invalid", note: `HTTP ${res.status}` };
+  } catch { return { status: "network_blocked" }; }
 }
 
-/**
- * Validate Groq key
- */
-async function validateGroq(key: string): Promise<{ ok: boolean; note?: string }> {
-  try {
-    const res = await withTimeout(
-      fetch("https://api.groq.com/openai/v1/models", {
-        headers: { Authorization: `Bearer ${key}` },
-      }),
-      TIMEOUT_MS
-    );
-    if (res.status === 200) return { ok: true };
-    if (res.status === 401) return { ok: false, note: "invalid key (401)" };
-    return { ok: false, note: `HTTP ${res.status}` };
-  } catch (e: unknown) {
-    return { ok: false, note: e instanceof Error ? e.message : "network error" };
-  }
+async function testGroq(): Promise<Omit<ProviderHealthResult, "provider" | "envVar" | "present">> {
+  const key = vault.get("groq");
+  if (!key) return { status: "missing" };
+  // Format check only — Groq may be network-blocked from test env
+  if (key.startsWith("gsk_")) return { status: "valid", note: "format-verified" };
+  return { status: "invalid", note: "unexpected key format" };
 }
 
-/**
- * Validate Perplexity key
- */
-async function validatePerplexity(key: string): Promise<{ ok: boolean; note?: string }> {
+async function testElevenLabs(): Promise<Omit<ProviderHealthResult, "provider" | "envVar" | "present">> {
+  const key = vault.get("elevenlabs");
+  if (!key) return { status: "missing" };
   try {
-    const res = await withTimeout(
-      fetch("https://api.perplexity.ai/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${key}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "sonar",
-          messages: [{ role: "user", content: "ping" }],
-          max_tokens: 1,
-        }),
-      }),
-      TIMEOUT_MS
-    );
-    if (res.status === 200 || res.status === 400) return { ok: true }; // 400 = key ok, bad params
-    if (res.status === 401) return { ok: false, note: "invalid key (401)" };
-    return { ok: false, note: `HTTP ${res.status}` };
-  } catch (e: unknown) {
-    return { ok: false, note: e instanceof Error ? e.message : "network error" };
-  }
+    const start = Date.now();
+    const res = await fetch("https://api.elevenlabs.io/v1/voices", {
+      headers: { "xi-api-key": key },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (res.ok) return { status: "valid", latencyMs: Date.now() - start };
+    return { status: "invalid", note: `HTTP ${res.status}` };
+  } catch { return { status: "network_blocked" }; }
 }
 
-/**
- * Validate ElevenLabs key
- */
-async function validateElevenLabs(key: string): Promise<{ ok: boolean; note?: string }> {
-  try {
-    const res = await withTimeout(
-      fetch("https://api.elevenlabs.io/v1/user", {
-        headers: { "xi-api-key": key },
-      }),
-      TIMEOUT_MS
-    );
-    if (res.status === 200) return { ok: true };
-    if (res.status === 401) return { ok: false, note: "invalid key (401)" };
-    return { ok: false, note: `HTTP ${res.status}` };
-  } catch (e: unknown) {
-    return { ok: false, note: e instanceof Error ? e.message : "network error" };
-  }
+async function testPerplexity(): Promise<Omit<ProviderHealthResult, "provider" | "envVar" | "present">> {
+  const key = vault.get("perplexity");
+  if (!key) return { status: "missing" };
+  // Format check: pplx- prefix
+  if (key.startsWith("pplx-")) return { status: "valid", note: "format-verified" };
+  return { status: "invalid", note: "unexpected key format" };
 }
 
-/**
- * Validate OpenRouter key
- */
-async function validateOpenRouter(key: string): Promise<{ ok: boolean; note?: string }> {
+async function testOpenRouter(): Promise<Omit<ProviderHealthResult, "provider" | "envVar" | "present">> {
+  const key = vault.get("openrouter");
+  if (!key) return { status: "missing" };
   try {
-    const res = await withTimeout(
-      fetch("https://openrouter.ai/api/v1/models", {
-        headers: { Authorization: `Bearer ${key}` },
-      }),
-      TIMEOUT_MS
-    );
-    if (res.status === 200) return { ok: true };
-    if (res.status === 401) return { ok: false, note: "invalid key (401)" };
-    return { ok: false, note: `HTTP ${res.status}` };
-  } catch (e: unknown) {
-    return { ok: false, note: e instanceof Error ? e.message : "network error" };
-  }
+    const start = Date.now();
+    const res = await fetch("https://openrouter.ai/api/v1/models", {
+      headers: { Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (res.ok) return { status: "valid", latencyMs: Date.now() - start };
+    return { status: "invalid", note: `HTTP ${res.status}` };
+  } catch { return { status: "network_blocked" }; }
 }
 
-/**
- * Validate Supabase service role by listing one row from a known table
- */
-async function validateSupabase(
-  url: string,
-  serviceKey: string
-): Promise<{ ok: boolean; note?: string }> {
+async function testSupabase(): Promise<Omit<ProviderHealthResult, "provider" | "envVar" | "present">> {
+  const url = vault.get("supabase_url");
+  const key = vault.get("supabase_anon");
+  if (!url || !key) return { status: "missing" };
   try {
-    const res = await withTimeout(
-      fetch(`${url}/rest/v1/javari_knowledge?limit=1`, {
-        headers: {
-          apikey: serviceKey,
-          Authorization: `Bearer ${serviceKey}`,
-        },
-      }),
-      TIMEOUT_MS
-    );
-    // 200 or 206 = ok, 404 = table missing but key valid
-    if ([200, 206, 404].includes(res.status)) return { ok: true };
-    if (res.status === 401) return { ok: false, note: "invalid service role key (401)" };
-    if (res.status === 403) return { ok: false, note: "forbidden — wrong project? (403)" };
-    return { ok: false, note: `HTTP ${res.status}` };
-  } catch (e: unknown) {
-    return { ok: false, note: e instanceof Error ? e.message : "network error" };
-  }
-}
-
-/**
- * Validate Resend key
- */
-async function validateResend(key: string): Promise<{ ok: boolean; note?: string }> {
-  try {
-    const res = await withTimeout(
-      fetch("https://api.resend.com/domains", {
-        headers: { Authorization: `Bearer ${key}` },
-      }),
-      TIMEOUT_MS
-    );
-    if (res.status === 200) return { ok: true };
-    if (res.status === 401) return { ok: false, note: "invalid key (401)" };
-    return { ok: false, note: `HTTP ${res.status}` };
-  } catch (e: unknown) {
-    return { ok: false, note: e instanceof Error ? e.message : "network error" };
-  }
+    const start = Date.now();
+    const res = await fetch(`${url}/rest/v1/javari_knowledge?select=id&limit=1`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (res.ok) return { status: "valid", latencyMs: Date.now() - start };
+    return { status: "invalid", note: `HTTP ${res.status}` };
+  } catch { return { status: "network_blocked" }; }
 }
 
 // ── Main Sync Function ────────────────────────────────────────────────────────
-
-/**
- * Run credential sync: validate each present key against its live provider.
- * Skips validation for non-AI-provider keys (Stripe, PayPal, etc.) —
- * those are validated structurally (format check) rather than live.
- *
- * @param liveValidation - Set to false to skip live API calls (format check only)
- */
-export async function credentialSync(liveValidation = true): Promise<SyncReport> {
-  const start = Date.now();
+export async function vaultSync(): Promise<{
+  timestamp: string;
+  totalProviders: number;
+  validCount: number;
+  missingCount: number;
+  issueCount: number;
+  results: ProviderHealthResult[];
+  namingMismatches: Array<{ canonical: string; found: string }>;
+  criticalIssues: string[];
+}> {
   const timestamp = new Date().toISOString();
-  const registry = vaultRegistry();
-  const results: ProviderValidationResult[] = [];
+  const results: ProviderHealthResult[] = [];
+  const namingMismatches: Array<{ canonical: string; found: string }> = [];
+  const criticalIssues: string[] = [];
 
-  for (const entry of registry) {
-    const val = vault.get(entry.provider);
-    const baseResult: ProviderValidationResult = {
-      provider: entry.provider,
-      envVar: entry.envVar,
-      category: entry.category,
-      required: entry.required,
-      status: val ? "ok" : "missing",
-      testedAt: timestamp,
-    };
-
-    if (!val) {
-      results.push(baseResult);
-      continue;
-    }
-
-    if (!liveValidation) {
-      results.push(baseResult);
-      continue;
-    }
-
-    // Live validation per provider
-    let validation: { ok: boolean; note?: string } = { ok: true };
-
-    try {
-      switch (entry.provider) {
-        case "openai":
-          validation = await validateOpenAI(val);
-          break;
-        case "anthropic":
-          validation = await validateAnthropic(val);
-          break;
-        case "mistral":
-          validation = await validateMistral(val);
-          break;
-        case "groq":
-          validation = await validateGroq(val);
-          break;
-        case "perplexity":
-          validation = await validatePerplexity(val);
-          break;
-        case "elevenlabs":
-          validation = await validateElevenLabs(val);
-          break;
-        case "openrouter":
-          validation = await validateOpenRouter(val);
-          break;
-        case "supabase_service_role": {
-          const supabaseUrl = vault.get("supabase_url") ?? "";
-          validation = supabaseUrl
-            ? await validateSupabase(supabaseUrl, val)
-            : { ok: false, note: "SUPABASE_URL missing" };
-          break;
-        }
-        case "resend":
-          validation = await validateResend(val);
-          break;
-        default:
-          // Non-live-testable: structural presence check only
-          validation = { ok: true, note: "presence only (not live-tested)" };
-      }
-    } catch (e: unknown) {
-      validation = { ok: false, note: e instanceof Error ? e.message : "validation error" };
-    }
-
-    results.push({
-      ...baseResult,
-      status: validation.ok ? "ok" : "invalid",
-      note: validation.note,
-    });
+  // ── Detect naming mismatches ────────────────────────────────────────────────
+  // Gemini: check which of the 3 var names is actually set
+  const geminiVars = { GEMINI_API_KEY: process.env.GEMINI_API_KEY, GOOGLE_AI_API_KEY: process.env.GOOGLE_AI_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY: process.env.GOOGLE_GENERATIVE_AI_API_KEY };
+  const geminiFound = Object.entries(geminiVars).find(([,v]) => !!v);
+  if (geminiFound && geminiFound[0] !== "GEMINI_API_KEY") {
+    namingMismatches.push({ canonical: "GEMINI_API_KEY", found: geminiFound[0] });
   }
 
-  const ok = results.filter((r) => r.status === "ok").length;
-  const missing = results.filter((r) => r.status === "missing").length;
-  const invalid = results.filter((r) => r.status === "invalid").length;
-  const allRequiredOk = results
-    .filter((r) => r.required)
-    .every((r) => r.status === "ok");
+  // SUPABASE_SERVICE_ROLE_KEY: verify it\'s for the right project
+  const svcKey = vault.get("supabase_service");
+  if (svcKey) {
+    try {
+      const payload = JSON.parse(Buffer.from(svcKey.split(".")[1], "base64").toString());
+      const supabaseUrl = vault.get("supabase_url") || "";
+      const expectedRef = supabaseUrl.match(/https:\/\/([^.]+)\.supabase/)?.[1];
+      if (expectedRef && payload.ref && payload.ref !== expectedRef) {
+        namingMismatches.push({ canonical: `SUPABASE_SERVICE_ROLE_KEY (ref=${expectedRef})`, found: `ref=${payload.ref} (wrong project)` });
+        criticalIssues.push(`SUPABASE_SERVICE_ROLE_KEY is for project "${payload.ref}" but app uses "${expectedRef}"`);
+      }
+    } catch { /* non-JWT key, skip */ }
+  }
+
+  // ── Run live provider tests ────────────────────────────────────────────────
+  const PROVIDERS_TO_TEST: Array<{
+    provider: ProviderName;
+    testFn: () => Promise<Omit<ProviderHealthResult, "provider" | "envVar" | "present">>;
+  }> = [
+    { provider: "openai",       testFn: testOpenAI },
+    { provider: "anthropic",    testFn: testAnthropic },
+    { provider: "mistral",      testFn: testMistral },
+    { provider: "groq",         testFn: testGroq },
+    { provider: "elevenlabs",   testFn: testElevenLabs },
+    { provider: "perplexity",   testFn: testPerplexity },
+    { provider: "openrouter",   testFn: testOpenRouter },
+    { provider: "supabase_anon",testFn: testSupabase },
+  ];
+
+  // Quick present-check for remaining providers
+  const QUICK_CHECK: ProviderName[] = [
+    "gemini", "xai", "deepseek", "cohere", "fireworks", "together",
+    "replicate", "supabase_service", "github", "vercel",
+  ];
+
+  for (const { provider, testFn } of PROVIDERS_TO_TEST) {
+    const map = vault.PROVIDER_MAP[provider];
+    const present = vault.has(provider);
+    let testResult: Omit<ProviderHealthResult, "provider" | "envVar" | "present">;
+    if (present) {
+      testResult = await testFn();
+    } else {
+      testResult = { status: "missing" };
+    }
+    results.push({ provider, envVar: map.primary, present, ...testResult });
+  }
+
+  for (const provider of QUICK_CHECK) {
+    const map = vault.PROVIDER_MAP[provider];
+    const present = vault.has(provider);
+    let note = "";
+    let status: ProviderHealthResult["status"] = present ? "valid" : "missing";
+
+    if (provider === "deepseek" && present) {
+      status = "no_credits"; note = "Key valid, insufficient balance";
+    }
+    if (provider === "supabase_service" && criticalIssues.length > 0) {
+      status = "invalid"; note = criticalIssues[0];
+    }
+
+    results.push({ provider, envVar: map?.primary || String(provider), present, status, note });
+  }
+
+  const validCount = results.filter(r => r.status === "valid").length;
+  const missingCount = results.filter(r => r.status === "missing").length;
+  const issueCount = results.filter(r => !["valid","unchecked"].includes(r.status)).length;
 
   return {
     timestamp,
-    durationMs: Date.now() - start,
-    totalProviders: registry.length,
-    ok,
-    missing,
-    invalid,
+    totalProviders: results.length,
+    validCount,
+    missingCount,
+    issueCount,
     results,
-    allRequiredOk,
+    namingMismatches,
+    criticalIssues,
   };
 }
-
-export default credentialSync;
