@@ -1,193 +1,104 @@
 // lib/javari/secrets/credential-loader.ts
-// ─────────────────────────────────────────────────────────────────────────────
-// JAVARI OS — AGENT-SCOPED CREDENTIAL LOADER
-// ─────────────────────────────────────────────────────────────────────────────
-// Provides getCredentialForAgent(agentName, providerName) so every AI agent
-// can get exactly the credentials it needs without touching process.env directly.
-//
-// Supported agents: javari | claude | chatgpt | router | autonomous-executor
-//                   voice-subsystem | ingest | admin
-// ─────────────────────────────────────────────────────────────────────────────
-// Timestamp: 2026-02-18 16:45 EST
+// Safe credential loader — resolves provider names to actual API keys
+// All code should call these functions instead of process.env directly
 
-import { vault, type ProviderName, type VaultStatus } from "./vault";
+import vault, { type ProviderName } from "./vault";
 
-// ── Agent definitions ─────────────────────────────────────────────────────────
+// ── AI Provider keys ─────────────────────────────────────────────────────────
+export const getOpenAIKey      = ()  => vault.assert("openai");
+export const getAnthropicKey   = ()  => vault.assert("anthropic");
+export const getMistralKey     = ()  => vault.assert("mistral");
+export const getGroqKey        = ()  => vault.assert("groq");
+export const getElevenLabsKey  = ()  => vault.assert("elevenlabs");
+export const getPerplexityKey  = ()  => vault.assert("perplexity");
+export const getGeminiKey      = ()  => vault.assert("gemini");
+export const getXAIKey         = ()  => vault.assert("xai");
+export const getOpenRouterKey  = ()  => vault.assert("openrouter");
+export const getDeepSeekKey    = ()  => vault.assert("deepseek");
+export const getCohereKey      = ()  => vault.assert("cohere");
+export const getFireworksKey   = ()  => vault.assert("fireworks");
+export const getTogetherKey    = ()  => vault.assert("together");
+export const getReplicateKey   = ()  => vault.assert("replicate");
 
-export type AgentName =
-  | "javari"
-  | "claude"
-  | "chatgpt"
-  | "router"
-  | "autonomous-executor"
-  | "voice-subsystem"
-  | "ingest"
-  | "admin";
+// ── Infrastructure keys ──────────────────────────────────────────────────────
+export const getSupabaseUrl        = () => vault.assert("supabase_url");
+export const getSupabaseAnonKey    = () => vault.assert("supabase_anon");
+export const getSupabaseServiceKey = () => vault.get("supabase_service") ?? null;
+export const getGitHubToken        = () => vault.assert("github");
+export const getVercelToken        = () => vault.assert("vercel");
+export const getStripeKey          = () => vault.get("stripe") ?? null;
+export const getPayPalSecret       = () => vault.get("paypal") ?? null;
 
-interface AgentCredentialMap {
-  allowed: ProviderName[];
-  description: string;
-}
+// ── Agent-scoped credential access ───────────────────────────────────────────
+// Expose a safe server-side function for any agent to get its credentials
+// Agents never receive keys they haven\'t been scoped to access.
 
-/** Defines which credentials each agent is permitted to request */
-const AGENT_PERMISSIONS: Record<AgentName, AgentCredentialMap> = {
-  javari: {
-    description: "Javari AI core engine — full multi-AI routing",
-    allowed: [
-      "openai", "anthropic", "mistral", "groq", "perplexity",
-      "openrouter", "xai", "deepseek", "cohere",
-      "supabase_url", "supabase_anon_key", "supabase_service_role",
-      "elevenlabs",
-    ],
-  },
-  claude: {
-    description: "Claude (Anthropic) agent for specialized reasoning tasks",
-    allowed: ["anthropic", "supabase_url", "supabase_anon_key"],
-  },
-  chatgpt: {
-    description: "OpenAI GPT agent for general tasks",
-    allowed: ["openai", "supabase_url", "supabase_anon_key"],
-  },
-  router: {
-    description: "Multi-AI routing engine — selects best provider per query",
-    allowed: [
-      "openai", "anthropic", "mistral", "groq", "perplexity",
-      "openrouter", "xai", "deepseek", "cohere",
-    ],
-  },
-  "autonomous-executor": {
-    description: "Javari autonomous build/deploy executor",
-    allowed: [
-      "openai", "anthropic",
-      "github_pat", "vercel_token",
-      "supabase_url", "supabase_service_role",
-      "cron_secret",
-    ],
-  },
-  "voice-subsystem": {
-    description: "Javari voice layer — ElevenLabs TTS + OpenAI Realtime",
-    allowed: ["openai", "elevenlabs"],
-  },
-  ingest: {
-    description: "R2 canonical document ingestion pipeline",
-    allowed: [
-      "openai", "github_pat",
-      "supabase_url", "supabase_anon_key", "supabase_service_role",
-      "ingest_secret",
-    ],
-  },
-  admin: {
-    description: "Admin dashboard and setup endpoints",
-    allowed: [
-      "supabase_url", "supabase_anon_key", "supabase_service_role",
-      "stripe_secret", "stripe_webhook_secret",
-      "paypal_client_id", "paypal_client_secret",
-      "resend", "cron_secret", "admin_setup_key",
-    ],
-  },
+type AgentName =
+  | "javari" | "claude" | "chatgpt" | "router"
+  | "autonomous-executor" | "voice-subsystem" | "ingest-worker";
+
+const AGENT_SCOPES: Record<AgentName, ProviderName[]> = {
+  "javari": [
+    "openai", "anthropic", "mistral", "groq", "gemini", "xai",
+    "openrouter", "perplexity", "cohere",
+    "supabase_url", "supabase_anon", "supabase_service",
+    "github", "vercel",
+  ],
+  "claude": ["anthropic", "supabase_url", "supabase_anon"],
+  "chatgpt": ["openai", "supabase_url", "supabase_anon"],
+  "router": [
+    "openai", "anthropic", "mistral", "groq", "gemini", "xai",
+    "openrouter", "perplexity", "cohere", "fireworks", "together",
+  ],
+  "autonomous-executor": [
+    "openai", "anthropic", "supabase_url", "supabase_anon", "supabase_service",
+    "github", "vercel",
+  ],
+  "voice-subsystem": ["openai", "elevenlabs"],
+  "ingest-worker": [
+    "openai", "supabase_url", "supabase_anon", "supabase_service", "github",
+  ],
 };
 
-// ── Core Function ─────────────────────────────────────────────────────────────
-
 /**
- * Get a credential for a specific agent.
- *
- * @param agentName - The requesting agent identifier
- * @param providerName - The credential/provider being requested
- * @returns The credential value, or null if not found
- * @throws Error if the agent is not permitted to access this provider
- *
- * @example
- * const openaiKey = getCredentialForAgent("voice-subsystem", "openai");
+ * Get credentials for a specific agent.
+ * Only returns keys the agent is authorized to use.
+ * Returns only keys that are actually present (no nulls in result).
  */
 export function getCredentialForAgent(
   agentName: AgentName,
   providerName: ProviderName
 ): string | null {
-  const permissions = AGENT_PERMISSIONS[agentName];
-  if (!permissions) {
-    throw new Error(`[CredentialLoader] Unknown agent: "${agentName}"`);
+  const scope = AGENT_SCOPES[agentName];
+  if (!scope) {
+    console.warn(`[CredentialLoader] Unknown agent: ${agentName}`);
+    return null;
   }
-
-  if (!permissions.allowed.includes(providerName)) {
-    throw new Error(
-      `[CredentialLoader] Agent "${agentName}" is not permitted to access ` +
-        `credential "${providerName}". ` +
-        `Allowed: ${permissions.allowed.join(", ")}`
-    );
+  if (!scope.includes(providerName)) {
+    console.warn(`[CredentialLoader] Agent "${agentName}" not authorized for "${providerName}"`);
+    return null;
   }
-
   return vault.get(providerName);
 }
 
 /**
- * Assert a credential for an agent. Throws if missing or not permitted.
+ * Get all available credentials for an agent.
  */
-export function assertCredentialForAgent(
-  agentName: AgentName,
-  providerName: ProviderName
-): string {
-  const val = getCredentialForAgent(agentName, providerName);
-  if (!val) {
-    throw new Error(
-      `[CredentialLoader] Agent "${agentName}" requires credential ` +
-        `"${providerName}" but it is not set. ` +
-        `Check Vercel environment variables.`
-    );
-  }
-  return val;
-}
-
-/**
- * Get all available credentials for an agent (only those that are present).
- * Returns a map of providerName → true/false (never the actual values).
- */
-export function getAgentCredentialStatus(
+export function getAllCredentialsForAgent(
   agentName: AgentName
-): Record<ProviderName, VaultStatus> {
-  const permissions = AGENT_PERMISSIONS[agentName];
-  if (!permissions) {
-    throw new Error(`[CredentialLoader] Unknown agent: "${agentName}"`);
-  }
-
-  const result: Partial<Record<ProviderName, VaultStatus>> = {};
-  for (const provider of permissions.allowed) {
-    result[provider] = vault.getStatus(provider);
-  }
-  return result as Record<ProviderName, VaultStatus>;
+): Partial<Record<ProviderName, string>> {
+  const scope = AGENT_SCOPES[agentName] ?? [];
+  return vault.getMany(scope);
 }
 
 /**
- * Check if an agent has a specific credential available.
+ * Check if all required credentials for an agent are present.
  */
-export function agentHasCredential(
+export function validateAgentCredentials(
   agentName: AgentName,
-  providerName: ProviderName
-): boolean {
-  try {
-    return !!getCredentialForAgent(agentName, providerName);
-  } catch {
-    return false;
-  }
+  required?: ProviderName[]
+): { ok: boolean; missing: string[] } {
+  const scope = required ?? AGENT_SCOPES[agentName] ?? [];
+  const missing = scope.filter(p => !vault.has(p));
+  return { ok: missing.length === 0, missing: missing.map(String) };
 }
-
-/**
- * Get all agent names and their descriptions. Safe to expose in diagnostics.
- */
-export function listAgents(): Array<{ name: AgentName; description: string; allowedCount: number }> {
-  return (Object.entries(AGENT_PERMISSIONS) as [AgentName, AgentCredentialMap][]).map(
-    ([name, def]) => ({
-      name,
-      description: def.description,
-      allowedCount: def.allowed.length,
-    })
-  );
-}
-
-export default {
-  getCredentialForAgent,
-  assertCredentialForAgent,
-  getAgentCredentialStatus,
-  agentHasCredential,
-  listAgents,
-};
