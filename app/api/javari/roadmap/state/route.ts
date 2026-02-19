@@ -1,27 +1,32 @@
 // app/api/javari/roadmap/state/route.ts
 // GET /api/javari/roadmap/state — load live roadmap state from Supabase
-// Loads roadmap + tasks from javari_tasks table, joins into canonical phases
 // POST /api/javari/roadmap/state — webhook handler for automated progress updates
 //
-// KEY FIX: supaHeaders() now uses SAME key for both apikey + Authorization
-// (matches roadmap-state.ts pattern — avoids RLS downgrade to anon)
+// Architecture:
+//   canonical-roadmap.ts → phases[].taskIds (string[])
+//   canonical-roadmap.ts → tasks[] (flat Task array with phaseId)
+//   javari_tasks (Supabase) → live statuses, results, timestamps
 //
-// 2026-02-19 — TASK-P0-006 v3
+// Strategy: canonical = structure + metadata, DB = live status override
+// 2026-02-19 — TASK-P0-006 Roadmap Dashboard UI (v3 — proper join)
 
 import { NextRequest, NextResponse } from 'next/server';
 import { JAVARI_CANONICAL_ROADMAP } from '@/lib/javari/roadmap/canonical-roadmap';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 15;
 
-const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const SUPA_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-
-function supaHeaders() {
+function supabaseHeaders() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) throw new Error('Supabase not configured');
   return {
-    apikey: SUPA_KEY,              // ← same key both places (critical for RLS bypass)
-    Authorization: `Bearer ${SUPA_KEY}`,
-    'Content-Type': 'application/json',
-    Prefer: 'return=representation',
+    url,
+    headers: {
+      apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || key,
+      Authorization: `Bearer ${key}`,
+      'Content-Type': 'application/json',
+    },
   };
 }
 
@@ -29,181 +34,181 @@ export async function GET() {
   const t0 = Date.now();
   const canonical = JAVARI_CANONICAL_ROADMAP;
 
+  // Build canonical task map (id → Task) for fast lookup
+  const canonicalTaskMap = new Map(canonical.tasks.map((t) => [t.id, t]));
+
+  // Default response using canonical data only (DB enrichment applied below)
+  let dbTaskMap = new Map<string, Record<string, unknown>>();
+  let roadmapRow: Record<string, unknown> | null = null;
+  let source = 'canonical-only';
+
   try {
-    if (!SUPA_URL || !SUPA_KEY) throw new Error('Supabase env vars not set');
+    const { url, headers } = supabaseHeaders();
 
-    // ── 1. Load roadmap metadata row ─────────────────────────────────────────
-    const roadmapRes = await fetch(
-      `${SUPA_URL}/rest/v1/javari_roadmaps?id=eq.javari-os-v2&select=id,title,status,task_count,completed_count,failed_count,progress,started_at,updated_at&limit=1`,
-      { headers: supaHeaders() }
-    );
+    // Load both in parallel for speed
+    const [roadmapRes, tasksRes] = await Promise.all([
+      fetch(
+        `${url}/rest/v1/javari_roadmaps?id=eq.javari-os-v2&select=id,title,status,task_count,completed_count,failed_count,progress,started_at,updated_at&limit=1`,
+        { headers }
+      ),
+      fetch(
+        `${url}/rest/v1/javari_tasks?roadmap_id=eq.javari-os-v2&select=id,status,result,started_at,completed_at&limit=100`,
+        { headers }
+      ),
+    ]);
 
-    const roadmapRows = roadmapRes.ok
-      ? (await roadmapRes.json() as Record<string, unknown>[])
-      : [];
-    const roadmapRow = roadmapRows[0] || null;
+    if (roadmapRes.ok) {
+      const rows = await roadmapRes.json() as Record<string, unknown>[];
+      roadmapRow = rows[0] || null;
+    }
 
-    // ── 2. Load all tasks for this roadmap ───────────────────────────────────
-    const tasksRes = await fetch(
-      `${SUPA_URL}/rest/v1/javari_tasks?roadmap_id=eq.javari-os-v2` +
-      `&select=id,title,description,status,priority,phase_id,phase_order,task_order,estimated_hours,dependencies,tags,result,started_at,completed_at` +
-      `&order=phase_order.asc,task_order.asc&limit=200`,
-      { headers: supaHeaders() }
-    );
+    if (tasksRes.ok) {
+      const dbTasks = await tasksRes.json() as Record<string, unknown>[];
+      dbTaskMap = new Map(dbTasks.map((t) => [t.id as string, t]));
+      source = dbTasks.length > 0 ? 'supabase' : 'canonical-only';
+    }
+  } catch (err) {
+    console.warn('[RoadmapState] DB load failed, using canonical:', err);
+  }
 
-    const dbTasks = tasksRes.ok
-      ? (await tasksRes.json() as Record<string, unknown>[])
-      : [];
-
-    // ── 3. Index tasks by id for fast lookup ─────────────────────────────────
-    const taskMap = new Map<string, Record<string, unknown>>();
-    for (const t of dbTasks) taskMap.set(t.id as string, t);
-
-    // DB status → UI status normalization
-    const normalizeStatus = (s: unknown): string => {
-      if (s === 'in-progress') return 'running';
-      if (s === 'not-started') return 'pending';
-      return String(s || 'pending');
-    };
-
-    // ── 4. Build enriched phases: canonical structure + live DB statuses ─────
-    const enrichedPhases = canonical.phases.map((cp) => {
-      const enrichedTasks = cp.tasks.map((ct) => {
-        const db = taskMap.get(ct.id);
+  // ── Build enriched phases (canonical structure + DB live status) ──────────
+  const enrichedPhases = canonical.phases.map((phase) => {
+    // Resolve tasks for this phase using taskIds → canonical task lookup
+    const phaseTasks = (phase.taskIds || [])
+      .map((tid) => canonicalTaskMap.get(tid))
+      .filter(Boolean)
+      .map((ct) => {
+        const dbTask = dbTaskMap.get(ct!.id);
+        // Map DB status to UI status (DB uses 'in-progress', UI uses 'running')
+        const rawStatus = (dbTask?.status as string) || ct!.status;
+        const uiStatus = rawStatus === 'in-progress' ? 'running' : rawStatus;
         return {
-          id: ct.id,
-          title: ct.title,
-          description: ct.description || '',
-          status: db ? normalizeStatus(db.status) : normalizeStatus(ct.status),
-          priority: ct.priority,
-          estimatedHours: (db?.estimated_hours as number | undefined) ?? ct.estimatedHours,
-          dependencies: (db?.dependencies as string[]) ?? ct.dependencies ?? [],
-          tags: (db?.tags as string[]) ?? ct.tags ?? [],
-          result: db?.result as string | undefined,
-          started_at: db?.started_at as string | undefined,
-          completed_at: db?.completed_at as string | undefined,
+          id: ct!.id,
+          title: ct!.title,
+          description: ct!.description,
+          status: uiStatus,
+          priority: ct!.priority,
+          estimatedHours: ct!.estimatedHours,
+          dependencies: ct!.dependencies || [],
+          tags: ct!.tags || [],
+          result: (dbTask?.result as string | undefined) || (ct!.result),
+          started_at: dbTask?.started_at as string | undefined,
+          completed_at: dbTask?.completed_at as string | undefined,
         };
       });
 
-      // Derive phase status from live task statuses
-      const allComplete = enrichedTasks.every((t) => t.status === 'complete');
-      const anyRunning = enrichedTasks.some((t) => t.status === 'running');
-      const anyFailed = enrichedTasks.some((t) => t.status === 'failed');
-      const anyBlocked = enrichedTasks.some((t) => t.status === 'blocked');
-      const anyNonPending = enrichedTasks.some((t) => t.status !== 'pending');
+    // Compute phase status from live task statuses
+    const computePhaseStatus = () => {
+      if (phaseTasks.length === 0) return phase.status;
+      const allDone = phaseTasks.every((t) => t.status === 'complete' || t.status === 'skipped');
+      if (allDone) return 'complete' as const;
+      const anyRunning = phaseTasks.some((t) => t.status === 'running' || t.status === 'in-progress');
+      const anyDone = phaseTasks.some((t) => t.status === 'complete');
+      const anyFailed = phaseTasks.some((t) => t.status === 'failed');
+      if (anyFailed && !anyDone && !anyRunning) return 'failed' as const;
+      if (anyRunning || anyDone) return 'active' as const;
+      return 'pending' as const;
+    };
 
-      const phaseStatus = allComplete ? 'complete'
-        : anyRunning ? 'active'
-        : anyFailed ? 'failed'
-        : anyNonPending ? 'active'
-        : 'idle';
+    return {
+      id: phase.id,
+      name: phase.name,
+      status: computePhaseStatus(),
+      order: phase.order + 1, // display as 1-5 (not 0-4)
+      description: phase.description,
+      exitCriteria: phase.exitCriteria || [],
+      estimatedDuration: phase.estimatedDuration,
+      tasks: phaseTasks,
+    };
+  });
 
-      return {
-        id: cp.id,
-        name: cp.name,
-        status: phaseStatus,
-        order: cp.order,
-        description: cp.description || '',
-        exitCriteria: cp.exitCriteria || [],
-        tasks: enrichedTasks,
-      };
-    });
+  // ── Compute live counts from enriched tasks ───────────────────────────────
+  const allEnrichedTasks = enrichedPhases.flatMap((p) => p.tasks);
+  const completedCount = allEnrichedTasks.filter((t) => t.status === 'complete').length;
+  const failedCount = allEnrichedTasks.filter((t) => t.status === 'failed').length;
+  const runningCount = allEnrichedTasks.filter((t) => t.status === 'running').length;
+  const totalCount = allEnrichedTasks.length;
+  const liveProgress = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
 
-    // ── 5. Compute live aggregate stats ──────────────────────────────────────
-    const allEnrichedTasks = enrichedPhases.flatMap((p) => p.tasks);
-    const completedCount = allEnrichedTasks.filter((t) => t.status === 'complete').length;
-    const failedCount = allEnrichedTasks.filter((t) => t.status === 'failed').length;
-    const totalCount = allEnrichedTasks.length;
-    const progress = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
+  // ── Milestone enrichment (mark achieved based on phase completion) ────────
+  const completedPhaseIds = new Set(
+    enrichedPhases.filter((p) => p.status === 'complete').map((p) => p.id)
+  );
+  const enrichedMilestones = canonical.milestones.map((m) => ({
+    ...m,
+    achieved: completedPhaseIds.has(m.phaseId || ''),
+  }));
 
-    return NextResponse.json({
-      success: true,
-      source: dbTasks.length > 0 ? 'supabase' : 'canonical-fallback',
-      loadMs: Date.now() - t0,
-      roadmap: {
-        id: 'javari-os-v2',
-        title: canonical.name,
-        version: canonical.version,
-        status: (roadmapRow?.status as string) || canonical.status,
-        progress,
-        totalTasks: totalCount,
-        completedTasks: completedCount,
-        failedTasks: failedCount,
-        phases: enrichedPhases,
-        milestones: canonical.milestones || [],
-        startedAt: roadmapRow?.started_at as string | null ?? null,
-        updatedAt: roadmapRow?.updated_at as string ?? new Date().toISOString(),
-      },
-    });
-  } catch (err) {
-    console.error('[RoadmapState/GET] Error — returning canonical fallback:', err);
-
-    // Safe fallback: canonical structure, all pending
-    const allTasks = canonical.phases.flatMap((p) => p.tasks);
-    return NextResponse.json({
-      success: true,
-      source: 'canonical-fallback',
-      loadMs: Date.now() - t0,
-      error: err instanceof Error ? err.message : String(err),
-      roadmap: {
-        id: 'javari-os-v2',
-        title: canonical.name,
-        version: canonical.version,
-        status: canonical.status,
-        progress: 0,
-        totalTasks: allTasks.length,
-        completedTasks: 0,
-        failedTasks: 0,
-        phases: canonical.phases.map((p) => ({
-          id: p.id,
-          name: p.name,
-          status: p.status,
-          order: p.order,
-          exitCriteria: p.exitCriteria || [],
-          tasks: p.tasks,
-        })),
-        milestones: canonical.milestones || [],
-        startedAt: null,
-        updatedAt: new Date().toISOString(),
-      },
-    });
-  }
+  return NextResponse.json({
+    success: true,
+    source,
+    loadMs: Date.now() - t0,
+    roadmap: {
+      id: 'javari-os-v2',
+      title: canonical.title,
+      version: canonical.version,
+      status: (roadmapRow?.status as string) || canonical.status || 'executing',
+      progress: liveProgress,
+      totalTasks: totalCount,
+      completedTasks: completedCount,
+      failedTasks: failedCount,
+      runningTasks: runningCount,
+      phases: enrichedPhases,
+      milestones: enrichedMilestones,
+      startedAt: (roadmapRow?.started_at as string) || null,
+      updatedAt: (roadmapRow?.updated_at as string) || new Date().toISOString(),
+    },
+  });
 }
 
-// ── Webhook: automated progress updates ───────────────────────────────────────
+// ── Webhook: automated task progress update ───────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
-    const { taskId, status, result, error: taskError } = await req.json() as {
+    const body = await req.json() as {
       taskId?: string;
       status?: string;
       result?: string;
       error?: string;
     };
 
+    const { taskId, status, result, error: taskError } = body;
     if (!taskId || !status) {
-      return NextResponse.json({ success: false, error: 'taskId + status required' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'Missing taskId or status' }, { status: 400 });
     }
 
-    const update: Record<string, unknown> = {
-      status,
-      updated_at: new Date().toISOString(),
-    };
-    if (result) update.result = result;
-    if (taskError) update.error = taskError;
-    if (status === 'running' || status === 'in-progress') update.started_at = new Date().toISOString();
-    if (status === 'complete' || status === 'failed') update.completed_at = new Date().toISOString();
+    const { url, headers } = supabaseHeaders();
+
+    // Map UI status → DB status
+    const dbStatus = status === 'running' ? 'in-progress' : status;
+
+    const updateBody: Record<string, unknown> = { status: dbStatus };
+    if (result) updateBody.result = result;
+    if (taskError) updateBody.error = taskError;
+    if (status === 'running') updateBody.started_at = new Date().toISOString();
+    if (status === 'complete' || status === 'failed') {
+      updateBody.completed_at = new Date().toISOString();
+    }
+    updateBody.updated_at = new Date().toISOString();
 
     const res = await fetch(
-      `${SUPA_URL}/rest/v1/javari_tasks?id=eq.${encodeURIComponent(taskId)}&roadmap_id=eq.javari-os-v2`,
-      { method: 'PATCH', headers: { ...supaHeaders(), Prefer: 'return=minimal' }, body: JSON.stringify(update) }
+      `${url}/rest/v1/javari_tasks?id=eq.${taskId}&roadmap_id=eq.javari-os-v2`,
+      {
+        method: 'PATCH',
+        headers: { ...headers, Prefer: 'return=minimal' },
+        body: JSON.stringify(updateBody),
+      }
     );
 
     if (!res.ok) {
-      return NextResponse.json({ success: false, error: await res.text() }, { status: 500 });
+      const errText = await res.text();
+      return NextResponse.json({ success: false, error: errText.slice(0, 200) }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, taskId, newStatus: status });
   } catch (err) {
-    return NextResponse.json({ success: false, error: String(err) }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: err instanceof Error ? err.message : String(err) },
+      { status: 500 }
+    );
   }
 }
