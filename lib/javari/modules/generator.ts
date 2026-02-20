@@ -528,7 +528,9 @@ MANDATORY — deviation causes build failure:
 - export async function POST(req: NextRequest): Promise<NextResponse>
 - Never use NextApiRequest or export default
 - Auth: createClient from @supabase/supabase-js, verify with supabase.auth.getUser(token)
-- Credits: call POST /api/credits/spend on craudiovizai.com (CRA central API) — DO NOT access user_credits table directly
+- Credits: call POST ${process.env.NEXT_PUBLIC_CRA_URL ?? 'https://craudiovizai.com'}/api/credits/spend with {amount, reason, userId} — DO NOT access user_credits table directly
+- Auth: import from '@/components/AuthProvider' (useAuth hook)
+- Logging: POST ${process.env.NEXT_PUBLIC_CRA_URL ?? 'https://craudiovizai.com'}/api/analytics/event on success
 - Return NextResponse.json({ success: boolean, ... })
 - Server-only env vars: SUPABASE_SERVICE_ROLE_KEY (never NEXT_PUBLIC_ on server)
 - Return ONLY the complete TypeScript file. No markdown. No explanation.`;
