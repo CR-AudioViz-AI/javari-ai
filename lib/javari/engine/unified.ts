@@ -1,13 +1,12 @@
 // lib/javari/engine/unified.ts
-// Javari Unified AI Engine — v3
-// Changelog from v2:
-//   - systemCommand mode: no token throttling, no persona overlay, 8192 output tokens
-//   - Long-form mode: detected by prompt length or explicit flag → 8192 tokens
-//   - System commands NEVER hit this engine (intercepted by chat/route.ts)
-//     but if they somehow do, this engine will handle gracefully
-//   - Provider attempt timeout raised to 28s for long-form (keeps 2s buffer in 30s)
-//   - Correct provider fallback ordering preserved
-// 2026-02-19 — P1-003
+// Javari Unified AI Engine — v4
+// Changelog from v3:
+//   - Long-form threshold raised to 1500 chars (was 500) — avoids Anthropic timeout on medium prompts
+//   - Long-form mode: Groq-first fallback chain (fastest model for large outputs)
+//   - Provider attempt timeout: 25s (short) / 50s (long-form), both safe under Vercel Pro 60s limit
+//   - MAX_PROVIDERS reduced to 3 for long-form (prevents timeout chain exceeding 60s)
+//   - systemCommand mode: short-circuits to Groq/OpenAI only (fastest completion)
+// 2026-02-19 — P1-003 (v4 fix)
 
 import { normalizeEnvelope } from "@/lib/normalize-envelope";
 import { routeRequest, type RoutingContext } from "@/lib/javari/multi-ai/router";
@@ -18,20 +17,19 @@ import type { Message } from "@/lib/types";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const PROVIDER_ATTEMPT_TIMEOUT_SHORT_MS = 22_000; // short: <= 500 prompt chars
-const PROVIDER_ATTEMPT_TIMEOUT_LONG_MS  = 28_000; // long: > 500 prompt chars
-const RETRY_BASE_MS  = 250;
-const RETRY_MAX_MS   = 1_500;
-const MAX_PROVIDERS  = 6;
+const PROVIDER_ATTEMPT_TIMEOUT_SHORT_MS = 25_000; // ≤1500 char prompts
+const PROVIDER_ATTEMPT_TIMEOUT_LONG_MS  = 50_000; // >1500 char prompts (Vercel Pro max 60s)
+const RETRY_BASE_MS  = 200;
+const RETRY_MAX_MS   = 1_000;
+const MAX_PROVIDERS_SHORT = 6; // Can try many on short prompts
+const MAX_PROVIDERS_LONG  = 3; // Limit on long-form to stay under 60s total
 
-// Long-form threshold: if prompt > this many chars, use long-form token limits
-const LONG_FORM_THRESHOLD_CHARS = 500;
+// Long-form threshold: only use long path for truly large prompts (1500+ chars)
+const LONG_FORM_THRESHOLD_CHARS = 1_500;
 
-// Token limits
 const MAX_TOKENS_NORMAL    = 4_096;
 const MAX_TOKENS_LONG_FORM = 8_192;
 
-// Errors that are fatal (bad key, billing) — don't retry same provider
 const FATAL_ERROR_PATTERNS = [
   /invalid.*api.*key/i,
   /api key.*not.*valid/i,
@@ -76,6 +74,36 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   }
 }
 
+// ── Build provider chain ──────────────────────────────────────────────────────
+
+function buildProviderChain(
+  primaryProvider: string,
+  isLongForm: boolean
+): string[] {
+  if (isLongForm) {
+    // Long-form: prefer fastest providers (Groq > OpenAI > primary if different)
+    const longFormOrder = ["groq", "openai", "mistral"];
+    const chain = [
+      ...longFormOrder,
+      // Add primary if not already included
+      ...(longFormOrder.includes(primaryProvider) ? [] : [primaryProvider]),
+    ].slice(0, MAX_PROVIDERS_LONG);
+    return chain;
+  }
+
+  // Normal: routing-first with full fallback chain
+  return [
+    primaryProvider,
+    primaryProvider !== "anthropic"  ? "anthropic"  : null,
+    primaryProvider !== "openai"     ? "openai"     : null,
+    primaryProvider !== "groq"       ? "groq"       : null,
+    primaryProvider !== "mistral"    ? "mistral"    : null,
+    primaryProvider !== "openrouter" ? "openrouter" : null,
+  ]
+    .filter(Boolean)
+    .slice(0, MAX_PROVIDERS_SHORT) as string[];
+}
+
 // ── Main engine ──────────────────────────────────────────────────────────────
 
 export async function unifiedJavariEngine({
@@ -84,8 +112,8 @@ export async function unifiedJavariEngine({
   context = {},
   files = [],
   _memoryAlreadyInjected = false,
-  _systemCommandMode = false,    // Disables persona + throttling + overrides
-  _longForm = false,              // Forces 8192 token output limit
+  _systemCommandMode = false,
+  _longForm = false,
 }: {
   messages?: Message[];
   persona?: string;
@@ -101,17 +129,17 @@ export async function unifiedJavariEngine({
   const userPrompt = lastUserMessage?.content ?? "";
 
   // ── Determine mode ────────────────────────────────────────────────────────
-  const isLongForm = _longForm || _systemCommandMode || userPrompt.length > LONG_FORM_THRESHOLD_CHARS;
+  const isLongForm = _longForm || userPrompt.length > LONG_FORM_THRESHOLD_CHARS;
   const maxTokens  = isLongForm ? MAX_TOKENS_LONG_FORM : MAX_TOKENS_NORMAL;
   const providerTimeout = isLongForm ? PROVIDER_ATTEMPT_TIMEOUT_LONG_MS : PROVIDER_ATTEMPT_TIMEOUT_SHORT_MS;
 
   // ── Persona overlay (suppressed in system command mode) ───────────────────
   const personaOverlays: Record<string, string> = {
     default: "",
-    friendly: "Tone: warm, conversational, encouraging.",
-    developer: "Tone: precise, technical, senior-engineer level.",
-    executive: "Tone: concise, strategic, outcome-driven.",
-    teacher: "Tone: patient, clear, educational.",
+    friendly:   "Tone: warm, conversational, encouraging.",
+    developer:  "Tone: precise, technical, senior-engineer level.",
+    executive:  "Tone: concise, strategic, outcome-driven.",
+    teacher:    "Tone: patient, clear, educational.",
   };
   const personaOverlay = _systemCommandMode ? "" : (personaOverlays[persona] ?? "");
 
@@ -137,16 +165,13 @@ export async function unifiedJavariEngine({
   const primaryProvider = routingDecision.selectedModel.provider;
   const modelName = routingDecision.selectedModel.id;
 
-  const candidateProviders = [
-    primaryProvider,
-    primaryProvider !== "anthropic"  ? "anthropic"  : null,
-    primaryProvider !== "openai"     ? "openai"     : null,
-    primaryProvider !== "groq"       ? "groq"       : null,
-    primaryProvider !== "mistral"    ? "mistral"    : null,
-    primaryProvider !== "openrouter" ? "openrouter" : null,
-  ]
-    .filter(Boolean)
-    .slice(0, MAX_PROVIDERS) as string[];
+  const candidateProviders = buildProviderChain(primaryProvider, isLongForm);
+
+  console.info(
+    `[Javari] isLongForm=${isLongForm} promptLen=${userPrompt.length} ` +
+    `timeout=${providerTimeout}ms maxTokens=${maxTokens} ` +
+    `chain=${candidateProviders.join(",")}`
+  );
 
   const errors: { provider: string; error: string; fatal: boolean }[] = [];
 
@@ -215,7 +240,6 @@ export async function unifiedJavariEngine({
     }
   }
 
-  // All providers exhausted
   const providerSummary = errors.map((e) => `${e.provider}(${e.fatal ? "fatal" : "transient"})`).join(", ");
   console.error(`[Javari] All ${candidateProviders.length} providers failed:`, providerSummary);
 
