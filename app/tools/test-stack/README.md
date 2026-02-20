@@ -1,11 +1,11 @@
 # Test Stack
 
-> A full-stack test module combining UI, API processing, and database logging for validation
+> Full-stack test module validating complete pipeline: UI page, API route, DB migration, GitHub commit
 
-**Family:** creative-suite
-**Credits per use:** 1
+**Family:** developer-tools
+**Credits per use:** 2
 **Minimum plan:** free
-**Generated:** 2026-02-20T03:56:14.858Z
+**Generated:** 2026-02-20T04:05:53.801Z
 **Generator:** Javari Module Factory v2.1
 
 ## Routes
@@ -31,15 +31,12 @@ const { success, result, creditsUsed } = await response.json();
 
 ## Credit System
 
-Each use deducts **1 credit(s)** from the user's balance.
+Each use deducts **2 credit(s)** from the user's balance.
 Credits are refunded automatically on errors (< 60 seconds).
 
 ## Features
 
-- Input form
-- API processing
-- Result display
-- Usage logging
+
 
 ## Development
 
