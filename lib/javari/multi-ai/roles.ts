@@ -275,9 +275,9 @@ export const DELEGATION_RULES: DelegationRule[] = [
   },
   // 4. Code generation → engineer
   {
-    condition: (f) => f.has_code_request,
+    condition: (f) => f.has_code_request && !f.requires_reasoning_depth,
     primaryRole:   "engineer",
-    supportRoles:  f.requires_validation ? ["validator"] : [],
+    supportRoles:  ["validator"],
     reason: "Code task → engineer (Claude Sonnet)",
   },
   // 5. Reasoning + code → architect plans, engineer builds
