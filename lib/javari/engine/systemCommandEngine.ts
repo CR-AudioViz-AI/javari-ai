@@ -20,8 +20,7 @@ import type { ParsedCommand } from './commandDetector';
 import { runModuleFactory, validateRequest } from '@/lib/javari/modules/engine';
 import type { ModuleRequest } from '@/lib/javari/modules/types';
 import { vault } from '@/lib/javari/secrets/vault';
-import { craFetch as internalCraFetch, pingCra } from '@/lib/javari/internal-router';
-import { craFetch } from '@/lib/javari/internal-router';
+import { craFetch, pingCra } from '@/lib/javari/internal-router';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -255,14 +254,14 @@ async function executeRunDiagnostic(
     }
   }
 
-  // 1. central_services — ping via /api/javari-internal (CORS-safe, no auth needed)
+  // 1. central_services — /api/internal/ping (edge, wildcard CORS, no auth required)
   await check('central_services', async () => {
-    const r = await craFetch<{ ok?: boolean; service?: string; ms?: number }>(
-      '/api/javari-internal?action=ping',
-      { useInternalAuth: true, timeoutMs: 8_000 }
+    const r = await craFetch<{ ok?: boolean; service?: string; timestamp?: string }>(
+      '/api/internal/ping',
+      { timeoutMs: 8_000 }
     );
-    if (!r.ok) throw new Error(`CRA unreachable: ${r.error ?? `status=${r.status}`}`);
-    return `CRA "${r.data?.service ?? 'craudiovizai'}" reachable via javari-internal (${r.ms}ms)`;
+    if (!r.ok) throw new Error(`CRA unreachable: status=${r.status} url=${r.url} ${r.error ?? ''}`);
+    return `CRA reachable: service=${r.data?.service ?? 'craudiovizai'} url=${r.url} (${r.ms}ms)`;
   });
 
   // 2. auth_chain — verify auth routes registered
