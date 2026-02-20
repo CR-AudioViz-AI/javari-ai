@@ -1,10 +1,17 @@
 // app/api/javari/chat/route.ts
-// Javari Chat API v3 — XML System Command intercept layer
+// Javari Chat API v4 — XML System Command intercept layer
+// 2026-02-20 — JAVARI_PATCH upgrade_system_command_engine
+//
 // Pipeline:
-//   1. Detect JAVARI_COMMAND / JAVARI_SYSTEM_COMMAND / JAVARI_EXECUTE blocks
-//   2. If found → bypass provider routing entirely → systemCommandEngine()
+//   1. Detect JAVARI_COMMAND / JAVARI_SYSTEM_COMMAND / JAVARI_EXECUTE / JAVARI_PATCH / JAVARI_SYSTEM_REPAIR
+//   2. If found → bypass all provider routing → systemCommandEngine v2
 //   3. If not found → memory retrieval → unifiedJavariEngine (normal chat)
-// 2026-02-19 — P1-003 System Command Engine
+//
+// Response additions (v4):
+//   - progress[]       — step-by-step progress events
+//   - finalReport      — human-readable formatted summary
+//   - structuredLogs   — leveled timestamped log array
+//   - parseLogs        — XML parser trace for debugging
 
 import { NextResponse } from "next/server";
 import { detectXmlCommand } from "@/lib/javari/engine/commandDetector";
@@ -14,8 +21,8 @@ import { retrieveRelevantMemory } from "@/lib/javari/memory/retrieval";
 import { JAVARI_SYSTEM_PROMPT } from "@/lib/javari/engine/systemPrompt";
 import type { Message } from "@/lib/types";
 
-// System commands can take much longer (module generation = 30-60s)
-export const maxDuration = 90;
+// System commands can run long (diagnostics = 30-60s, module gen = 60-90s)
+export const maxDuration = 120;
 
 export async function POST(req: Request) {
   const t0 = Date.now();
@@ -29,51 +36,67 @@ export async function POST(req: Request) {
       files?: unknown[];
     };
 
-    // ── Extract last user message ────────────────────────────────────────────
+    // ── Extract last user message ──────────────────────────────────────────
     const userMessages = (messages ?? []).filter((m) => m.role === "user");
     const lastUserContent = userMessages[userMessages.length - 1]?.content ?? "";
 
-    // ── STEP 1: Detect XML system command ────────────────────────────────────
+    // ── STEP 1: Detect XML system command ────────────────────────────────
     const detection = detectXmlCommand(lastUserContent);
 
     if (detection.isCommand && detection.command) {
       const cmd = detection.command;
       const detectMs = Date.now() - t0;
 
-      console.info(`[ChatRoute] SystemCommandMode engaged | action=${cmd.action} | detectMs=${detectMs}`);
+      console.info(
+        `[ChatRoute v4] SystemCommandMode | tag=${cmd.tagName} action=${cmd.action} valid=${cmd.valid} detectMs=${detectMs}`
+      );
 
-      // Execute through system command engine (bypasses all provider routing)
+      // Execute through system command engine v2 — bypasses ALL provider routing
       const cmdResult = await executeSystemCommand(cmd);
-
       const totalMs = Date.now() - t0;
-      console.info(`[ChatRoute] SystemCommand complete | action=${cmd.action} | success=${cmdResult.success} | totalMs=${totalMs}`);
 
-      // Return structured JSON — not chat envelope
+      console.info(
+        `[ChatRoute v4] SystemCommand complete | action=${cmd.action} success=${cmdResult.success} totalMs=${totalMs}`
+      );
+
+      // ── Build assistant message for chat UI ──────────────────────────
+      // finalReport is the primary human-readable output from SCE v2
+      const assistantContent = cmdResult.success
+        ? cmdResult.finalReport
+        : formatCommandError(cmd.action, cmdResult.error ?? "Unknown error");
+
       return NextResponse.json({
+        // Core command metadata
         systemCommandMode: true,
         action: cmd.action,
         commandDetected: true,
+        tagName: cmd.tagName,
         valid: cmd.valid,
         success: cmdResult.success,
+        // Payload
         result: cmdResult.result,
-        logs: cmdResult.logs,
+        // Observability
+        progress: cmdResult.progress,
+        finalReport: cmdResult.finalReport,
+        structuredLogs: cmdResult.logs,
+        parseLogs: cmd.parseLogs ?? [],
+        // Timing
         executionMs: cmdResult.executionMs,
         totalMs,
         timestamp: cmdResult.timestamp,
+        // Error (if any)
         error: cmdResult.error ?? null,
-        // Include a human-readable assistant message for the chat UI
+        // Chat UI message
         messages: [
           {
             role: "assistant",
-            content: cmdResult.success
-              ? formatCommandSuccess(cmd.action, cmdResult.result)
-              : formatCommandError(cmd.action, cmdResult.error ?? "Unknown error"),
+            content: assistantContent,
           },
         ],
       });
     }
 
-    // ── STEP 2: Normal chat path ─────────────────────────────────────────────
+    // ── STEP 2: Normal chat path ─────────────────────────────────────────
 
     // Retrieve R2 semantic memory (5s timeout — never block chat)
     let memoryContext = "";
@@ -83,10 +106,10 @@ export async function POST(req: Request) {
         new Promise<string>((resolve) => setTimeout(() => resolve(""), 5_000)),
       ]);
     } catch {
-      // Non-fatal
+      // Non-fatal — memory retrieval failure never blocks chat
     }
 
-    // Build augmented message list
+    // Build augmented message list with memory + system prompt
     const augmented: Message[] = [];
     if (memoryContext) {
       augmented.push({ role: "system", content: memoryContext } as Message);
@@ -107,7 +130,7 @@ export async function POST(req: Request) {
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     const totalMs = Date.now() - t0;
-    console.error("[ChatRoute] Error:", msg, `(${totalMs}ms)`);
+    console.error("[ChatRoute v4] Error:", msg, `(${totalMs}ms)`);
 
     return NextResponse.json(
       {
@@ -127,112 +150,15 @@ export async function POST(req: Request) {
   }
 }
 
-// ── Format helpers for chat UI ────────────────────────────────────────────────
-
-function formatCommandSuccess(action: string, result: Record<string, unknown>): string {
-  switch (action) {
-    case "ping_system": {
-      const r = result as { status?: string; supabase?: string; moduleFactory?: string };
-      return [
-        "✅ **System Ping — All Systems Operational**",
-        "",
-        `- Platform: ${r.status ?? "operational"}`,
-        `- Supabase: ${r.supabase === "connected" ? "✅" : "⚠️"} ${r.supabase}`,
-        `- Module Factory: ${r.moduleFactory === "operational" ? "✅" : "⚠️"} ${r.moduleFactory}`,
-      ].join("\n");
-    }
-
-    case "generate_module":
-    case "implement_module_factory_engine": {
-      const r = result as {
-        slug?: string; name?: string; status?: string;
-        validation?: { passed?: boolean; score?: number };
-        artifacts?: { totalFiles?: number; files?: string[] };
-        commit?: { sha?: string } | null;
-        generationMs?: number;
-      };
-      const lines = [
-        `✅ **Module Generated: ${r.name ?? r.slug}**`,
-        "",
-        `- Status: ${r.status}`,
-        `- Validation: ${r.validation?.passed ? "✅ PASS" : "❌ FAIL"} (score ${r.validation?.score ?? 0}/100)`,
-        `- Files: ${r.artifacts?.totalFiles ?? 0}`,
-      ];
-      if (r.artifacts?.files?.length) {
-        lines.push("", "**Files:**");
-        (r.artifacts.files as string[]).forEach((f) => lines.push(`  - \`${f}\``));
-      }
-      if (r.commit?.sha) {
-        lines.push("", `- Commit: \`${(r.commit.sha as string).slice(0, 10)}\``);
-      }
-      lines.push("", `- Generation time: ${r.generationMs ?? 0}ms`);
-      return lines.join("\n");
-    }
-
-    case "preview_module": {
-      const r = result as {
-        slug?: string; name?: string;
-        validation?: { passed?: boolean; score?: number };
-        artifacts?: { totalFiles?: number };
-        generationMs?: number;
-      };
-      return [
-        `✅ **Module Preview: ${r.name ?? r.slug}**`,
-        "",
-        `- Validation: ${r.validation?.passed ? "✅ PASS" : "❌ FAIL"} (score ${r.validation?.score ?? 0}/100)`,
-        `- Files that would be generated: ${r.artifacts?.totalFiles ?? 0}`,
-        `- Generation time: ${r.generationMs ?? 0}ms`,
-        "",
-        "To commit: re-run with \`auto_commit: true\`",
-      ].join("\n");
-    }
-
-    case "get_status": {
-      const r = result as {
-        roadmap?: { progress?: number; completed_count?: number };
-        tasks?: Record<string, number>;
-        knowledgeBase?: { totalRows?: number };
-      };
-      return [
-        "✅ **Platform Status**",
-        "",
-        `- Roadmap progress: ${r.roadmap?.progress ?? 0}%`,
-        `- Tasks complete: ${r.roadmap?.completed_count ?? 0}`,
-        `- Task breakdown: ${Object.entries(r.tasks ?? {}).map(([k,v]) => `${k}=${v}`).join(", ")}`,
-        `- Knowledge base: ${r.knowledgeBase?.totalRows ?? 0} rows`,
-      ].join("\n");
-    }
-
-    case "run_diagnostic": {
-      const r = result as { allPass?: boolean; checks?: Record<string, boolean | string> };
-      const lines = [
-        `${r.allPass ? "✅" : "⚠️"} **Diagnostic ${r.allPass ? "PASSED" : "COMPLETED WITH ISSUES"}**`,
-        "",
-      ];
-      Object.entries(r.checks ?? {}).forEach(([k, v]) => {
-        lines.push(`- ${k}: ${v === true ? "✅" : `❌ ${v}`}`);
-      });
-      return lines.join("\n");
-    }
-
-    default: {
-      return [
-        `✅ **Command Executed: ${action}**`,
-        "",
-        "```json",
-        JSON.stringify(result, null, 2).slice(0, 800),
-        "```",
-      ].join("\n");
-    }
-  }
-}
+// ── Error formatter (kept for non-SCE errors) ────────────────────────────────
 
 function formatCommandError(action: string, error: string): string {
   return [
-    `❌ **Command Failed: ${action}**`,
+    `❌ **Command Failed: \`${action}\`**`,
     "",
-    `Error: ${error}`,
+    `**Error:** ${error}`,
     "",
-    "Please check the command structure and try again.",
+    "Check command structure and try again. Valid actions:",
+    "`ping_system` · `run_diagnostic` · `get_status` · `generate_module` · `preview_module` · `update_roadmap` · `ingest_docs`",
   ].join("\n");
 }
