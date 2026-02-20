@@ -26,7 +26,16 @@ const AuthContext = createContext<AuthContextType>({
   signInWithMagicLink: async () => ({ error: null }), signOut: async () => {}, refreshCredits: async () => {},
 });
 
+/** Primary auth hook — returns full context including user, session, credits */
 export function useAuth() { return useContext(AuthContext); }
+
+/** Alias for useAuth — returns user object directly for components that only need user */
+export function useUser() {
+  const { user } = useContext(AuthContext);
+  return user;
+}
+
+/** Legacy alias — same as useAuth */
 export function useAuthContext() { return useContext(AuthContext); }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
