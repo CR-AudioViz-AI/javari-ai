@@ -1,9 +1,9 @@
 // lib/javari/modules/validator.ts
-// Module Factory Validator
+// Module Factory Validator — v2.1 (bug fixes: SEC003, REG001, API000)
 // Runs static analysis, security scanning, schema checks on generated artifacts
 // No external linting dependencies — pure pattern matching + structural validation
 // OWASP Top 10 aware, WCAG 2.2 AA checks
-// 2026-02-19 — TASK-P1-001
+// 2026-02-19 — TASK-P1-003 — Fixed: SEC003 regex, REG001 falsy, API000 scope
 
 import type {
   ModuleArtifacts,
@@ -25,13 +25,25 @@ const HARDCODED_SECRET_PATTERNS = [
   /AKIA[0-9A-Z]{16}/,               // AWS access keys
 ];
 
+// Patterns that are dangerous in ALL file types (client and server)
 const DANGEROUS_PATTERNS = [
   { pattern: /eval\s*\(/, code: 'SEC001', message: 'eval() detected — XSS risk' },
   { pattern: /dangerouslySetInnerHTML/, code: 'SEC002', message: 'dangerouslySetInnerHTML — XSS risk; sanitize first' },
-  { pattern: /process\.env\.[A-Z_]+(?!NEXT_PUBLIC_)/, code: 'SEC003', message: 'Non-public env var exposed in client component' },
   { pattern: /console\.log\(.*(?:key|secret|password|token)/i, code: 'SEC004', message: 'Possible credential logging' },
   { pattern: /\.innerHTML\s*=/, code: 'SEC005', message: 'innerHTML assignment — XSS risk' },
   { pattern: /document\.write/, code: 'SEC006', message: 'document.write() — XSS risk' },
+];
+
+// Client-only dangerous patterns (only apply to files with "use client")
+// FIX: SEC003 regex now uses lookahead at START of var name (not after full [A-Z_]+ match)
+// FIX: SEC003 moved to client-only checks — API routes legitimately use server env vars
+const CLIENT_DANGEROUS_PATTERNS = [
+  {
+    // Correct lookahead: checks immediately after "process.env." prefix
+    pattern: /process\.env\.(?!NEXT_PUBLIC_)[A-Z_]+/,
+    code: 'SEC003',
+    message: 'Non-public env var exposed in client component — use NEXT_PUBLIC_ prefix or move to server',
+  },
 ];
 
 // ── TypeScript / React patterns ───────────────────────────────────────────────
@@ -44,6 +56,7 @@ const TS_CHECKS = [
 ];
 
 const REQUIRED_API_EXPORTS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+
 const REQUIRED_API_PATTERNS = [
   { pattern: /export const dynamic/, code: 'API001', message: 'Missing export const dynamic — add "force-dynamic" for auth routes' },
   { pattern: /NextResponse\.json/, code: 'API002', message: 'Missing NextResponse.json — ensure structured response' },
@@ -73,6 +86,7 @@ const AUTH_PATTERNS = [
   /useUser/,
   /verifyJWT/,
   /getUser/,
+  /auth\.api\.getUser/,
 ];
 
 // ── Issue Builder ─────────────────────────────────────────────────────────────
@@ -116,7 +130,7 @@ function validateUIFile(file: { path: string; content: string }): ValidationIssu
     }
   }
 
-  // Security scan
+  // Security scan — patterns dangerous in all files
   for (const { pattern, code, message } of DANGEROUS_PATTERNS) {
     if (pattern.test(content)) {
       const line = findLineNumber(content, pattern);
@@ -124,12 +138,13 @@ function validateUIFile(file: { path: string; content: string }): ValidationIssu
     }
   }
 
-  // No process.env in client components (after "use client")
-  if (/"use client"/.test(content) && /process\.env\.[A-Z]/.test(content)) {
-    const nonPublic = content.match(/process\.env\.(?!NEXT_PUBLIC_)([A-Z_]+)/g);
-    if (nonPublic && nonPublic.length > 0) {
-      issues.push(issue('error', path, 'SEC003',
-        `Server env vars in client component: ${nonPublic.slice(0, 3).join(', ')}`));
+  // Client-only checks: SEC003 — server env vars in client components
+  if (/"use client"/.test(content)) {
+    for (const { pattern, code, message } of CLIENT_DANGEROUS_PATTERNS) {
+      if (pattern.test(content)) {
+        const line = findLineNumber(content, pattern);
+        issues.push(issue('error', path, code, message, line));
+      }
     }
   }
 
@@ -143,14 +158,18 @@ function validateAPIFile(file: { path: string; content: string }): ValidationIss
   const { path, content } = file;
 
   // Must export at least one HTTP verb
+  // FIX: Check for both "export async function POST" and "export const POST = "
+  // Also handle edge cases: "export function POST", "export const POST:"
   const hasHTTPExport = REQUIRED_API_EXPORTS.some((v) =>
-    new RegExp(`export\\s+(?:async\\s+)?function\\s+${v}|export\\s+const\\s+${v}`).test(content)
+    new RegExp(
+      `export\\s+(?:async\\s+)?function\\s+${v}\\b|export\\s+const\\s+${v}\\s*[=:]`
+    ).test(content)
   );
   if (!hasHTTPExport) {
-    issues.push(issue('error', path, 'API000', 'No HTTP method exported (GET, POST, etc.)'));
+    issues.push(issue('error', path, 'API000', 'No HTTP method exported (GET, POST, etc.) — ensure export async function POST or export const POST ='));
   }
 
-  // Required API patterns
+  // Required API patterns (warnings, not errors — AI sometimes omits these)
   for (const { pattern, code, message } of REQUIRED_API_PATTERNS) {
     if (!pattern.test(content)) {
       issues.push(issue('warning', path, code, message));
@@ -165,27 +184,16 @@ function validateAPIFile(file: { path: string; content: string }): ValidationIss
     }
   }
 
-  // Security scan — skip SEC003 for API routes (server-side env vars are allowed)
-  const API_DANGEROUS = DANGEROUS_PATTERNS.filter((p) => p.code !== 'SEC003');
-  for (const { pattern, code, message } of API_DANGEROUS) {
+  // Security scan — ALL file types (no SEC003 here — API routes ARE server-side)
+  for (const { pattern, code, message } of DANGEROUS_PATTERNS) {
     if (pattern.test(content)) {
       const line = findLineNumber(content, pattern);
       issues.push(issue('error', path, code, message, line));
     }
   }
 
-  // API000: Validate that the route exports at least one HTTP verb (App Router style)
-  // Accept both "export async function POST" and "export function POST" and "export const POST"
-  const appRouterExport = REQUIRED_API_EXPORTS.some((v) =>
-    new RegExp(`export\s+(?:async\s+)?function\s+${v}\b`).test(content) ||
-    new RegExp(`export\s+const\s+${v}\s*=`).test(content)
-  );
-  // Also accept Pages Router "export default" — downgrade to warning not error
-  const pagesRouterDefault = /export\s+default\s+(?:async\s+)?function/.test(content);
-  if (!appRouterExport && pagesRouterDefault) {
-    issues.push(issue('warning', path, 'API000W',
-      'Using Pages Router (export default) — consider migrating to App Router (export async function POST)'));
-  }
+  // NOTE: SEC003 (server env var check) intentionally NOT applied to API routes
+  // API routes run server-side and legitimately use process.env.* without NEXT_PUBLIC_ prefix
 
   return issues;
 }
@@ -306,11 +314,13 @@ export function validateModule(
   }
 
   // Registry completeness check
+  // FIX: Use "field in registry" (presence check) not !registry[field] (falsy check)
+  // This correctly handles creditsPerUse: 0, features: [], enabled: false, etc.
   try {
     const registry = JSON.parse(artifacts.registryEntry.content) as Record<string, unknown>;
     const required = ['slug', 'name', 'description', 'family', 'types', 'creditsPerUse'];
     for (const field of required) {
-      if (!registry[field]) {
+      if (!(field in registry)) {
         allIssues.push(issue('error', artifacts.registryEntry.path, 'REG001',
           `Registry entry missing required field: ${field}`));
       }
@@ -324,7 +334,7 @@ export function validateModule(
   const checks: ValidationChecks = {
     typescriptSyntax: !allIssues.some((i) => i.code.startsWith('TS') && i.severity === 'error'),
     schemaCompleteness: !allIssues.some((i) => i.code.startsWith('REG') && i.severity === 'error'),
-    apiRouteShape: artifacts.apiRoutes.length > 0 &&
+    apiRouteShape: artifacts.apiRoutes.length === 0 ||  // no API routes = still ok (UI-only module)
       !allIssues.some((i) => i.code === 'API000' && i.severity === 'error'),
     noHardcodedSecrets: !allIssues.some((i) => i.code === 'SEC010'),
     creditSystemHooked: checkCreditIntegration(artifacts),
@@ -336,11 +346,12 @@ export function validateModule(
   const warnings = allIssues.filter((i) => i.severity === 'warning');
   const score = calculateScore(allIssues, checks);
 
-  // Pass if: no errors, both critical checks pass (auth + credits)
+  // Pass criteria: no errors AND secrets clean AND schema complete AND API shape valid (if routes exist)
   const passed =
     errors.length === 0 &&
     checks.noHardcodedSecrets &&
-    checks.schemaCompleteness;
+    checks.schemaCompleteness &&
+    checks.apiRouteShape;
 
   return { passed, errors, warnings, checks, score };
 }
