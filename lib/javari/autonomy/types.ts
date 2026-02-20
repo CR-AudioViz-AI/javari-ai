@@ -40,6 +40,7 @@ export interface TaskNode {
     provider: string;            // primary provider hint
     model: string;               // primary model hint
     requires_validation: boolean;
+    requires_reasoning_depth?: boolean; // set by planner from routing context
     requires_json: boolean;
     high_risk: boolean;
     cost_sensitivity: string;
