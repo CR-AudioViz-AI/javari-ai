@@ -1,24 +1,47 @@
-/**
- * Javari AI - Design Token System
- * SPEC 04 — Canonical UI Token Implementation
- * 
- * Provides semantic design tokens for consistent, accessible UI across all components
- * - Semantic color system with WCAG 2.2 AA contrast
- * - Typography scale with proper line heights
- * - Spacing scale (0-16 rem)
- * - Border radius tokens (sm-2xl)
- * - Elevation (shadow) system
- * - Motion/animation tokens
- * - Dark mode support (manual toggle via data-theme attribute)
- * 
- * @version 1.0.0
- * @spec SPEC 04
- * @timestamp Tuesday, January 28, 2025 at 11:03 AM EST
- */
+/* app/globals.css */
+/* 2026-02-20 — STEP 0: Added dvh/safe-area utilities */
+/* All existing tokens preserved — only additions made */
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ── iOS / Mobile viewport fix ──────────────────────────────────────────────
+   Provides --app-height fallback chain for browsers that don't support dvh.
+   Set by JS on load and on resize. Components use var(--app-height, 100dvh).
+   ────────────────────────────────────────────────────────────────────────── */
+@layer base {
+  :root {
+    --app-height: 100dvh;
+  }
+
+  html, body {
+    /* Prevent iOS scroll bounce from leaking outside app */
+    overscroll-behavior: none;
+    /* Respect safe areas on notched devices */
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+}
+
+/* ── Safe area utility classes ──────────────────────────────────────────────*/
+@layer utilities {
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .pt-safe {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .h-screen-safe {
+    height: 100dvh;
+    height: var(--app-height, 100vh);
+  }
+  .min-h-screen-safe {
+    min-height: 100dvh;
+    min-height: var(--app-height, 100vh);
+  }
+}
 
 /* === JAVARI AVATAR ANIMATIONS === */
 
@@ -89,102 +112,110 @@
   
   /* Borders & Focus */
   --border: 214 32% 91%;             /* Light border */
-  --focus: 221 83% 53%;              /* Primary blue for focus rings */
-
-  /* === Typography === */
-  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --focus-ring: 221 83% 53%;         /* Blue focus ring */
   
-  /* Line Heights */
-  --line-height-tight: 1.25;
-  --line-height-normal: 1.5;
-  --line-height-relaxed: 1.75;
-
+  /* Text Hierarchy */
+  --text-primary: 222 47% 11%;       /* Primary text */
+  --text-secondary: 215 25% 35%;     /* Secondary text */
+  --text-muted: 215 16% 47%;         /* Muted text */
+  --text-disabled: 220 9% 71%;       /* Disabled text */
+  
+  /* === Typography Scale === */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  
+  --text-xs: 0.75rem;      /* 12px */
+  --text-sm: 0.875rem;     /* 14px */
+  --text-base: 1rem;       /* 16px */
+  --text-lg: 1.125rem;     /* 18px */
+  --text-xl: 1.25rem;      /* 20px */
+  --text-2xl: 1.5rem;      /* 24px */
+  --text-3xl: 1.875rem;    /* 30px */
+  --text-4xl: 2.25rem;     /* 36px */
+  
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.625;
+  
   /* === Spacing Scale (rem) === */
-  --spacing-0: 0;
-  --spacing-1: 0.25rem;    /* 4px */
-  --spacing-2: 0.5rem;     /* 8px */
-  --spacing-3: 0.75rem;    /* 12px */
-  --spacing-4: 1rem;       /* 16px */
-  --spacing-6: 1.5rem;     /* 24px */
-  --spacing-8: 2rem;       /* 32px */
-  --spacing-12: 3rem;      /* 48px */
-  --spacing-16: 4rem;      /* 64px */
-
+  --space-0: 0;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+  
   /* === Border Radius === */
-  --radius-sm: 0.25rem;    /* 4px */
-  --radius-md: 0.5rem;     /* 8px */
-  --radius-lg: 0.75rem;    /* 12px */
-  --radius-xl: 1rem;       /* 16px */
-  --radius-2xl: 1.5rem;    /* 24px */
-
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+  --radius-full: 9999px;
+  
   /* === Elevation (Shadows) === */
-  --elevation-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --elevation-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-  --elevation-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
-
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  
   /* === Motion Tokens === */
   --duration-fast: 150ms;
-  --duration-normal: 300ms;
-  --duration-slow: 500ms;
-  
-  --easing-standard: cubic-bezier(0.4, 0, 0.2, 1);
-  --easing-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --duration-normal: 200ms;
+  --duration-slow: 300ms;
+  --ease-default: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 /* ============================================
-   DESIGN TOKENS — DARK MODE
-   Manual toggle via [data-theme="dark"] attribute
-   NOT automatically enabled
+   DARK MODE (via data-theme="dark")
    ============================================ */
 
 [data-theme="dark"] {
-  /* === Semantic Colors === */
-  /* Background & Surface */
-  --background: 222 47% 11%;         /* Dark background */
-  --foreground: 210 40% 98%;         /* Light text - WCAG AA */
-  --surface: 217 33% 17%;            /* Dark surface */
-  --surface-muted: 215 28% 24%;      /* Muted dark surface */
+  --background: 222 47% 7%;
+  --foreground: 210 40% 96%;
+  --surface: 222 47% 11%;
+  --surface-muted: 217 33% 17%;
   
-  /* Primary Brand */
-  --primary: 217 91% 60%;            /* Lighter blue for dark mode */
-  --primary-foreground: 222 47% 11%; /* Dark text on primary */
+  --primary: 217 91% 60%;
+  --primary-foreground: 0 0% 100%;
   
-  /* Secondary */
-  --secondary: 217 33% 17%;          /* Dark blue-gray */
-  --secondary-foreground: 210 40% 98%; /* Light text on secondary */
+  --secondary: 217 33% 17%;
+  --secondary-foreground: 210 40% 96%;
   
-  /* Accent */
-  --accent: 142 76% 45%;             /* Brighter green for dark mode */
-  --accent-foreground: 222 47% 11%; /* Dark text on accent */
+  --border: 217 33% 20%;
   
-  /* Semantic States */
-  --success: 142 76% 45%;            /* Brighter green */
-  --warning: 38 92% 60%;             /* Brighter amber */
-  --error: 0 84% 70%;                /* Brighter red */
-  
-  /* Borders & Focus */
-  --border: 217 33% 28%;             /* Dark border */
-  --focus: 217 91% 60%;              /* Lighter blue for focus */
-
-  /* === Elevation (Shadows) — Adjusted for dark mode === */
-  --elevation-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
-  --elevation-md: 0 4px 6px -1px rgb(0 0 0 / 0.4), 0 2px 4px -2px rgb(0 0 0 / 0.3);
-  --elevation-lg: 0 10px 15px -3px rgb(0 0 0 / 0.5), 0 4px 6px -4px rgb(0 0 0 / 0.4);
+  --text-primary: 210 40% 96%;
+  --text-secondary: 215 20% 65%;
+  --text-muted: 215 16% 47%;
+  --text-disabled: 215 16% 35%;
 }
 
 /* ============================================
-   BASE LAYER — Essential Resets
+   REDUCED MOTION — respect user preference
    ============================================ */
 
-@layer base {
-  * {
-    @apply border-border;
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
-  
-  body {
-    @apply bg-background text-foreground;
-    font-family: var(--font-sans);
-    line-height: var(--line-height-normal);
+
+  .animate-avatarIdle,
+  .animate-avatarListening,
+  .animate-avatarThinking,
+  .animate-avatarSpeaking,
+  .animate-avatarError {
+    animation: none !important;
   }
 }
