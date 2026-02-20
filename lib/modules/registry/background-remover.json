@@ -1,0 +1,19 @@
+{
+  "slug": "background-remover",
+  "name": "Background Remover",
+  "description": "Remove image backgrounds instantly with AI, supports batch processing, transparent PNG export, and custom background replacement",
+  "family": "creative-suite",
+  "types": [
+    "full-stack"
+  ],
+  "creditsPerUse": 2,
+  "minPlan": "free",
+  "features": [],
+  "routes": {
+    "ui": "/tools/background-remover",
+    "api": "/api/tools/background-remover/process"
+  },
+  "generatedAt": "2026-02-20T04:33:50.956Z",
+  "generatedBy": "javari-module-factory@2.1",
+  "status": "ready"
+}
