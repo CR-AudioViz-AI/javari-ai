@@ -1,0 +1,19 @@
+{
+  "slug": "social-caption-generator",
+  "name": "Social Caption Generator",
+  "description": "Create platform-optimized social media captions with hashtags, emojis, and tone controls for Instagram, TikTok, LinkedIn, X",
+  "family": "creative-suite",
+  "types": [
+    "full-stack"
+  ],
+  "creditsPerUse": 1,
+  "minPlan": "free",
+  "features": [],
+  "routes": {
+    "ui": "/tools/social-caption-generator",
+    "api": "/api/tools/social-caption-generator/process"
+  },
+  "generatedAt": "2026-02-20T04:34:21.708Z",
+  "generatedBy": "javari-module-factory@2.1",
+  "status": "ready"
+}
