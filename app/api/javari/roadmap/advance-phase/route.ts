@@ -21,7 +21,9 @@ function supaHeaders() {
 
 export async function POST(req: NextRequest) {
   try {
-    const { phaseId, force = false } = await req.json() as { phaseId: string; force?: boolean };
+    const body = await req.json() as { phaseId?: string; phase?: string; force?: boolean; dryRun?: boolean };
+    const phaseId = body.phaseId ?? body.phase ?? "";
+    const force = body.force ?? body.dryRun ?? false;
 
     if (!phaseId) {
       return NextResponse.json({ success: false, error: 'phaseId required' }, { status: 400 });
