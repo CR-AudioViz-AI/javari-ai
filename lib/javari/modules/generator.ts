@@ -141,18 +141,19 @@ Requirements:
 // ── API Route Generator ───────────────────────────────────────────────────────
 
 async function generateAPIRoute(req: ModuleRequest): Promise<ModuleFile> {
-  const systemPrompt = `You are an expert Next.js 14 API route developer.
-Rules:
-- export const dynamic = "force-dynamic"
-- export const maxDuration = 30
-- Auth check via Supabase: verify Bearer token in Authorization header
+  const systemPrompt = `You are an expert Next.js 14 App Router API route developer.
+CRITICAL RULES — MUST FOLLOW EXACTLY:
+- This is Next.js 14 App Router. NEVER use NextApiRequest/NextApiResponse. NEVER use export default.
+- ALWAYS use: import { NextRequest, NextResponse } from 'next/server'
+- ALWAYS export named async functions: export async function POST(req: NextRequest): Promise<NextResponse>
+- ALWAYS include: export const dynamic = "force-dynamic" and export const maxDuration = 30
+- Auth: extract Bearer from req.headers.get('authorization'), verify via Supabase getUser()
 - Credit deduction BEFORE processing (fail fast if insufficient)
-- Input validation: check all required fields, return 400 on missing
-- Error responses: always { success: false, error: string }
-- Success responses: always { success: true, result: ... }
-- No hardcoded secrets — use process.env with NEXT_PUBLIC_ prefix only for public vars
-- Rate limit awareness: return 429 with retry-after header if needed
-- Return ONLY the complete TypeScript file content, no markdown fences`;
+- Input: parse body with await req.json() typed as Record<string, unknown>
+- Error responses: always return NextResponse.json({ success: false, error: string }, { status: N })
+- Success responses: return NextResponse.json({ success: true, result: ... })
+- Use process.env only for server-side vars (SUPABASE_SERVICE_ROLE_KEY, etc.) — never expose secrets
+- Return ONLY the complete TypeScript file content — no markdown fences, no explanation`;
 
   const userPrompt = `Generate a Next.js API route for the "${req.name}" module processor.
 
