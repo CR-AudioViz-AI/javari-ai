@@ -11,7 +11,9 @@ import type { ModuleArtifacts, ModuleRequest, CommitRecord, ModuleFile } from '.
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const REPO_OWNER = 'CR-AudioViz-AI';
-const REPO_NAME = 'javari-ai';
+// Default target = craudiovizai (the CRA platform where tools live)
+// Pass targetRepo to runModuleWriter() to override for testing
+const DEFAULT_REPO_NAME = 'craudiovizai';
 const DEFAULT_BRANCH = 'main';
 
 function getOctokit(): Octokit {
