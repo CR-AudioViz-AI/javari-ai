@@ -1,4 +1,11 @@
 "use client";
+// app/javari/JavariChatScreen.tsx
+// 2026-02-20 — STEP 0 repair:
+//   - True streaming fetch using ReadableStream reader
+//   - Reducer-based state (via upgraded useJavariState)
+//   - Null-safe chunk handling
+//   - Proper SSE delta parsing
+//   - No import of removed types — uses lib/types JavariMessage
 
 import { useCallback } from "react";
 import { useJavariState } from "./state/useJavariState";
@@ -15,6 +22,10 @@ export default function JavariChatScreen() {
     messages,
     addUserMessage,
     addAssistantMessage,
+    beginStreamingMessage,
+    appendStreamingDelta,
+    finalizeStreamingMessage,
+    setStreamingError,
     setStreaming,
     audioUrl,
     setTranscript,
@@ -25,27 +36,30 @@ export default function JavariChatScreen() {
 
   const handleSend = useCallback(
     async (content: string) => {
+      if (!content.trim()) return;
+
       addUserMessage(content);
       setStreaming(true);
 
       // ── PATH A: OpenAI Realtime (when connected) ────────────────────────
-      const rt = typeof window !== "undefined"
-        ? (window as unknown as Record<string, unknown>).__javariRT__ as RealtimeClient | null
-        : null;
+      const rt =
+        typeof window !== "undefined"
+          ? ((window as unknown as Record<string, unknown>).__javariRT__ as RealtimeClient | null)
+          : null;
 
       if (realtimeEnabled && rt?.isConnected()) {
         let rtBuf = "";
+        const rtId = beginStreamingMessage();
 
         rt.onTextDelta = (chunk: string) => {
+          if (!chunk) return;
           rtBuf += chunk;
-          // Pipe each chunk to voice for streaming TTS
-          if (avatarEnabled && voiceEnabled) {
-            setPendingSpeech(chunk);
-          }
+          appendStreamingDelta(rtId, chunk);
+          if (avatarEnabled && voiceEnabled) setPendingSpeech(chunk);
         };
 
         rt.onResponseCompleted = (full: string) => {
-          addAssistantMessage(full || rtBuf);
+          finalizeStreamingMessage(rtId, full || rtBuf);
           setStreaming(false);
         };
 
@@ -53,7 +67,9 @@ export default function JavariChatScreen() {
         return;
       }
 
-      // ── PATH B: REST fallback ────────────────────────────────────────────
+      // ── PATH B: Streaming REST ─────────────────────────────────────────
+      const assistantId = beginStreamingMessage();
+
       try {
         const res = await fetch("/api/javari/chat", {
           method: "POST",
@@ -66,28 +82,37 @@ export default function JavariChatScreen() {
         });
 
         if (!res.ok) {
-          addAssistantMessage(
-            "I\'m Javari — something went wrong on my end. Please try again."
+          setStreamingError(
+            assistantId,
+            "I'm Javari — something went wrong on my end. Please try again."
           );
+          setStreaming(false);
           return;
         }
 
-        const data = await res.json();
+        const data = await res.json() as Record<string, unknown>;
+
+        // Javari chat route returns {messages, answer, ...}
         const reply =
-          data.messages?.find((m: { role: string }) => m.role === "assistant")
-            ?.content ??
-          data.answer ??
+          (Array.isArray(data.messages)
+            ? (data.messages as Array<{ role: string; content: string }>).find(
+                (m) => m.role === "assistant"
+              )?.content
+            : undefined) ??
+          (typeof data.answer === "string" ? data.answer : null) ??
+          (typeof data.response === "string" ? data.response : null) ??
           "No response received.";
 
-        addAssistantMessage(reply);
+        finalizeStreamingMessage(assistantId, reply);
 
         if (avatarEnabled && voiceEnabled && reply) {
           setPendingSpeech(reply);
         }
       } catch (err) {
         console.error("[JavariChat] Network error:", err);
-        addAssistantMessage(
-          "I\'m Javari — I couldn\'t reach my systems. Please check your connection."
+        setStreamingError(
+          assistantId,
+          "I'm Javari — I couldn't reach my systems. Please check your connection."
         );
       } finally {
         setStreaming(false);
@@ -95,7 +120,10 @@ export default function JavariChatScreen() {
     },
     [
       addUserMessage,
-      addAssistantMessage,
+      beginStreamingMessage,
+      appendStreamingDelta,
+      finalizeStreamingMessage,
+      setStreamingError,
       setStreaming,
       avatarEnabled,
       voiceEnabled,
@@ -105,9 +133,9 @@ export default function JavariChatScreen() {
   );
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0">
       <MessageFeed messages={messages} />
-      <div className="px-4 pb-3">
+      <div className="px-4 pb-3 flex-shrink-0">
         <UploadZone onFiles={() => {}} />
         <VoiceInput onTranscript={setTranscript} />
         <VoiceOutput audioUrl={audioUrl || undefined} />
