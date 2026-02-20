@@ -1,10 +1,37 @@
 // lib/javari/multi-ai/router.ts
-// Multi-AI routing engine with policy enforcement
+// Javari Multi-Model Routing Engine — v2
+// 2026-02-20 — STEP 1 complete implementation
+//
+// Pipeline (in order):
+//   1. analyzeRoutingContext()  → determine ALL routing flags
+//   2. selectPrimaryModel()     → pick optimal model from flags
+//   3. buildFallbackChain()     → ordered provider list for resilience
+//   4. routeRequest()           → public API (backward compat with unified.ts)
+//
+// Routing logic (priority order):
+//   A. JSON-mode request → Mistral large (strict structured output)
+//   B. Reasoning-depth   → o4-mini / o3 (OpenAI o-series)
+//   C. Bulk/cheap tasks  → Groq Llama (free tier, high volume)
+//   D. Default           → Groq (speed) → OpenAI → Anthropic
+//
+// Fallback tree (per spec):
+//   o-series → GPT-4-class → Llama → Claude validator
+//
+// Fully backward-compatible with existing unified.ts import:
+//   import { routeRequest, type RoutingDecision, type RoutingContext } from './router'
 
-import { ModelMetadata, selectModelByTask, getModel, getFallbackModel } from './model-registry';
+import { ModelMetadata, selectModelByTask, getModel, getFallbackModel } from "./model-registry";
+import { analyzeRoutingContext } from "./routing-context";
+import type { RoutingContext as AnalysisContext } from "./routing-context";
+
+// ── Re-export RoutingContext for unified.ts (backward compat) ─────────────────
+export type { RoutingContext } from "./routing-context";
+export { analyzeRoutingContext } from "./routing-context";
+
+// ── Interfaces ────────────────────────────────────────────────────────────────
 
 export interface RoutingPolicy {
-  maxCostPerRequest?: number; // USD
+  maxCostPerRequest?: number;
   preferredProviders?: string[];
   excludedProviders?: string[];
   requireReasoning?: boolean;
@@ -20,240 +47,301 @@ export interface RoutingDecision {
   costEstimate: number;
   confidence: number;
   overrideApplied?: string;
-}
 
-export interface RoutingContext {
-  prompt: string;
-  mode: 'single' | 'super' | 'advanced' | 'roadmap' | 'council';
-  policy?: RoutingPolicy;
-  userOverride?: string; // Model ID override
-}
-
-// Keyword-based capability detection
-function analyzePrompt(prompt: string): {
-  needsReasoning: boolean;
-  needsSpeed: boolean;
-  needsCoding: boolean;
-  complexity: 'low' | 'medium' | 'high';
-} {
-  const lower = prompt.toLowerCase();
-  
-  // Reasoning keywords
-  const reasoningKeywords = [
-    'analyze', 'explain', 'why', 'reason', 'logic', 'think', 'consider',
-    'evaluate', 'compare', 'pros and cons', 'trade-off', 'decision',
-    'strategy', 'plan', 'architect', 'design', 'optimize'
-  ];
-  
-  // Speed keywords
-  const speedKeywords = [
-    'quick', 'fast', 'immediately', 'urgent', 'asap', 'right now',
-    'simple', 'brief', 'short', 'summarize'
-  ];
-  
-  // Coding keywords
-  const codingKeywords = [
-    'code', 'function', 'class', 'implement', 'build', 'create',
-    'debug', 'fix', 'refactor', 'api', 'database', 'algorithm',
-    'component', 'module', 'package', 'library', 'framework'
-  ];
-  
-  const needsReasoning = reasoningKeywords.some(kw => lower.includes(kw));
-  const needsSpeed = speedKeywords.some(kw => lower.includes(kw));
-  const needsCoding = codingKeywords.some(kw => lower.includes(kw));
-  
-  // Complexity based on prompt length and structure
-  const wordCount = prompt.split(/\s+/).length;
-  let complexity: 'low' | 'medium' | 'high' = 'low';
-  
-  if (wordCount > 100 || needsReasoning) complexity = 'medium';
-  if (wordCount > 200 || (needsReasoning && needsCoding)) complexity = 'high';
-  
-  return { needsReasoning, needsSpeed, needsCoding, complexity };
-}
-
-// Cost ceiling enforcement
-function enforceCostCeiling(
-  model: ModelMetadata,
-  policy: RoutingPolicy,
-  estimatedTokens: number
-): boolean {
-  if (!policy.maxCostPerRequest) return true;
-  
-  const inputCost = (estimatedTokens * model.pricing.inputPerMillion) / 1000000;
-  const outputCost = (estimatedTokens * 2 * model.pricing.outputPerMillion) / 1000000;
-  const totalCost = inputCost + outputCost;
-  
-  return totalCost <= policy.maxCostPerRequest;
-}
-
-// Override detection from prompt
-function detectOverride(prompt: string): string | null {
-  const lower = prompt.toLowerCase();
-  
-  // Model-specific keywords
-  const overrides: Record<string, string[]> = {
-    'o1': ['use o1', 'with o1', 'o-series', 'o1 model'],
-    'claude-sonnet-4': ['use claude', 'with claude', 'claude sonnet'],
-    'gpt-4o': ['use gpt-4o', 'with gpt-4o', 'gpt4o'],
-    '-2-flash': ['use', 'with', 'flash'],
-    'groq-llama': ['use groq', 'with groq', 'fast inference']
+  // New in v2 — routing metadata attached for downstream use
+  routingMeta: {
+    requires_reasoning_depth: boolean;
+    requires_json: boolean;
+    requires_validation: boolean;
+    high_risk: boolean;
+    cost_sensitivity: string;
+    complexity_score: number;
+    fallback_chain: string[];
+    primary_provider_hint: string;
+    primary_model_hint: string;
   };
-  
-  for (const [modelId, keywords] of Object.entries(overrides)) {
-    if (keywords.some(kw => lower.includes(kw))) {
-      return modelId;
-    }
-  }
-  
-  return null;
 }
 
-export function routeRequest(context: RoutingContext): RoutingDecision {
-  const analysis = analyzePrompt(context.prompt);
-  const override = detectOverride(context.prompt);
-  
-  // Handle user override
-  if (context.userOverride || override) {
-    const modelId = context.userOverride || override!;
-    const model = getModel(modelId);
-    
-    if (model) {
+// Legacy interface kept for backward compat with any direct callsites
+export interface LegacyRoutingContext {
+  prompt: string;
+  mode: "single" | "super" | "advanced" | "roadmap" | "council";
+  policy?: RoutingPolicy;
+  userOverride?: string;
+}
+
+// ── Model catalogue (routing-relevant subset) ─────────────────────────────────
+// Maps provider hint → preferred model id for use in generateStream()
+// When the registry model doesn't carry the actual API model string,
+// we override it here via getModelOverride().
+
+const MODEL_OVERRIDES: Record<string, { provider: string; modelId: string }> = {
+  // o-series (reasoning)
+  "o4-mini": { provider: "openai",    modelId: "o4-mini" },
+  "o3":      { provider: "openai",    modelId: "o3" },
+  "o1":      { provider: "openai",    modelId: "o1" },
+  "o1-mini": { provider: "openai",    modelId: "o1-mini" },
+
+  // Mistral (JSON mode)
+  "mistral-large-latest": { provider: "mistral", modelId: "mistral-large-latest" },
+  "mixtral-8x7b-32768":   { provider: "mistral", modelId: "mixtral-8x7b-32768" },
+
+  // Groq Llama (bulk/cost)
+  "llama-3.1-70b-versatile": { provider: "groq", modelId: "llama-3.1-70b-versatile" },
+  "llama-3.1-8b-instant":    { provider: "groq", modelId: "llama-3.1-8b-instant" },
+
+  // GPT-4-class
+  "gpt-4o":      { provider: "openai",    modelId: "gpt-4o" },
+  "gpt-4o-mini": { provider: "openai",    modelId: "gpt-4o-mini" },
+
+  // Claude (validator / fallback)
+  "claude-sonnet-4-20250514":  { provider: "anthropic", modelId: "claude-sonnet-4-20250514" },
+  "claude-haiku-4-5-20251001": { provider: "anthropic", modelId: "claude-haiku-4-5-20251001" },
+};
+
+// ── Synthetic model metadata for o-series / Mistral (not in registry) ────────
+// These models don't exist in the local model-registry.ts but ARE valid providers.
+// We create minimal metadata so RoutingDecision.selectedModel is always populated.
+
+function syntheticModel(
+  id: string,
+  provider: string,
+  name: string,
+  reasoning: number,
+  cost: ModelMetadata["cost"],
+  priority: number
+): ModelMetadata {
+  return {
+    id,
+    provider,
+    name,
+    speed: cost === "free" ? "ultra-fast" : cost === "low" ? "fast" : "medium",
+    cost,
+    reliability: 0.95,
+    capabilities: { reasoning, coding: 8, analysis: reasoning, speed: cost === "free" ? 9 : 6 },
+    limits: { rpm: 500, tpm: 200_000, contextWindow: 128_000 },
+    pricing: { inputPerMillion: 0, outputPerMillion: 0 },
+    available: true,
+    fallbackPriority: priority,
+  };
+}
+
+const SYNTHETIC_MODELS: Record<string, ModelMetadata> = {
+  "o4-mini":              syntheticModel("o4-mini",              "openai",    "OpenAI o4-mini",            10, "high",    1),
+  "o3":                   syntheticModel("o3",                   "openai",    "OpenAI o3",                 10, "expensive", 2),
+  "o1":                   syntheticModel("o1",                   "openai",    "OpenAI o1",                 10, "expensive", 3),
+  "mistral-large-latest": syntheticModel("mistral-large-latest", "mistral",   "Mistral Large",             8,  "moderate", 5),
+  "mixtral-8x7b-32768":   syntheticModel("mixtral-8x7b-32768",  "mistral",   "Mixtral 8x7B",              7,  "low",     6),
+  "llama-3.1-70b-versatile": syntheticModel("llama-3.1-70b-versatile", "groq", "Llama 3.1 70B (Groq)",  8,  "free",    4),
+};
+
+function resolveModel(modelHint: string): ModelMetadata {
+  // Try synthetic first (o-series etc.)
+  if (SYNTHETIC_MODELS[modelHint]) return SYNTHETIC_MODELS[modelHint];
+  // Try registry
+  const reg = getModel(modelHint);
+  if (reg) return reg;
+  // Last resort: fallback model
+  return getFallbackModel();
+}
+
+// ── Fallback chain builder ────────────────────────────────────────────────────
+// Per spec:
+//   o-series → GPT-4-class → Llama → Claude validator
+//   GPT-4-class → Llama → Claude validator
+//   Llama → Claude validator
+
+export function buildFallbackChain(
+  primaryProvider: string,
+  ctx: AnalysisContext
+): string[] {
+  // Always end with Claude (validator / final safety net)
+  const CLAUDE_ANCHOR = "anthropic";
+
+  if (primaryProvider === "openai" && ctx.requires_reasoning_depth) {
+    // o-series path
+    return ["openai", "openai", "groq", CLAUDE_ANCHOR];
+    //       ^o-series ^gpt-4o  ^llama ^claude
+  }
+  if (primaryProvider === "mistral") {
+    return ["mistral", "openai", "groq", CLAUDE_ANCHOR];
+  }
+  if (primaryProvider === "groq") {
+    return ["groq", "openai", CLAUDE_ANCHOR, "mistral", "openrouter"];
+  }
+  // Default
+  return [primaryProvider, "groq", "openai", CLAUDE_ANCHOR, "mistral", "openrouter", "xai", "perplexity"]
+    .filter((p, i, arr) => arr.indexOf(p) === i) // dedupe
+    .slice(0, 7);
+}
+
+// ── Public routing entry point ────────────────────────────────────────────────
+// Backward-compatible with existing unified.ts call:
+//   routeRequest({ prompt, mode })
+
+export function routeRequest(
+  context: LegacyRoutingContext
+): RoutingDecision {
+  const { prompt, mode, policy, userOverride } = context;
+
+  // ── 1. Analyze routing context ──────────────────────────────────────────
+  const ctx = analyzeRoutingContext(
+    prompt,
+    mode,
+    policy?.preferredProviders?.[0]
+  );
+
+  // ── 2. Handle explicit user model override ──────────────────────────────
+  if (userOverride) {
+    const overrideModel = resolveModel(userOverride);
+    return {
+      selectedModel: overrideModel,
+      reason: `Explicit user override: ${userOverride}`,
+      alternatives: [],
+      costEstimate: 0,
+      confidence: 1.0,
+      overrideApplied: userOverride,
+      routingMeta: buildMeta(ctx),
+    };
+  }
+
+  // ── 3. JSON-mode routing → Mistral ──────────────────────────────────────
+  if (ctx.requires_json) {
+    const mistral = resolveModel("mistral-large-latest");
+    return {
+      selectedModel: mistral,
+      reason: "JSON/structured output required → Mistral Large (strict JSON mode)",
+      alternatives: [resolveModel("mixtral-8x7b-32768"), resolveModel("gpt-4o-mini")],
+      costEstimate: ctx.estimated_cost_usd,
+      confidence: 0.92,
+      routingMeta: buildMeta(ctx),
+    };
+  }
+
+  // ── 4. Reasoning-depth routing → o-series ──────────────────────────────
+  if (ctx.requires_reasoning_depth) {
+    const oModel = ctx.complexity_score >= 80
+      ? resolveModel("o3")
+      : resolveModel("o4-mini");
+
+    return {
+      selectedModel: oModel,
+      reason: `High reasoning depth (complexity=${ctx.complexity_score}) → ${oModel.id}`,
+      alternatives: [resolveModel("gpt-4o"), resolveModel("claude-sonnet-4-20250514")],
+      costEstimate: ctx.estimated_cost_usd,
+      confidence: 0.90,
+      routingMeta: buildMeta(ctx),
+    };
+  }
+
+  // ── 5. Bulk/cost-optimized → Groq Llama ────────────────────────────────
+  if (ctx.is_bulk_task && !ctx.high_risk) {
+    const llama = resolveModel("llama-3.1-70b-versatile");
+    return {
+      selectedModel: llama,
+      reason: `Bulk task (summarize/extract/classify/rewrite) → Groq Llama 70B (free tier)`,
+      alternatives: [resolveModel("gpt-4o-mini")],
+      costEstimate: 0,
+      confidence: 0.88,
+      routingMeta: buildMeta(ctx),
+    };
+  }
+
+  // ── 6. Cost ceiling enforcement ─────────────────────────────────────────
+  if (policy?.maxCostPerRequest !== undefined) {
+    const ceiling = policy.maxCostPerRequest;
+    if (ceiling === 0) {
+      // Must be free
+      const llama = resolveModel("llama-3.1-70b-versatile");
       return {
-        selectedModel: model,
-        reason: `User override: ${modelId}`,
+        selectedModel: llama,
+        reason: "Cost ceiling = $0 → free tier Llama",
         alternatives: [],
         costEstimate: 0,
-        confidence: 1.0,
-        overrideApplied: modelId
+        confidence: 0.85,
+        routingMeta: buildMeta(ctx),
       };
     }
   }
-  
-  // Mode-specific routing
-  if (context.mode === 'council') {
-    // Council mode uses predefined models (handled by orchestrator)
-    const model = getModel('gpt-4o-mini') || getFallbackModel();
+
+  // ── 7. Council mode ─────────────────────────────────────────────────────
+  if (mode === "council") {
+    const council = getModel("gpt-4o-mini") ?? getFallbackModel();
     return {
-      selectedModel: model,
-      reason: 'Council mode: orchestrator will manage multi-model workflow',
+      selectedModel: council,
+      reason: "Council mode: orchestrator manages multi-model workflow",
       alternatives: [],
-      costEstimate: 0,
-      confidence: 1.0
+      costEstimate: 0.002,
+      confidence: 1.0,
+      routingMeta: buildMeta(ctx),
     };
   }
-  
-  // Build task requirements
-  const taskRequirements: any = {
-    needsReasoning: analysis.needsReasoning,
-    needsSpeed: analysis.needsSpeed,
-    needsCoding: analysis.needsCoding
+
+  // ── 8. Default: Use registry model selection ────────────────────────────
+  const taskReqs = {
+    needsReasoning: ctx.requires_reasoning_depth,
+    needsSpeed:     ctx.cost_sensitivity === "free",
+    needsCoding:    ctx.has_code_request,
   };
-  
-  // Apply cost constraints from policy
-  if (context.policy?.maxCostPerRequest) {
-    // Map cost ceiling to cost tier
-    if (context.policy.maxCostPerRequest < 0.01) {
-      taskRequirements.maxCost = 'free';
-    } else if (context.policy.maxCostPerRequest < 0.05) {
-      taskRequirements.maxCost = 'low';
-    } else if (context.policy.maxCostPerRequest < 0.20) {
-      taskRequirements.maxCost = 'medium';
-    } else {
-      taskRequirements.maxCost = 'high';
-    }
-  }
-  
-  // Select optimal model
-  let selectedModel = selectModelByTask(taskRequirements);
-  
-  // Apply provider filters
-  if (context.policy?.preferredProviders?.length) {
-    const preferred = context.policy.preferredProviders;
+
+  let selectedModel = selectModelByTask(taskReqs);
+
+  // Apply preferred provider filter
+  if (policy?.preferredProviders?.length) {
+    const preferred = policy.preferredProviders;
     if (!preferred.includes(selectedModel.provider)) {
-      // Try to find preferred provider
-      const alternativeModel = selectModelByTask({
-        ...taskRequirements,
-        maxCost: 'premium' // Relax cost for preferred provider
-      });
-      
-      if (preferred.includes(alternativeModel.provider)) {
-        selectedModel = alternativeModel;
+      const alt = selectModelByTask({ ...taskReqs, maxCost: "premium" });
+      if (preferred.includes(alt.provider)) {
+        selectedModel = alt;
       }
     }
   }
-  
-  // Build decision
-  const estimatedTokens = Math.min(context.prompt.length * 1.5, 2000);
-  
+
+  const estimatedTokens = Math.min(prompt.length * 1.5, 2000);
+  const costEstimate =
+    (estimatedTokens * selectedModel.pricing.inputPerMillion) / 1_000_000 +
+    (estimatedTokens * 2 * selectedModel.pricing.outputPerMillion) / 1_000_000;
+
   return {
     selectedModel,
-    reason: buildReason(selectedModel, analysis, context),
-    alternatives: [], // Could populate with runner-ups
-    costEstimate: estimateCost(selectedModel, estimatedTokens),
-    confidence: calculateConfidence(selectedModel, analysis)
+    reason: buildReason(selectedModel, ctx),
+    alternatives: [],
+    costEstimate,
+    confidence: Math.min(selectedModel.reliability + 0.05, 1.0),
+    routingMeta: buildMeta(ctx),
   };
 }
 
-function buildReason(
-  model: ModelMetadata,
-  analysis: ReturnType<typeof analyzePrompt>,
-  context: RoutingContext
-): string {
-  const reasons: string[] = [];
-  
-  if (analysis.needsReasoning) {
-    reasons.push(`High reasoning required (${model.capabilities.reasoning}/10)`);
-  }
-  
-  if (analysis.needsSpeed) {
-    reasons.push(`Speed optimized (${model.speed})`);
-  }
-  
-  if (analysis.needsCoding) {
-    reasons.push(`Coding capability (${model.capabilities.coding}/10)`);
-  }
-  
-  if (model.cost === 'free') {
-    reasons.push('Cost-optimized (free tier)');
-  }
-  
-  if (reasons.length === 0) {
-    reasons.push(`General purpose: ${model.name}`);
-  }
-  
-  return reasons.join(', ');
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function buildMeta(ctx: AnalysisContext): RoutingDecision["routingMeta"] {
+  return {
+    requires_reasoning_depth: ctx.requires_reasoning_depth,
+    requires_json:            ctx.requires_json,
+    requires_validation:      ctx.requires_validation,
+    high_risk:                ctx.high_risk,
+    cost_sensitivity:         ctx.cost_sensitivity,
+    complexity_score:         ctx.complexity_score,
+    fallback_chain:           ctx.fallback_chain,
+    primary_provider_hint:    ctx.primary_provider_hint,
+    primary_model_hint:       ctx.primary_model_hint,
+  };
 }
 
-function estimateCost(model: ModelMetadata, tokens: number): number {
-  const inputCost = (tokens * model.pricing.inputPerMillion) / 1000000;
-  const outputCost = (tokens * 2 * model.pricing.outputPerMillion) / 1000000;
-  return inputCost + outputCost;
+function buildReason(model: ModelMetadata, ctx: AnalysisContext): string {
+  const parts: string[] = [];
+  if (ctx.has_code_request) parts.push(`code task (coding=${model.capabilities.coding}/10)`);
+  if (ctx.is_bulk_task)     parts.push("bulk task → cost-optimized");
+  if (model.cost === "free") parts.push("free tier");
+  if (parts.length === 0)   parts.push(`general purpose: ${model.name}`);
+  return parts.join(", ");
 }
 
-function calculateConfidence(
-  model: ModelMetadata,
-  analysis: ReturnType<typeof analyzePrompt>
-): number {
-  let confidence = model.reliability;
-  
-  // Boost confidence if capabilities match requirements
-  if (analysis.needsReasoning && model.capabilities.reasoning >= 8) {
-    confidence += 0.05;
-  }
-  if (analysis.needsCoding && model.capabilities.coding >= 8) {
-    confidence += 0.05;
-  }
-  if (analysis.needsSpeed && model.capabilities.speed >= 8) {
-    confidence += 0.05;
-  }
-  
-  return Math.min(confidence, 1.0);
-}
+// ── Routing logger (preserved from v1) ───────────────────────────────────────
 
 export interface RouterLog {
   timestamp: string;
-  context: RoutingContext;
+  context: LegacyRoutingContext;
   decision: RoutingDecision;
   executionTime?: number;
   success?: boolean;
@@ -263,55 +351,40 @@ export interface RouterLog {
 export class RouterLogger {
   private logs: RouterLog[] = [];
   private maxLogs = 100;
-  
-  log(context: RoutingContext, decision: RoutingDecision): void {
-    this.logs.unshift({
-      timestamp: new Date().toISOString(),
-      context,
-      decision
-    });
-    
+
+  log(context: LegacyRoutingContext, decision: RoutingDecision): void {
+    this.logs.unshift({ timestamp: new Date().toISOString(), context, decision });
     if (this.logs.length > this.maxLogs) {
       this.logs = this.logs.slice(0, this.maxLogs);
     }
   }
-  
+
   updateLog(timestamp: string, update: Partial<RouterLog>): void {
-    const log = this.logs.find(l => l.timestamp === timestamp);
-    if (log) {
-      Object.assign(log, update);
-    }
+    const log = this.logs.find((l) => l.timestamp === timestamp);
+    if (log) Object.assign(log, update);
   }
-  
+
   getLogs(limit = 10): RouterLog[] {
     return this.logs.slice(0, limit);
   }
-  
-  getStats(): {
-    totalRequests: number;
-    byProvider: Record<string, number>;
-    avgCost: number;
-    avgConfidence: number;
-  } {
+
+  getStats() {
     const byProvider: Record<string, number> = {};
     let totalCost = 0;
-    let totalConfidence = 0;
-    
-    this.logs.forEach(log => {
-      const provider = log.decision.selectedModel.provider;
-      byProvider[provider] = (byProvider[provider] || 0) + 1;
-      totalCost += log.decision.costEstimate;
-      totalConfidence += log.decision.confidence;
+    let totalConf = 0;
+    this.logs.forEach((l) => {
+      const p = l.decision.selectedModel.provider;
+      byProvider[p] = (byProvider[p] || 0) + 1;
+      totalCost += l.decision.costEstimate;
+      totalConf += l.decision.confidence;
     });
-    
     return {
       totalRequests: this.logs.length,
       byProvider,
-      avgCost: this.logs.length > 0 ? totalCost / this.logs.length : 0,
-      avgConfidence: this.logs.length > 0 ? totalConfidence / this.logs.length : 0
+      avgCost:       this.logs.length > 0 ? totalCost / this.logs.length : 0,
+      avgConfidence: this.logs.length > 0 ? totalConf / this.logs.length : 0,
     };
   }
 }
 
-// Global router logger instance
 export const globalRouterLogger = new RouterLogger();
