@@ -3,7 +3,7 @@
 // AI-powered code synthesis for UI pages, API routes, DB migrations
 // Uses OpenAI GPT-4o via vault → Anthropic fallback → deterministic template
 // Strict TypeScript, WCAG 2.2 AA, OWASP Top 10 safe
-// 2026-02-19 — P1-003 — Fixed: useUser→useAuth, template fallback, clean prompts
+// 2026-02-20 — Architecture fix: CRA central services integration (credits API, auth)
 // Timestamp: 2026-02-19 21:45 EST
 
 import { vault } from '@/lib/javari/secrets/vault';
@@ -528,7 +528,7 @@ MANDATORY — deviation causes build failure:
 - export async function POST(req: NextRequest): Promise<NextResponse>
 - Never use NextApiRequest or export default
 - Auth: createClient from @supabase/supabase-js, verify with supabase.auth.getUser(token)
-- Credits: check user_credits table BEFORE processing, deduct on success
+- Credits: call POST /api/credits/spend on craudiovizai.com (CRA central API) — DO NOT access user_credits table directly
 - Return NextResponse.json({ success: boolean, ... })
 - Server-only env vars: SUPABASE_SERVICE_ROLE_KEY (never NEXT_PUBLIC_ on server)
 - Return ONLY the complete TypeScript file. No markdown. No explanation.`;
@@ -543,7 +543,7 @@ Family: ${req.family}
 Requirements:
 - File: app/api/tools/${req.slug}/process/route.ts
 - Full auth via Supabase JWT Bearer token
-- Credit check + deduction (${req.creditsPerUse} credits)
+- Credit check + deduction via CRA API: POST /api/credits/spend with amount=${req.creditsPerUse}
 - Validate input (non-empty string required)
 - Call appropriate processing based on description
 - Log with [${req.slug}] prefix`;
