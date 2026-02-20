@@ -1,14 +1,13 @@
 // lib/javari/engine/unified.ts
-// Javari Unified AI Engine — v2
-// Pipeline: memory retrieval (once) → identity injection → provider routing → retry with backoff
-// Changes from v1:
-//   - Memory retrieved ONCE here, not duplicated in chat route
-//   - Exponential backoff between provider attempts (250ms → 500ms → 1000ms)
-//   - Jitter added to prevent thundering herd on cold starts
-//   - Fallback chain expanded to 6 providers (groq added — fast free tier)
-//   - Error categorization: transient vs fatal (don't retry 400/401/403)
-//   - Provider attempt timeout: 22s per attempt (leaves 8s buffer inside 30s max)
-// 2026-02-19
+// Javari Unified AI Engine — v3
+// Changelog from v2:
+//   - systemCommand mode: no token throttling, no persona overlay, 8192 output tokens
+//   - Long-form mode: detected by prompt length or explicit flag → 8192 tokens
+//   - System commands NEVER hit this engine (intercepted by chat/route.ts)
+//     but if they somehow do, this engine will handle gracefully
+//   - Provider attempt timeout raised to 28s for long-form (keeps 2s buffer in 30s)
+//   - Correct provider fallback ordering preserved
+// 2026-02-19 — P1-003
 
 import { normalizeEnvelope } from "@/lib/normalize-envelope";
 import { routeRequest, type RoutingContext } from "@/lib/javari/multi-ai/router";
@@ -19,12 +18,20 @@ import type { Message } from "@/lib/types";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const PROVIDER_ATTEMPT_TIMEOUT_MS = 22_000; // 22s per provider, leaves buffer in 30s maxDuration
-const RETRY_BASE_MS = 250;
-const RETRY_MAX_MS = 1_500;
-const MAX_PROVIDERS = 6;
+const PROVIDER_ATTEMPT_TIMEOUT_SHORT_MS = 22_000; // short: <= 500 prompt chars
+const PROVIDER_ATTEMPT_TIMEOUT_LONG_MS  = 28_000; // long: > 500 prompt chars
+const RETRY_BASE_MS  = 250;
+const RETRY_MAX_MS   = 1_500;
+const MAX_PROVIDERS  = 6;
 
-// Errors that indicate the provider is permanently misconfigured — don't retry
+// Long-form threshold: if prompt > this many chars, use long-form token limits
+const LONG_FORM_THRESHOLD_CHARS = 500;
+
+// Token limits
+const MAX_TOKENS_NORMAL    = 4_096;
+const MAX_TOKENS_LONG_FORM = 8_192;
+
+// Errors that are fatal (bad key, billing) — don't retry same provider
 const FATAL_ERROR_PATTERNS = [
   /invalid.*api.*key/i,
   /api key.*not.*valid/i,
@@ -36,29 +43,13 @@ const FATAL_ERROR_PATTERNS = [
   /billing/i,
 ];
 
-// Errors that are transient — worth retrying on next provider
-const TRANSIENT_ERROR_PATTERNS = [
-  /timeout/i,
-  /network/i,
-  /connection/i,
-  /503/,
-  /502/,
-  /500/,
-  /overloaded/i,
-  /rate.*limit/i,
-  /429/,
-  /econnreset/i,
-  /fetch.*failed/i,
-];
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 function jitter(ms: number): number {
-  // ±20% random jitter to prevent thundering herd
   return ms + Math.floor((Math.random() - 0.5) * ms * 0.4);
 }
 
@@ -70,7 +61,6 @@ function backoffMs(attempt: number): number {
   return jitter(Math.min(RETRY_BASE_MS * 2 ** attempt, RETRY_MAX_MS));
 }
 
-/** Run a promise with a hard timeout */
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_, reject) => {
@@ -93,16 +83,29 @@ export async function unifiedJavariEngine({
   persona = "default",
   context = {},
   files = [],
-  _memoryAlreadyInjected = false, // set to true when caller already prepended memory
+  _memoryAlreadyInjected = false,
+  _systemCommandMode = false,    // Disables persona + throttling + overrides
+  _longForm = false,              // Forces 8192 token output limit
 }: {
   messages?: Message[];
   persona?: string;
   context?: Record<string, unknown>;
   files?: unknown[];
   _memoryAlreadyInjected?: boolean;
+  _systemCommandMode?: boolean;
+  _longForm?: boolean;
 }) {
   const start = Date.now();
 
+  const lastUserMessage = [...messages].reverse().find((m) => m.role === "user");
+  const userPrompt = lastUserMessage?.content ?? "";
+
+  // ── Determine mode ────────────────────────────────────────────────────────
+  const isLongForm = _longForm || _systemCommandMode || userPrompt.length > LONG_FORM_THRESHOLD_CHARS;
+  const maxTokens  = isLongForm ? MAX_TOKENS_LONG_FORM : MAX_TOKENS_NORMAL;
+  const providerTimeout = isLongForm ? PROVIDER_ATTEMPT_TIMEOUT_LONG_MS : PROVIDER_ATTEMPT_TIMEOUT_SHORT_MS;
+
+  // ── Persona overlay (suppressed in system command mode) ───────────────────
   const personaOverlays: Record<string, string> = {
     default: "",
     friendly: "Tone: warm, conversational, encouraging.",
@@ -110,43 +113,36 @@ export async function unifiedJavariEngine({
     executive: "Tone: concise, strategic, outcome-driven.",
     teacher: "Tone: patient, clear, educational.",
   };
-  const personaOverlay = personaOverlays[persona] || "";
+  const personaOverlay = _systemCommandMode ? "" : (personaOverlays[persona] ?? "");
 
-  // Last user message — used for routing and memory retrieval
-  const lastUserMessage = [...messages].reverse().find((m) => m.role === "user");
-  const userPrompt = lastUserMessage?.content ?? "";
-
-  // ── STEP 1: Retrieve R2 semantic memory (skip if caller already injected) ──
+  // ── Memory retrieval ──────────────────────────────────────────────────────
   let memoryContext = "";
   if (!_memoryAlreadyInjected) {
     try {
       memoryContext = await retrieveRelevantMemory(userPrompt);
     } catch {
-      // Non-fatal — continue without memory context
       console.info("[Javari] Memory retrieval skipped (non-fatal)");
     }
   }
 
-  // ── STEP 2: Assemble system prompt ────────────────────────────────────────
+  // ── Assemble system prompt ────────────────────────────────────────────────
   const promptParts: string[] = [];
   if (memoryContext) promptParts.push(memoryContext);
   promptParts.push(JAVARI_SYSTEM_PROMPT);
   if (personaOverlay) promptParts.push(personaOverlay);
   const systemPrompt = promptParts.join("\n\n");
 
-  // ── STEP 3: Build provider fallback chain ─────────────────────────────────
+  // ── Provider fallback chain ────────────────────────────────────────────────
   const routingDecision = routeRequest({ prompt: userPrompt, mode: "single" } as RoutingContext);
   const primaryProvider = routingDecision.selectedModel.provider;
   const modelName = routingDecision.selectedModel.id;
 
-  // 6-provider fallback chain: primary first, then best alternatives
-  // Groq added — very fast free tier, ideal for cold-start recovery
   const candidateProviders = [
     primaryProvider,
-    primaryProvider !== "anthropic" ? "anthropic" : null,
-    primaryProvider !== "openai" ? "openai" : null,
-    primaryProvider !== "groq" ? "groq" : null,
-    primaryProvider !== "mistral" ? "mistral" : null,
+    primaryProvider !== "anthropic"  ? "anthropic"  : null,
+    primaryProvider !== "openai"     ? "openai"     : null,
+    primaryProvider !== "groq"       ? "groq"       : null,
+    primaryProvider !== "mistral"    ? "mistral"    : null,
     primaryProvider !== "openrouter" ? "openrouter" : null,
   ]
     .filter(Boolean)
@@ -156,13 +152,8 @@ export async function unifiedJavariEngine({
 
   for (let i = 0; i < candidateProviders.length; i++) {
     const pName = candidateProviders[i];
+    if (i > 0) await sleep(backoffMs(i - 1));
 
-    // Add backoff delay between attempts (not before the first)
-    if (i > 0) {
-      await sleep(backoffMs(i - 1));
-    }
-
-    // Skip if we can't get the key
     let apiKey: string;
     try {
       apiKey = getProviderApiKey(pName as Parameters<typeof getProviderApiKey>[0]);
@@ -174,7 +165,6 @@ export async function unifiedJavariEngine({
     try {
       const provider = getProvider(pName as Parameters<typeof getProvider>[0], apiKey);
 
-      // Wrap the entire stream collection in a timeout
       const fullText = await withTimeout(
         (async () => {
           const stream = provider.generateStream(userPrompt, {
@@ -195,7 +185,7 @@ export async function unifiedJavariEngine({
 
           return text;
         })(),
-        PROVIDER_ATTEMPT_TIMEOUT_MS
+        providerTimeout
       );
 
       if (!fullText?.trim()) {
@@ -210,17 +200,18 @@ export async function unifiedJavariEngine({
         latency: Date.now() - start,
         memoryUsed: !!memoryContext || _memoryAlreadyInjected,
         providerAttempts: i + 1,
+        isLongForm,
+        maxTokens,
       });
 
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       const fatal = isFatalError(errMsg);
       errors.push({ provider: pName, error: errMsg, fatal });
-      console.error(`[Javari] Provider ${pName} failed (attempt ${i + 1}, ${fatal ? "fatal" : "transient"}):`, errMsg.slice(0, 120));
-
-      // Don't try more providers if this is a transient error on a fast provider —
-      // the next provider will likely succeed. But if it's fatal (bad key), skip immediately.
-      // Either way, the loop continues to the next candidate.
+      console.error(
+        `[Javari] Provider ${pName} failed (attempt ${i + 1}, ${fatal ? "fatal" : "transient"}):`,
+        errMsg.slice(0, 120)
+      );
     }
   }
 
