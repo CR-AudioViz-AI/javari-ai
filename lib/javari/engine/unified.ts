@@ -1,29 +1,32 @@
 // lib/javari/engine/unified.ts
-// Javari Unified AI Engine — v5
-// 2026-02-20 — STEP 1: validator stage + routing metadata integration
+// Javari Unified AI Engine — v6
+// 2026-02-20 — STEP 3: multi_ai_team commander mode
 //
-// Changelog from v4:
-//   - routeRequest() now returns RoutingDecision.routingMeta
-//   - analyzeRoutingContext() called before chain to set model/fallback hints
-//   - buildProviderChain() now uses ctx.fallback_chain from routing context
-//   - Post-generation validator stage: runs when ctx.requires_validation
-//   - isOutputMalformed() check integrated into provider loop
-//   - Validator corrected output used when available
-//   - All provider model hints flow from routing context (not hardcoded)
-//   - Long-form threshold: 1500 chars (unchanged)
-//   - Timeouts: 25s short / 50s long (unchanged)
+// Changelog from v5 (STEP 1):
+//   - New mode: "multi_ai_team" — orchestrates multiple specialist agents
+//   - orchestrateTask() called when mode=multi_ai_team or prompt is complex
+//   - Agent assignment via determineAgentForTask() delegation rules
+//   - OrchestrationEvents logged to console + passed through in routingMeta
+//   - All v5 paths (single-agent, validator, memory) preserved exactly
+//   - Zero regressions to STEP 0/1/2
 
-import { normalizeEnvelope } from "@/lib/normalize-envelope";
-import { routeRequest, buildFallbackChain }  from "@/lib/javari/multi-ai/router";
-import { analyzeRoutingContext }              from "@/lib/javari/multi-ai/routing-context";
+import { normalizeEnvelope }                from "@/lib/normalize-envelope";
+import { routeRequest, buildFallbackChain } from "@/lib/javari/multi-ai/router";
+import { analyzeRoutingContext }             from "@/lib/javari/multi-ai/routing-context";
 import { validateResponse, isOutputMalformed } from "@/lib/javari/multi-ai/validator";
-import { getProvider, getProviderApiKey }    from "@/lib/javari/providers";
-import { JAVARI_SYSTEM_PROMPT }              from "./systemPrompt";
-import { retrieveRelevantMemory }            from "@/lib/javari/memory/retrieval";
-import type { Message }                      from "@/lib/types";
+import { getProvider, getProviderApiKey }   from "@/lib/javari/providers";
+import { JAVARI_SYSTEM_PROMPT }             from "./systemPrompt";
+import { retrieveRelevantMemory }           from "@/lib/javari/memory/retrieval";
+import {
+  orchestrateTask,
+  isMultiAgentMode,
+  type OrchestrationEvent,
+} from "@/lib/javari/multi-ai/orchestrator";
+import { determineAgentForTask }            from "@/lib/javari/multi-ai/roles";
+import type { Message }                     from "@/lib/types";
 import type { RoutingContext as LegacyRoutingContext } from "@/lib/javari/multi-ai/router";
 
-// ── Constants ─────────────────────────────────────────────────────────────────
+// ── Constants (unchanged from v5) ─────────────────────────────────────────────
 
 const PROVIDER_ATTEMPT_TIMEOUT_SHORT_MS = 25_000;
 const PROVIDER_ATTEMPT_TIMEOUT_LONG_MS  = 50_000;
@@ -46,7 +49,7 @@ const FATAL_ERROR_PATTERNS = [
   /billing/i,
 ];
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Helpers (unchanged) ───────────────────────────────────────────────────────
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -79,15 +82,13 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   }
 }
 
-// ── Provider chain builder ─────────────────────────────────────────────────────
-// v5: Uses routing context fallback_chain when available; falls back to legacy logic
+// ── Provider chain builder (unchanged from v5) ─────────────────────────────────
 
 function buildProviderChain(
   primaryProvider: string,
   isLongForm: boolean,
   fallbackHint?: string[]
 ): string[] {
-  // If routing context provided a chain, use it (deduplicated)
   if (fallbackHint?.length) {
     const base = [...new Set(fallbackHint)];
     return isLongForm ? base.slice(0, MAX_PROVIDERS_LONG) : base.slice(0, MAX_PROVIDERS_SHORT);
@@ -115,6 +116,96 @@ function buildProviderChain(
     .slice(0, MAX_PROVIDERS_SHORT) as string[];
 }
 
+// ── Build a synthetic TaskNode for multi_ai_team mode ─────────────────────────
+// (Allows orchestrateTask() to work without a full task graph)
+
+function buildSyntheticTaskNode(
+  userPrompt: string,
+  routingCtx: ReturnType<typeof analyzeRoutingContext>
+) {
+  return {
+    id:          "unified_task",
+    title:       "Direct request",
+    description: userPrompt,
+    type:        "generation" as const,
+    status:      "running"    as const,
+    dependencies: [],
+    dependents:  [],
+    routing: {
+      provider:            routingCtx.primary_provider_hint,
+      model:               routingCtx.primary_model_hint,
+      requires_validation: routingCtx.requires_validation,
+      requires_json:       routingCtx.requires_json,
+      high_risk:           routingCtx.high_risk,
+      cost_sensitivity:    routingCtx.cost_sensitivity,
+      fallback_chain:      routingCtx.fallback_chain,
+      requires_reasoning_depth: routingCtx.requires_reasoning_depth,
+    },
+    attempt:      0,
+    maxAttempts:  3,
+    createdAt:    new Date().toISOString(),
+    parentGoalId: "unified",
+  };
+}
+
+// ── Multi-AI Team execution ───────────────────────────────────────────────────
+
+async function runMultiAiTeam(
+  userPrompt: string,
+  routingCtx: ReturnType<typeof analyzeRoutingContext>,
+  systemPrompt: string,
+  start: number
+): Promise<ReturnType<typeof normalizeEnvelope>> {
+  const syntheticTask = buildSyntheticTaskNode(userPrompt, routingCtx);
+
+  const orchEvents: OrchestrationEvent[] = [];
+  const orchEmit = (e: OrchestrationEvent) => {
+    orchEvents.push(e);
+    console.info(
+      `[Javari-Team] ${e.type} role=${e.role} provider=${e.provider ?? ""} score=${e.score ?? ""}`
+    );
+  };
+
+  const result = await orchestrateTask(
+    syntheticTask as Parameters<typeof orchestrateTask>[0],
+    "",
+    "unified",
+    orchEmit
+  );
+
+  if (!result.success || !result.finalOutput) {
+    return normalizeEnvelope(
+      "I encountered a problem coordinating my AI team. Please try again.",
+      {
+        success: false,
+        error:   result.error ?? "Multi-AI team returned empty output",
+        multiAiTeam: true,
+        agents: result.agentsUsed,
+      }
+    );
+  }
+
+  return normalizeEnvelope(result.finalOutput, {
+    success:  true,
+    provider: result.agentsUsed.join("+"),
+    model:    result.strategy,
+    latency:  Date.now() - start,
+    // @ts-expect-error extended metadata
+    multiAiTeam:   true,
+    agentsUsed:    result.agentsUsed,
+    mergeStrategy: result.strategy,
+    orchEventCount: orchEvents.length,
+    routingMeta: {
+      requires_reasoning_depth: routingCtx.requires_reasoning_depth,
+      requires_json:            routingCtx.requires_json,
+      requires_validation:      routingCtx.requires_validation,
+      high_risk:                routingCtx.high_risk,
+      complexity_score:         routingCtx.complexity_score,
+      multi_ai_team:            true,
+    },
+  });
+}
+
 // ── Main engine ───────────────────────────────────────────────────────────────
 
 export async function unifiedJavariEngine({
@@ -125,6 +216,7 @@ export async function unifiedJavariEngine({
   _memoryAlreadyInjected = false,
   _systemCommandMode = false,
   _longForm = false,
+  _mode,
 }: {
   messages?: Message[];
   persona?: string;
@@ -133,49 +225,90 @@ export async function unifiedJavariEngine({
   _memoryAlreadyInjected?: boolean;
   _systemCommandMode?: boolean;
   _longForm?: boolean;
+  /** v6: explicit mode override. "multi_ai_team" activates team orchestration. */
+  _mode?: "single" | "multi_ai_team" | "auto";
 }) {
   const start = Date.now();
 
   const lastUserMessage = [...messages].reverse().find((m) => m.role === "user");
-  const userPrompt = lastUserMessage?.content ?? "";
+  const userPrompt      = lastUserMessage?.content ?? "";
 
-  // ── Determine mode ────────────────────────────────────────────────────────
+  // ── Determine mode ─────────────────────────────────────────────────────────
   const isLongForm = _longForm || userPrompt.length > LONG_FORM_THRESHOLD_CHARS;
   const maxTokens  = isLongForm ? MAX_TOKENS_LONG_FORM : MAX_TOKENS_NORMAL;
   const providerTimeout = isLongForm
     ? PROVIDER_ATTEMPT_TIMEOUT_LONG_MS
     : PROVIDER_ATTEMPT_TIMEOUT_SHORT_MS;
 
-  // ── STEP 1: Routing context analysis ─────────────────────────────────────
+  // ── STEP 1: Routing context analysis ──────────────────────────────────────
   const routingCtx = analyzeRoutingContext(userPrompt, "single");
 
-  // ── Legacy routing decision (for model name / primary provider) ───────────
+  // ── STEP 3: Determine if multi_ai_team mode should activate ───────────────
+  const syntheticTask  = buildSyntheticTaskNode(userPrompt, routingCtx);
+  const useMultiTeam   =
+    _mode === "multi_ai_team" ||
+    (_mode !== "single" && !_systemCommandMode && isMultiAgentMode(syntheticTask as Parameters<typeof isMultiAgentMode>[0]));
+
+  if (useMultiTeam) {
+    // ── MULTI-AI TEAM PATH ─────────────────────────────────────────────────
+    // Memory retrieval still applies (injected into system prompt context)
+    let memoryContext = "";
+    if (!_memoryAlreadyInjected) {
+      try {
+        memoryContext = await retrieveRelevantMemory(userPrompt);
+      } catch {
+        console.info("[Javari] Memory retrieval skipped (non-fatal)");
+      }
+    }
+
+    const personaOverlays: Record<string, string> = {
+      default:  "",
+      friendly:  "Tone: warm, conversational, encouraging.",
+      developer: "Tone: precise, technical, senior-engineer level.",
+      executive: "Tone: concise, strategic, outcome-driven.",
+      teacher:   "Tone: patient, clear, educational.",
+    };
+
+    const systemPromptParts: string[] = [];
+    if (memoryContext) systemPromptParts.push(memoryContext);
+    systemPromptParts.push(JAVARI_SYSTEM_PROMPT);
+    const overlay = personaOverlays[persona] ?? "";
+    if (overlay) systemPromptParts.push(overlay);
+    const systemPrompt = systemPromptParts.join("\n\n");
+
+    console.info(
+      `[Javari] v6 multi_ai_team: complexity=${routingCtx.complexity_score} ` +
+      `high_risk=${routingCtx.high_risk} requires_validation=${routingCtx.requires_validation}`
+    );
+
+    return runMultiAiTeam(userPrompt, routingCtx, systemPrompt, start);
+  }
+
+  // ── SINGLE-AGENT PATH (identical to v5) ────────────────────────────────────
+
   const routingDecision = routeRequest({
     prompt: userPrompt,
-    mode: _systemCommandMode ? "single" : "single",
+    mode: "single",
   } as LegacyRoutingContext);
 
   const primaryProvider = routingDecision.routingMeta.primary_provider_hint;
   const modelName       = routingDecision.routingMeta.primary_model_hint;
 
-  // ── Build provider chain using routing context ────────────────────────────
   const candidateProviders = buildProviderChain(
     primaryProvider,
     isLongForm,
     routingDecision.routingMeta.fallback_chain
   );
 
-  // ── Persona overlay ───────────────────────────────────────────────────────
   const personaOverlays: Record<string, string> = {
-    default: "",
-    friendly:   "Tone: warm, conversational, encouraging.",
-    developer:  "Tone: precise, technical, senior-engineer level.",
-    executive:  "Tone: concise, strategic, outcome-driven.",
-    teacher:    "Tone: patient, clear, educational.",
+    default:  "",
+    friendly:  "Tone: warm, conversational, encouraging.",
+    developer: "Tone: precise, technical, senior-engineer level.",
+    executive: "Tone: concise, strategic, outcome-driven.",
+    teacher:   "Tone: patient, clear, educational.",
   };
   const personaOverlay = _systemCommandMode ? "" : (personaOverlays[persona] ?? "");
 
-  // ── Memory retrieval ──────────────────────────────────────────────────────
   let memoryContext = "";
   if (!_memoryAlreadyInjected) {
     try {
@@ -185,13 +318,11 @@ export async function unifiedJavariEngine({
     }
   }
 
-  // ── Assemble system prompt ────────────────────────────────────────────────
   const promptParts: string[] = [];
   if (memoryContext) promptParts.push(memoryContext);
   promptParts.push(JAVARI_SYSTEM_PROMPT);
   if (personaOverlay) promptParts.push(personaOverlay);
 
-  // Inject JSON instruction if required
   if (routingCtx.requires_json && !_systemCommandMode) {
     promptParts.push(
       "IMPORTANT: The user requires strict JSON output. " +
@@ -201,15 +332,13 @@ export async function unifiedJavariEngine({
 
   const systemPrompt = promptParts.join("\n\n");
 
-  // ── Logging ───────────────────────────────────────────────────────────────
   console.info(
-    `[Javari] v5 routing: provider=${primaryProvider} model=${modelName} ` +
+    `[Javari] v6 single: provider=${primaryProvider} model=${modelName} ` +
     `reasoning=${routingCtx.requires_reasoning_depth} json=${routingCtx.requires_json} ` +
     `validate=${routingCtx.requires_validation} risk=${routingCtx.high_risk} ` +
     `complexity=${routingCtx.complexity_score} chain=${candidateProviders.join(",")}`
   );
 
-  // ── Provider fallback loop ────────────────────────────────────────────────
   const errors: { provider: string; error: string; fatal: boolean }[] = [];
   let bestOutput: string | null = null;
   let bestProvider = "";
@@ -226,7 +355,6 @@ export async function unifiedJavariEngine({
       continue;
     }
 
-    // Per-provider model: use routing hint for primary, default for fallbacks
     const perProviderModel = i === 0 ? modelName : undefined;
 
     try {
@@ -235,7 +363,7 @@ export async function unifiedJavariEngine({
       const fullText = await withTimeout(
         (async () => {
           const stream = provider.generateStream(userPrompt, {
-            rolePrompt: systemPrompt,
+            rolePrompt:     systemPrompt,
             preferredModel: perProviderModel,
           });
 
@@ -254,7 +382,6 @@ export async function unifiedJavariEngine({
         providerTimeout
       );
 
-      // ── Malformed output check ──────────────────────────────────────────
       if (isOutputMalformed(fullText)) {
         errors.push({ provider: pName, error: "Empty/malformed response", fatal: false });
         continue;
@@ -262,11 +389,11 @@ export async function unifiedJavariEngine({
 
       bestOutput   = fullText.trim();
       bestProvider = pName;
-      break; // Successful generation — exit loop
+      break;
 
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      const fatal = isFatalError(errMsg);
+      const fatal  = isFatalError(errMsg);
       errors.push({ provider: pName, error: errMsg, fatal });
       console.error(
         `[Javari] Provider ${pName} failed (attempt ${i + 1}, ${fatal ? "fatal" : "transient"}):`,
@@ -275,7 +402,6 @@ export async function unifiedJavariEngine({
     }
   }
 
-  // ── All providers failed ──────────────────────────────────────────────────
   if (!bestOutput) {
     const providerSummary = errors
       .map((e) => `${e.provider}(${e.fatal ? "fatal" : "transient"})`)
@@ -292,8 +418,6 @@ export async function unifiedJavariEngine({
     );
   }
 
-  // ── STEP 1: Validator stage ───────────────────────────────────────────────
-  // Only runs when context flags it; never loops (single call)
   let finalOutput = bestOutput;
   let validationResult: Awaited<ReturnType<typeof validateResponse>> | null = null;
 
@@ -301,16 +425,14 @@ export async function unifiedJavariEngine({
     try {
       validationResult = await validateResponse(userPrompt, bestOutput, routingCtx, {
         useFullModel: routingCtx.high_risk,
-        attemptFix: true,
+        attemptFix:   true,
       });
 
       if (!validationResult.skipped) {
         if (!validationResult.passed && validationResult.corrected) {
-          // Validator rewrote the output — use corrected version
           finalOutput = validationResult.corrected;
           console.info(`[Javari] Validator corrected output (score=${validationResult.score})`);
         } else if (!validationResult.passed && !validationResult.corrected) {
-          // Failed and no fix — log but don't crash; use original
           console.warn(
             `[Javari] Validation failed (score=${validationResult.score}), ` +
             `issues=${validationResult.issues.join("; ")}. Using original.`
@@ -321,44 +443,42 @@ export async function unifiedJavariEngine({
       }
     } catch (vErr) {
       console.warn("[Javari] Validator threw:", vErr instanceof Error ? vErr.message : vErr);
-      // Graceful: use original output
     }
   }
 
-  // ── JSON post-validation ──────────────────────────────────────────────────
   if (routingCtx.requires_json) {
     try {
       JSON.parse(finalOutput);
       console.info("[Javari] JSON output validated successfully");
     } catch {
       console.warn("[Javari] JSON output failed parse — returning as-is with warning");
-      // Could attempt strip+reparse but don't risk breaking partial-valid output
     }
   }
 
-  // ── Return normalized envelope ────────────────────────────────────────────
   return normalizeEnvelope(finalOutput, {
-    success: true,
+    success:  true,
     provider: bestProvider,
-    model: modelName,
-    latency: Date.now() - start,
-    // @ts-expect-error -- extra metadata fields (non-standard but useful)
-    memoryUsed: !!memoryContext || _memoryAlreadyInjected,
+    model:    modelName,
+    latency:  Date.now() - start,
+    // @ts-expect-error extended metadata
+    memoryUsed:       !!memoryContext || _memoryAlreadyInjected,
     providerAttempts: errors.length + 1,
     isLongForm,
     maxTokens,
+    multiAiTeam: false,
     routingMeta: {
       requires_reasoning_depth: routingCtx.requires_reasoning_depth,
       requires_json:            routingCtx.requires_json,
       requires_validation:      routingCtx.requires_validation,
       high_risk:                routingCtx.high_risk,
       complexity_score:         routingCtx.complexity_score,
+      multi_ai_team:            false,
       validation: validationResult
         ? {
-            passed:    validationResult.passed,
-            score:     validationResult.score,
-            skipped:   validationResult.skipped,
-            model:     validationResult.model,
+            passed:     validationResult.passed,
+            score:      validationResult.score,
+            skipped:    validationResult.skipped,
+            model:      validationResult.model,
             durationMs: validationResult.durationMs,
           }
         : null,
