@@ -21,7 +21,7 @@ const PROVIDER_ATTEMPT_TIMEOUT_SHORT_MS = 25_000; // ≤1500 char prompts
 const PROVIDER_ATTEMPT_TIMEOUT_LONG_MS  = 50_000; // >1500 char prompts (Vercel Pro max 60s)
 const RETRY_BASE_MS  = 200;
 const RETRY_MAX_MS   = 1_000;
-const MAX_PROVIDERS_SHORT = 6; // Can try many on short prompts
+const MAX_PROVIDERS_SHORT = 8; // Can try many on short prompts
 const MAX_PROVIDERS_LONG  = 3; // Limit on long-form to stay under 60s total
 
 // Long-form threshold: only use long path for truly large prompts (1500+ chars)
@@ -81,24 +81,25 @@ function buildProviderChain(
   isLongForm: boolean
 ): string[] {
   if (isLongForm) {
-    // Long-form: prefer fastest providers (Groq > OpenAI > primary if different)
-    const longFormOrder = ["groq", "openai", "mistral"];
+    // Long-form: Groq (speed) → OpenAI (quality) → Anthropic → Mistral → OpenRouter
+    const longFormOrder = ["groq", "openai", "anthropic", "mistral", "openrouter"];
     const chain = [
       ...longFormOrder,
-      // Add primary if not already included
       ...(longFormOrder.includes(primaryProvider) ? [] : [primaryProvider]),
     ].slice(0, MAX_PROVIDERS_LONG);
     return chain;
   }
 
-  // Normal: routing-first with full fallback chain
+  // Normal: Groq (fast/free) → OpenAI → Anthropic → Mistral → OpenRouter → xAI → Perplexity
   return [
     primaryProvider,
-    primaryProvider !== "anthropic"  ? "anthropic"  : null,
-    primaryProvider !== "openai"     ? "openai"     : null,
     primaryProvider !== "groq"       ? "groq"       : null,
+    primaryProvider !== "openai"     ? "openai"     : null,
+    primaryProvider !== "anthropic"  ? "anthropic"  : null,
     primaryProvider !== "mistral"    ? "mistral"    : null,
     primaryProvider !== "openrouter" ? "openrouter" : null,
+    primaryProvider !== "xai"        ? "xai"        : null,
+    primaryProvider !== "perplexity" ? "perplexity" : null,
   ]
     .filter(Boolean)
     .slice(0, MAX_PROVIDERS_SHORT) as string[];
