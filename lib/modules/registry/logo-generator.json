@@ -1,0 +1,19 @@
+{
+  "slug": "logo-generator",
+  "name": "Logo Generator",
+  "description": "AI-powered logo creation with style customization, color palette selection, and SVG/PNG export for brands and businesses",
+  "family": "creative-suite",
+  "types": [
+    "full-stack"
+  ],
+  "creditsPerUse": 3,
+  "minPlan": "starter",
+  "features": [],
+  "routes": {
+    "ui": "/tools/logo-generator",
+    "api": "/api/tools/logo-generator/process"
+  },
+  "generatedAt": "2026-02-20T04:33:19.328Z",
+  "generatedBy": "javari-module-factory@2.1",
+  "status": "ready"
+}
