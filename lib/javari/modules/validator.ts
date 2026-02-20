@@ -2,8 +2,8 @@
 // Module Factory Validator v2.1
 // Static analysis + security + schema checks on generated artifacts
 // OWASP Top 10 aware, WCAG 2.2 AA checks, no external linting deps
-// 2026-02-19 — P1-003 — Complete file, all checks operational
-// Timestamp: 2026-02-19 21:50 EST
+// 2026-02-19 — P1-003 — Fixed: AUTH001 false positive for db-only modules
+// Timestamp: 2026-02-19 22:10 EST
 
 import type {
   ModuleArtifacts,
@@ -346,7 +346,9 @@ export function validateModule(
   }
 
   // ── Auth gate ─────────────────────────────────────────────────────────────
-  const authGate = checkAuthGate(artifacts);
+  // DB-only modules have no UI or API routes — auth gate not applicable
+  const isDbOnly = req.types.length > 0 && req.types.every((t) => t === 'db');
+  const authGate = isDbOnly || checkAuthGate(artifacts);
   if (!authGate) {
     allErrors.push({
       severity: 'error', file: 'pipeline', code: 'AUTH001',
