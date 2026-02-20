@@ -165,12 +165,26 @@ function validateAPIFile(file: { path: string; content: string }): ValidationIss
     }
   }
 
-  // Security scan
-  for (const { pattern, code, message } of DANGEROUS_PATTERNS) {
+  // Security scan — skip SEC003 for API routes (server-side env vars are allowed)
+  const API_DANGEROUS = DANGEROUS_PATTERNS.filter((p) => p.code !== 'SEC003');
+  for (const { pattern, code, message } of API_DANGEROUS) {
     if (pattern.test(content)) {
       const line = findLineNumber(content, pattern);
       issues.push(issue('error', path, code, message, line));
     }
+  }
+
+  // API000: Validate that the route exports at least one HTTP verb (App Router style)
+  // Accept both "export async function POST" and "export function POST" and "export const POST"
+  const appRouterExport = REQUIRED_API_EXPORTS.some((v) =>
+    new RegExp(`export\s+(?:async\s+)?function\s+${v}\b`).test(content) ||
+    new RegExp(`export\s+const\s+${v}\s*=`).test(content)
+  );
+  // Also accept Pages Router "export default" — downgrade to warning not error
+  const pagesRouterDefault = /export\s+default\s+(?:async\s+)?function/.test(content);
+  if (!appRouterExport && pagesRouterDefault) {
+    issues.push(issue('warning', path, 'API000W',
+      'Using Pages Router (export default) — consider migrating to App Router (export async function POST)'));
   }
 
   return issues;
