@@ -37,7 +37,7 @@ async function testProvider(cfg: typeof PROVIDER_CONFIGS[number]): Promise<{
       headers = { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" };
     } else {
       body = { model: cfg.model, messages: [{ role: "user", content: TEST_PROMPT }], max_tokens: 10 };
-      headers = { Authorization: \`Bearer \${apiKey}\`, "Content-Type": "application/json",
+      headers = { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json",
         ...(cfg.name === "openrouter" || cfg.name === "perplexity"
           ? { "HTTP-Referer": "https://craudiovizai.com", "X-Title": "Javari AI" }
           : {}),
@@ -50,7 +50,7 @@ async function testProvider(cfg: typeof PROVIDER_CONFIGS[number]): Promise<{
     const latency = Date.now() - t0;
     if (!res.ok) {
       const txt = await res.text();
-      return { ok: false, latency, error: \`HTTP \${res.status}: \${txt.slice(0, 120)}\`, model: cfg.model };
+      return { ok: false, latency, error: `HTTP ${res.status}: ${txt.slice(0, 120)}`, model: cfg.model };
     }
     return { ok: true, latency, model: cfg.model };
   } catch (err) {
@@ -64,7 +64,7 @@ export const maxDuration = 90;
 
 export async function POST(req: NextRequest) {
   const auth = req.headers.get("Authorization") ?? "";
-  if (CRON_SECRET && auth !== \`Bearer \${CRON_SECRET}\`) {
+  if (CRON_SECRET && auth !== `Bearer ${CRON_SECRET}`) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 
