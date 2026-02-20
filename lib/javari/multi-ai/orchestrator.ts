@@ -12,7 +12,6 @@
 // or called directly from /api/autonomy when mode="multi_ai_team".
 
 import { getProvider, getProviderApiKey } from "@/lib/javari/providers";
-import { isOutputMalformed }              from "@/lib/javari/multi-ai/validator";
 import {
   AGENT_ROLES,
   determineAgentForTask,
@@ -22,6 +21,13 @@ import {
 } from "./roles";
 import { mergeAgentOutputs, type AgentOutput } from "./merge";
 import type { TaskNode, AutonomyEvent }         from "@/lib/javari/autonomy/types";
+
+// Inline malformed-output guard (avoids duplicate validator.ts import in webpack)
+function isOutputMalformed(text: string | null | undefined): boolean {
+  if (!text) return true;
+  const t = text.trim();
+  return t.length < 5 || /^(undefined|null|\[object Object\])$/.test(t);
+}
 
 // ── Orchestration event types (superset of AutonomyEvent types) ───────────────
 //
