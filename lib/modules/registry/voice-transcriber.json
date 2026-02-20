@@ -1,0 +1,19 @@
+{
+  "slug": "voice-transcriber",
+  "name": "Voice Transcriber",
+  "description": "Transcribe audio and video files to text with speaker identification, timestamps, and multi-language support",
+  "family": "ai-integration",
+  "types": [
+    "full-stack"
+  ],
+  "creditsPerUse": 3,
+  "minPlan": "starter",
+  "features": [],
+  "routes": {
+    "ui": "/tools/voice-transcriber",
+    "api": "/api/tools/voice-transcriber/process"
+  },
+  "generatedAt": "2026-02-20T04:34:05.027Z",
+  "generatedBy": "javari-module-factory@2.1",
+  "status": "ready"
+}
