@@ -1,0 +1,19 @@
+{
+  "slug": "brand-color-palette",
+  "name": "Brand Color Palette",
+  "description": "Generate harmonious brand color palettes from a seed color or description with hex codes, accessibility scores, and CSS/Tailwind export",
+  "family": "creative-suite",
+  "types": [
+    "full-stack"
+  ],
+  "creditsPerUse": 2,
+  "minPlan": "free",
+  "features": [],
+  "routes": {
+    "ui": "/tools/brand-color-palette",
+    "api": "/api/tools/brand-color-palette/process"
+  },
+  "generatedAt": "2026-02-20T04:35:31.138Z",
+  "generatedBy": "javari-module-factory@2.1",
+  "status": "ready"
+}
