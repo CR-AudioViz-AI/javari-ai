@@ -10,7 +10,7 @@ const BrandColorPalettePage = () => {
   const [status, setStatus] = useState<"idle" | "processing" | "complete" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [seedColor, setSeedColor] = useState<string>("");
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
     if (!loading && !user) {
