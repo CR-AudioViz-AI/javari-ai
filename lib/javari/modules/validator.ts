@@ -28,7 +28,7 @@ const HARDCODED_SECRET_PATTERNS = [
 const DANGEROUS_PATTERNS = [
   { pattern: /eval\s*\(/, code: 'SEC001', message: 'eval() detected — XSS risk' },
   { pattern: /dangerouslySetInnerHTML/, code: 'SEC002', message: 'dangerouslySetInnerHTML — XSS risk; sanitize first' },
-  { pattern: /console\.log\(.*(?:key|secret|password|token)/i, code: 'SEC004', message: 'Possible credential logging' },
+  { pattern: /console\.log\(.*(?:process\.env\.[A-Z_]*(?:SECRET|PASSWORD|KEY|TOKEN)|['"`][^'"` ]{8,}(?:secret|password)[^'"` ]*['"`])/i, code: 'SEC004', message: 'Possible credential logging — direct env var or string literal' },
   { pattern: /\.innerHTML\s*=/, code: 'SEC005', message: 'innerHTML assignment — XSS risk' },
   { pattern: /document\.write/, code: 'SEC006', message: 'document.write() — XSS risk' },
 ];
