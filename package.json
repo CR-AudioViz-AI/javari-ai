@@ -1,5 +1,5 @@
 {
-  "name": "crav-javari",
+  "name": "javari-ai",
   "version": "1.0.0",
   "private": true,
   "scripts": {
@@ -59,5 +59,6 @@
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.15",
     "typescript": "^5.6.3"
-  }
+  },
+  "description": "Javari AI \u2014 Autonomous build engine for CR AudioViz AI platform"
 }
