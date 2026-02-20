@@ -26,7 +26,7 @@ import { vault } from '@/lib/javari/secrets/vault';
 const SUPABASE_URL  = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY
                    || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-// CRA_BASE handled by internal-router (env: NEXT_PUBLIC_CRA_URL + CRA_FALLBACK_URL)
+const CRA_BASE = process.env.NEXT_PUBLIC_CRA_URL ?? process.env.CRA_FALLBACK_URL ?? 'https://craudiovizai-fgz0ait8y-roy-hendersons-projects-1d3d5e94.vercel.app';
 const JAI_BASE      = process.env.NEXT_PUBLIC_APP_URL ?? 'https://javariai.com';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
