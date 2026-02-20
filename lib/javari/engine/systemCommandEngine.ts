@@ -20,6 +20,7 @@ import type { ParsedCommand } from './commandDetector';
 import { runModuleFactory, validateRequest } from '@/lib/javari/modules/engine';
 import type { ModuleRequest } from '@/lib/javari/modules/types';
 import { vault } from '@/lib/javari/secrets/vault';
+import { craFetch as internalCraFetch, pingCra } from '@/lib/javari/internal-router';
 import { craFetch } from '@/lib/javari/internal-router';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
