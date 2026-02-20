@@ -7,7 +7,7 @@
 //   get_status → platform status summary
 //   run_diagnostic → self-heal diagnostic
 // Returns structured JSON — never chat text
-// 2026-02-19 — P1-003
+// 2026-02-20 — P1-003 Fix: supabaseFetch 204 No Content handling
 
 import type { ParsedCommand } from './commandDetector';
 import { runModuleFactory, validateRequest } from '@/lib/javari/modules/engine';
@@ -52,7 +52,15 @@ async function supabaseFetch(
     },
   });
   if (!res.ok) throw new Error(`Supabase ${res.status}: ${await res.text()}`);
-  return res.json();
+  // 204 No Content — PATCH/DELETE with return=minimal returns no body
+  if (res.status === 204 || res.headers.get('content-length') === '0') return null;
+  const text = await res.text();
+  if (!text || text.trim() === '') return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text; // Return raw text if not JSON
+  }
 }
 
 // ── Action: ping_system ───────────────────────────────────────────────────────
