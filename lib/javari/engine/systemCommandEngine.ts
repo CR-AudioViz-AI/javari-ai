@@ -26,7 +26,7 @@ import { vault } from '@/lib/javari/secrets/vault';
 const SUPABASE_URL  = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY
                    || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const CRA_BASE      = process.env.NEXT_PUBLIC_CRA_URL ?? 'https://craudiovizai.com';
+// CRA_BASE handled by internal-router (env: NEXT_PUBLIC_CRA_URL + CRA_FALLBACK_URL)
 const JAI_BASE      = process.env.NEXT_PUBLIC_APP_URL ?? 'https://javariai.com';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -156,24 +156,15 @@ async function craFetch(
   opts: RequestInit = {},
   timeoutMs = 8_000
 ): Promise<{ ok: boolean; status: number; data: unknown; ms: number }> {
-  const t0 = Date.now();
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    const res = await fetch(`${CRA_BASE}${path}`, {
-      ...opts,
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
-    const ms = Date.now() - t0;
-    let data: unknown = null;
-    try { data = await res.json(); } catch { data = null; }
-    return { ok: res.ok, status: res.status, data, ms };
-  } catch (err) {
-    return { ok: false, status: 0, data: (err as Error).message, ms: Date.now() - t0 };
-  }
+  // Uses internal-router for retry/backoff and CRA_FALLBACK_URL support
+  const { craFetch: _internalCraFetch } = await import('@/lib/javari/internal-router');
+  const r = await _internalCraFetch(path, {
+    method: (opts.method as 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE') ?? 'GET',
+    timeoutMs,
+    useInternalAuth: true,
+  });
+  return { ok: r.ok, status: r.status, data: r.data, ms: r.ms };
 }
-
 // ══════════════════════════════════════════════════════════════════════════════
 // ACTION: ping_system
 // ══════════════════════════════════════════════════════════════════════════════
