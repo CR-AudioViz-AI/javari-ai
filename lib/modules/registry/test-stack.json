@@ -1,0 +1,24 @@
+{
+  "slug": "test-stack",
+  "name": "Test Stack",
+  "description": "A full-stack test module combining UI, API processing, and database logging for validation",
+  "family": "creative-suite",
+  "types": [
+    "full-stack"
+  ],
+  "creditsPerUse": 1,
+  "minPlan": "free",
+  "features": [
+    "Input form",
+    "API processing",
+    "Result display",
+    "Usage logging"
+  ],
+  "routes": {
+    "ui": "/tools/test-stack",
+    "api": "/api/tools/test-stack/process"
+  },
+  "generatedAt": "2026-02-20T03:56:14.858Z",
+  "generatedBy": "javari-module-factory@2.1",
+  "status": "ready"
+}
