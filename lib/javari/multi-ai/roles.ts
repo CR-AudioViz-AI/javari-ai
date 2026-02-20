@@ -254,48 +254,48 @@ export interface TaskFlags {
 export const DELEGATION_RULES: DelegationRule[] = [
   // 1. JSON/structured output → json_specialist
   {
-    condition: (f) => f.requires_json,
+    condition: (flags) => f.requires_json,
     primaryRole:   "json_specialist",
     supportRoles:  ["validator"],
     reason: "Structured JSON output required → Mistral strict mode",
   },
   // 2. Planning / reasoning-heavy + no code → architect
   {
-    condition: (f) => f.requires_reasoning_depth && !f.has_code_request,
+    condition: (flags) => f.requires_reasoning_depth && !f.has_code_request,
     primaryRole:   "architect",
     supportRoles:  ["validator"],
     reason: "Deep reasoning without code → architect (ChatGPT)",
   },
   // 3. High-risk anything → engineer + validator mandatory
   {
-    condition: (f) => f.high_risk,
+    condition: (flags) => f.high_risk,
     primaryRole:   "engineer",
     supportRoles:  ["validator"],
     reason: "High-risk task → engineer executes + validator reviews",
   },
   // 4. Code generation → engineer
   {
-    condition: (f) => f.has_code_request && !f.requires_reasoning_depth,
+    condition: (flags) => f.has_code_request && !f.requires_reasoning_depth,
     primaryRole:   "engineer",
     supportRoles:  ["validator"],
     reason: "Code task → engineer (Claude Sonnet)",
   },
   // 5. Reasoning + code → architect plans, engineer builds
   {
-    condition: (f) => f.requires_reasoning_depth && f.has_code_request,
+    condition: (flags) => f.requires_reasoning_depth && f.has_code_request,
     primaryRole:   "architect",
     supportRoles:  ["engineer", "validator"],
     reason: "Design+code → architect plans, engineer builds, validator reviews",
   },
   // 6. Validation task → validator directly
   {
-    condition: (f) => f.task_type === "validation",
+    condition: (flags) => f.task_type === "validation",
     primaryRole:   "validator",
     reason: "Validation task type → validator",
   },
   // 7. Bulk (summarize/extract/classify) → bulk_worker
   {
-    condition: (f) => f.is_bulk_task && !f.high_risk,
+    condition: (flags) => f.is_bulk_task && !f.high_risk,
     primaryRole:   "bulk_worker",
     reason: "Bulk task → Groq Llama (free tier)",
   },
