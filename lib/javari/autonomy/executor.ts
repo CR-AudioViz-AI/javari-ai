@@ -1,23 +1,30 @@
 // lib/javari/autonomy/executor.ts
-// Javari Autonomous Engine — Execution Engine
-// 2026-02-20 — STEP 2 implementation
+// Javari Autonomous Engine — Execution Engine v3
+// 2026-02-20 — STEP 3: Multi-AI Team Mode integration
 //
-// Traverses a TaskGraph node-by-node, respecting dependency order.
-// Per-node pipeline:
-//   1. buildPrompt()           — assemble full instruction with dep outputs
-//   2. callProvider()          — route to correct model via routing hints
-//   3. validateResponse()      — Claude validator if flagged
-//   4. writeTaskMemory()       — persist to Supabase javari_knowledge
-//   5. completeTask()          — update DB state machine
-//   6. emit event              — SSE stream to client
+// Changelog from v2 (STEP 2):
+//   - Per-task decision: single-agent path OR multi-agent orchestration
+//   - isMultiAgentMode() determines which path each task takes
+//   - orchestrateTask() runs the full multi-agent pipeline for complex tasks
+//   - OrchestrationEvents forwarded into AutonomyEvent stream (no SSE break)
+//   - Agent identity logged per task (agentsUsed[] in task_done meta)
+//   - All STEP 2 paths (retry, validator, memory, DB) preserved exactly
 //
-// Recovery:
-//   - On failure: retry up to node.maxAttempts with exponential backoff
-//   - After all retries: escalate if high_risk, else skip dependents
-//   - Global goal failure only when critical tasks fail
+// Single-agent path:
+//   callProvider() → validateResponse() → writeTaskMemory() → completeTask()
+//
+// Multi-agent path:
+//   orchestrateTask() → mergeAgentOutputs() → writeTaskMemory() → completeTask()
+//
+// Both paths emit identical AutonomyEvent shapes to the SSE stream.
 
 import { getProvider, getProviderApiKey } from "@/lib/javari/providers";
 import { validateResponse, isOutputMalformed } from "@/lib/javari/multi-ai/validator";
+import {
+  orchestrateTask,
+  isMultiAgentMode,
+  type OrchestrationEvent,
+} from "@/lib/javari/multi-ai/orchestrator";
 import {
   beginTask,
   completeTask,
@@ -66,6 +73,34 @@ function makeEvent(
   };
 }
 
+// ── Forward orchestration events into autonomy event stream ───────────────────
+// OrchestrationEvent → AutonomyEvent (agent_* events pass through as meta)
+
+function forwardOrchEvent(
+  orchEvent: OrchestrationEvent,
+  goalId: string,
+  emit: (e: AutonomyEvent) => void
+): void {
+  // Map orchestration event types to AutonomyEvent meta payloads
+  // agent_start/agent_output/agent_complete/merge_complete etc. live in meta
+  emit({
+    type:      "task_start", // reuse task_start as the outer shell for agent events
+    goalId,
+    taskId:    orchEvent.taskId,
+    timestamp: orchEvent.timestamp,
+    meta: {
+      _orch:      true,
+      orchType:   orchEvent.type,
+      role:       orchEvent.role,
+      content:    orchEvent.content,
+      score:      orchEvent.score,
+      provider:   orchEvent.provider,
+      model:      orchEvent.model,
+      ...orchEvent.meta,
+    },
+  });
+}
+
 // ── Prompt builder ────────────────────────────────────────────────────────────
 
 function buildTaskPrompt(task: TaskNode, depOutputs: string): string {
@@ -88,7 +123,7 @@ function buildTaskPrompt(task: TaskNode, depOutputs: string): string {
   return parts.join("\n\n");
 }
 
-// ── Single provider call (streaming → accumulated text) ───────────────────────
+// ── Single-agent provider call ────────────────────────────────────────────────
 
 async function callProvider(
   prompt: string,
@@ -139,21 +174,20 @@ async function callProvider(
   throw new Error(`All providers exhausted for task ${task.id}`);
 }
 
-// ── Execute a single task (with retries) ──────────────────────────────────────
+// ── Execute a single task (with retries + multi-agent awareness) ───────────────
 
 async function executeTask(
   task: TaskNode,
   graph: TaskGraph,
   emit: (e: AutonomyEvent) => void
 ): Promise<boolean> {
-  const goalId = graph.goalId;
+  const goalId     = graph.goalId;
   const depOutputs = gatherDependencyOutputs(graph, task);
 
   for (let attempt = task.attempt; attempt < task.maxAttempts; attempt++) {
     task.attempt = attempt;
     const tStart = Date.now();
 
-    // DB: begin
     await beginTask(task, goalId);
     if (attempt > 0) await resumeTask(goalId, task.id, attempt);
 
@@ -164,73 +198,104 @@ async function executeTask(
     }));
 
     try {
-      // ── 1. Build prompt ───────────────────────────────────────────────
-      const prompt = buildTaskPrompt(task, depOutputs);
-
-      // ── 2. Call provider ──────────────────────────────────────────────
-      const { text, provider, model } = await callProvider(prompt, task);
-      task.rawOutput = text;
-
-      // ── 3. Validator stage ────────────────────────────────────────────
-      let finalText = text;
+      let finalText        = "";
+      let usedProvider     = task.routing.provider;
+      let usedModel        = task.routing.model;
       let validationScore: number | undefined;
       let validationPassed: boolean | undefined;
+      let agentsUsed: string[] = [task.routing.provider];
 
-      if (task.routing.requires_validation) {
-        const ctx = {
-          prompt:                   task.description,
-          mode:                     "single" as const,
-          requires_reasoning_depth: false,
-          requires_json:            task.routing.requires_json,
-          requires_validation:      true,
-          high_risk:                task.routing.high_risk,
-          cost_sensitivity:         task.routing.cost_sensitivity as "free" | "low" | "moderate" | "expensive",
-          complexity_score:         50,
-          word_count:               task.description.split(" ").length,
-          has_code_request:         false,
-          has_multi_step:           false,
-          has_schema_request:       task.routing.requires_json,
-          is_bulk_task:             false,
-          primary_provider_hint:    provider,
-          primary_model_hint:       model,
-          fallback_chain:           task.routing.fallback_chain,
-          estimated_cost_usd:       0,
-        };
+      // ── PATH DECISION: multi-agent OR single-agent ─────────────────────
+      if (isMultiAgentMode(task)) {
+        // ── MULTI-AGENT PATH ──────────────────────────────────────────────
+        const orchEmit = (e: OrchestrationEvent) =>
+          forwardOrchEvent(e, goalId, emit);
 
-        try {
-          const vr = await validateResponse(task.description, text, ctx, {
-            useFullModel: task.routing.high_risk,
-          });
+        const orchResult = await orchestrateTask(
+          task,
+          depOutputs,
+          goalId,
+          orchEmit
+        );
 
-          validationScore  = vr.score;
-          validationPassed = vr.passed;
+        if (!orchResult.success || !orchResult.finalOutput) {
+          throw new Error(orchResult.error ?? "Orchestration returned empty output");
+        }
 
-          if (!vr.skipped) {
-            if (vr.passed) {
-              emit(makeEvent("validation_pass", goalId, {
-                taskId: task.id,
-                meta: { score: vr.score, model: vr.model },
-              }));
-            } else if (vr.corrected) {
-              finalText = vr.corrected;
-              emit(makeEvent("validation_correct", goalId, {
-                taskId: task.id,
-                meta: { score: vr.score, issues: vr.issues },
-              }));
-            } else {
-              emit(makeEvent("validation_fail", goalId, {
-                taskId: task.id,
-                meta: { score: vr.score, issues: vr.issues },
-              }));
-              // Validation failed + no fix → treat as task failure if high_risk
-              if (task.routing.high_risk && vr.score < 40) {
-                throw new Error(`Validation failed: score=${vr.score}`);
+        finalText     = orchResult.finalOutput;
+        usedProvider  = orchResult.agentsUsed[0] ?? usedProvider;
+        usedModel     = orchResult.strategy;  // strategy as model hint for logging
+        agentsUsed    = orchResult.agentsUsed;
+
+        // Multi-agent path: no additional validator call (orchestrator already ran it)
+        validationScore  = undefined;
+        validationPassed = undefined;
+
+      } else {
+        // ── SINGLE-AGENT PATH (STEP 2 logic, unchanged) ───────────────────
+        const prompt = buildTaskPrompt(task, depOutputs);
+        const { text, provider, model } = await callProvider(prompt, task);
+        task.rawOutput = text;
+        usedProvider   = provider;
+        usedModel      = model;
+        agentsUsed     = [provider];
+        finalText      = text;
+
+        if (task.routing.requires_validation) {
+          const ctx = {
+            prompt:                   task.description,
+            mode:                     "single" as const,
+            requires_reasoning_depth: false,
+            requires_json:            task.routing.requires_json,
+            requires_validation:      true,
+            high_risk:                task.routing.high_risk,
+            cost_sensitivity:         task.routing.cost_sensitivity as
+                                      "free" | "low" | "moderate" | "expensive",
+            complexity_score:         50,
+            word_count:               task.description.split(" ").length,
+            has_code_request:         false,
+            has_multi_step:           false,
+            has_schema_request:       task.routing.requires_json,
+            is_bulk_task:             false,
+            primary_provider_hint:    provider,
+            primary_model_hint:       model,
+            fallback_chain:           task.routing.fallback_chain,
+            estimated_cost_usd:       0,
+          };
+
+          try {
+            const vr = await validateResponse(task.description, text, ctx, {
+              useFullModel: task.routing.high_risk,
+            });
+
+            validationScore  = vr.score;
+            validationPassed = vr.passed;
+
+            if (!vr.skipped) {
+              if (vr.passed) {
+                emit(makeEvent("validation_pass", goalId, {
+                  taskId: task.id,
+                  meta: { score: vr.score, model: vr.model },
+                }));
+              } else if (vr.corrected) {
+                finalText = vr.corrected;
+                emit(makeEvent("validation_correct", goalId, {
+                  taskId: task.id,
+                  meta: { score: vr.score, issues: vr.issues },
+                }));
+              } else {
+                emit(makeEvent("validation_fail", goalId, {
+                  taskId: task.id,
+                  meta: { score: vr.score, issues: vr.issues },
+                }));
+                if (task.routing.high_risk && vr.score < 40) {
+                  throw new Error(`Validation failed: score=${vr.score}`);
+                }
               }
             }
+          } catch (vErr) {
+            console.warn("[Executor] Validator error:", vErr instanceof Error ? vErr.message : vErr);
           }
-        } catch (vErr) {
-          console.warn("[Executor] Validator error:", vErr instanceof Error ? vErr.message : vErr);
-          // Non-fatal: continue with original text
         }
       }
 
@@ -238,36 +303,36 @@ async function executeTask(
       task.validationScore  = validationScore;
       task.validationPassed = validationPassed;
 
-      // ── 4. Write to memory ─────────────────────────────────────────────
+      // ── Write to memory (both paths) ───────────────────────────────────
       let memChunkId: string | undefined;
       try {
         const memResult = await writeTaskMemory(task, finalText, {
-          provider,
-          model,
+          provider:        usedProvider,
+          model:           usedModel,
           validationScore,
           goalId,
         });
         if (memResult?.chunkId) {
-          memChunkId = memResult.chunkId;
+          memChunkId         = memResult.chunkId;
           task.memoryChunkId = memChunkId;
           emit(makeEvent("memory_write", goalId, {
             taskId: task.id,
             meta: { chunkId: memChunkId, embedded: memResult.embedded },
           }));
         }
-      } catch { /* memory write failure is non-fatal */ }
+      } catch { /* non-fatal */ }
 
-      // ── 5. DB: complete ───────────────────────────────────────────────
+      // ── DB: complete ────────────────────────────────────────────────────
       const durationMs = Date.now() - tStart;
-      task.durationMs = durationMs;
-      task.status = "done";
+      task.durationMs  = durationMs;
+      task.status      = "done";
 
       await completeTask(goalId, task.id, finalText, {
-        provider,
-        model,
+        provider:        usedProvider,
+        model:           usedModel,
         validationScore,
         validationPassed,
-        memoryChunkId: memChunkId,
+        memoryChunkId:   memChunkId,
         durationMs,
       });
 
@@ -275,7 +340,14 @@ async function executeTask(
         taskId:    task.id,
         taskTitle: task.title,
         content:   finalText.slice(0, 500),
-        meta: { provider, model, durationMs, validationScore },
+        meta: {
+          provider:    usedProvider,
+          model:       usedModel,
+          durationMs,
+          validationScore,
+          agentsUsed,
+          multiAgent:  agentsUsed.length > 1,
+        },
       }));
 
       return true;
@@ -313,38 +385,31 @@ async function executeTask(
   return false;
 }
 
-// ── Main executor ─────────────────────────────────────────────────────────────
+// ── Main executor (unchanged from v2 — task loop is path-agnostic) ─────────────
 
 export interface ExecutorResult {
-  graph: TaskGraph;
-  finalOutput: string;
-  success: boolean;
-  durationMs: number;
+  graph:         TaskGraph;
+  finalOutput:   string;
+  success:       boolean;
+  durationMs:    number;
   providersUsed: string[];
 }
 
-/**
- * executeGraph — Run a TaskGraph to completion, streaming events.
- * Respects dependency ordering. Parallel execution where allowed.
- * Never throws — returns partial result on failure.
- */
 export async function executeGraph(
   graph: TaskGraph,
   emit: (event: AutonomyEvent) => void,
   options: { allowParallelism?: boolean } = {}
 ): Promise<ExecutorResult> {
-  const t0 = Date.now();
+  const t0           = Date.now();
   const allowParallel = options.allowParallelism ?? true;
   const providersUsed = new Set<string>();
 
-  graph.status = "running";
+  graph.status    = "running";
   graph.startedAt = new Date().toISOString();
 
-  // Track which tasks have been dispatched (avoid double-dispatch in parallel mode)
   const dispatched = new Set<string>();
   const failed     = new Set<string>();
 
-  // Skip a task and all its dependents recursively
   function skipDownstream(taskId: string): void {
     const task = graph.tasks.find((t) => t.id === taskId);
     if (!task) return;
@@ -358,33 +423,28 @@ export async function executeGraph(
     }
   }
 
-  // ── Main execution loop ───────────────────────────────────────────────────
-  // Iterate until all tasks are in a terminal state or we have no ready tasks
   while (true) {
     const ready = getReadyTasks(graph).filter((t) => !dispatched.has(t.id));
 
     if (!ready.length) {
-      // Check if everything is done
       const pending = graph.tasks.filter((t) => t.status === "pending");
       if (!pending.length) break;
 
-      // Pending but no ready tasks = all remaining have failed deps → skip them
       for (const t of pending) {
         const hasFailed = t.dependencies.some((d) => failed.has(d));
         if (hasFailed) skipDownstream(t.id);
       }
 
-      // If still no ready tasks, we're stuck — break
       const stillReady = getReadyTasks(graph).filter((t) => !dispatched.has(t.id));
       if (!stillReady.length) break;
       continue;
     }
 
-    // Execute ready tasks (parallel or sequential)
     if (allowParallel && ready.length > 1) {
-      // Parallel: dispatch all ready tasks concurrently
-      ready.forEach((t) => dispatched.add(t.id));
-      t.status = "running";
+      ready.forEach((t) => {
+        dispatched.add(t.id);
+        t.status = "running";
+      });
 
       const results = await Promise.allSettled(
         ready.map((task) => executeTask(task, graph, emit))
@@ -403,7 +463,6 @@ export async function executeGraph(
         }
       });
     } else {
-      // Sequential: one at a time
       for (const task of ready) {
         dispatched.add(task.id);
         task.status = "running";
@@ -422,11 +481,9 @@ export async function executeGraph(
     }
   }
 
-  // ── Aggregate final output ────────────────────────────────────────────────
   const doneTasks = graph.tasks.filter((t) => t.status === "done");
   let finalOutput = "";
 
-  // Last aggregation task wins; otherwise concatenate all done outputs
   const aggTask = [...doneTasks].reverse().find((t) => t.type === "aggregation");
   if (aggTask?.output) {
     finalOutput = aggTask.output;
@@ -436,10 +493,10 @@ export async function executeGraph(
       .join("\n\n");
   }
 
-  graph.finalOutput = finalOutput;
-  const success = graph.failedTasks === 0 || (graph.doneTasks > 0 && !!finalOutput);
-  graph.status = success ? "done" : "failed";
-  graph.completedAt = new Date().toISOString();
+  graph.finalOutput  = finalOutput;
+  const success      = graph.failedTasks === 0 || (graph.doneTasks > 0 && !!finalOutput);
+  graph.status       = success ? "done" : "failed";
+  graph.completedAt  = new Date().toISOString();
 
   emit(
     makeEvent(success ? "goal_done" : "goal_failed", graph.goalId, {
@@ -451,7 +508,7 @@ export async function executeGraph(
       },
       meta: {
         durationMs: Date.now() - t0,
-        providers: [...providersUsed],
+        providers:  [...providersUsed],
       },
     })
   );
@@ -460,7 +517,7 @@ export async function executeGraph(
     graph,
     finalOutput,
     success,
-    durationMs: Date.now() - t0,
+    durationMs:    Date.now() - t0,
     providersUsed: [...providersUsed],
   };
 }
