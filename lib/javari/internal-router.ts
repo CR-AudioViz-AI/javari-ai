@@ -66,9 +66,9 @@ function getInternalHeaders(opts: FetchOptions = {}): Record<string, string> {
     'X-Request-Source': 'javari-ai',
   };
 
-  // Internal secret for bypass of rate limiting on CRA side
-  const secret = process.env.INTERNAL_API_SECRET ?? vault.get('github' as Parameters<typeof vault.get>[0])?.slice(-16) ?? '';
-  if (secret) headers['X-Internal-Secret'] = secret;
+  // Internal secret — always sent for CRA internal route bypass
+  const intSecret = process.env.INTERNAL_API_SECRET ?? 'jvr_int_cra2026hvrs';
+  if (intSecret) headers['X-Internal-Secret'] = intSecret;
 
   if (opts.useInternalAuth) {
     const cronSecret = process.env.CRON_SECRET ?? '';
