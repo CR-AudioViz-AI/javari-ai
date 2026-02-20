@@ -15,7 +15,7 @@ export interface JavariProvider {
 
 /** Resolve an API key by provider name — throws if missing. */
 export function getProviderApiKey(
-  providerName: "openai" | "anthropic" | "mistral" | "groq" | "gemini" | "openrouter"
+  providerName: "openai" | "anthropic" | "mistral" | "groq" | "gemini" | "openrouter" | "perplexity" | "xai"
 ): string {
   const key = vault.get(providerName as ProviderName);
   if (!key) throw new Error(`[Providers] API key missing for: ${providerName}`);
@@ -174,15 +174,66 @@ function createGroqProvider(apiKey: string): JavariProvider {
 
 /** Get a provider instance by name with a provided API key. */
 export function getProvider(
-  providerName: "openai" | "anthropic" | "mistral" | "groq" | "gemini" | "openrouter",
+  providerName: "openai" | "anthropic" | "mistral" | "groq" | "gemini" | "openrouter" | "perplexity" | "xai",
   apiKey: string
 ): JavariProvider {
   switch (providerName) {
-    case "openai":     return createOpenAIProvider(apiKey);
-    case "anthropic":  return createAnthropicProvider(apiKey);
-    case "mistral":    return createMistralProvider(apiKey);
-    case "groq":       return createGroqProvider(apiKey);
-    case "openrouter": return createOpenRouterProvider(apiKey);
-    default:           return createOpenAIProvider(apiKey);
+    case "openai":      return createOpenAIProvider(apiKey);
+    case "anthropic":   return createAnthropicProvider(apiKey);
+    case "mistral":     return createMistralProvider(apiKey);
+    case "groq":        return createGroqProvider(apiKey);
+    case "openrouter":  return createOpenRouterProvider(apiKey);
+    case "perplexity":  return createPerplexityViaOpenRouterProvider(apiKey);
+    case "xai":         return createXaiProvider(apiKey);
+    default:            return createOpenAIProvider(apiKey);
   }
+}
+
+// ── Perplexity via OpenRouter (avoids Cloudflare interference on direct API) ──
+function createPerplexityViaOpenRouterProvider(apiKey: string): JavariProvider {
+  const openRouterKey = vault.get("openrouter") ?? apiKey;
+  return {
+    name: "perplexity",
+    async *generateStream(prompt, { rolePrompt } = {}) {
+      const model = "perplexity/llama-3.1-sonar-small-128k-online";
+      const messages: Array<{role:string;content:string}> = [];
+      if (rolePrompt) messages.push({ role: "system", content: rolePrompt });
+      messages.push({ role: "user", content: prompt });
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${openRouterKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://craudiovizai.com",
+          "X-Title": "Javari AI",
+        },
+        body: JSON.stringify({ model, messages, stream: true }),
+      });
+      if (!res.ok || !res.body) throw new Error(`Perplexity/OpenRouter ${res.status}`);
+      yield* parseSSEStream(res.body);
+    },
+  };
+}
+
+// ── xAI / Grok (OpenAI-compatible API) ───────────────────────────────────────
+function createXaiProvider(apiKey: string): JavariProvider {
+  return {
+    name: "xai",
+    async *generateStream(prompt, { rolePrompt, preferredModel } = {}) {
+      const model = preferredModel ?? "grok-2-latest";
+      const messages: Array<{role:string;content:string}> = [];
+      if (rolePrompt) messages.push({ role: "system", content: rolePrompt });
+      messages.push({ role: "user", content: prompt });
+      const res = await fetch("https://api.x.ai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ model, messages, stream: true }),
+      });
+      if (!res.ok || !res.body) throw new Error(`xAI ${res.status}`);
+      yield* parseSSEStream(res.body);
+    },
+  };
 }
