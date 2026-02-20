@@ -3,7 +3,7 @@
 // AI-powered code synthesis for UI pages, API routes, and DB migrations
 // Uses OpenAI GPT-4o via vault — falls back to Anthropic
 // Strict TypeScript, WCAG 2.2 AA, OWASP Top 10 safe
-// 2026-02-19 — TASK-P1-001
+// 2026-02-19 — TASK-P1-001 | TASK-P1-003 fix: max_tokens 4096→8192 to prevent API route truncation
 
 import { vault } from '@/lib/javari/secrets/vault';
 import type {
@@ -62,7 +62,7 @@ async function generateWithAI(systemPrompt: string, userPrompt: string): Promise
           { role: 'user', content: userPrompt },
         ],
         temperature: 0.2,
-        max_tokens: 4096,
+        max_tokens: 8192,
       }),
     });
     if (res.ok) {
@@ -81,8 +81,8 @@ async function generateWithAI(systemPrompt: string, userPrompt: string): Promise
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 4096,
+        model: 'claude-sonnet-4-5-20251022',
+        max_tokens: 8192,
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
       }),
