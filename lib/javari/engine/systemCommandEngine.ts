@@ -266,11 +266,16 @@ async function executeRunDiagnostic(
     }
   }
 
-  // 1. central_services — CRA health endpoint
+  // 1. central_services — CRA lightweight ping (not the heavy 30-API health monitor)
   await check('central_services', async () => {
-    const r = await craFetch('/api/health-check');
-    if (!r.ok && r.status !== 200) throw new Error(`CRA health ${r.status}: ${JSON.stringify(r.data).slice(0,80)}`);
-    return `CRA reachable (${r.ms}ms)`;
+    const r = await craFetch('/api/ping');
+    // 200 = healthy, 404 = route not deployed yet (CRA needs redeploy)
+    if (r.status === 200) return `CRA ping ok (${r.ms}ms)`;
+    // Fallback: try /api/auth/user — 200 or 401 both mean CRA is up
+    const r2 = await craFetch('/api/auth/user');
+    const alive = r2.status === 200 || r2.status === 401 || r2.status === 403;
+    if (!alive) throw new Error(`CRA unreachable: ping=${r.status} auth=${r2.status} err=${r2.error ?? ''}`);
+    return `CRA reachable via auth fallback (${r2.ms}ms, ping=${r.status})`;
   });
 
   // 2. auth_chain — CRA auth user endpoint (unauthenticated = 401 is OK, means route exists)
