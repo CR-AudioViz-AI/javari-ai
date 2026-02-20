@@ -20,13 +20,14 @@ import type { ParsedCommand } from './commandDetector';
 import { runModuleFactory, validateRequest } from '@/lib/javari/modules/engine';
 import type { ModuleRequest } from '@/lib/javari/modules/types';
 import { vault } from '@/lib/javari/secrets/vault';
+import { craFetch } from '@/lib/javari/internal-router';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const SUPABASE_URL  = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY
                    || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const CRA_BASE = process.env.NEXT_PUBLIC_CRA_URL ?? process.env.CRA_FALLBACK_URL ?? 'https://craudiovizai-fgz0ait8y-roy-hendersons-projects-1d3d5e94.vercel.app';
+// CRA_BASE removed — routing now via @/lib/javari/internal-router
 const JAI_BASE      = process.env.NEXT_PUBLIC_APP_URL ?? 'https://javariai.com';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -149,22 +150,9 @@ async function supabaseFetch(path: string, opts: RequestInit = {}): Promise<unkn
   try { return JSON.parse(text); } catch { return text; }
 }
 
-// ── CRA fetch helper ───────────────────────────────────────────────────────────
+// craFetch now imported from @/lib/javari/internal-router
 
-async function craFetch(
-  path: string,
-  opts: RequestInit = {},
-  timeoutMs = 8_000
-): Promise<{ ok: boolean; status: number; data: unknown; ms: number }> {
-  // Uses internal-router for retry/backoff and CRA_FALLBACK_URL support
-  const { craFetch: _internalCraFetch } = await import('@/lib/javari/internal-router');
-  const r = await _internalCraFetch(path, {
-    method: (opts.method as 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE') ?? 'GET',
-    timeoutMs,
-    useInternalAuth: true,
-  });
-  return { ok: r.ok, status: r.status, data: r.data, ms: r.ms };
-}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // ACTION: ping_system
 // ══════════════════════════════════════════════════════════════════════════════
@@ -266,37 +254,44 @@ async function executeRunDiagnostic(
     }
   }
 
-  // 1. central_services — CRA lightweight ping (not the heavy 30-API health monitor)
+  // 1. central_services — ping via /api/javari-internal (CORS-safe, no auth needed)
   await check('central_services', async () => {
-    const r = await craFetch('/api/ping');
-    // 200 = healthy, 404 = route not deployed yet (CRA needs redeploy)
-    if (r.status === 200) return `CRA ping ok (${r.ms}ms)`;
-    // Fallback: try /api/auth/user — 200 or 401 both mean CRA is up
-    const r2 = await craFetch('/api/auth/user');
-    const alive = r2.status === 200 || r2.status === 401 || r2.status === 403;
-    if (!alive) throw new Error(`CRA unreachable: ping=${r.status} auth=${r2.status} err=${r2.error ?? ''}`);
-    return `CRA reachable via auth fallback (${r2.ms}ms, ping=${r.status})`;
+    const r = await craFetch<{ ok?: boolean; service?: string; ms?: number }>(
+      '/api/javari-internal?action=ping',
+      { useInternalAuth: true, timeoutMs: 8_000 }
+    );
+    if (!r.ok) throw new Error(`CRA unreachable: ${r.error ?? `status=${r.status}`}`);
+    return `CRA "${r.data?.service ?? 'craudiovizai'}" reachable via javari-internal (${r.ms}ms)`;
   });
 
-  // 2. auth_chain — CRA auth user endpoint (unauthenticated = 401 is OK, means route exists)
+  // 2. auth_chain — verify auth routes registered
   await check('auth_chain', async () => {
-    const r = await craFetch('/api/auth/user');
-    if (r.status === 0) throw new Error(`CRA auth unreachable: ${r.data}`);
-    return `Auth route exists, status=${r.status} (401=expected-unauthenticated)`;
+    const r = await craFetch<{ ok?: boolean; endpoints?: string[] }>(
+      '/api/javari-internal?action=auth',
+      { useInternalAuth: true, timeoutMs: 8_000 }
+    );
+    if (!r.ok) throw new Error(`CRA auth chain unreachable: ${r.error ?? `status=${r.status}`}`);
+    return `Auth routes: ${(r.data?.endpoints ?? []).join(', ')}`;
   });
 
-  // 3. credits_chain — CRA credits balance endpoint
+  // 3. credits_chain — verify credits routes registered
   await check('credits_chain', async () => {
-    const r = await craFetch('/api/credits/balance');
-    if (r.status === 0) throw new Error(`CRA credits unreachable: ${r.data}`);
-    return `Credits route exists, status=${r.status}`;
+    const r = await craFetch<{ ok?: boolean; endpoints?: string[] }>(
+      '/api/javari-internal?action=credits',
+      { useInternalAuth: true, timeoutMs: 8_000 }
+    );
+    if (!r.ok) throw new Error(`CRA credits chain unreachable: ${r.error ?? `status=${r.status}`}`);
+    return `Credits routes: ${(r.data?.endpoints ?? []).join(', ')}`;
   });
 
-  // 4. payments_chain — CRA stripe/paypal endpoints
+  // 4. payments_chain — verify payments routes registered
   await check('payments_chain', async () => {
-    const r = await craFetch('/api/payments');
-    if (r.status === 0) throw new Error(`CRA payments unreachable: ${r.data}`);
-    return `Payments route exists, status=${r.status}`;
+    const r = await craFetch<{ ok?: boolean; endpoints?: string[] }>(
+      '/api/javari-internal?action=payments',
+      { useInternalAuth: true, timeoutMs: 8_000 }
+    );
+    if (!r.ok) throw new Error(`CRA payments chain unreachable: ${r.error ?? `status=${r.status}`}`);
+    return `Payments routes: ${(r.data?.endpoints ?? []).join(', ')}`;
   });
 
   // 5. supabase_integrity — roadmap + tasks + knowledge tables
