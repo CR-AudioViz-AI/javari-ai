@@ -1,6 +1,6 @@
 // lib/javari/engine/unified.ts
-// Javari Unified AI Engine — v7
-// 2026-02-20 — STEP 4: module_factory mode added
+// Javari Unified AI Engine — v8
+// 2026-02-20 — STEP 5: entitlement + credit billing integration
 //
 // Changelog from v5 (STEP 1):
 //   - New mode: "multi_ai_team" — orchestrates multiple specialist agents
@@ -26,6 +26,9 @@ import { determineAgentForTask }            from "@/lib/javari/multi-ai/roles";
 import type { Message }                     from "@/lib/types";
 import type { RoutingContext as LegacyRoutingContext } from "@/lib/javari/multi-ai/router";
 import { runModuleFactory } from "@/lib/javari/factory/module-factory";
+import { enforceEntitlement, type Feature } from "@/lib/javari/revenue/entitlements";
+import { checkBalance, deductCredits, estimateCallCost } from "@/lib/javari/revenue/credits";
+import { logUsageEvent, logAIModelCost } from "@/lib/javari/revenue/metering";
 
 // ── Constants (unchanged from v5) ─────────────────────────────────────────────
 
@@ -218,6 +221,7 @@ export async function unifiedJavariEngine({
   _systemCommandMode = false,
   _longForm = false,
   _mode,
+  _userId,
 }: {
   messages?: Message[];
   persona?: string;
@@ -228,6 +232,8 @@ export async function unifiedJavariEngine({
   _longForm?: boolean;
   /** v6: explicit mode override. "multi_ai_team" activates team orchestration. */
   _mode?: "single" | "multi_ai_team" | "module_factory" | "auto";
+  /** v8 STEP 5: caller passes userId for entitlement/billing checks */
+  _userId?: string;
 }) {
   const start = Date.now();
 
@@ -243,6 +249,41 @@ export async function unifiedJavariEngine({
 
   // ── STEP 1: Routing context analysis ──────────────────────────────────────
   const routingCtx = analyzeRoutingContext(userPrompt, "single");
+
+  // ── STEP 5: Entitlement + balance guard ────────────────────────────────────
+  const _billingUserId = _userId ?? "";
+  if (!_systemCommandMode && _billingUserId) {
+    try {
+      // Feature gate: pick narrowest feature for this mode
+      const _feature: Feature =
+        _mode === "module_factory" ? "module_factory" :
+        _mode === "multi_ai_team"  ? "multi_ai_team"  :
+        "chat";
+      await enforceEntitlement(_billingUserId, _feature);
+      // Balance gate
+      const _bal = await checkBalance(_billingUserId);
+      if (!_bal.sufficient) {
+        return normalizeEnvelope(
+          "Insufficient credits. Visit /billing/credits to top up.",
+          { success: false, provider: "billing", model: "entitlement-check",
+            latency: 0, error: "INSUFFICIENT_CREDITS" }
+        );
+      }
+    } catch (entErr: unknown) {
+      const isEntitlement = (entErr instanceof Error) && entErr.message.startsWith("ENTITLEMENT_DENIED");
+      if (isEntitlement) {
+        const upgradeUrl = (entErr as { upgradeUrl?: string }).upgradeUrl ?? "/billing";
+        return normalizeEnvelope(
+          `Feature not available on your current plan. Upgrade at ${upgradeUrl}`,
+          { success: false, provider: "billing", model: "entitlement-check",
+            latency: 0, error: "ENTITLEMENT_DENIED", upgradeUrl }
+        );
+      }
+      // Non-entitlement errors: log and continue (fail open)
+      console.warn("[Javari] Billing pre-check threw (non-fatal):", entErr instanceof Error ? entErr.message : entErr);
+    }
+  }
+
 
   // ── STEP 4: module_factory mode ────────────────────────────────────────────
   if (_mode === "module_factory") {
@@ -486,6 +527,53 @@ export async function unifiedJavariEngine({
       console.info("[Javari] JSON output validated successfully");
     } catch {
       console.warn("[Javari] JSON output failed parse — returning as-is with warning");
+    }
+  }
+
+  // ── STEP 5: Post-call billing deduction + metering ────────────────────────
+  let _creditsCharged = 0;
+  let _traceId        = "";
+  if (!_systemCommandMode && _billingUserId && finalOutput) {
+    try {
+      const _cost = estimateCallCost(
+        bestProvider,
+        modelName,
+        (userPrompt.length + (finalOutput?.length ?? 0)),
+        routingCtx.high_risk ? "expensive" : routingCtx.complexity_score > 70 ? "moderate" : "low"
+      );
+      _creditsCharged = _cost.credits;
+      // Non-blocking: fire-and-forget deduction to not delay response
+      const _deductPromise = deductCredits(
+        _billingUserId, _creditsCharged,
+        `${_mode ?? "chat"} — ${bestProvider}/${modelName}`,
+        { idempotencyKey: `uni_${start}_${_billingUserId.slice(0,8)}` }
+      ).then((r) => { if (!r.success) console.warn("[Javari] Credit deduction failed:", r.error); });
+      _traceId = logUsageEvent({
+        userId:      _billingUserId,
+        eventType:   "chat",
+        feature:     _mode ?? "chat",
+        creditsUsed: _creditsCharged,
+        success:     true,
+        durationMs:  Date.now() - start,
+        metadata:    { provider: bestProvider, model: modelName },
+      });
+      logAIModelCost({
+        userId:          _billingUserId,
+        provider:        bestProvider,
+        model:           modelName,
+        inputTokens:     Math.ceil(userPrompt.length / 4),
+        outputTokens:    Math.ceil((finalOutput?.length ?? 0) / 4),
+        costUsd:         _cost.costUSD,
+        creditsCharged:  _creditsCharged,
+        tier:            _cost.tier,
+        marginMultiplier: 4,
+        latencyMs:       Date.now() - start,
+        success:         true,
+        traceId:         _traceId,
+      });
+      void _deductPromise;
+    } catch (billErr) {
+      console.warn("[Javari] Post-call billing failed (non-fatal):", billErr instanceof Error ? billErr.message : billErr);
     }
   }
 
