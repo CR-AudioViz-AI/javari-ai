@@ -1,6 +1,6 @@
 // lib/javari/engine/unified.ts
-// Javari Unified AI Engine — v9
-// 2026-02-20 — STEP 6: productization hooks (UI entitlement feedback, cost preview)
+// Javari Unified AI Engine — v10
+// 2026-02-20 — STEP 7: observability, outage detection, canary flags, analytics
 //
 // Changelog from v5 (STEP 1):
 //   - New mode: "multi_ai_team" — orchestrates multiple specialist agents
@@ -29,6 +29,10 @@ import { runModuleFactory } from "@/lib/javari/factory/module-factory";
 import { enforceEntitlement, type Feature } from "@/lib/javari/revenue/entitlements";
 import { checkBalance, deductCredits, estimateCallCost } from "@/lib/javari/revenue/credits";
 import { logUsageEvent, logAIModelCost } from "@/lib/javari/revenue/metering";
+import { routingLog, autonomyLog }           from "@/lib/observability/logger";
+import { recordLatency, recordError, recordModelCost } from "@/lib/observability/metrics";
+import { isCanaryEnabled, recordCanaryOutcome } from "@/lib/canary/feature-canary";
+import { track }                             from "@/lib/analytics/track";
 
 // ── Constants (unchanged from v5) ─────────────────────────────────────────────
 
@@ -500,12 +504,19 @@ export async function unifiedJavariEngine({
       .join(", ");
     console.error(`[Javari] All ${candidateProviders.length} providers failed:`, providerSummary);
 
+    // STEP 7: Record outage metrics + analytics
+    recordError("provider.all_failed", { providers: providerSummary });
+    track({ event: "outage_detected", properties: { providerSummary, candidateCount: candidateProviders.length } });
+    routingLog.error("All providers failed", { meta: { providerSummary } });
+
     return normalizeEnvelope(
       "I'm Javari — I'm having trouble reaching my AI providers right now. Please try again in a moment.",
       {
-        success: false,
-        error: `All providers failed: ${providerSummary}`,
+        success:        false,
+        error:          `All providers failed: ${providerSummary}`,
         providerErrors: errors,
+        degraded:       true,
+        degradedReason: "provider_outage",
       }
     );
   }
@@ -546,6 +557,12 @@ export async function unifiedJavariEngine({
       console.warn("[Javari] JSON output failed parse — returning as-is with warning");
     }
   }
+
+  // ── STEP 7: Record latency + canary outcome ─────────────────────────────────
+  const _totalMs = Date.now() - start;
+  recordLatency("unified_engine", _totalMs, { mode: _mode ?? "auto" });
+  if (_mode === "multi_ai_team") recordCanaryOutcome("multi_ai_team", !!finalOutput);
+  if (_mode === "module_factory") recordCanaryOutcome("module_factory", !!finalOutput);
 
   // ── STEP 5: Post-call billing deduction + metering ────────────────────────
   let _creditsCharged = 0;
