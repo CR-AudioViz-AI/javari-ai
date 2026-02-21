@@ -39,14 +39,13 @@ export async function GET(req: NextRequest) {
     return Response.json({
       success: true,
       tiers:   getTierDefinitions().map((t) => ({
-        tier:           t.tier,
-        label:          t.label,
-        creditGrant:    t.creditGrantPerCycle,
-        cycleDays:      t.cycleDays,
-        maxCallsPerDay: t.maxCallsPerDay,
-        features:       t.features,
-        stripePriceId:  t.stripePriceId ?? null,
-        monthlyUsdCents: t.monthlyUsdCents,
+        tier:            t.tier,
+        label:           t.label,
+        priceMonthlyUsd: t.priceMonthlyUsd,
+        creditsPerCycle: t.creditsPerCycle,
+        features:        t.features,
+        stripePriceId:   t.stripePriceId ?? null,
+        description:     t.description,
       })),
     });
   }
