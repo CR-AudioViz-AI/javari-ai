@@ -1,23 +1,28 @@
 /**
  * Javari AI — Next.js Middleware
- * STEP 7: Rate limiting + Henderson Override Protocol + Kill Switch
+ * STEP 9: Maintenance mode + LAUNCH_MODE + rate limiting + kill switch
  *
- * @version 3.0.0
- * @date 2026-02-20 — STEP 7 Production Hardening
+ * @version 4.0.0
+ * @date 2026-02-21 — STEP 9 Official Launch
  */
 
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-// ── Supabase (Edge-compatible, no cookies) ────────────────────────────────────
+// ── Env ───────────────────────────────────────────────────────────────────────
 const supabaseUrl     = process.env.NEXT_PUBLIC_SUPABASE_URL    ?? "https://kteobfyferrukqeolofj.supabase.co";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
-
-// ── Internal bypass key ───────────────────────────────────────────────────────
 const INTERNAL_KEY    = process.env.INTERNAL_SERVICE_KEY ?? "javari_internal_bypass_key";
 
-// ── Rate limit store (in-memory, resets on cold start) ───────────────────────
+// ── Launch flags (edge-compatible in-process defaults) ────────────────────────
+// These reflect STEP 9 production state.
+// Real-time overrides can be pushed via Supabase javari_settings table.
+let _maintenanceMode = false;
+let _degradedMode    = false;
+let _launchMode      = true;  // LAUNCH_MODE = true (STEP 9)
+
+// ── Rate limit store ──────────────────────────────────────────────────────────
 interface RLEntry { count: number; resetAt: number; }
 const _rl = new Map<string, RLEntry>();
 
@@ -29,12 +34,19 @@ function rlCheck(key: string, max: number, windowMs: number): { ok: boolean; rem
   return { ok: e.count <= max, remaining: Math.max(0, max - e.count), resetAt: e.resetAt };
 }
 
-// ── Route config ──────────────────────────────────────────────────────────────
+// ── Route categories ──────────────────────────────────────────────────────────
 
 const ADMIN_ROUTES = [
   "/api/admin/kill-switch",
   "/api/admin/kill-command",
   "/api/admin/security",
+];
+
+const HEALTH_ROUTES = [
+  "/api/health",
+  "/api/beta/checklist",
+  "/health",
+  "/live",
 ];
 
 const KILL_PROTECTED = [
@@ -50,19 +62,25 @@ const KILL_PROTECTED = [
   "/api/review",
 ];
 
-// AI-heavy routes — 30 req/min
-const AI_ROUTES = [
-  "/api/chat",
-  "/api/autonomy",
-  "/api/factory",
-  "/api/javari",
+const AI_ROUTES     = ["/api/chat", "/api/autonomy", "/api/factory", "/api/javari"];
+const AUTH_ROUTES   = ["/api/auth", "/auth"];
+const BILLING_ROUTES = ["/api/billing"];
+
+// ── Abuse patterns (edge-side filter) ────────────────────────────────────────
+
+const ABUSE_UA_PATTERNS = [
+  "python-requests",
+  "masscan",
+  "nikto",
+  "sqlmap",
+  "dirbuster",
+  "nmap",
 ];
 
-// Auth routes — 10 req/min
-const AUTH_ROUTES = ["/api/auth", "/auth"];
-
-// Billing routes — 20 req/min
-const BILLING_ROUTES = ["/api/billing"];
+function isAbusiveRequest(req: NextRequest): boolean {
+  const ua = req.headers.get("user-agent") ?? "";
+  return ABUSE_UA_PATTERNS.some((p) => ua.toLowerCase().includes(p));
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -88,7 +106,6 @@ function rl429(result: { remaining: number; resetAt: number }, max: number): Nex
         "Retry-After":           String(retryAfter),
         "X-RateLimit-Remaining": String(result.remaining),
         "X-RateLimit-Limit":     String(max),
-        "X-RateLimit-Reset":     String(Math.floor(result.resetAt / 1000)),
       },
     }
   );
@@ -100,9 +117,13 @@ async function isKillSwitchActive(): Promise<boolean> {
   try {
     const sb = createClient(supabaseUrl, supabaseAnonKey);
     const { data } = await sb.from("javari_settings").select("kill_switch_active").single();
-    return data?.kill_switch_active === true;
+    if (data?.kill_switch_active === true) return true;
+    // Also sync maintenance mode from DB
+    _maintenanceMode = data?.maintenance_mode === true;
+    _degradedMode    = data?.degraded_mode    === true;
+    return false;
   } catch {
-    return false; // fail open
+    return false;
   }
 }
 
@@ -111,17 +132,47 @@ async function isKillSwitchActive(): Promise<boolean> {
 export async function middleware(req: NextRequest): Promise<NextResponse> {
   const { pathname } = req.nextUrl;
 
-  // 1. Always allow admin routes
-  if (ADMIN_ROUTES.some((r) => pathname.startsWith(r))) {
+  // 1. Always allow admin + health routes
+  if (
+    ADMIN_ROUTES.some((r) => pathname.startsWith(r)) ||
+    HEALTH_ROUTES.some((r) => pathname.startsWith(r))
+  ) {
     return NextResponse.next();
   }
 
-  // 2. Internal service bypass (no rate limiting, no kill switch)
+  // 2. Internal service bypass — no limits, no maintenance check
   if (isInternal(req)) {
     return NextResponse.next();
   }
 
-  // 3. Kill switch check for protected routes
+  // 3. Abuse prevention (edge-side, no DB needed)
+  if (isAbusiveRequest(req)) {
+    return NextResponse.json(
+      { error: "FORBIDDEN", code: "ABUSE_DETECTED" },
+      { status: 403 }
+    );
+  }
+
+  // 4. Maintenance mode — block all non-health routes
+  if (_maintenanceMode) {
+    return NextResponse.json(
+      {
+        error:   "MAINTENANCE",
+        message: "CRAudioVizAI is currently undergoing scheduled maintenance. Please try again shortly.",
+        code:    "MAINTENANCE_MODE",
+      },
+      {
+        status:  503,
+        headers: {
+          "X-System-Status": "MAINTENANCE",
+          "Retry-After":     "900",
+          "Cache-Control":   "no-store",
+        },
+      }
+    );
+  }
+
+  // 5. Kill switch check for AI-heavy protected routes
   const isKillRoute = KILL_PROTECTED.some((r) => pathname.startsWith(r));
   if (isKillRoute && await isKillSwitchActive()) {
     return NextResponse.json(
@@ -130,28 +181,34 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // 4. Rate limiting
+  // 6. Degraded mode — inject header for downstream handlers
+  const response = NextResponse.next();
+  if (_degradedMode) {
+    response.headers.set("X-Javari-Degraded", "1");
+  }
+  if (_launchMode) {
+    response.headers.set("X-Launch-Mode", "1");
+  }
+
+  // 7. Rate limiting
   const ip = getIP(req);
 
-  // Auth: 10/min
   if (AUTH_ROUTES.some((r) => pathname.startsWith(r))) {
     const r = rlCheck(`auth:${ip}`, 10, 60_000);
     if (!r.ok) return rl429(r, 10);
   }
 
-  // Billing: 20/min
   if (BILLING_ROUTES.some((r) => pathname.startsWith(r))) {
     const r = rlCheck(`bil:${ip}`, 20, 60_000);
     if (!r.ok) return rl429(r, 20);
   }
 
-  // AI: 30/min per IP
   if (AI_ROUTES.some((r) => pathname.startsWith(r))) {
     const r = rlCheck(`ai:${ip}`, 30, 60_000);
     if (!r.ok) return rl429(r, 30);
   }
 
-  return NextResponse.next();
+  return response;
 }
 
 export const config = {
