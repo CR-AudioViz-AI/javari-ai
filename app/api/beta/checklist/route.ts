@@ -74,10 +74,11 @@ async function checkModuleFactory(): Promise<CheckDetail> {
 
 async function checkMultiAgent(): Promise<CheckDetail> {
   try {
-    const { routeRequest } = await import("@/lib/javari/multi-ai/router");
-    const d = routeRequest({ userPrompt: "beta check", contextTokens: 5 });
-    return { name: "multi_agent", status: d.provider ? "pass" : "warn",
-             message: d.provider ? `Router active, primary: ${d.provider}` : "No provider resolved" };
+    const { analyzeRoutingContext } = await import("@/lib/javari/multi-ai/routing-context");
+    const ctx = analyzeRoutingContext("beta check probe", [], false);
+    return { name: "multi_agent", status: ctx ? "pass" : "warn",
+             message: ctx ? "Routing context engine operational" : "Context returned null",
+             value: ctx ? "operational" : "degraded" };
   } catch (e) {
     return { name: "multi_agent", status: "fail",
              message: e instanceof Error ? e.message : "Router unavailable" };
