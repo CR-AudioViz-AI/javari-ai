@@ -1,6 +1,7 @@
 // app/api/canonical/ingest/route.ts
 // CR AudioViz AI — Canonical Ingest API Endpoint
 // 2026-02-22 — Canonical Document Ingestion System
+// Redeployed: 2026-02-21T23:38:35Z — pick up CANONICAL_ADMIN_SECRET env var
 //
 // POST /api/canonical/ingest
 // Protected by CANONICAL_ADMIN_SECRET header.
