@@ -1,6 +1,6 @@
 // lib/javari/engine/unified.ts
-// Javari Unified AI Engine — v8
-// 2026-02-20 — STEP 5: entitlement + credit billing integration
+// Javari Unified AI Engine — v9
+// 2026-02-20 — STEP 6: productization hooks (UI entitlement feedback, cost preview)
 //
 // Changelog from v5 (STEP 1):
 //   - New mode: "multi_ai_team" — orchestrates multiple specialist agents
@@ -234,6 +234,8 @@ export async function unifiedJavariEngine({
   _mode?: "single" | "multi_ai_team" | "module_factory" | "auto";
   /** v8 STEP 5: caller passes userId for entitlement/billing checks */
   _userId?: string;
+  /** v9 STEP 6: if true, return cost estimate only — do not execute */
+  _previewCost?: boolean;
 }) {
   const start = Date.now();
 
@@ -284,6 +286,21 @@ export async function unifiedJavariEngine({
     }
   }
 
+
+  // ── STEP 6: Cost preview mode (estimate only, no execution) ─────────────
+  if (_previewCost && _billingUserId) {
+    const _prevCost = estimateCallCost(_mode === "multi_ai_team" ? "multi_ai_team" :
+      _mode === "module_factory" ? "module_factory" : "chat");
+    return normalizeEnvelope(
+      `Estimated cost: ${_prevCost} credits`,
+      { success: true, provider: "billing", model: "cost-preview", latency: 0,
+        // @ts-expect-error extended metadata
+        costPreview: true,
+        estimatedCredits: _prevCost,
+        entitlementStatus: "allowed",
+      }
+    );
+  }
 
   // ── STEP 4: module_factory mode ────────────────────────────────────────────
   if (_mode === "module_factory") {
@@ -576,6 +593,13 @@ export async function unifiedJavariEngine({
       console.warn("[Javari] Post-call billing failed (non-fatal):", billErr instanceof Error ? billErr.message : billErr);
     }
   }
+
+  // ── STEP 6: Annotate response with entitlement + cost metadata for UI ──
+  const _postCallMeta = _billingUserId ? {
+    entitlementStatus: "allowed" as const,
+    creditsUsed:       _creditsCharged,
+    userId:            _billingUserId,
+  } : {};
 
   return normalizeEnvelope(finalOutput, {
     success:  true,
