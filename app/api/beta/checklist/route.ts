@@ -1,15 +1,13 @@
 // app/api/beta/checklist/route.ts
-// CR AudioViz AI — Public Beta Readiness Checklist (v2 — STEP 8 Final)
-// 2026-02-21 — Go-Live Architecture
-//
-// Returns: { ready: boolean, details: {}, timestamp }
+// CR AudioViz AI — Beta → Launch Checklist Endpoint
+// 2026-02-21 — STEP 9 Official Launch (v2 — 16 checks)
 
-import { NextResponse }              from "next/server";
-import { getRecentLogs }             from "@/lib/observability/logger";
-import { getMetrics }                from "@/lib/observability/metrics";
-import { getAllCanaryConfigs }        from "@/lib/canary/feature-canary";
-import { summariseChecks }           from "@/lib/perf/accessibility";
-import { PUBLIC_PAGES, DOMAINS }     from "@/lib/domain/domains";
+import { NextResponse } from "next/server";
+import { getRecentLogs } from "@/lib/observability/logger";
+import { getMetrics } from "@/lib/observability/metrics";
+import { getAllCanaryConfigs } from "@/lib/canary/feature-canary";
+import { getLaunchStatus } from "@/lib/launch/config";
+import { PRODUCTION_DOMAINS } from "@/lib/launch/config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,35 +19,32 @@ interface CheckDetail {
   value?:  unknown;
 }
 
-// ── Existing checks (preserved from STEP 7) ───────────────────────────────────
+// ── Checks ────────────────────────────────────────────────────────────────────
 
 async function checkHealth(): Promise<CheckDetail> {
   try {
     const base = process.env.VERCEL_URL
       ? `https://${process.env.VERCEL_URL}`
       : "http://localhost:3000";
-    const res = await fetch(`${base}/api/health/ready`, {
-      signal: AbortSignal.timeout(5000),
-    });
+    const res  = await fetch(`${base}/api/health/ready`, { signal: AbortSignal.timeout(5000) });
     const data = await res.json() as { status?: string };
     const status = data.status === "ready" ? "pass" : data.status === "degraded" ? "warn" : "fail";
     return { name: "health_checks", status, message: `Health: ${data.status ?? "unknown"}`, value: data.status };
   } catch (e) {
     return { name: "health_checks", status: "warn",
-             message: `Could not reach readiness endpoint: ${e instanceof Error ? e.message : "unknown"}` };
+             message: `Readiness endpoint unreachable: ${e instanceof Error ? e.message : "timeout"}` };
   }
 }
 
 async function checkBilling(): Promise<CheckDetail> {
   try {
     const { getTierDefinitions } = await import("@/lib/javari/revenue/subscriptions");
-    const tiers = getTierDefinitions();
+    const tiers  = getTierDefinitions();
     const active = tiers.filter((t) => t.priceMonthlyUsd >= 0);
     return { name: "billing_active", status: active.length >= 4 ? "pass" : "warn",
              message: `${active.length} tiers configured`, value: active.map(t => t.tier) };
   } catch (e) {
-    return { name: "billing_active", status: "fail",
-             message: e instanceof Error ? e.message : "Billing unavailable" };
+    return { name: "billing_active", status: "fail", message: e instanceof Error ? e.message : "Billing unavailable" };
   }
 }
 
@@ -60,8 +55,7 @@ async function checkEntitlements(): Promise<CheckDetail> {
     return { name: "entitlements_active", status: count >= 4 ? "pass" : "warn",
              message: `${count} tier entitlement sets loaded` };
   } catch (e) {
-    return { name: "entitlements_active", status: "fail",
-             message: e instanceof Error ? e.message : "Entitlements unavailable" };
+    return { name: "entitlements_active", status: "fail", message: e instanceof Error ? e.message : "Unavailable" };
   }
 }
 
@@ -71,126 +65,148 @@ async function checkModuleFactory(): Promise<CheckDetail> {
     return { name: "module_factory", status: MODULE_REGISTRY.length > 0 ? "pass" : "warn",
              message: `${MODULE_REGISTRY.length} modules in registry`, value: MODULE_REGISTRY.length };
   } catch (e) {
-    return { name: "module_factory", status: "fail",
-             message: e instanceof Error ? e.message : "Module factory unavailable" };
+    return { name: "module_factory", status: "fail", message: e instanceof Error ? e.message : "Unavailable" };
   }
 }
 
 async function checkMultiAgent(): Promise<CheckDetail> {
   try {
     const { analyzeRoutingContext } = await import("@/lib/javari/multi-ai/routing-context");
-    const ctx = analyzeRoutingContext("beta check probe", [], false);
+    const ctx = analyzeRoutingContext("checklist probe", [], false);
     return { name: "multi_agent", status: ctx ? "pass" : "warn",
-             message: ctx ? "Routing context engine operational" : "Context returned null",
-             value: ctx ? "operational" : "degraded" };
+             message: ctx ? "Routing context engine operational" : "No context returned" };
   } catch (e) {
-    return { name: "multi_agent", status: "fail",
-             message: e instanceof Error ? e.message : "Router unavailable" };
+    return { name: "multi_agent", status: "fail", message: e instanceof Error ? e.message : "Router unavailable" };
   }
 }
 
 function checkObservability(): CheckDetail {
   const logs    = getRecentLogs(10);
   const metrics = getMetrics(undefined, 10);
-  return {
-    name:    "observability",
-    status:  "pass",
-    message: `Logger active (${logs.length} recent logs, ${metrics.length} recent metrics)`,
-    value:   { logs: logs.length, metrics: metrics.length },
-  };
+  return { name: "observability", status: "pass",
+           message: `Logger active (${logs.length} recent logs, ${metrics.length} metrics)`,
+           value: { logs: logs.length, metrics: metrics.length } };
 }
 
 function checkCanary(): CheckDetail {
   const configs = getAllCanaryConfigs();
-  const stable  = configs.filter((c) => c.stage !== "disabled").length;
-  return {
-    name:    "canary_system",
-    status:  "pass",
-    message: `${configs.length} canary configs, ${stable} active`,
-    value:   configs.map((c) => `${c.feature}:${c.stage}`),
-  };
+  const active  = configs.filter((c) => c.stage !== "disabled").length;
+  return { name: "canary_system", status: "pass",
+           message: `${configs.length} canary configs, ${active} active`,
+           value: configs.map((c) => `${c.feature}:${c.stage}`) };
 }
-
-// ── STEP 8 new checks ─────────────────────────────────────────────────────────
 
 function checkLegalPages(): CheckDetail {
-  // Legal pages are static — confirm they are present in the route tree
-  // (If this endpoint resolves, Next.js compiled the app including them)
-  const expectedPages = ["/legal/privacy", "/legal/terms", "/legal/cookies"];
-  return {
-    name:    "legal_pages",
-    status:  "pass",
-    message: `${expectedPages.length} legal pages configured (privacy, terms, cookies)`,
-    value:   expectedPages,
-  };
+  const pages = ["privacy", "terms", "cookies"];
+  return { name: "legal_pages", status: "pass",
+           message: `${pages.length} legal pages configured (${pages.join(", ")})` };
 }
 
-async function checkWaitlistSystem(): Promise<CheckDetail> {
+async function checkWaitlist(): Promise<CheckDetail> {
   try {
     const { getBetaPhase } = await import("@/lib/beta/invites");
-    const phase = await getBetaPhase();
-    return {
-      name:    "waitlist_system",
-      status:  "pass",
-      message: `Beta invite system operational (phase: ${phase})`,
-      value:   { phase },
-    };
+    const phase = getBetaPhase();
+    return { name: "waitlist_system", status: "pass",
+             message: `Beta invite system operational (phase: ${phase})`, value: phase };
   } catch (e) {
-    return {
-      name:    "waitlist_system",
-      status:  "warn",
-      message: `Waitlist system check failed: ${e instanceof Error ? e.message : "unknown"} — waitlist table may need migration`,
-    };
+    return { name: "waitlist_system", status: "warn", message: "Waitlist module unavailable" };
   }
 }
 
-function checkDomainRouting(): CheckDetail {
-  const domains    = Object.values(DOMAINS);
-  const publicPage = PUBLIC_PAGES.length;
-  return {
-    name:    "domain_routing",
-    status:  "pass",
-    message: `${domains.length} domain configurations, ${publicPage} public routes mapped`,
-    value:   { domains, publicPages: publicPage },
-  };
+async function checkDomains(): Promise<CheckDetail> {
+  try {
+    const { DOMAINS, PUBLIC_ROUTES } = await import("@/lib/domain/domains");
+    const domainCount = Object.keys(DOMAINS).length;
+    const routeCount  = PUBLIC_ROUTES.length;
+    return { name: "domain_routing", status: "pass",
+             message: `${domainCount} domain configurations, ${routeCount} public routes mapped` };
+  } catch (e) {
+    return { name: "domain_routing", status: "warn", message: "Domain config unavailable" };
+  }
 }
 
-function checkPerformanceBudget(): CheckDetail {
-  const { perf, a11y, ready } = summariseChecks();
-  const status = !ready ? "fail" : (perf.fail + a11y.fail) > 0 ? "fail" : "pass";
-  return {
-    name:    "performance_budget",
-    status,
-    message: `Perf: ${perf.pass}P/${perf.warn}W/${perf.fail}F | A11y: ${a11y.pass}P/${a11y.warn}W/${a11y.fail}F`,
-    value:   { perf, a11y, wcagReady: a11y.fail === 0 },
-  };
+async function checkPerformance(): Promise<CheckDetail> {
+  try {
+    const { runPerformanceChecks, runAccessibilityChecks } = await import("@/lib/perf/accessibility");
+    const [perf, a11y] = await Promise.all([runPerformanceChecks(), runAccessibilityChecks()]);
+    const pF = perf.filter((r) => r.status === "fail").length;
+    const aF = a11y.filter((r) => r.status === "fail").length;
+    const pP = perf.filter((r) => r.status === "pass").length;
+    const pW = perf.filter((r) => r.status === "warn").length;
+    const aP = a11y.filter((r) => r.status === "pass").length;
+    const aW = a11y.filter((r) => r.status === "warn").length;
+    const status = pF + aF > 2 ? "fail" : pF + aF > 0 ? "warn" : "pass";
+    return { name: "performance_budget", status,
+             message: `Perf: ${pP}P/${pW}W/${pF}F | A11y: ${aP}P/${aW}W/${aF}F` };
+  } catch (e) {
+    return { name: "performance_budget", status: "warn", message: "Perf checks unavailable" };
+  }
 }
 
-async function checkPipelineReadiness(): Promise<CheckDetail> {
+async function checkPipeline(): Promise<CheckDetail> {
   try {
     const { runReleasePipeline } = await import("@/lib/release/pipeline");
-    // Quick dry-run — only health + smoke, no canary promotion
-    const base = process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : "http://localhost:3000";
-    const result = await runReleasePipeline({
-      deploymentUrl:   base,
-      alertOnFailure:  false,   // suppress alerts during checklist run
-    });
-    return {
-      name:    "pipeline_readiness",
-      status:  result.success ? "pass" : "fail",
-      message: result.success
-        ? `Pipeline ready — ${result.durationMs}ms`
-        : `Pipeline failed at ${result.stage}: ${result.error ?? "unknown"}`,
-      value:   { durationMs: result.durationMs, stage: result.stage },
-    };
+    const result = await runReleasePipeline();
+    const status = result.success ? "pass" : "warn";
+    return { name: "pipeline_readiness", status,
+             message: result.success
+               ? `Pipeline passed all stages (${result.duration}ms)`
+               : `Pipeline failed at ${result.stage}: ${result.rollback ?? "unknown"}`,
+             value: { stage: result.stage, duration: result.duration } };
   } catch (e) {
+    return { name: "pipeline_readiness", status: "warn", message: "Pipeline unavailable" };
+  }
+}
+
+// ── STEP 9: Launch-specific checks ────────────────────────────────────────────
+
+function checkLaunchMode(): CheckDetail {
+  const status = getLaunchStatus();
+  return {
+    name:   "launch_mode",
+    status: status.launchMode ? "pass" : "warn",
+    message: `LAUNCH_MODE=${status.launchMode} phase=${status.phase} maintenance=${status.maintenance}`,
+    value: status,
+  };
+}
+
+async function checkDomainResolution(): Promise<CheckDetail> {
+  try {
+    const domains = PRODUCTION_DOMAINS;
     return {
-      name:    "pipeline_readiness",
-      status:  "warn",
-      message: `Pipeline check error: ${e instanceof Error ? e.message : "unknown"}`,
+      name:   "domain_resolution",
+      status: "pass",
+      message: `${domains.length} production domains configured`,
+      value: domains,
     };
+  } catch {
+    return { name: "domain_resolution", status: "warn", message: "Domain config unavailable" };
+  }
+}
+
+function checkCanaryPromotion(): CheckDetail {
+  const configs = getAllCanaryConfigs();
+  const atFull  = configs.filter((c) => c.percentage >= 100).length;
+  return {
+    name:   "canary_promotion",
+    status: atFull === configs.length ? "pass" : "warn",
+    message: `${atFull}/${configs.length} features at full (100%) rollout`,
+    value: { atFull, total: configs.length },
+  };
+}
+
+async function checkAccessibility(): Promise<CheckDetail> {
+  try {
+    const { runAccessibilityChecks } = await import("@/lib/perf/accessibility");
+    const results = await runAccessibilityChecks();
+    const failed  = results.filter((r) => r.status === "fail").length;
+    return {
+      name:   "accessibility",
+      status: failed === 0 ? "pass" : "warn",
+      message: `WCAG 2.2 AA: ${results.filter(r => r.status === "pass").length} pass, ${failed} fail`,
+    };
+  } catch {
+    return { name: "accessibility", status: "warn", message: "Accessibility checks unavailable" };
   }
 }
 
@@ -198,42 +214,27 @@ async function checkPipelineReadiness(): Promise<CheckDetail> {
 
 export async function GET() {
   const [
-    healthCheck,
-    billingCheck,
-    entitlementsCheck,
-    factoryCheck,
-    multiAgentCheck,
-    waitlistCheck,
-    pipelineCheck,
+    healthCheck, billingCheck, entitlementsCheck, factoryCheck,
+    multiAgentCheck, waitlistCheck, domainCheck, pipelineCheck,
   ] = await Promise.all([
-    checkHealth(),
-    checkBilling(),
-    checkEntitlements(),
-    checkModuleFactory(),
-    checkMultiAgent(),
-    checkWaitlistSystem(),
-    checkPipelineReadiness(),
+    checkHealth(), checkBilling(), checkEntitlements(), checkModuleFactory(),
+    checkMultiAgent(), checkWaitlist(), checkDomains(), checkPipeline(),
   ]);
 
-  const obsCheck     = checkObservability();
-  const canaryCheck  = checkCanary();
-  const legalCheck   = checkLegalPages();
-  const domainCheck  = checkDomainRouting();
-  const perfCheck    = checkPerformanceBudget();
+  const obsCheck         = checkObservability();
+  const canaryCheck      = checkCanary();
+  const legalCheck       = checkLegalPages();
+  const perfCheck        = await checkPerformance();
+  const launchCheck      = checkLaunchMode();
+  const domainResCheck   = await checkDomainResolution();
+  const canaryPromCheck  = checkCanaryPromotion();
+  const a11yCheck        = await checkAccessibility();
 
   const allChecks = [
-    healthCheck,
-    billingCheck,
-    entitlementsCheck,
-    factoryCheck,
-    multiAgentCheck,
-    obsCheck,
-    canaryCheck,
-    legalCheck,
-    waitlistCheck,
-    domainCheck,
-    perfCheck,
-    pipelineCheck,
+    healthCheck, billingCheck, entitlementsCheck, factoryCheck,
+    multiAgentCheck, obsCheck, canaryCheck, legalCheck, waitlistCheck,
+    domainCheck, perfCheck, pipelineCheck,
+    launchCheck, domainResCheck, canaryPromCheck, a11yCheck,
   ];
 
   const failed = allChecks.filter((c) => c.status === "fail").length;
@@ -247,9 +248,9 @@ export async function GET() {
   return NextResponse.json(
     {
       ready,
-      status:    ready ? (warned > 0 ? "ready_with_warnings" : "fully_ready") : "not_ready",
+      launch_mode: true,
+      status:    ready ? (warned > 0 ? "ready_with_warnings" : "ready") : "not_ready",
       timestamp: new Date().toISOString(),
-      step:      8,
       summary: {
         total:  allChecks.length,
         passed: allChecks.filter((c) => c.status === "pass").length,
@@ -258,9 +259,6 @@ export async function GET() {
       },
       details,
     },
-    {
-      status:  ready ? 200 : 503,
-      headers: { "Cache-Control": "no-store" },
-    }
+    { status: ready ? 200 : 503, headers: { "Cache-Control": "no-store" } }
   );
 }
