@@ -1,6 +1,6 @@
 // lib/javari/engine/unified.ts
-// Javari Unified AI Engine — v6
-// 2026-02-20 — STEP 3: multi_ai_team commander mode
+// Javari Unified AI Engine — v7
+// 2026-02-20 — STEP 4: module_factory mode added
 //
 // Changelog from v5 (STEP 1):
 //   - New mode: "multi_ai_team" — orchestrates multiple specialist agents
@@ -25,6 +25,7 @@ import {
 import { determineAgentForTask }            from "@/lib/javari/multi-ai/roles";
 import type { Message }                     from "@/lib/types";
 import type { RoutingContext as LegacyRoutingContext } from "@/lib/javari/multi-ai/router";
+import { runModuleFactory } from "@/lib/javari/factory/module-factory";
 
 // ── Constants (unchanged from v5) ─────────────────────────────────────────────
 
@@ -226,7 +227,7 @@ export async function unifiedJavariEngine({
   _systemCommandMode?: boolean;
   _longForm?: boolean;
   /** v6: explicit mode override. "multi_ai_team" activates team orchestration. */
-  _mode?: "single" | "multi_ai_team" | "auto";
+  _mode?: "single" | "multi_ai_team" | "module_factory" | "auto";
 }) {
   const start = Date.now();
 
@@ -242,6 +243,39 @@ export async function unifiedJavariEngine({
 
   // ── STEP 1: Routing context analysis ──────────────────────────────────────
   const routingCtx = analyzeRoutingContext(userPrompt, "single");
+
+  // ── STEP 4: module_factory mode ────────────────────────────────────────────
+  if (_mode === "module_factory") {
+    // Parse "module: <name> | <description>" or fall back to userPrompt as description
+    const parts     = userPrompt.split("|");
+    const moduleName = parts[0]?.replace(/^module:/i, "").trim() || "New Module";
+    const moduleDesc = parts[1]?.trim() || userPrompt;
+    const factoryEvents: unknown[] = [];
+    const factoryEmit = (e: unknown) => factoryEvents.push(e);
+    try {
+      const fr = await runModuleFactory(moduleName, moduleDesc, factoryEmit as Parameters<typeof runModuleFactory>[2]);
+      if (fr.bundle) {
+        const summary = [
+          `Module **${fr.bundle.moduleName}** generated successfully.`,
+          `${fr.bundle.successFiles} files ready to commit.`,
+          fr.bundle.warnings.length ? `Warnings: ${fr.bundle.warnings.join("; ")}` : "",
+        ].filter(Boolean).join(" ");
+        return normalizeEnvelope(summary, {
+          success: true, provider: "factory", model: "multi_agent",
+          latency: Date.now() - start,
+          // @ts-expect-error extended metadata
+          moduleFactory: true, bundle: {
+            moduleId: fr.bundle.moduleId,
+            files: fr.bundle.files.map((f) => ({ path: f.path, category: f.category, lineCount: f.lineCount })),
+            readyToCommit: fr.bundle.readyToCommit,
+          },
+        });
+      }
+    } catch (factoryErr) {
+      console.error("[Javari] module_factory mode failed:", factoryErr instanceof Error ? factoryErr.message : factoryErr);
+    }
+    // Fallback to single-agent if factory fails
+  }
 
   // ── STEP 3: Determine if multi_ai_team mode should activate ───────────────
   const syntheticTask  = buildSyntheticTaskNode(userPrompt, routingCtx);
