@@ -9,7 +9,7 @@
 //
 // Protected by AUTONOMY_CORE_ADMIN_SECRET header.
 // Called by Vercel Cron job OR manual admin trigger.
-// Cache-bust: 2026-02-21 STEP-11-DEBUG — force edge route re-registration.
+// Cache-bust: 2026-02-21 STEP-11-SECRET-REFRESH — new admin secret deployed.
 
 import { NextRequest, NextResponse } from "next/server";
 import { runAutonomyCycle }          from "@/lib/autonomy-core/scheduler/cycle";
