@@ -1,114 +1,162 @@
 /**
- * HENDERSON OVERRIDE PROTOCOL + KILL COMMAND ENFORCEMENT MIDDLEWARE
- * 
- * @version 2.1.0 - Fixed Supabase client for Edge runtime
- * @date December 31, 2025 - 7:58 PM EST
+ * Javari AI — Next.js Middleware
+ * STEP 7: Rate limiting + Henderson Override Protocol + Kill Switch
+ *
+ * @version 3.0.0
+ * @date 2026-02-20 — STEP 7 Production Hardening
  */
 
-import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
-// Edge-compatible Supabase client (no cookies dependency)
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kteobfyferrukqeolofj.supabase.co';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt0ZW9iZnlmZXJydWtxZW9sb2ZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIxOTcyNjYsImV4cCI6MjA3NzU1NzI2Nn0.uy-jlF_z6qVb8qogsNyGDLHqT4HhmdRhLrW7zPv3qhY';
+// ── Supabase (Edge-compatible, no cookies) ────────────────────────────────────
+const supabaseUrl     = process.env.NEXT_PUBLIC_SUPABASE_URL    ?? "https://kteobfyferrukqeolofj.supabase.co";
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 
-const ROY_EMAIL = 'royhenderson@craudiovizai.com';
-const ROY_USER_ID = process.env.ROY_USER_ID || 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
+// ── Internal bypass key ───────────────────────────────────────────────────────
+const INTERNAL_KEY    = process.env.INTERNAL_SERVICE_KEY ?? "javari_internal_bypass_key";
 
-// Routes that should be blocked when kill switch is active
-const PROTECTED_ROUTES = [
-  '/api/javari/chat',
-  '/api/javari/auto-heal',
-  '/api/javari/build',
-  '/api/javari/projects',
-  '/api/javari/telemetry',
-  '/api/developer/commit',
-  '/api/developer/deploy',
-  '/api/developer/generate',
-  '/api/auto-fix',
-  '/api/suggestions',
-  '/api/review'
-];
+// ── Rate limit store (in-memory, resets on cold start) ───────────────────────
+interface RLEntry { count: number; resetAt: number; }
+const _rl = new Map<string, RLEntry>();
 
-// Routes that should ALWAYS work
-const ADMIN_ROUTES = [
-  '/api/admin/kill-switch',
-  '/api/admin/kill-command',
-  '/api/admin/security'
-];
-
-/**
- * Check Henderson Override Protocol status
- */
-async function isHendersonProtocolActive(): Promise<boolean> {
-  try {
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
-    const { data } = await supabase
-      .from('javari_settings')
-      .select('kill_switch_active')
-      .single();
-    
-    return data?.kill_switch_active === true;
-  } catch (error) {
-    console.error('Kill switch check failed:', error);
-    return false; // Fail open
-  }
+function rlCheck(key: string, max: number, windowMs: number): { ok: boolean; remaining: number; resetAt: number } {
+  const now = Date.now();
+  let e = _rl.get(key);
+  if (!e || now >= e.resetAt) { e = { count: 0, resetAt: now + windowMs }; _rl.set(key, e); }
+  e.count++;
+  return { ok: e.count <= max, remaining: Math.max(0, max - e.count), resetAt: e.resetAt };
 }
 
-/**
- * Middleware function
- */
-export async function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+// ── Route config ──────────────────────────────────────────────────────────────
 
-  // Always allow admin routes
-  if (ADMIN_ROUTES.some(route => pathname.startsWith(route))) {
-    return NextResponse.next();
-  }
+const ADMIN_ROUTES = [
+  "/api/admin/kill-switch",
+  "/api/admin/kill-command",
+  "/api/admin/security",
+];
 
-  // Check if route should be protected
-  const isProtectedRoute = PROTECTED_ROUTES.some(route => pathname.startsWith(route));
-  
-  if (!isProtectedRoute) {
-    return NextResponse.next();
-  }
+const KILL_PROTECTED = [
+  "/api/javari/chat",
+  "/api/javari/auto-heal",
+  "/api/javari/build",
+  "/api/javari/projects",
+  "/api/developer/commit",
+  "/api/developer/deploy",
+  "/api/developer/generate",
+  "/api/auto-fix",
+  "/api/suggestions",
+  "/api/review",
+];
 
-  // Check kill switch
-  const isActive = await isHendersonProtocolActive();
-  
-  if (!isActive) {
-    return NextResponse.next();
-  }
+// AI-heavy routes — 30 req/min
+const AI_ROUTES = [
+  "/api/chat",
+  "/api/autonomy",
+  "/api/factory",
+  "/api/javari",
+];
 
-  // Kill switch IS active - block non-Roy access
-  // Note: In middleware we can't easily verify Roy without cookies
-  // So for protected routes during lockdown, return 503
+// Auth routes — 10 req/min
+const AUTH_ROUTES = ["/api/auth", "/auth"];
+
+// Billing routes — 20 req/min
+const BILLING_ROUTES = ["/api/billing"];
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function getIP(req: NextRequest): string {
+  return (
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    req.headers.get("x-real-ip") ??
+    "unknown"
+  );
+}
+
+function isInternal(req: NextRequest): boolean {
+  return req.headers.get("x-internal-service-key") === INTERNAL_KEY;
+}
+
+function rl429(result: { remaining: number; resetAt: number }, max: number): NextResponse {
+  const retryAfter = Math.ceil((result.resetAt - Date.now()) / 1000);
   return NextResponse.json(
+    { success: false, error: "Too many requests", code: "RATE_LIMITED", retryAfter },
     {
-      error: 'SYSTEM_LOCKED',
-      message: 'Platform is currently in protected mode.',
-      code: 'HENDERSON_OVERRIDE_PROTOCOL',
-      timestamp: new Date().toISOString()
-    },
-    { 
-      status: 503,
+      status: 429,
       headers: {
-        'X-System-Status': 'LOCKED',
-        'Retry-After': '3600'
-      }
+        "Retry-After":           String(retryAfter),
+        "X-RateLimit-Remaining": String(result.remaining),
+        "X-RateLimit-Limit":     String(max),
+        "X-RateLimit-Reset":     String(Math.floor(result.resetAt / 1000)),
+      },
     }
   );
 }
 
+// ── Kill switch check ─────────────────────────────────────────────────────────
+
+async function isKillSwitchActive(): Promise<boolean> {
+  try {
+    const sb = createClient(supabaseUrl, supabaseAnonKey);
+    const { data } = await sb.from("javari_settings").select("kill_switch_active").single();
+    return data?.kill_switch_active === true;
+  } catch {
+    return false; // fail open
+  }
+}
+
+// ── Middleware ────────────────────────────────────────────────────────────────
+
+export async function middleware(req: NextRequest): Promise<NextResponse> {
+  const { pathname } = req.nextUrl;
+
+  // 1. Always allow admin routes
+  if (ADMIN_ROUTES.some((r) => pathname.startsWith(r))) {
+    return NextResponse.next();
+  }
+
+  // 2. Internal service bypass (no rate limiting, no kill switch)
+  if (isInternal(req)) {
+    return NextResponse.next();
+  }
+
+  // 3. Kill switch check for protected routes
+  const isKillRoute = KILL_PROTECTED.some((r) => pathname.startsWith(r));
+  if (isKillRoute && await isKillSwitchActive()) {
+    return NextResponse.json(
+      { error: "SYSTEM_LOCKED", message: "Platform is currently in protected mode.", code: "HENDERSON_OVERRIDE_PROTOCOL" },
+      { status: 503, headers: { "X-System-Status": "LOCKED", "Retry-After": "3600" } }
+    );
+  }
+
+  // 4. Rate limiting
+  const ip = getIP(req);
+
+  // Auth: 10/min
+  if (AUTH_ROUTES.some((r) => pathname.startsWith(r))) {
+    const r = rlCheck(`auth:${ip}`, 10, 60_000);
+    if (!r.ok) return rl429(r, 10);
+  }
+
+  // Billing: 20/min
+  if (BILLING_ROUTES.some((r) => pathname.startsWith(r))) {
+    const r = rlCheck(`bil:${ip}`, 20, 60_000);
+    if (!r.ok) return rl429(r, 20);
+  }
+
+  // AI: 30/min per IP
+  if (AI_ROUTES.some((r) => pathname.startsWith(r))) {
+    const r = rlCheck(`ai:${ip}`, 30, 60_000);
+    if (!r.ok) return rl429(r, 30);
+  }
+
+  return NextResponse.next();
+}
+
 export const config = {
   matcher: [
-    // Only match protected API routes, not all routes
-    '/api/javari/:path*',
-    '/api/developer/:path*',
-    '/api/auto-fix/:path*',
-    '/api/suggestions/:path*',
-    '/api/review/:path*',
-    '/api/admin/:path*'
+    "/api/:path*",
+    "/auth/:path*",
   ],
 };
