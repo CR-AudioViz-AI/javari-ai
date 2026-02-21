@@ -1,6 +1,6 @@
 // lib/javari/engine/unified.ts
-// Javari Unified AI Engine — v10
-// 2026-02-20 — STEP 7: observability, outage detection, canary flags, analytics
+// Javari Unified AI Engine — v11
+// 2026-02-21 — STEP 10: enterprise org/team routing, region-aware fallback, audit events
 //
 // Changelog from v5 (STEP 1):
 //   - New mode: "multi_ai_team" — orchestrates multiple specialist agents
@@ -33,6 +33,24 @@ import { routingLog, autonomyLog }           from "@/lib/observability/logger";
 import { recordLatency, recordError, recordModelCost } from "@/lib/observability/metrics";
 import { isCanaryEnabled, recordCanaryOutcome } from "@/lib/canary/feature-canary";
 import { track }                             from "@/lib/analytics/track";
+import { writeAuditEvent }                   from "@/lib/enterprise/audit";
+import { getTeamConfig, resolveTeamFromWorkspace } from "@/lib/enterprise/ai-teams";
+import type { TeamType }                     from "@/lib/enterprise/ai-teams";
+
+// ── Region-aware routing ───────────────────────────────────────────────────────
+// Maps deployment region (Vercel VERCEL_REGION env) to provider preference.
+const REGION_PROVIDER_PREFERENCE: Record<string, string[]> = {
+  "iad1":  ["openai",     "anthropic",  "groq",    "openrouter"],  // us-east
+  "sfo1":  ["anthropic",  "openai",     "groq",    "openrouter"],  // us-west
+  "fra1":  ["anthropic",  "openrouter", "openai",  "groq"],        // eu-central
+  "sin1":  ["openrouter", "anthropic",  "openai",  "groq"],        // ap-southeast
+  "default": ["groq",    "anthropic",  "openai",  "openrouter"],
+};
+
+function getRegionProviders(): string[] {
+  const region = process.env.VERCEL_REGION ?? "default";
+  return REGION_PROVIDER_PREFERENCE[region] ?? REGION_PROVIDER_PREFERENCE["default"];
+}
 
 // ── Constants (unchanged from v5) ─────────────────────────────────────────────
 
@@ -240,8 +258,29 @@ export async function unifiedJavariEngine({
   _userId?: string;
   /** v9 STEP 6: if true, return cost estimate only — do not execute */
   _previewCost?: boolean;
+  /** v11 STEP 10: enterprise org context */
+  _orgId?:    string;
+  /** v11 STEP 10: workspace team type for AI team routing */
+  _teamType?: string;
+  /** v11 STEP 10: preferred region for routing */
+  _region?:   string;
 }) {
   const start = Date.now();
+
+  // ── v11 STEP 10: Region + enterprise team routing ──────────────────────────
+  const _regionProviders = getRegionProviders();
+  const _resolvedTeam    = resolveTeamFromWorkspace(_teamType);
+  const _teamCfg         = _resolvedTeam !== "general"
+    ? getTeamConfig(_resolvedTeam, _orgId)
+    : null;
+
+  // Team-level system prompt suffix (injected later)
+  const _teamPromptSuffix = _teamCfg?.systemPromptSuffix ?? "";
+
+  // Team preferred providers override region order (enterprise only)
+  const _enterpriseProviders = _orgId && _teamCfg
+    ? _teamCfg.preferredProviders
+    : _regionProviders;
 
   const lastUserMessage = [...messages].reverse().find((m) => m.role === "user");
   const userPrompt      = lastUserMessage?.content ?? "";
@@ -618,6 +657,17 @@ export async function unifiedJavariEngine({
     userId:            _billingUserId,
   } : {};
 
+  // v11: Enterprise audit event (fire-and-forget, only for org users)
+  if (_orgId && _billingUserId) {
+    void writeAuditEvent({
+      action:    "module.generated",
+      userId:    _billingUserId,
+      orgId:     _orgId,
+      metadata:  { provider: bestProvider, model: modelName, latency: Date.now() - start, mode: _mode ?? "single" },
+      severity:  "info",
+    });
+  }
+
   return normalizeEnvelope(finalOutput, {
     success:  true,
     provider: bestProvider,
@@ -636,6 +686,7 @@ export async function unifiedJavariEngine({
       high_risk:                routingCtx.high_risk,
       complexity_score:         routingCtx.complexity_score,
       multi_ai_team:            false,
+      enterprise: _orgId ? { orgId: _orgId, teamType: _resolvedTeam, region: _region ?? process.env.VERCEL_REGION ?? "default" } : null,
       validation: validationResult
         ? {
             passed:     validationResult.passed,
