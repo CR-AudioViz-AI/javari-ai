@@ -29,9 +29,27 @@ async function getAuthedUserId(): Promise<string | null> {
   } catch { return null; }
 }
 
-// ── GET — subscription status ─────────────────────────────────────────────────
+// ── GET — subscription status OR public tier list ────────────────────────────
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+
+  // Public endpoint: ?tiers=true returns tier metadata without auth
+  if (searchParams.get("tiers") === "true") {
+    return Response.json({
+      success: true,
+      tiers:   getTierDefinitions().map((t) => ({
+        tier:           t.tier,
+        label:          t.label,
+        creditGrant:    t.creditGrantPerCycle,
+        cycleDays:      t.cycleDays,
+        maxCallsPerDay: t.maxCallsPerDay,
+        features:       t.features,
+        stripePriceId:  t.stripePriceId ?? null,
+        monthlyUsdCents: t.monthlyUsdCents,
+      })),
+    });
+  }
   const userId = await getAuthedUserId();
   if (!userId) {
     return Response.json({ success: false, error: "Unauthorized" }, { status: 401 });
