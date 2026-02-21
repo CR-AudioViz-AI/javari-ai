@@ -5,7 +5,6 @@
 // GET /api/billing → system status + public tier summary
 
 import { getTierDefinitions } from "@/lib/javari/revenue/subscriptions";
-import { TIER_FEATURES, TIER_CREDIT_GRANT } from "@/lib/javari/revenue/entitlements";
 
 export const runtime = "nodejs";
 
@@ -27,12 +26,13 @@ export async function GET() {
         "stripe_ready_metadata",
       ],
       tiers: tiers.map((t) => ({
-        tier:            t.tier,
-        label:           t.label,
-        creditGrant:     t.creditGrantPerCycle,
-        monthlyUsdCents: t.monthlyUsdCents,
-        features:        TIER_FEATURES[t.tier] ?? [],
-        maxCallsPerDay:  t.maxCallsPerDay,
+        tier:             t.tier,
+        label:            t.label,
+        priceMonthlyUsd:  t.priceMonthlyUsd,
+        creditsPerCycle:  t.creditsPerCycle,
+        features:         t.features,
+        stripePriceId:    t.stripePriceId ?? null,
+        description:      t.description,
       })),
       timestamp: new Date().toISOString(),
     });
