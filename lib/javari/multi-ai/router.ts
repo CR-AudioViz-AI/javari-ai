@@ -1,5 +1,5 @@
 // lib/javari/multi-ai/router.ts
-// Javari Multi-Model Routing Engine — v2
+// Javari Multi-Model Routing Engine — v3 (STEP 10: region metadata)
 // 2026-02-20 — STEP 1 complete implementation
 //
 // Pipeline (in order):
@@ -50,6 +50,10 @@ export interface RoutingDecision {
 
   // New in v2 — routing metadata attached for downstream use
   routingMeta: {
+    // v11 STEP 10: region-aware metadata
+    region?:               string;
+    regionProviders?:      string[];
+    enterpriseTeam?:       string | null;
     requires_reasoning_depth: boolean;
     requires_json: boolean;
     requires_validation: boolean;
