@@ -124,8 +124,8 @@ const nextConfig = {
   },
 
   // ── Experimental ─────────────────────────────────────────────────────────
+  // Note: optimizeCss requires 'critters' package — disabled until installed
   experimental: {
-    optimizeCss: true,         // inline critical CSS
     optimizePackageImports: [  // tree-shake large deps
       "lucide-react",
       "@radix-ui/react-dropdown-menu",
