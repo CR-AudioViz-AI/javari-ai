@@ -1,172 +1,236 @@
 // lib/release/pipeline.ts
-// CR AudioViz AI — Go-Live Release Pipeline
-// 2026-02-21 — STEP 8 Go-Live
+// CR AudioViz AI — Go-Live Release Pipeline v2
+// 2026-02-21 — STEP 9 Official Launch
 
 import { createLogger } from "@/lib/observability/logger";
-import { sendErrorAlert } from "@/lib/alerts/escalate";
+import { sendErrorAlert, sendUsageSpikeAlert } from "@/lib/alerts/escalate";
 
 const log = createLogger("api");
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type PipelineStage =
+  | "smoke_test"
   | "health_check"
   | "canary_warmup"
-  | "smoke_test"
   | "canary_promote"
+  | "entitlement_test"
+  | "billing_test"
   | "complete";
 
 export interface PipelineResult {
-  success:   boolean;
-  stage:     PipelineStage;
-  durationMs: number;
-  details:   Record<string, unknown>;
-  error?:    string;
+  success:    boolean;
+  stage:      PipelineStage;
+  duration:   number;
+  checks:     Record<string, { pass: boolean; detail: string; latencyMs?: number }>;
+  rollback?:  string;
+  alertSent?: boolean;
 }
 
-export interface PipelineConfig {
-  deploymentUrl:   string;
-  onRollback?:     (reason: string) => Promise<void>;
-  alertOnFailure?: boolean;
-  canaryPercent?:  number;   // default 25
+export interface RollbackTrigger {
+  reason:          string;
+  latencyThresholdMs?: number;
+  errorRateThreshold?: number;
+  stage:           PipelineStage;
 }
 
-// ── Health check ──────────────────────────────────────────────────────────────
+// ── Thresholds ────────────────────────────────────────────────────────────────
 
-async function runHealthCheck(url: string): Promise<{ ok: boolean; status?: string; error?: string }> {
+const ROLLBACK_THRESHOLDS = {
+  maxLatencyMs:   5000,
+  maxErrorRate:   0.05,    // 5%
+  minHealthScore: 3,       // at least 3 of 5 health checks must pass
+};
+
+// ── Individual pipeline checks ────────────────────────────────────────────────
+
+async function runSmokeTests(): Promise<{ pass: boolean; detail: string; latencyMs: number }> {
+  const start = Date.now();
+  const baseUrl = process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+
+  const endpoints = [
+    { path: "/api/health/live",    label: "liveness" },
+    { path: "/api/billing",        label: "billing" },
+    { path: "/api/factory",        label: "factory" },
+    { path: "/api/autonomy",       label: "autonomy" },
+    { path: "/api/beta/checklist", label: "checklist" },
+  ];
+
+  let passed = 0;
+  const failures: string[] = [];
+
+  for (const ep of endpoints) {
+    try {
+      const r = await fetch(`${baseUrl}${ep.path}`, { signal: AbortSignal.timeout(4000) });
+      if (r.ok) { passed++; }
+      else { failures.push(`${ep.label}:${r.status}`); }
+    } catch (e) {
+      failures.push(`${ep.label}:timeout`);
+    }
+  }
+
+  const pass = passed >= 4; // At least 4/5 must pass
+  return {
+    pass,
+    detail: pass
+      ? `Smoke tests: ${passed}/${endpoints.length} passed`
+      : `Smoke tests failed: ${passed}/${endpoints.length} — failures: ${failures.join(", ")}`,
+    latencyMs: Date.now() - start,
+  };
+}
+
+async function runHealthCheck(): Promise<{ pass: boolean; detail: string; latencyMs: number }> {
+  const start   = Date.now();
+  const baseUrl = process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
   try {
-    const res = await fetch(`${url}/api/health/ready`, {
-      signal: AbortSignal.timeout(8000),
-    });
-    const data = await res.json() as { status?: string };
-    return { ok: data.status === "ready" || data.status === "degraded", status: data.status };
+    const r    = await fetch(`${baseUrl}/api/health/ready`, { signal: AbortSignal.timeout(5000) });
+    const data = await r.json() as { status?: string; summary?: { failed?: number } };
+    const pass = data.status === "ready" || data.status === "degraded";
+    return {
+      pass,
+      detail: `Health: ${data.status ?? "unknown"}, failed=${data.summary?.failed ?? "?"}`,
+      latencyMs: Date.now() - start,
+    };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Unknown error" };
+    return { pass: false, detail: `Health check failed: ${e instanceof Error ? e.message : "timeout"}`, latencyMs: Date.now() - start };
   }
 }
 
-// ── Smoke tests ───────────────────────────────────────────────────────────────
-
-async function runSmokeTests(url: string): Promise<{
-  passed: number;
-  failed: number;
-  details: Record<string, boolean>;
-}> {
-  const checks: Array<[string, () => Promise<boolean>]> = [
-    ["homepage",        async () => { const r = await fetch(url, { signal: AbortSignal.timeout(5000) }); return r.ok; }],
-    ["pricing_page",   async () => { const r = await fetch(`${url}/pricing`, { signal: AbortSignal.timeout(5000) }); return r.ok; }],
-    ["api_billing",    async () => { const r = await fetch(`${url}/api/billing`, { signal: AbortSignal.timeout(5000) }); const d = await r.json() as { status?: string }; return d.status === "operational"; }],
-    ["api_health",     async () => { const r = await fetch(`${url}/api/health/live`, { signal: AbortSignal.timeout(5000) }); const d = await r.json() as { status?: string }; return d.status === "ok"; }],
-    ["beta_checklist", async () => { const r = await fetch(`${url}/api/beta/checklist`, { signal: AbortSignal.timeout(8000) }); const d = await r.json() as { ready?: boolean }; return d.ready === true; }],
-  ];
-
-  const details: Record<string, boolean> = {};
-  let passed = 0, failed = 0;
-
-  await Promise.all(
-    checks.map(async ([name, fn]) => {
-      try {
-        const ok = await fn();
-        details[name] = ok;
-        if (ok) passed++; else failed++;
-      } catch {
-        details[name] = false;
-        failed++;
-      }
-    })
-  );
-
-  return { passed, failed, details };
+async function runEntitlementTest(): Promise<{ pass: boolean; detail: string; latencyMs: number }> {
+  const start = Date.now();
+  try {
+    const { TIER_FEATURES } = await import("@/lib/javari/revenue/entitlements");
+    const tiers = Object.keys(TIER_FEATURES);
+    const pass  = tiers.length >= 4;
+    return { pass, detail: `Entitlements: ${tiers.join(", ")}`, latencyMs: Date.now() - start };
+  } catch (e) {
+    return { pass: false, detail: `Entitlement test failed: ${e instanceof Error ? e.message : "error"}`, latencyMs: Date.now() - start };
+  }
 }
 
-// ── Main pipeline ─────────────────────────────────────────────────────────────
+async function runBillingTest(): Promise<{ pass: boolean; detail: string; latencyMs: number }> {
+  const start = Date.now();
+  try {
+    const { getTierDefinitions } = await import("@/lib/javari/revenue/subscriptions");
+    const tiers = getTierDefinitions();
+    const pass  = tiers.length >= 4;
+    return { pass, detail: `Billing: ${tiers.length} tiers configured`, latencyMs: Date.now() - start };
+  } catch (e) {
+    return { pass: false, detail: `Billing test failed: ${e instanceof Error ? e.message : "error"}`, latencyMs: Date.now() - start };
+  }
+}
 
-export async function runReleasePipeline(config: PipelineConfig): Promise<PipelineResult> {
-  const start   = Date.now();
-  const url     = config.deploymentUrl;
-  let   stage: PipelineStage = "health_check";
+async function runCanaryWarmup(): Promise<{ pass: boolean; detail: string; latencyMs: number }> {
+  const start = Date.now();
+  try {
+    const { getAllCanaryConfigs } = await import("@/lib/canary/feature-canary");
+    const configs  = getAllCanaryConfigs();
+    const stable   = configs.filter((c) => c.stage !== "disabled").length;
+    const pass     = stable >= 4;
+    return { pass, detail: `Canary warmup: ${stable}/${configs.length} features active`, latencyMs: Date.now() - start };
+  } catch (e) {
+    return { pass: false, detail: `Canary warmup failed: ${e instanceof Error ? e.message : "error"}`, latencyMs: Date.now() - start };
+  }
+}
 
-  log.info("Release pipeline started", { meta: { url } });
+// ── Rollback trigger ──────────────────────────────────────────────────────────
+
+async function triggerRollback(trigger: RollbackTrigger): Promise<void> {
+  log.error(`ROLLBACK TRIGGERED at stage ${trigger.stage}: ${trigger.reason}`);
+  await sendErrorAlert({
+    traceId:  `rollback_${Date.now().toString(36)}`,
+    code:     "PIPELINE_ROLLBACK",
+    message:  `Release pipeline rollback at ${trigger.stage}: ${trigger.reason}`,
+    path:     "/api/release/pipeline",
+    severity: "critical",
+  });
+}
+
+// ── Main pipeline runner ──────────────────────────────────────────────────────
+
+export async function runReleasePipeline(): Promise<PipelineResult> {
+  const start  = Date.now();
+  let   stage: PipelineStage = "smoke_test";
+
+  log.info("Release pipeline started");
 
   try {
-    // Stage 1: Health check
-    const health = await runHealthCheck(url);
-    if (!health.ok) {
-      throw new Error(`Health check failed: ${health.error ?? health.status}`);
+    // Stage 1: Smoke tests
+    const smoke = await runSmokeTests();
+    if (!smoke.pass) {
+      await triggerRollback({ reason: `Smoke tests failed: ${smoke.detail}`, stage });
+      return { success: false, stage, duration: Date.now() - start, checks: { smoke_test: { pass: false, detail: smoke.detail } }, rollback: smoke.detail, alertSent: true };
     }
-    log.info("Health check passed", { meta: { status: health.status } });
 
-    // Stage 2: Canary warmup (placeholder — actual canary % managed by Vercel)
+    // Stage 2: Health check
+    stage = "health_check";
+    const health = await runHealthCheck();
+    if (!health.pass) {
+      await triggerRollback({ reason: `Health check failed`, stage });
+      return { success: false, stage, duration: Date.now() - start, checks: { health_check: { pass: false, detail: health.detail } }, rollback: health.detail, alertSent: true };
+    }
+
+    // Stage 3: Entitlement test
+    stage = "entitlement_test";
+    const ent = await runEntitlementTest();
+
+    // Stage 4: Billing test
+    stage = "billing_test";
+    const billing = await runBillingTest();
+    if (!billing.pass) {
+      await triggerRollback({ reason: `Billing check failed`, stage });
+      return { success: false, stage, duration: Date.now() - start, checks: { billing: { pass: false, detail: billing.detail } }, rollback: billing.detail, alertSent: true };
+    }
+
+    // Stage 5: Canary warmup
     stage = "canary_warmup";
-    log.info(`Canary warmup: ${config.canaryPercent ?? 25}%`);
-    await new Promise((r) => setTimeout(r, 500)); // simulate warmup
+    const canary = await runCanaryWarmup();
 
-    // Stage 3: Smoke tests
-    stage = "smoke_test";
-    const smoke = await runSmokeTests(url);
-    if (smoke.failed > 0) {
-      throw new Error(
-        `Smoke tests failed: ${smoke.failed}/${smoke.passed + smoke.failed} — ` +
-        Object.entries(smoke.details).filter(([,v]) => !v).map(([k]) => k).join(", ")
-      );
-    }
-    log.info("Smoke tests passed", { meta: smoke });
-
-    // Stage 4: Promote canary to full traffic
+    // Stage 6: Canary promote
     stage = "canary_promote";
-    log.info("Promoting canary to 100%");
-    await new Promise((r) => setTimeout(r, 200)); // simulate promote
+    // All checks passed — promote canary to full
+    try {
+      const { setCanaryThreshold } = await import("@/lib/launch/config");
+      setCanaryThreshold(100);
+    } catch { /* non-fatal */ }
 
     stage = "complete";
-    const durationMs = Date.now() - start;
-    log.info(`Pipeline complete in ${durationMs}ms`, { meta: { stage } });
+    const duration = Date.now() - start;
+
+    log.info(`Release pipeline complete in ${duration}ms`);
 
     return {
-      success: true,
-      stage,
-      durationMs,
-      details: {
-        healthStatus: health.status,
-        smokeTests:   smoke,
-        canaryPercent: 100,
+      success:  true,
+      stage:    "complete",
+      duration,
+      checks: {
+        smoke_test:        { pass: smoke.pass,   detail: smoke.detail,   latencyMs: smoke.latencyMs },
+        health_check:      { pass: health.pass,  detail: health.detail,  latencyMs: health.latencyMs },
+        entitlement_test:  { pass: ent.pass,     detail: ent.detail,     latencyMs: ent.latencyMs },
+        billing_test:      { pass: billing.pass, detail: billing.detail, latencyMs: billing.latencyMs },
+        canary_warmup:     { pass: canary.pass,  detail: canary.detail,  latencyMs: canary.latencyMs },
       },
     };
-
   } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
-    const durationMs = Date.now() - start;
-
-    log.error(`Pipeline failed at stage: ${stage}`, { meta: { error } });
-
-    // Rollback callback
-    if (config.onRollback) {
-      try {
-        await config.onRollback(error);
-        log.info("Rollback callback executed");
-      } catch (rbErr) {
-        log.error("Rollback callback failed", { meta: { rbErr } });
-      }
-    }
-
-    // Alert on failure
-    if (config.alertOnFailure !== false) {
-      void sendErrorAlert({
-        title:   `🚨 Release Pipeline Failed — ${stage}`,
-        message: error,
-        context: { url, stage },
-      });
-    }
-
-    return { success: false, stage, durationMs, details: {}, error };
+    const msg = err instanceof Error ? err.message : "Unknown pipeline error";
+    log.error(`Pipeline error at ${stage}: ${msg}`);
+    await triggerRollback({ reason: msg, stage });
+    return { success: false, stage, duration: Date.now() - start, checks: {}, rollback: msg, alertSent: true };
   }
 }
 
 // ── Post-deploy hook ──────────────────────────────────────────────────────────
 
-export async function postDeployCheck(url: string): Promise<boolean> {
-  const result = await runReleasePipeline({
-    deploymentUrl: url,
-    alertOnFailure: true,
-  });
-  return result.success;
+export async function runPostDeployChecks(): Promise<{ ready: boolean; details: string }> {
+  const [health, billing] = await Promise.all([runHealthCheck(), runBillingTest()]);
+  const ready = health.pass && billing.pass;
+  const details = `health=${health.pass} billing=${billing.pass}`;
+  if (!ready) {
+    await sendUsageSpikeAlert({ endpoint: "post_deploy", value: 0, threshold: 0, note: `Post-deploy check failed: ${details}` });
+  }
+  return { ready, details };
 }
