@@ -33,11 +33,13 @@ const navigationLinks = [
 export function MobileNav() {
   // EXPLICIT: Menu must start closed and only open on user tap
   const [isOpen, setIsOpen] = useState(false)
+  const [mounted, setMounted] = useState(false)
   const drawerRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
 
-  // Ensure menu is always closed on mount (safety guard)
+  // Hydration-safe guard: prevent flash during SSR/client hydration
   useEffect(() => {
+    setMounted(true)
     setIsOpen(false)
   }, [])
 
@@ -149,8 +151,8 @@ export function MobileNav() {
         </button>
       </div>
 
-      {/* Overlay Backdrop */}
-      {isOpen && (
+      {/* Overlay Backdrop - Only render after mount to prevent hydration flash */}
+      {mounted && isOpen && (
         <div
           onClick={closeMenu}
           className="fixed inset-0 bg-black/50 z-[998] transition-opacity duration-normal"
@@ -158,7 +160,7 @@ export function MobileNav() {
         />
       )}
 
-      {/* Mobile Drawer */}
+      {/* Mobile Drawer - Always render but use transform for visibility */}
       <div
         ref={drawerRef}
         id="mobile-drawer"
@@ -170,7 +172,7 @@ export function MobileNav() {
           bg-background shadow-lg z-[999]
           flex flex-col overflow-auto
           transition-transform duration-normal
-          ${isOpen ? 'translate-x-0' : 'translate-x-full'}
+          ${mounted && isOpen ? 'translate-x-0' : 'translate-x-full'}
         `}
       >
         {/* Drawer Header */}

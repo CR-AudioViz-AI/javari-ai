@@ -11,7 +11,7 @@
 
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   HomeIcon,
   ChartBarIcon,
@@ -45,6 +45,13 @@ const navItems: NavItem[] = [
 export function Sidebar() {
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  // Hydration-safe guard
+  useEffect(() => {
+    setMounted(true);
+    setIsOpen(false);
+  }, []);
 
   return (
     <>
@@ -61,8 +68,8 @@ export function Sidebar() {
         )}
       </button>
 
-      {/* Backdrop for mobile */}
-      {isOpen && (
+      {/* Backdrop for mobile - Only after mount */}
+      {mounted && isOpen && (
         <div
           className="lg:hidden fixed inset-0 bg-black bg-opacity-50 z-30"
           onClick={() => setIsOpen(false)}
@@ -74,7 +81,7 @@ export function Sidebar() {
         className={`
           fixed top-0 left-0 z-40 h-screen w-64 
           bg-gray-900 text-white transition-transform duration-300
-          ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+          ${mounted && isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         `}
       >
         <div className="flex flex-col h-full">
