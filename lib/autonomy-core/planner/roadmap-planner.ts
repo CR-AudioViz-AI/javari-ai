@@ -22,6 +22,8 @@ import { executeTask }          from "./task-executor";
 import type { TaskExecutionResult } from "./task-executor";
 import { createLogger }         from "@/lib/observability/logger";
 import { writeAuditEvent }      from "@/lib/enterprise/audit";
+import { validateRoadmap, formatValidationResult } from "./roadmap-validator";
+import type { ValidationResult } from "./roadmap-validator";
 
 const log = createLogger("autonomy");
 
@@ -39,6 +41,8 @@ export interface PlanningResult {
   durationMs:       number;
   skipped:          boolean;   // true if no active roadmap or no pending tasks
   skipReason?:      string;
+  validation?:      Record<string, any>;  // Validation results from roadmap-validator
+  validationStatus?: 'passed' | 'blocked' | 'warned';
 }
 
 // ── Supabase helpers ──────────────────────────────────────────────────────────
@@ -193,6 +197,89 @@ export async function runRoadmapPlanner(opts: {
     });
   }
 
+  // ── 3.5. VALIDATION LAYER (FS-3) ────────────────────────────────────────
+  // Run full roadmap validation BEFORE selecting tasks
+  let validationResult: ValidationResult | null = null;
+  let validationStatus: 'passed' | 'blocked' | 'warned' = 'passed';
+
+  try {
+    const supabaseUrl = SB_URL();
+    const supabaseKey = SB_KEY();
+
+    if (supabaseUrl && supabaseKey) {
+      // Convert tasks to validator format
+      const roadmapForValidation = {
+        id: roadmap.id,
+        name: roadmap.title,
+        tasks: tasks.map(t => ({
+          id: t.id,
+          title: t.title,
+          status: t.status,
+          priority: t.priority === 'high' ? 3 : t.priority === 'medium' ? 2 : 1,
+          requiredSecrets: (t.metadata as any)?.requiredSecrets,
+          prerequisites: t.dependencies,
+          estimatedCost: (t.metadata as any)?.estimatedCost,
+          safetyRisk: (t.metadata as any)?.safetyRisk,
+        })),
+      };
+
+      validationResult = await validateRoadmap(roadmapForValidation, supabaseUrl, supabaseKey);
+
+      const formattedValidation = formatValidationResult(validationResult);
+
+      // Determine validation status
+      if (!validationResult.valid) {
+        const hasCritical = validationResult.blockers.some(i => i.severity === 'CRITICAL');
+        if (hasCritical) {
+          validationStatus = 'blocked';
+          log.warn(`[${opts.cycleId}] VALIDATION BLOCKED: ${validationResult.blockers.length} critical/high issues found`);
+        } else {
+          validationStatus = 'warned';
+          log.warn(`[${opts.cycleId}] VALIDATION WARNINGS: ${validationResult.blockers.length} high-priority issues found`);
+        }
+      } else {
+        log.info(`[${opts.cycleId}] Validation passed: ${validationResult.warnings.length} warnings, ${validationResult.info.length} info`);
+      }
+
+      // Log validation event
+      await writeAuditEvent({
+        action: "module.generated",
+        metadata: {
+          system: "autonomy-core-planner",
+          event: "validation_completed",
+          cycleId: opts.cycleId,
+          validationStatus,
+          validation: formattedValidation,
+        },
+        severity: validationStatus === 'blocked' ? 'error' : validationStatus === 'warned' ? 'warn' : 'info',
+      });
+
+      // If CRITICAL issues exist, abort task execution
+      if (validationStatus === 'blocked') {
+        return {
+          roadmapId: roadmap.id,
+          roadmapTitle: roadmap.title,
+          tasksFound: tasks.length,
+          tasksReady: resolution.readyCount,
+          tasksExecuted: 0,
+          tasksComplete: tasks.filter(t => t.status === 'complete').length,
+          tasksFailed: 0,
+          executionResults: [],
+          cycleDetected: resolution.cycleDetected,
+          blockedTasks: resolution.blockedTasks,
+          durationMs: Date.now() - start,
+          skipped: true,
+          skipReason: 'blocked_by_validation',
+          validation: formattedValidation,
+          validationStatus,
+        };
+      }
+    }
+  } catch (err) {
+    log.error(`[${opts.cycleId}] Validation error: ${err instanceof Error ? err.message : 'Unknown'}`);
+    // Continue execution on validation failure (fail-open)
+  }
+
   // ── 4. Pick first batch (up to maxTasksPerCycle) ────────────────────────
   const firstBatch  = resolution.batches[0] ?? [];
   const toExecute   = firstBatch.slice(0, maxTasks);
@@ -279,5 +366,7 @@ export async function runRoadmapPlanner(opts: {
     blockedTasks:  resolution.blockedTasks,
     durationMs:    Date.now() - start,
     skipped:       false,
+    validation:    validationResult ? formatValidationResult(validationResult) : undefined,
+    validationStatus,
   };
 }
