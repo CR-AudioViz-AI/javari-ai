@@ -1,13 +1,19 @@
 // lib/autonomy-core/scheduler/cycle.ts
 // CR AudioViz AI — Autonomous Cycle Scheduler
 // 2026-02-21 — STEP 11: Javari Autonomous Ecosystem Mode
+// 2026-02-22 — Step 12: canonical platform docs loaded at cycle start
 //
 // Orchestrates the full crawl → detect → validate → fix → report pipeline.
+// Each cycle now loads top-k canonical platform documents via
+// match_canonical_chunks() RPC, making the cycle document-aware and
+// architecture-aware. Context logged to audit trail each run.
+//
 // Called by /api/autonomy-core/run (Vercel Cron or manual trigger).
 // All state is in Supabase — no in-process global state between invocations.
 // Kill switch checked at every stage.
 
 import { getAutonomyCoreConfig }      from "../crawler/types";
+import { getAutonomyCanonicalContext } from "../canonical-context";
 import { crawlCore }                   from "../crawler/crawl";
 import { detectAnomalies }             from "../diff/detect";
 import { runRing2Fixes, rollbackPatch } from "../fixer/ring2";
@@ -113,6 +119,26 @@ export async function runAutonomyCycle(opts?: {
     meta: { ring: cfg.ring, mode: cfg.mode, dryRun: opts?.dryRun }
   });
 
+  // ── Load canonical platform context ────────────────────────────────────────
+  // Fetches top-k relevant platform docs from match_canonical_chunks() RPC.
+  // Makes this cycle document-aware and architecture-aware.
+  // Non-blocking — never halts the cycle on failure.
+  let canonicalCtxLoaded = false;
+  let canonicalChunkCount = 0;
+  try {
+    const canonicalCtx = await getAutonomyCanonicalContext();
+    if (canonicalCtx) {
+      canonicalCtxLoaded  = true;
+      // Count chunks by separator occurrences
+      canonicalChunkCount = (canonicalCtx.match(/\n---\n/g) ?? []).length;
+      log.info(`[${cycleId}] Canonical context loaded: ${canonicalChunkCount} chunks`);
+    } else {
+      log.info(`[${cycleId}] Canonical context: no matching docs (threshold not met)`);
+    }
+  } catch (e) {
+    log.warn(`[${cycleId}] Canonical context load failed (non-fatal): ${e instanceof Error ? e.message : e}`);
+  }
+
   // Check halt conditions (unless forced by admin)
   if (!opts?.force) {
     const haltReason = shouldHalt(cfg);
@@ -141,7 +167,10 @@ export async function runAutonomyCycle(opts?: {
 
     await writeAuditEvent({
       action:   "module.generated",
-      metadata: { system: "autonomy-core", stage: "crawl", cycleId, snapshotId, scope: cfg.scope },
+      metadata: {
+        system: "autonomy-core", stage: "crawl", cycleId, snapshotId, scope: cfg.scope,
+        canonicalContextLoaded: canonicalCtxLoaded, canonicalChunkCount,
+      },
       severity: "info",
     });
 
