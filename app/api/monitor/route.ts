@@ -2,6 +2,7 @@
 // Javari Full Platform Monitor - ALL apps, ALL bots
 // Timestamp: 2025-11-30 21:15 EST
 
+export const runtime = "nodejs";
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
