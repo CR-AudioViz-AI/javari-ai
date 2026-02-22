@@ -3,6 +3,7 @@
  * Fixed with proper error handling per ChatGPT audit
  */
 
+export const runtime = "nodejs";
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
