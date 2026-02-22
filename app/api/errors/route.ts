@@ -303,7 +303,6 @@ for (const provider of providers) {
   try {
     return await callAI(provider, prompt);
   } catch (err) {
-    console.log(\`Provider \${provider} failed, trying next...\`);
   }
 }
 throw new Error('All AI providers failed');`
