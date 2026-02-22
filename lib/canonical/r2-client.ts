@@ -1,127 +1,26 @@
 // lib/canonical/r2-client.ts
 // CR AudioViz AI — Canonical R2 Read-Only Client
-// 2026-02-22 — R2 is sole source of truth; this module NEVER mutates R2.
+// 2026-02-22 REWRITE — Fixes SigV4 SignatureDoesNotMatch by using @aws-sdk/client-s3.
+// Cloudflare R2 is S3-compatible; aws-sdk v3 supports it via endpoint override.
 //
-// Uses S3-compatible REST API (Cloudflare R2 supports AWS S3 GET/HEAD/LIST).
-// Auth: HMAC-SHA256 AWS Signature V4 — same pattern used by existing R2 integrations.
-// Env vars required:
-//   R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET
-//   R2_CANONICAL_PREFIX (default: "roadmap/")
+// READ-ONLY — no writes, no mutations, no deletes. Ever.
+//
+// Env vars (all already exist in Vercel):
+//   R2_ACCESS_KEY_ID     — R2 access key
+//   R2_SECRET_ACCESS_KEY — R2 secret key
+//   R2_ACCOUNT_ID        — Cloudflare account ID (used to build endpoint)
+//   R2_BUCKET            — bucket name (default: "crav-assets-prod")
+//   R2_CANONICAL_PREFIX  — prefix to list under (default: "roadmap/")
+//   R2_ENDPOINT          — optional override (e.g. https://xxx.r2.cloudflarestorage.com)
 
-import crypto from "crypto";
-import { createLogger } from "@/lib/observability/logger";
+import {
+  S3Client,
+  ListObjectsV2Command,
+  GetObjectCommand,
+  type ListObjectsV2CommandOutput,
+} from "@aws-sdk/client-s3";
 
-const log = createLogger("canonical:r2");
-
-// ── Config ────────────────────────────────────────────────────────────────────
-
-function getR2Config() {
-  const accountId  = process.env.R2_ACCOUNT_ID        ?? "";
-  const accessKey  = process.env.R2_ACCESS_KEY_ID     ?? "";
-  const secretKey  = process.env.R2_SECRET_ACCESS_KEY ?? "";
-  const bucket     = process.env.R2_BUCKET            ?? "craudiovizai-canonical";
-  const prefix     = process.env.R2_CANONICAL_PREFIX  ?? "roadmap/";
-  const endpoint   = process.env.R2_ENDPOINT
-    ?? (accountId ? `https://${accountId}.r2.cloudflarestorage.com` : "");
-
-  return { accountId, accessKey, secretKey, bucket, prefix, endpoint };
-}
-
-// ── AWS Signature V4 (HMAC-SHA256) ───────────────────────────────────────────
-// Minimal implementation for GET + ListObjectsV2 only — no PUT/DELETE.
-
-function hmac(key: Buffer | string, data: string): Buffer {
-  return crypto.createHmac("sha256", key).update(data, "utf8").digest();
-}
-
-function hash(data: string): string {
-  return crypto.createHash("sha256").update(data, "utf8").digest("hex");
-}
-
-function formatDate(d: Date): string {
-  return d.toISOString().replace(/[:\-]|\.\d{3}/g, "").slice(0, 15) + "Z";
-}
-
-function formatDateShort(d: Date): string {
-  return d.toISOString().slice(0, 10).replace(/-/g, "");
-}
-
-function signedHeaders(
-  method:  "GET",
-  url:     string,
-  body:    string,
-  cfg:     ReturnType<typeof getR2Config>
-): Record<string, string> {
-  const now      = new Date();
-  const dateTime = formatDate(now);
-  const dateShort = formatDateShort(now);
-  const region   = "auto";
-  const service  = "s3";
-
-  const parsed   = new URL(url);
-  const host     = parsed.host;
-  const path     = parsed.pathname;
-  const query    = parsed.search.slice(1); // strip leading "?"
-
-  const payloadHash = hash(body);
-
-  // Canonical headers (must be sorted, lowercase)
-  const canonicalHeaders =
-    `host:${host}\n` +
-    `x-amz-content-sha256:${payloadHash}\n` +
-    `x-amz-date:${dateTime}\n`;
-  const signedHdrs = "host;x-amz-content-sha256;x-amz-date";
-
-  const canonicalRequest = [
-    method,
-    path,
-    query,
-    canonicalHeaders,
-    signedHdrs,
-    payloadHash,
-  ].join("\n");
-
-  const credScope     = `${dateShort}/${region}/${service}/aws4_request`;
-  const stringToSign  = `AWS4-HMAC-SHA256\n${dateTime}\n${credScope}\n${hash(canonicalRequest)}`;
-
-  const signingKey = hmac(
-    hmac(hmac(hmac(`AWS4${cfg.secretKey}`, dateShort), region), service),
-    "aws4_request"
-  );
-  const signature = hmac(signingKey, stringToSign).toString("hex");
-
-  return {
-    host,
-    "x-amz-date":          dateTime,
-    "x-amz-content-sha256": payloadHash,
-    authorization: (
-      `AWS4-HMAC-SHA256 Credential=${cfg.accessKey}/${credScope}, ` +
-      `SignedHeaders=${signedHdrs}, Signature=${signature}`
-    ),
-  };
-}
-
-// ── R2 API helpers ────────────────────────────────────────────────────────────
-
-async function r2Get(path: string, query = ""): Promise<Response> {
-  const cfg = getR2Config();
-
-  if (!cfg.accessKey || !cfg.secretKey || !cfg.endpoint) {
-    throw new Error("R2 credentials not configured (R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY)");
-  }
-
-  const url  = `${cfg.endpoint}/${cfg.bucket}/${path}${query ? "?" + query : ""}`;
-  const hdrs = signedHeaders("GET", url, "", cfg);
-
-  const res = await fetch(url, {
-    method:  "GET",
-    headers: hdrs,
-    signal:  AbortSignal.timeout(15_000),
-  });
-  return res;
-}
-
-// ── Public API ────────────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface R2DocMeta {
   key:          string;   // full R2 key, e.g. "roadmap/MASTER_ROADMAP.md"
@@ -129,112 +28,157 @@ export interface R2DocMeta {
   lastModified: string;   // ISO date string
 }
 
-/**
- * List all documents under R2_CANONICAL_PREFIX.
- * Implements ListObjectsV2 pagination — returns ALL keys (up to 10k).
- * READ-ONLY — never mutates R2.
- */
-export async function listRoadmapDocs(): Promise<R2DocMeta[]> {
-  const cfg    = getR2Config();
-  const docs: R2DocMeta[] = [];
-  let continuationToken: string | null = null;
+// ── R2 client factory ─────────────────────────────────────────────────────────
 
-  try {
-    do {
-      const qs = new URLSearchParams({
-        "list-type": "2",
-        prefix: cfg.prefix,
-        "max-keys": "1000",
-        ...(continuationToken ? { "continuation-token": continuationToken } : {}),
-      }).toString();
+function buildS3Client(): S3Client {
+  const accountId = process.env.R2_ACCOUNT_ID        ?? "";
+  const accessKey = process.env.R2_ACCESS_KEY_ID     ?? "";
+  const secretKey = process.env.R2_SECRET_ACCESS_KEY ?? "";
+  const endpoint  = process.env.R2_ENDPOINT
+    ?? (accountId ? `https://${accountId}.r2.cloudflarestorage.com` : "");
 
-      const res = await r2Get("", qs);
+  if (!accessKey || !secretKey) {
+    throw new Error(
+      "R2 credentials not configured. " +
+      "Set R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY in Vercel env vars."
+    );
+  }
+  if (!endpoint) {
+    throw new Error(
+      "R2 endpoint not configured. " +
+      "Set R2_ACCOUNT_ID or R2_ENDPOINT in Vercel env vars."
+    );
+  }
 
-      if (res.status === 404) {
-        log.warn(`R2 bucket not found or prefix ${cfg.prefix} empty — returning empty list`);
-        return [];
-      }
-      if (!res.ok) {
-        const body = await res.text().catch(() => "");
-        throw new Error(`R2 ListObjectsV2 failed: ${res.status} ${body.slice(0, 200)}`);
-      }
+  return new S3Client({
+    region:   "auto",               // Cloudflare R2 requires "auto"
+    endpoint,
+    credentials: { accessKeyId: accessKey, secretAccessKey: secretKey },
+    // Force path-style for R2 compatibility
+    forcePathStyle: true,
+  });
+}
 
-      const xml = await res.text();
+function getR2Config() {
+  return {
+    bucket: process.env.R2_BUCKET           ?? "crav-assets-prod",
+    prefix: process.env.R2_CANONICAL_PREFIX ?? "roadmap/",
+  };
+}
 
-      // Parse XML response (minimal, no external dependency)
-      const keys = [...xml.matchAll(/<Key>([^<]+)<\/Key>/g)].map((m) => m[1]);
-      const sizes = [...xml.matchAll(/<Size>(\d+)<\/Size>/g)].map((m) => parseInt(m[1]));
-      const dates  = [...xml.matchAll(/<LastModified>([^<]+)<\/LastModified>/g)].map((m) => m[1]);
-
-      for (let i = 0; i < keys.length; i++) {
-        const key = keys[i];
-        // Only markdown files
-        if (!key.endsWith(".md") && !key.endsWith(".txt")) continue;
-        docs.push({
-          key,
-          size:         sizes[i]  ?? 0,
-          lastModified: dates[i]  ?? new Date().toISOString(),
-        });
-      }
-
-      // Check for next page
-      const truncated = /<IsTruncated>true<\/IsTruncated>/.test(xml);
-      if (truncated) {
-        const tokenMatch = xml.match(/<NextContinuationToken>([^<]+)<\/NextContinuationToken>/);
-        continuationToken = tokenMatch ? tokenMatch[1] : null;
-      } else {
-        continuationToken = null;
-      }
-    } while (continuationToken);
-
-    log.info(`R2 list complete: ${docs.length} docs under prefix "${cfg.prefix}"`);
-    return docs;
-
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Unknown R2 error";
-    log.error(`listRoadmapDocs failed: ${msg}`);
-    throw e;
+function clog(level: "info" | "warn" | "error", msg: string, extra?: unknown) {
+  const ts  = new Date().toISOString();
+  const tag = `[${level.toUpperCase()}][canonical:r2]`;
+  if (extra !== undefined) {
+    console[level](`${ts} ${tag} ${msg}`, extra);
+  } else {
+    console[level](`${ts} ${tag} ${msg}`);
   }
 }
 
+// ── Public API ────────────────────────────────────────────────────────────────
+
 /**
- * Fetch raw text content of a single R2 document by key.
- * READ-ONLY — returns content string.
- * Returns null if not found or unreachable (caller decides to skip/abort).
+ * listRoadmapDocs — list all docs under R2_CANONICAL_PREFIX.
+ * Handles S3 pagination automatically.
+ * Returns empty array (not throw) if prefix is empty.
+ * Throws on auth failure or network error.
+ */
+export async function listRoadmapDocs(): Promise<R2DocMeta[]> {
+  const s3  = buildS3Client();
+  const cfg = getR2Config();
+  const docs: R2DocMeta[] = [];
+  let continuationToken: string | undefined;
+
+  clog("info", `Listing R2 docs: bucket=${cfg.bucket} prefix=${cfg.prefix}`);
+
+  do {
+    const cmd = new ListObjectsV2Command({
+      Bucket:            cfg.bucket,
+      Prefix:            cfg.prefix,
+      MaxKeys:           1000,
+      ContinuationToken: continuationToken,
+    });
+
+    let output: ListObjectsV2CommandOutput;
+    try {
+      output = await s3.send(cmd);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      clog("error", `ListObjectsV2 failed: ${msg}`);
+      throw new Error(`R2 ListObjectsV2 failed: ${msg}`);
+    }
+
+    for (const obj of output.Contents ?? []) {
+      if (!obj.Key) continue;
+      // Only markdown files
+      if (!obj.Key.endsWith(".md") && !obj.Key.endsWith(".txt")) continue;
+      docs.push({
+        key:          obj.Key,
+        size:         obj.Size         ?? 0,
+        lastModified: obj.LastModified?.toISOString() ?? new Date().toISOString(),
+      });
+    }
+
+    continuationToken = output.IsTruncated ? output.NextContinuationToken : undefined;
+  } while (continuationToken);
+
+  clog("info", `Listed ${docs.length} docs under prefix "${cfg.prefix}"`);
+  return docs;
+}
+
+/**
+ * fetchDoc — fetch raw text of a single R2 document by key.
+ * Returns null if not found or on fetch error (caller decides to skip).
+ * READ-ONLY — never writes or deletes.
  */
 export async function fetchDoc(key: string): Promise<string | null> {
+  const s3  = buildS3Client();
+  const cfg = getR2Config();
+
+  clog("info", `Fetching R2 doc: ${key}`);
+
   try {
-    const res = await r2Get(encodeURIComponent(key).replace(/%2F/g, "/"));
+    const cmd = new GetObjectCommand({ Bucket: cfg.bucket, Key: key });
+    const res = await s3.send(cmd);
 
-    if (res.status === 404) {
-      log.warn(`R2 doc not found: ${key}`);
-      return null;
-    }
-    if (!res.ok) {
-      log.error(`R2 fetchDoc failed for ${key}: ${res.status}`);
+    if (!res.Body) {
+      clog("warn", `Empty body for R2 key: ${key}`);
       return null;
     }
 
-    const text = await res.text();
-    log.info(`Fetched R2 doc: ${key} (${text.length} chars)`);
+    // Body is a ReadableStream in Node.js — collect it
+    const bytes = await res.Body.transformToByteArray();
+    const text  = new TextDecoder("utf-8").decode(bytes);
+    clog("info", `Fetched ${key}: ${text.length} chars`);
     return text;
 
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    log.error(`fetchDoc(${key}) threw: ${msg}`);
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes("NoSuchKey") || msg.includes("404")) {
+      clog("warn", `R2 key not found: ${key}`);
+    } else {
+      clog("error", `fetchDoc(${key}) failed: ${msg}`);
+    }
     return null;
   }
 }
 
 /**
- * Verify R2 connectivity by attempting a HEAD-equivalent (small GET).
- * Returns { ok, message }.
+ * checkR2Connectivity — probe R2 by attempting a real list.
+ * Returns { ok, message } — never throws.
  */
 export async function checkR2Connectivity(): Promise<{ ok: boolean; message: string }> {
   try {
     const docs = await listRoadmapDocs();
-    return { ok: true, message: `R2 reachable — ${docs.length} docs found under prefix` };
+    return {
+      ok:      true,
+      message: `R2 reachable — ${docs.length} docs found under prefix`,
+    };
   } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : "R2 unreachable" };
+    return {
+      ok:      false,
+      message: e instanceof Error ? e.message : "R2 unreachable",
+    };
   }
 }
