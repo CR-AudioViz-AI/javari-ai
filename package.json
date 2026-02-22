@@ -10,7 +10,9 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
+    "@aws-sdk/client-s3": "^3.726.0",
     "@google/generative-ai": "^0.21.0",
+    "@heroicons/react": "^2.2.0",
     "@mistralai/mistralai": "^1.3.6",
     "@octokit/rest": "^21.0.2",
     "@radix-ui/react-collapsible": "^1.1.1",
@@ -47,8 +49,7 @@
     "stripe": "^17.3.1",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
-    "zustand": "^4.5.0",
-    "@aws-sdk/client-s3": "^3.726.0"
+    "zustand": "^4.5.0"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
@@ -61,5 +62,5 @@
     "tailwindcss": "^3.4.15",
     "typescript": "^5.6.3"
   },
-  "description": "Javari AI \u2014 Autonomous build engine for CR AudioViz AI platform"
+  "description": "Javari AI — Autonomous build engine for CR AudioViz AI platform"
 }
