@@ -1,147 +1,143 @@
 // lib/canonical/chunker.ts
-// CR AudioViz AI — Deterministic Markdown Chunker
-// 2026-02-22 — Canonical Document Ingestion System
+// CR AudioViz AI — Canonical Markdown Chunker
+// 2026-02-22 PART 2
 //
-// Splits markdown into semantically meaningful chunks using heading boundaries.
-// Deterministic: same input → same output always.
-// No external dependencies — pure string processing.
-// No createLogger import (avoids LogSubsystem type constraint).
+// Deterministic: same input always produces the same output.
+// No external dependencies.
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-export interface TextChunk {
-  index:      number;   // 0-based position in document
-  text:       string;   // chunk content
-  tokenCount: number;   // estimated token count (≈ chars/4)
-  heading?:   string;   // nearest H1/H2/H3 heading context
+export interface Chunk {
+  chunkIndex:   number;
+  chunkText:    string;
+  approxTokens: number;   // Math.ceil(chunkText.length / 4)
 }
 
-// ── Token estimation ──────────────────────────────────────────────────────────
-// 1 token ≈ 4 chars for English — close enough for chunk budgeting
-// without requiring a heavy tokenizer dependency.
-
-export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
+export interface ChunkOptions {
+  maxChars?: number;   // default 3500
 }
 
-// ── Heading extractor ─────────────────────────────────────────────────────────
+const DEFAULT_MAX_CHARS = 3500;
 
-function extractHeading(text: string): string | undefined {
-  const m = text.match(/^#{1,3}\s+(.+)$/m);
-  return m ? m[1].trim() : undefined;
-}
-
-// ── Core chunker ──────────────────────────────────────────────────────────────
+// ─── Internal helpers ─────────────────────────────────────────────────────────
 
 /**
- * chunkMarkdown — splits markdown into chunks respecting heading boundaries.
- *
- * Strategy (priority order):
- * 1. Split on H1/H2 heading lines
- * 2. If section > maxTokens → split on H3
- * 3. If still > maxTokens → split on paragraph boundaries (double newline)
- * 4. If still > maxTokens → hard-split at maxTokens chars with overlap
- *
- * @param text       Raw markdown text
- * @param maxTokens  Max tokens per chunk (default 800 ≈ 3200 chars)
- * @param overlap    Token overlap on hard-splits (default 80 ≈ 320 chars)
+ * Split text on lines that begin a new H2 or H3 heading (## or ###).
+ * The heading line stays attached to the section that follows it.
+ * H1 (#) is treated as the document title and kept with the first section.
  */
-export function chunkMarkdown(
-  text:      string,
-  maxTokens  = 800,
-  overlap    = 80,
-): TextChunk[] {
-  const chunks: TextChunk[] = [];
+function splitOnHeadings(text: string): string[] {
+  const lines    = text.split("\n");
+  const sections: string[] = [];
+  let   current  = "";
+
+  for (const line of lines) {
+    // New section starts on any ## or ### heading
+    if (/^#{2,3}\s/.test(line) && current.trim().length > 0) {
+      sections.push(current);
+      current = "";
+    }
+    current += line + "\n";
+  }
+  if (current.trim().length > 0) {
+    sections.push(current);
+  }
+
+  return sections.length > 0 ? sections : [text];
+}
+
+/**
+ * Split a single section on blank-line paragraph boundaries.
+ */
+function splitOnParagraphs(text: string): string[] {
+  return text
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+}
+
+/**
+ * Hard-split a string at maxChars boundaries (no overlap).
+ * Used only when a single paragraph already exceeds maxChars.
+ */
+function hardSplit(text: string, maxChars: number): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  while (start < text.length) {
+    parts.push(text.slice(start, start + maxChars));
+    start += maxChars;
+  }
+  return parts.filter((p) => p.trim().length > 0);
+}
+
+// ─── Public API ───────────────────────────────────────────────────────────────
+
+/**
+ * chunkMarkdown — splits markdown text into overlapping, size-bounded chunks.
+ *
+ * Strategy (in priority order):
+ *   1. Split on H2 / H3 headings — respect document structure.
+ *   2. Within each heading section, accumulate paragraphs until maxChars is hit.
+ *   3. If a single paragraph exceeds maxChars, hard-split it.
+ *
+ * Guarantees:
+ *   - Never returns empty chunks.
+ *   - chunkIndex is 0-based and sequential.
+ *   - Deterministic: identical input → identical output.
+ *   - approxTokens = Math.ceil(chunkText.length / 4)
+ */
+export function chunkMarkdown(text: string, opts?: ChunkOptions): Chunk[] {
+  const maxChars = opts?.maxChars ?? DEFAULT_MAX_CHARS;
+
+  // Normalise line endings
   const normalised = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
   if (!normalised) return [];
 
-  const h1h2Sections = splitOnHeading(normalised, /^#{1,2}\s+/m);
+  const chunks:    string[] = [];
+  const sections = splitOnHeadings(normalised);
 
-  for (const section of h1h2Sections) {
-    if (estimateTokens(section) <= maxTokens) {
-      addChunk(section, chunks, maxTokens, overlap);
-      continue;
-    }
-    const h3Sections = splitOnHeading(section, /^#{3}\s+/m);
-    for (const sub of h3Sections) {
-      if (estimateTokens(sub) <= maxTokens) {
-        addChunk(sub, chunks, maxTokens, overlap);
+  for (const section of sections) {
+    const paragraphs = splitOnParagraphs(section);
+    let   buffer     = "";
+
+    for (const para of paragraphs) {
+      // If one paragraph alone exceeds maxChars — hard-split it first
+      if (para.length > maxChars) {
+        // Flush buffer first
+        if (buffer.trim()) {
+          chunks.push(buffer.trim());
+          buffer = "";
+        }
+        for (const part of hardSplit(para, maxChars)) {
+          chunks.push(part.trim());
+        }
         continue;
       }
-      // Paragraph split
-      const paras = sub.split(/\n{2,}/);
-      let acc = "";
-      for (const para of paras) {
-        const candidate = acc ? `${acc}\n\n${para}` : para;
-        if (estimateTokens(candidate) <= maxTokens) {
-          acc = candidate;
-        } else {
-          if (acc) addChunk(acc, chunks, maxTokens, overlap);
-          acc = para;
+
+      const candidate = buffer ? `${buffer}\n\n${para}` : para;
+
+      if (candidate.length <= maxChars) {
+        buffer = candidate;
+      } else {
+        // Flush current buffer and start fresh with this paragraph
+        if (buffer.trim()) {
+          chunks.push(buffer.trim());
         }
+        buffer = para;
       }
-      if (acc) addChunk(acc, chunks, maxTokens, overlap);
+    }
+
+    // Flush remaining buffer for this section
+    if (buffer.trim()) {
+      chunks.push(buffer.trim());
+      buffer = "";
     }
   }
 
-  return chunks.map((c, i) => ({ ...c, index: i }));
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function splitOnHeading(text: string, pattern: RegExp): string[] {
-  const lines    = text.split("\n");
-  const sections: string[] = [];
-  let current    = "";
-
-  for (const line of lines) {
-    if (pattern.test(line) && current.trim()) {
-      sections.push(current.trim());
-      current = line + "\n";
-    } else {
-      current += line + "\n";
-    }
-  }
-  if (current.trim()) sections.push(current.trim());
-  return sections.length ? sections : [text];
-}
-
-function addChunk(
-  text:      string,
-  chunks:    TextChunk[],
-  maxTokens: number,
-  overlap:   number,
-): void {
-  const trimmed = text.trim();
-  if (!trimmed || trimmed.length < 20) return;
-
-  if (estimateTokens(trimmed) <= maxTokens) {
-    chunks.push({
-      index:      chunks.length,
-      text:       trimmed,
-      tokenCount: estimateTokens(trimmed),
-      heading:    extractHeading(trimmed),
-    });
-    return;
-  }
-
-  // Hard split with character-based overlap
-  const maxChars     = maxTokens * 4;
-  const overlapChars = overlap   * 4;
-  let start = 0;
-
-  while (start < trimmed.length) {
-    const end   = Math.min(start + maxChars, trimmed.length);
-    const slice = trimmed.slice(start, end);
-    if (slice.trim().length >= 20) {
-      chunks.push({
-        index:      chunks.length,
-        text:       slice.trim(),
-        tokenCount: estimateTokens(slice),
-        heading:    extractHeading(slice) ?? extractHeading(trimmed),
-      });
-    }
-    if (end === trimmed.length) break;
-    start = end - overlapChars;
-  }
+  // Build output — filter empty, assign indices
+  return chunks
+    .filter((c) => c.trim().length > 0)
+    .map((chunkText, i) => ({
+      chunkIndex:   i,
+      chunkText,
+      approxTokens: Math.ceil(chunkText.length / 4),
+    }));
 }
