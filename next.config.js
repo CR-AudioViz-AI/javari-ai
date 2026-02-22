@@ -2,6 +2,31 @@
 // next.config.js
 // CR AudioViz AI — Production-Optimised Next.js Config
 // 2026-02-21 — Added instrumentationHook for Secret Authority
+// 2026-02-22 — Added build stability guards
+
+// Experimental features with fallback
+let experimentalConfig = {
+  instrumentationHook: true,
+  optimizePackageImports: [  // tree-shake large deps
+    "lucide-react",
+    "@radix-ui/react-dropdown-menu",
+    "@radix-ui/react-dialog",
+    "framer-motion",
+  ],
+};
+
+// Safe experimental features wrapper
+try {
+  // Validate experimental features are supported
+  if (typeof process.env.NEXT_SKIP_INSTRUMENTATION !== 'undefined') {
+    experimentalConfig = {
+      ...experimentalConfig,
+      instrumentationHook: false,
+    };
+  }
+} catch (error) {
+  console.warn('[next.config] Experimental features configuration warning:', error.message);
+}
 
 const nextConfig = {
   // ── TypeScript & ESLint ───────────────────────────────────────────────────
@@ -13,15 +38,7 @@ const nextConfig = {
   },
 
   // ── Secret Authority: enable instrumentation.ts ───────────────────────────
-  experimental: {
-    instrumentationHook: true,
-    optimizePackageImports: [  // tree-shake large deps
-      "lucide-react",
-      "@radix-ui/react-dropdown-menu",
-      "@radix-ui/react-dialog",
-      "framer-motion",
-    ],
-  },
+  experimental: experimentalConfig,
 
   // ── Image Optimization ────────────────────────────────────────────────────
   images: {
