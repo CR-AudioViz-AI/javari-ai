@@ -86,9 +86,6 @@ export async function POST(req: NextRequest) {
   if (!providerModule) {
     return errorResponse("No AI provider available. Check API keys.");
   }
-
-  console.log(`[Chat] provider=${usedProvider} mode=${mode} stream=${wantsStream} msgLen=${message.length}`);
-
   // ── STREAMING PATH ────────────────────────────────────────────────────────
   if (wantsStream) {
     const encoder = new TextEncoder();
