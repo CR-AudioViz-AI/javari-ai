@@ -31,9 +31,15 @@ const navigationLinks = [
 ]
 
 export function MobileNav() {
+  // EXPLICIT: Menu must start closed and only open on user tap
   const [isOpen, setIsOpen] = useState(false)
   const drawerRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
+
+  // Ensure menu is always closed on mount (safety guard)
+  useEffect(() => {
+    setIsOpen(false)
+  }, [])
 
   // Handle Escape key to close drawer
   useEffect(() => {
