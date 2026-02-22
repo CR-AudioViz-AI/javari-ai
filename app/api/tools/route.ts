@@ -2,6 +2,7 @@
 // Javari Tool Execution API - Execute any tool
 // Timestamp: 2025-11-30 07:00 AM EST
 
+export const runtime = "nodejs";
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
