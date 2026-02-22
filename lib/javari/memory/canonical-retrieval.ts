@@ -13,7 +13,7 @@
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const CANONICAL_TOP_K        = 8;
-const CANONICAL_THRESHOLD    = 0.60;
+const CANONICAL_THRESHOLD    = 0.35;   // Calibrated: canonical chunks score 0.35-0.57
 const CANONICAL_MAX_CHARS    = 8_000;   // ~2 000 tokens
 
 // ── Types ─────────────────────────────────────────────────────────────────────

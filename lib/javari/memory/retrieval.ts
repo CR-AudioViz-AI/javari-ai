@@ -48,7 +48,7 @@ export async function retrieveRelevantMemory(userMessage: string): Promise<strin
     // ── Step 2: Both retrieval layers in parallel ─────────────────────────────
     const [generalChunks, canonicalCtx] = await Promise.all([
       searchSimilar(queryEmbedding, TOP_K, userMessage).catch(() => []),
-      retrieveCanonicalContext(queryEmbedding, { topK: 8, threshold: 0.60 }).catch(() => ""),
+      retrieveCanonicalContext(queryEmbedding, { topK: 8, threshold: 0.35 }).catch(() => ""),  // Calibrated threshold
     ]);
 
     const retrieveMs = Date.now() - t0 - embedMs;

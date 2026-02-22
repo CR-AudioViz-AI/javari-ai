@@ -16,7 +16,7 @@ import { generateEmbedding }       from "@/lib/javari/memory/embedding-provider"
 import { retrieveCanonicalContext } from "@/lib/javari/memory/canonical-retrieval";
 
 const AUTONOMY_TOP_K     = 10;
-const AUTONOMY_THRESHOLD = 0.65;
+const AUTONOMY_THRESHOLD = 0.35;   // Calibrated: canonical chunks score 0.35-0.57
 
 /**
  * getAutonomyCanonicalContext — fetches canonical platform docs most relevant
