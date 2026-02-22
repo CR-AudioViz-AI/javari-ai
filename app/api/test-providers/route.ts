@@ -2,6 +2,7 @@
 // Live provider health check — all keys via vault, no direct process.env.
 // 2026-02-19 — Perplexity test redirected to OpenRouter (Cloudflare/Vercel IP fix)
 
+export const runtime = "nodejs";
 import { NextResponse } from 'next/server';
 import { vault } from '@/lib/javari/secrets/vault';
 
