@@ -244,6 +244,10 @@ export async function unifiedJavariEngine({
   _longForm = false,
   _mode,
   _userId,
+  _previewCost = false,
+  _orgId,
+  _teamType,
+  _region,
 }: {
   messages?: Message[];
   persona?: string;
