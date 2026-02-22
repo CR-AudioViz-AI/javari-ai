@@ -5,49 +5,60 @@
 // Orchestrates: list R2 → fetch → sha256 → diff → chunk → embed → store
 //
 // Safety guarantees:
-//   - If R2 unreachable → abort immediately, return error
-//   - If individual doc fetch fails → skip, continue
-//   - If embedding fails on a chunk → skip that chunk, continue
-//   - Never delete canonical_docs rows
-//   - Never mutate R2
+//   - R2 unreachable → throw (caller returns 500 safely)
+//   - Individual doc fetch fails → skip, continue
+//   - Embedding fails on a chunk → skip that chunk, continue
+//   - Never deletes canonical_docs rows
+//   - Never mutates R2
 //   - force=true re-embeds even if sha256 unchanged
+//   - dryRun=true lists and chunks but makes no writes
 
-import crypto                                    from "crypto";
-import { createLogger }                          from "@/lib/observability/logger";
+import crypto from "crypto";
 import { listRoadmapDocs, fetchDoc, checkR2Connectivity } from "./r2-client";
-import { chunkMarkdown }                         from "./chunker";
-import { embedBatch }                            from "./embed";
-import { upsertCanonicalDoc, upsertDocChunks, getStoreStats } from "./store";
+import { chunkMarkdown }                                  from "./chunker";
+import { embedBatch }                                     from "./embed";
+import {
+  upsertCanonicalDoc,
+  upsertDocChunks,
+  getStoreStats,
+  getExistingDoc,
+} from "./store";
 
-const log = createLogger("canonical:ingest");
+function clog(level: "info" | "warn" | "error", msg: string, meta?: unknown) {
+  const ts = new Date().toISOString();
+  if (meta !== undefined) {
+    console[level](`${ts} [${level.toUpperCase()}][canonical:ingest] ${msg}`, JSON.stringify(meta));
+  } else {
+    console[level](`${ts} [${level.toUpperCase()}][canonical:ingest] ${msg}`);
+  }
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface IngestOptions {
-  force?:     boolean;   // re-embed even if sha256 unchanged
-  dryRun?:    boolean;   // list + hash only; no writes
-  maxTokens?: number;    // chunk size override (default 800)
-  prefix?:    string;    // override R2_CANONICAL_PREFIX
+  force?:     boolean;  // re-embed even if sha256 unchanged
+  dryRun?:    boolean;  // no writes — list + hash only
+  maxTokens?: number;   // chunk size override (default 800)
 }
 
 export interface DocIngestResult {
-  r2Key:        string;
-  status:       "unchanged" | "updated" | "new" | "fetch_failed" | "embed_failed" | "store_failed";
+  r2Key:         string;
+  status:        "unchanged" | "updated" | "new" | "fetch_failed" | "embed_failed" | "store_failed";
   chunksCreated: number;
   chunksSkipped: number;
-  durationMs:   number;
+  durationMs:    number;
 }
 
 export interface IngestSummary {
-  docsProcessed:  number;
-  docsUpdated:    number;
-  docsUnchanged:  number;
-  docsFailed:     number;
-  chunksCreated:  number;
-  chunksSkipped:  number;
-  durationMs:     number;
-  dryRun:         boolean;
-  docs:           DocIngestResult[];
+  docsProcessed: number;
+  docsUpdated:   number;
+  docsUnchanged: number;
+  docsFailed:    number;
+  chunksCreated: number;
+  chunksSkipped: number;
+  durationMs:    number;
+  dryRun:        boolean;
+  docs:          DocIngestResult[];
 }
 
 // ── SHA-256 helper ────────────────────────────────────────────────────────────
@@ -56,31 +67,29 @@ function sha256hex(text: string): string {
   return crypto.createHash("sha256").update(text, "utf8").digest("hex");
 }
 
-// ── Single doc ingest ─────────────────────────────────────────────────────────
+// ── Single-doc ingest ─────────────────────────────────────────────────────────
 
 async function ingestOneDoc(
   r2Key:      string,
-  opts:       IngestOptions,
   docVersion: string,
+  opts:       IngestOptions,
 ): Promise<DocIngestResult> {
   const start     = Date.now();
   const maxTokens = opts.maxTokens ?? 800;
 
-  // 1. Fetch content from R2
+  // 1. Fetch from R2
   const content = await fetchDoc(r2Key);
   if (!content) {
-    log.warn(`Skipping ${r2Key}: fetch failed`);
     return { r2Key, status: "fetch_failed", chunksCreated: 0, chunksSkipped: 0, durationMs: Date.now() - start };
   }
 
   const sha256 = sha256hex(content);
 
-  // 2. Check if doc changed vs stored record
+  // 2. Diff check (skip if unchanged and not forced)
   if (!opts.dryRun && !opts.force) {
-    const { getExistingDoc } = await import("./store");
     const existing = await getExistingDoc(r2Key);
     if (existing && existing.sha256 === sha256) {
-      log.info(`Unchanged: ${r2Key}`);
+      clog("info", `Unchanged: ${r2Key}`);
       return { r2Key, status: "unchanged", chunksCreated: 0, chunksSkipped: 0, durationMs: Date.now() - start };
     }
   }
@@ -88,23 +97,26 @@ async function ingestOneDoc(
   // 3. Chunk
   const chunks = chunkMarkdown(content, maxTokens);
   if (!chunks.length) {
-    log.warn(`No chunks produced for ${r2Key} (empty doc?)`);
+    clog("warn", `No chunks for ${r2Key} — skipping`);
     return { r2Key, status: "fetch_failed", chunksCreated: 0, chunksSkipped: 0, durationMs: Date.now() - start };
   }
 
-  // 4. Extract doc title from first H1
+  // 4. Extract title
   const titleMatch = content.match(/^#\s+(.+)$/m);
-  const docTitle   = titleMatch ? titleMatch[1].trim() : r2Key.split("/").pop()?.replace(/\.md$/, "") ?? r2Key;
+  const docTitle   = titleMatch
+    ? titleMatch[1].trim()
+    : (r2Key.split("/").pop()?.replace(/\.md$/, "") ?? r2Key);
 
+  // DRY RUN — stop here, no writes
   if (opts.dryRun) {
-    log.info(`DRY RUN: ${r2Key} → ${chunks.length} chunks (not written)`);
+    clog("info", `DRY RUN ${r2Key}: ${chunks.length} chunks (not written)`);
     return { r2Key, status: "new", chunksCreated: chunks.length, chunksSkipped: 0, durationMs: Date.now() - start };
   }
 
-  // 5. Upsert canonical_docs row first (get doc id)
+  // 5. Upsert canonical_docs row
   let docId: string;
   try {
-    const upsertResult = await upsertCanonicalDoc({
+    const upsert = await upsertCanonicalDoc({
       r2Key,
       version:    docVersion,
       sha256,
@@ -112,25 +124,21 @@ async function ingestOneDoc(
       charCount:  content.length,
       chunkCount: chunks.length,
     });
-    docId = upsertResult.id;
+    docId = upsert.id;
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "unknown";
-    log.error(`store failed for ${r2Key}: ${msg}`);
+    clog("error", `store failed for ${r2Key}: ${e instanceof Error ? e.message : e}`);
     return { r2Key, status: "store_failed", chunksCreated: 0, chunksSkipped: 0, durationMs: Date.now() - start };
   }
 
   // 6. Embed all chunks
-  const chunkTexts = chunks.map((c) => c.text);
   let embeds;
   try {
-    embeds = await embedBatch(chunkTexts, (done, total) => {
-      if (done % 10 === 0 || done === total) {
-        log.info(`  Embedding ${r2Key}: ${done}/${total}`);
-      }
-    });
+    embeds = await embedBatch(
+      chunks.map((c) => c.text),
+      (done, total) => { if (done % 10 === 0 || done === total) clog("info", `  ${r2Key}: embedded ${done}/${total}`); }
+    );
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "unknown";
-    log.error(`embedBatch failed for ${r2Key}: ${msg}`);
+    clog("error", `embedBatch failed for ${r2Key}: ${e instanceof Error ? e.message : e}`);
     return { r2Key, status: "embed_failed", chunksCreated: 0, chunksSkipped: 0, durationMs: Date.now() - start };
   }
 
@@ -138,56 +146,51 @@ async function ingestOneDoc(
   let chunksCreated = 0;
   let chunksSkipped = 0;
   try {
-    const result = await upsertDocChunks(docId, chunks, embeds);
+    const result  = await upsertDocChunks(docId, chunks, embeds);
     chunksCreated = result.inserted;
     chunksSkipped = result.skipped;
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "unknown";
-    log.error(`upsertDocChunks failed for ${r2Key}: ${msg}`);
+    clog("error", `upsertDocChunks failed for ${r2Key}: ${e instanceof Error ? e.message : e}`);
     return { r2Key, status: "store_failed", chunksCreated: 0, chunksSkipped: 0, durationMs: Date.now() - start };
   }
 
-  const status = chunksCreated > 0 ? "updated" : "embed_failed";
-  log.info(`Ingested ${r2Key}: ${chunksCreated} chunks in ${Date.now() - start}ms`);
+  const status: DocIngestResult["status"] = chunksCreated > 0 ? "updated" : "embed_failed";
+  clog("info", `Ingested ${r2Key}: ${chunksCreated} chunks in ${Date.now() - start}ms`);
   return { r2Key, status, chunksCreated, chunksSkipped, durationMs: Date.now() - start };
 }
 
 // ── Main entry point ──────────────────────────────────────────────────────────
 
 /**
- * ingestAllCanonicalDocs — runs the full ingestion pipeline.
+ * ingestAllCanonicalDocs
  *
  * Flow:
- *   1. Verify R2 connectivity (abort if unreachable)
+ *   1. Verify R2 connectivity — throws if unreachable
  *   2. List all docs under R2_CANONICAL_PREFIX
  *   3. For each doc: fetch → sha256 → diff → chunk → embed → store
- *   4. Return summary stats
+ *   4. Return IngestSummary
  *
- * Concurrency: sequential per doc to respect OpenAI embedding rate limits.
+ * Sequential processing to respect OpenAI embedding rate limits.
  */
-export async function ingestAllCanonicalDocs(opts: IngestOptions = {}): Promise<IngestSummary> {
+export async function ingestAllCanonicalDocs(
+  opts: IngestOptions = {}
+): Promise<IngestSummary> {
   const startAll = Date.now();
-  log.info("Starting canonical document ingest", { meta: { force: opts.force, dryRun: opts.dryRun } });
+  clog("info", "Starting canonical ingest", { force: opts.force, dryRun: opts.dryRun });
 
-  // Step 1: Verify R2 connectivity
-  const connectivity = await checkR2Connectivity();
-  if (!connectivity.ok) {
-    log.error(`R2 unreachable — aborting ingest: ${connectivity.message}`);
-    throw new Error(`R2 unreachable: ${connectivity.message}`);
+  // Step 1 — R2 connectivity
+  const conn = await checkR2Connectivity();
+  if (!conn.ok) {
+    clog("error", `R2 unreachable: ${conn.message}`);
+    throw new Error(`R2 unreachable: ${conn.message}`);
   }
-  log.info(`R2 connectivity: ${connectivity.message}`);
+  clog("info", `R2: ${conn.message}`);
 
-  // Step 2: List docs
-  let docs;
-  try {
-    docs = await listRoadmapDocs();
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "unknown";
-    throw new Error(`Failed to list R2 docs: ${msg}`);
-  }
+  // Step 2 — list docs
+  const docs = await listRoadmapDocs();
 
   if (!docs.length) {
-    log.warn("No canonical docs found in R2 — nothing to ingest");
+    clog("warn", "No docs found in R2 — nothing to ingest");
     return {
       docsProcessed: 0, docsUpdated: 0, docsUnchanged: 0, docsFailed: 0,
       chunksCreated: 0, chunksSkipped: 0,
@@ -197,37 +200,32 @@ export async function ingestAllCanonicalDocs(opts: IngestOptions = {}): Promise<
     };
   }
 
-  log.info(`Found ${docs.length} docs to process`);
+  clog("info", `Found ${docs.length} docs to process`);
 
-  // Step 3: Ingest each doc sequentially
+  // Step 3 — ingest sequentially
   const results: DocIngestResult[] = [];
-
   for (const doc of docs) {
-    // Use lastModified as doc version (ISO date → version string)
     const docVersion = doc.lastModified.slice(0, 10); // YYYY-MM-DD
-    const result     = await ingestOneDoc(doc.key, opts, docVersion);
+    const result     = await ingestOneDoc(doc.key, docVersion, opts);
     results.push(result);
   }
 
-  // Step 4: Compute summary
-  const docsUpdated   = results.filter((r) => r.status === "updated" || r.status === "new").length;
-  const docsUnchanged = results.filter((r) => r.status === "unchanged").length;
-  const docsFailed    = results.filter((r) => ["fetch_failed","embed_failed","store_failed"].includes(r.status)).length;
-  const chunksCreated = results.reduce((s, r) => s + r.chunksCreated, 0);
-  const chunksSkipped = results.reduce((s, r) => s + r.chunksSkipped, 0);
-
+  // Step 4 — summary
   const summary: IngestSummary = {
     docsProcessed: docs.length,
-    docsUpdated,
-    docsUnchanged,
-    docsFailed,
-    chunksCreated,
-    chunksSkipped,
-    durationMs: Date.now() - startAll,
-    dryRun:     opts.dryRun ?? false,
-    docs:       results,
+    docsUpdated:   results.filter((r) => r.status === "updated" || r.status === "new").length,
+    docsUnchanged: results.filter((r) => r.status === "unchanged").length,
+    docsFailed:    results.filter((r) => ["fetch_failed","embed_failed","store_failed"].includes(r.status)).length,
+    chunksCreated: results.reduce((s, r) => s + r.chunksCreated, 0),
+    chunksSkipped: results.reduce((s, r) => s + r.chunksSkipped, 0),
+    durationMs:    Date.now() - startAll,
+    dryRun:        opts.dryRun ?? false,
+    docs:          results,
   };
 
-  log.info("Canonical ingest complete", { meta: summary });
+  clog("info", "Canonical ingest complete", summary);
   return summary;
 }
+
+// Re-export getStoreStats so the API route only needs to import from here
+export { getStoreStats };
