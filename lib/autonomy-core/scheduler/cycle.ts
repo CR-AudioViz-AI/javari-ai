@@ -2,26 +2,31 @@
 // CR AudioViz AI — Autonomous Cycle Scheduler
 // 2026-02-21 — STEP 11: Javari Autonomous Ecosystem Mode
 // 2026-02-22 — Step 12: canonical platform docs loaded at cycle start
+// 2026-02-22 — Step 13: STAGE 0 planning pass — roadmap engine + dependency resolution
 //
-// Orchestrates the full crawl → detect → validate → fix → report pipeline.
-// Each cycle now loads top-k canonical platform documents via
-// match_canonical_chunks() RPC, making the cycle document-aware and
-// architecture-aware. Context logged to audit trail each run.
+// Orchestrates the full 5-stage pipeline:
+//   STAGE 0: Planning — roadmap task execution with canonical context + dependency resolution
+//   STAGE 1: Crawl   — GitHub repo snapshot
+//   STAGE 2: Detect  — anomaly detection
+//   STAGE 3: Fix     — Ring 2 auto-apply safe patches
+//   STAGE 4: Report  — persist + audit
 //
-// Called by /api/autonomy-core/run (Vercel Cron or manual trigger).
-// All state is in Supabase — no in-process global state between invocations.
-// Kill switch checked at every stage.
+// Cron: configured in vercel.json (*/15 * * * *) — activate by setting
+//   AUTONOMOUS_CORE_ENABLED=true in Vercel environment variables.
+// Kill switch: set AUTONOMOUS_CORE_KILL_SWITCH=true to halt immediately.
 
-import { getAutonomyCoreConfig }      from "../crawler/types";
-import { getAutonomyCanonicalContext } from "../canonical-context";
-import { crawlCore }                   from "../crawler/crawl";
-import { detectAnomalies }             from "../diff/detect";
+import { getAutonomyCoreConfig }       from "../crawler/types";
+import { getAutonomyCanonicalContext }  from "../canonical-context";
+import { runRoadmapPlanner }           from "../planner/roadmap-planner";
+import type { PlanningResult }          from "../planner/roadmap-planner";
+import { crawlCore }                    from "../crawler/crawl";
+import { detectAnomalies }              from "../diff/detect";
 import { runRing2Fixes, rollbackPatch } from "../fixer/ring2";
-import { validatePatch }               from "../validator/validate";
-import { generateCycleReport }         from "../reporter/report";
-import { writeAuditEvent }             from "@/lib/enterprise/audit";
-import { createLogger }                from "@/lib/observability/logger";
-import type { CycleReport, CorePatch } from "../crawler/types";
+import { validatePatch }                from "../validator/validate";
+import { generateCycleReport }          from "../reporter/report";
+import { writeAuditEvent }              from "@/lib/enterprise/audit";
+import { createLogger }                 from "@/lib/observability/logger";
+import type { CycleReport, CorePatch }  from "../crawler/types";
 
 const log = createLogger("autonomy");
 
@@ -137,6 +142,32 @@ export async function runAutonomyCycle(opts?: {
     }
   } catch (e) {
     log.warn(`[${cycleId}] Canonical context load failed (non-fatal): ${e instanceof Error ? e.message : e}`);
+  }
+
+
+  // ── STAGE 0: Roadmap Planning Pass ─────────────────────────────────────────
+  // Executes next batch of ready roadmap tasks using dependency resolution +
+  // canonical platform context. Runs before crawl so task output is available
+  // for anomaly detection in the same cycle.
+  // Non-blocking — planning failures never halt the crawl/fix pipeline.
+  let planningResult: PlanningResult | null = null;
+  try {
+    const adminSecret = process.env.AUTONOMY_CORE_ADMIN_SECRET ?? "";
+    const baseUrl     = process.env.NEXTAUTH_URL ?? (
+      process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000"
+    );
+    planningResult = await runRoadmapPlanner({
+      cycleId:          cycleId,
+      maxTasksPerCycle: Math.max(1, Math.floor(cfg.maxPatchesPerCycle / 2)), // share budget
+      dryRun:           dryRun,
+      baseUrl,
+      adminSecret,
+    });
+    if (!planningResult.skipped) {
+      log.info(`[${cycleId}] Planning: executed=${planningResult.tasksExecuted} complete=${planningResult.tasksComplete} failed=${planningResult.tasksFailed}`);
+    }
+  } catch (e) {
+    log.warn(`[${cycleId}] Planning pass failed (non-fatal): ${e instanceof Error ? e.message : e}`);
   }
 
   // Check halt conditions (unless forced by admin)
@@ -262,6 +293,10 @@ export async function runAutonomyCycle(opts?: {
       metadata: {
         system: "autonomy-core", stage: "complete", cycleId,
         anomaliesFound, patchesApplied: report.patchesApplied,
+        planningTasksExecuted: planningResult?.tasksExecuted ?? 0,
+        planningTasksComplete: planningResult?.tasksComplete ?? 0,
+        roadmapId:             planningResult?.roadmapId ?? null,
+        roadmapProgress:       planningResult ? `${planningResult.tasksComplete}/${planningResult.tasksFound}` : null,
       },
       severity: "info",
     });

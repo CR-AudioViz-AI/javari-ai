@@ -15,5 +15,11 @@
     "autoAlias": false,
     "silent": false,
     "autoJobCancelation": false
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/autonomy-core/run",
+      "schedule": "*/15 * * * *"
+    }
+  ]
 }
