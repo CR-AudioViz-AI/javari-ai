@@ -8,6 +8,7 @@
 // Created: Saturday, December 13, 2025 - 6:22 PM EST
 // =============================================================================
 
+export const runtime = "nodejs";
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
