@@ -31,7 +31,7 @@ export function cacheInvalidate(name?: string): void {
 }
 
 export function cacheStats(): { size: number; keys: string[] } {
-  return { size: _cache.size, keys: [..._cache.keys()] };
+  return { size: _cache.size, keys: Array.from(_cache.keys()) };
 }
 
 // ── Supabase bootstrap config (always from process.env) ───────────────────────
