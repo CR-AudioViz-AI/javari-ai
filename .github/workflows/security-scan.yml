@@ -19,7 +19,7 @@ jobs:
       - name: Run Security Scan
         run: npm run security:scan
       - name: Upload Security Report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: security-report
           path: security-scan-results.json
