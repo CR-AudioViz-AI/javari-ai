@@ -8,6 +8,8 @@
 
 import { ClockIcon, CpuChipIcon, ServerIcon } from '@heroicons/react/24/outline';
 
+export const dynamic = 'force-dynamic';
+
 export default function CommandCenterPage() {
   return (
     <div className="max-w-7xl mx-auto">

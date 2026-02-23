@@ -15,6 +15,8 @@ import { Sidebar } from '@/components/command/Sidebar';
 import { Header } from '@/components/command/Header';
 import { checkAdminAccess, getCurrentUserId } from '@/lib/command/checkAdmin';
 
+export const dynamic = 'force-dynamic';
+
 export const metadata = {
   title: 'Command Center | Javari OS',
   description: 'Autonomous operations control center for Javari AI',

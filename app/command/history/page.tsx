@@ -13,6 +13,8 @@ export const metadata = {
   description: 'Unified timeline of all autonomy events',
 };
 
+export const dynamic = 'force-dynamic';
+
 export default function HistoryPage() {
   return (
     <div className="max-w-7xl mx-auto">

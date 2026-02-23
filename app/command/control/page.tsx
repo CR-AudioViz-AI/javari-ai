@@ -13,6 +13,8 @@ export const metadata = {
   description: 'Manage autonomy operations and system controls',
 };
 
+export const dynamic = 'force-dynamic';
+
 export default function ControlPage() {
   return (
     <div className="max-w-7xl mx-auto">

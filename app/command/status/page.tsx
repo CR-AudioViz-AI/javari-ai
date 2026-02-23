@@ -13,6 +13,8 @@ export const metadata = {
   description: 'Real-time system status and health monitoring',
 };
 
+export const dynamic = 'force-dynamic';
+
 export default function StatusPage() {
   return (
     <div className="max-w-7xl mx-auto">
