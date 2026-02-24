@@ -1,7 +1,7 @@
 /**
  * Javari AI - Root Layout (App Shell)
  * SPEC 03 — Canonical Application Shell
- * Updated: Server-side pathname detection for Javari OS routes
+ * Updated: Server-side route detection via middleware
  * 
  * Defines the semantic structure for all pages:
  * - Skip-to-content link (accessibility)
@@ -12,15 +12,15 @@
  * - System overlay slot (empty placeholder)
  * 
  * JAVARI OS SSR OPTIMIZATION:
- * - Detects /javari routes on server via headers
- * - Excludes TopNav/MobileNav HTML for /javari routes
+ * - Middleware sets x-is-javari header for /javari routes
+ * - Root layout reads header to conditionally render navigation
  * - Zero FOUC - navigation never rendered for Javari OS
  * 
  * Server Component - optimal SSR performance
  * 
- * @version 2.0.0
- * @spec SPEC 03 + SPEC 02 + SSR Pathname Detection
- * @timestamp Monday, February 24, 2026 at 1:19 AM EST
+ * @version 3.0.0
+ * @spec SPEC 03 + SPEC 02 + Middleware Route Detection
+ * @timestamp Monday, February 24, 2026 at 1:26 AM EST
  */
 
 import type { Metadata } from 'next'
@@ -51,10 +51,9 @@ export default function RootLayout({
 }: {
   children: React.ReactNode
 }) {
-  // Server-side pathname detection
+  // Server-side route detection via middleware-set header
   const headersList = headers()
-  const pathname = headersList.get('x-invoke-path') || headersList.get('x-pathname') || ''
-  const isJavari = pathname.startsWith('/javari')
+  const isJavari = headersList.get('x-is-javari') === 'true'
 
   return (
     <html lang="en">
