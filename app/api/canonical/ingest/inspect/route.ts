@@ -44,8 +44,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     // 2. Fetch first document
-    const firstKey  = keys[0];
-    const text      = await fetchCanonicalText(firstKey);
+    const firstObj  = keys[0];
+    const text      = await fetchCanonicalText(firstObj.key);
 
     // 3. Hash + chunk
     const hash   = sha256Hex(text);
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({
       ok:                 true,
       keyCount:           keys.length,
-      firstKey,
+      firstKey: firstObj.key,
       firstDocSha256:     hash,
       firstDocChunkCount: chunks.length,
       firstDocChars:      text.length,
