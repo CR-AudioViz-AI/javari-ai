@@ -1,7 +1,7 @@
 /**
  * Javari AI - Root Layout (App Shell)
  * SPEC 03 — Canonical Application Shell
- * Updated: Integrated SPEC 02 Navigation System
+ * Updated: Integrated SPEC 02 Navigation System + Javari OS Immersive Mode
  * 
  * Defines the semantic structure for all pages:
  * - Skip-to-content link (accessibility)
@@ -11,17 +11,19 @@
  * - Footer slot (empty placeholder)
  * - System overlay slot (empty placeholder)
  * 
- * Server Component - renders without JavaScript
- * Navigation components handle their own client state
+ * JAVARI OS IMMERSIVE MODE:
+ * - Routes starting with /javari/* render WITHOUT global navigation
+ * - Provides full-screen OS experience for Javari interface
+ * - All other routes render with normal site navigation
  * 
- * @version 1.1.0
- * @spec SPEC 03 + SPEC 02
- * @timestamp Tuesday, January 28, 2025 at 11:28 AM EST
+ * @version 1.2.0
+ * @spec SPEC 03 + SPEC 02 + Javari OS Mode
+ * @timestamp Monday, February 24, 2026 at 12:58 AM EST
  */
 
 import type { Metadata } from 'next'
 import './globals.css'
-import { TopNav, MobileNav } from '@/components/navigation'
+import { LayoutWrapper } from './LayoutWrapper'
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://javariai.com'),
@@ -49,37 +51,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        {/* Skip-to-content link for keyboard navigation */}
-        <a 
-          href="#main-content" 
-          className="absolute -left-[9999px] z-[999] p-4 bg-primary text-primary-foreground no-underline rounded-md focus:left-4 focus:top-4"
-        >
-          Skip to main content
-        </a>
-
-        {/* Header slot - EMPTY placeholder for future implementation */}
-        <header role="banner">
-          {/* Header content will be added in future steps */}
-        </header>
-
-        {/* Navigation slot - Canonical Navigation System (SPEC 02) */}
-        <TopNav />
-        <MobileNav />
-
-        {/* Main content area - where page children render */}
-        <main role="main" id="main-content">
-          {children}
-        </main>
-
-        {/* Footer slot - EMPTY placeholder for future implementation */}
-        <footer role="contentinfo">
-          {/* Footer content will be added in future steps */}
-        </footer>
-
-        {/* System overlay slot - EMPTY placeholder for modals, toasts, etc. */}
-        <div role="region" aria-live="polite" aria-atomic="true">
-          {/* System overlays (modals, toasts) will be added in future steps */}
-        </div>
+        <LayoutWrapper>{children}</LayoutWrapper>
       </body>
     </html>
   )

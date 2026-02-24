@@ -1,9 +1,9 @@
 /**
  * JAVARI LAYOUT
  * 
- * Full-screen immersive layout for Javari OS
- * Hides global navigation to provide complete OS experience
- * Providers for Javari-specific state management
+ * Provider wrapper for Javari-specific features
+ * Does NOT create nested html/body - inherits from root layout
+ * Navigation hiding handled by root layout pathname detection
  */
 
 import { UserProfileProvider } from '@/components/user-profile/user-profile-context';
@@ -17,10 +17,7 @@ export default function JavariLayout({
   return (
     <UserProfileProvider>
       <SplitScreenProvider>
-        {/* Full-screen container - hides TopNav via CSS */}
-        <div className="fixed inset-0 z-50 bg-black">
-          {children}
-        </div>
+        {children}
       </SplitScreenProvider>
     </UserProfileProvider>
   );
