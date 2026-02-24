@@ -1,0 +1,19 @@
+{
+  "slug": "image-caption-generator",
+  "name": "Image Caption Generator",
+  "description": "Generate descriptive alt text and captions for images using computer vision AI, with SEO optimization and accessibility compliance",
+  "family": "ai-integration",
+  "types": [
+    "full-stack"
+  ],
+  "creditsPerUse": 2,
+  "minPlan": "free",
+  "features": [],
+  "routes": {
+    "ui": "/tools/image-caption-generator",
+    "api": "/api/tools/image-caption-generator/process"
+  },
+  "generatedAt": "2026-02-20T04:34:57.873Z",
+  "generatedBy": "javari-module-factory@2.1",
+  "status": "ready"
+}

@@ -1,0 +1,24 @@
+{
+  "slug": "javari-demo-widget",
+  "name": "Javari Demo Widget",
+  "description": "A demonstration widget showing Javari AI Module Factory capabilities with real-time AI generation preview and credit tracking dashboard",
+  "family": "ai-integration",
+  "types": [
+    "full-stack"
+  ],
+  "creditsPerUse": 1,
+  "minPlan": "free",
+  "features": [
+    "Real-time AI preview",
+    "Credit tracking",
+    "Generation history",
+    "Export results"
+  ],
+  "routes": {
+    "ui": "/tools/javari-demo-widget",
+    "api": "/api/tools/javari-demo-widget/process"
+  },
+  "generatedAt": "2026-02-20T00:14:54.060Z",
+  "generatedBy": "javari-module-factory@2.0",
+  "status": "ready"
+}

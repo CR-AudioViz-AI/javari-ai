@@ -1,0 +1,24 @@
+{
+  "slug": "color-palette",
+  "name": "Color Palette Generator",
+  "description": "Generate beautiful AI color palettes from text descriptions or uploaded images with accessibility contrast checking",
+  "family": "creative-suite",
+  "types": [
+    "full-stack"
+  ],
+  "creditsPerUse": 1,
+  "minPlan": "free",
+  "features": [
+    "Text to palette",
+    "Image color extraction",
+    "WCAG contrast check",
+    "Export CSS/JSON"
+  ],
+  "routes": {
+    "ui": "/tools/color-palette",
+    "api": "/api/tools/color-palette/process"
+  },
+  "generatedAt": "2026-02-20T00:16:02.190Z",
+  "generatedBy": "javari-module-factory@2.0",
+  "status": "ready"
+}
