@@ -237,3 +237,34 @@ export async function fetchCanonicalText(key: string): Promise<string> {
 
   return res.text();
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// COMPATIBILITY EXPORTS FOR CANONICAL INGESTION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//
+// The canonical ingestion module (lib/canonical/ingest.ts) expects these specific
+// function names. We export aliases and add checkR2Connectivity to maintain
+// compatibility without changing the existing API.
+
+export { listCanonicalKeys as listRoadmapDocs };
+export { fetchCanonicalText as fetchDoc };
+
+/**
+ * checkR2Connectivity
+ * 
+ * Verifies R2 connection by attempting to list keys.
+ * Used by ingestion module to verify setup before processing.
+ * 
+ * @returns Promise<{ ok: boolean; message: string }>
+ */
+export async function checkR2Connectivity(): Promise<{ ok: boolean; message: string }> {
+  try {
+    await listCanonicalKeys("");
+    return { ok: true, message: "R2 connection successful" };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "R2 connection failed"
+    };
+  }
+}
