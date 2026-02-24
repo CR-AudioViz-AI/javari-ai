@@ -1,57 +1,43 @@
 /**
- * JAVARI OS - DEDICATED ROOT LAYOUT
+ * JAVARI OS - NESTED LAYOUT (Proper Next.js Structure)
  * 
- * This layout completely overrides the global app layout for all /javari/* routes.
- * NO global navigation, NO header, NO footer - pure full-screen OS experience.
+ * This is a NESTED layout that wraps /javari/* routes.
+ * It does NOT replace the root layout - it works WITH it.
  * 
- * By having a layout.tsx in /app/javari/, Next.js will use THIS layout
- * instead of /app/layout.tsx for all routes under /javari/*.
+ * Next.js Layout Hierarchy:
+ * app/layout.tsx (ROOT - provides html/body)
+ *   └─ app/javari/layout.tsx (NESTED - provides Javari-specific context)
+ *      └─ page.tsx (content)
  * 
  * Architecture:
- * - Server-side rendering (SSR) - no FOUC
- * - No TopNav/MobileNav imports
- * - Full-screen immersive interface
- * - Providers for Javari-specific state
+ * - NO <html> or <body> tags (only root layout has these)
+ * - Provides full-screen container for Javari OS
+ * - Wraps children with Javari-specific providers
+ * - Root layout handles navigation hiding via pathname detection
  * 
- * Result: Clean server render, no flash of unwanted content
- * 
- * @version 2.0.0
- * @timestamp Monday, February 24, 2026 at 1:03 AM EST
+ * @version 3.0.0 - VALID NESTED LAYOUT
+ * @timestamp Monday, February 24, 2026 at 1:18 AM EST
  */
 
-import type { Metadata } from 'next'
-import '../globals.css'
+'use client'
+
 import { UserProfileProvider } from '@/components/user-profile/user-profile-context'
 import { SplitScreenProvider } from '@/components/split-screen/split-screen-context'
 
-export const metadata: Metadata = {
-  title: 'Javari OS - Your AI Operating System',
-  description: 'Full-screen immersive AI interface powered by Javari OS',
-  robots: {
-    index: true,
-    follow: true,
-  },
-}
-
-export default function JavariRootLayout({
+export default function JavariLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
-      <body className="overflow-hidden">
-        <UserProfileProvider>
-          <SplitScreenProvider>
-            {/* NO TopNav, NO MobileNav, NO global site navigation */}
-            {/* Pure Javari OS full-screen experience */}
-            <main role="main" className="w-full h-screen">
-              {children}
-            </main>
-          </SplitScreenProvider>
-        </UserProfileProvider>
-      </body>
-    </html>
+    <UserProfileProvider>
+      <SplitScreenProvider>
+        {/* Full-screen Javari OS container */}
+        <div className="fixed inset-0 w-full h-full overflow-hidden bg-black">
+          {children}
+        </div>
+      </SplitScreenProvider>
+    </UserProfileProvider>
   )
 }
 
