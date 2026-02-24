@@ -1,0 +1,19 @@
+{
+  "slug": "pdf-summarizer",
+  "name": "PDF Summarizer",
+  "description": "Upload PDFs and get AI-generated summaries, key points extraction, chapter breakdowns, and Q&A capabilities",
+  "family": "ai-integration",
+  "types": [
+    "full-stack"
+  ],
+  "creditsPerUse": 4,
+  "minPlan": "starter",
+  "features": [],
+  "routes": {
+    "ui": "/tools/pdf-summarizer",
+    "api": "/api/tools/pdf-summarizer/process"
+  },
+  "generatedAt": "2026-02-20T04:35:14.544Z",
+  "generatedBy": "javari-module-factory@2.1",
+  "status": "ready"
+}

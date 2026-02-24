@@ -1,0 +1,19 @@
+{
+  "slug": "resume-builder",
+  "name": "Resume Builder",
+  "description": "Build ATS-optimized resumes with AI content suggestions, multiple professional templates, and PDF/DOCX export",
+  "family": "business-intelligence",
+  "types": [
+    "full-stack"
+  ],
+  "creditsPerUse": 5,
+  "minPlan": "pro",
+  "features": [],
+  "routes": {
+    "ui": "/tools/resume-builder",
+    "api": "/api/tools/resume-builder/process"
+  },
+  "generatedAt": "2026-02-20T04:34:36.584Z",
+  "generatedBy": "javari-module-factory@2.1",
+  "status": "ready"
+}

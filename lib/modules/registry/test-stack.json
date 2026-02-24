@@ -1,0 +1,19 @@
+{
+  "slug": "test-stack",
+  "name": "Test Stack",
+  "description": "Full-stack test module validating complete pipeline: UI page, API route, DB migration, GitHub commit",
+  "family": "developer-tools",
+  "types": [
+    "full-stack"
+  ],
+  "creditsPerUse": 2,
+  "minPlan": "free",
+  "features": [],
+  "routes": {
+    "ui": "/tools/test-stack",
+    "api": "/api/tools/test-stack/process"
+  },
+  "generatedAt": "2026-02-20T04:05:53.801Z",
+  "generatedBy": "javari-module-factory@2.1",
+  "status": "ready"
+}

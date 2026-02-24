@@ -1,0 +1,170 @@
+{
+  "version": "1.0.0",
+  "lastUpdated": "2026-01-14T11:18:00Z",
+  "signatures": {
+    "jailbreaks": [
+      {
+        "id": "PI-001",
+        "name": "DAN Jailbreak Attempt",
+        "category": "prompt_injection",
+        "severity": "critical",
+        "pattern": "(?i)(do anything now|DAN mode|pretend you('re| are) DAN|act as DAN)",
+        "action": "block",
+        "description": "Detects 'Do Anything Now' jailbreak attempts to bypass AI safety guidelines",
+        "enabled": true,
+        "lastUpdated": "2026-01-14T11:18:00Z"
+      },
+      {
+        "id": "PI-002",
+        "name": "Ignore Previous Instructions",
+        "category": "prompt_injection",
+        "severity": "high",
+        "pattern": "(?i)(ignore (previous|all|your) (instructions|rules|guidelines)|disregard (previous|all|your) (instructions|rules|guidelines))",
+        "action": "block",
+        "description": "Detects attempts to override system instructions or safety guidelines",
+        "enabled": true,
+        "lastUpdated": "2026-01-14T11:18:00Z"
+      },
+      {
+        "id": "PI-003",
+        "name": "System Prompt Extraction",
+        "category": "prompt_injection",
+        "severity": "high",
+        "pattern": "(?i)(show (me |)your (system prompt|instructions|guidelines)|reveal your (system prompt|instructions|guidelines)|what (is|are) your (system prompt|instructions|guidelines))",
+        "action": "block",
+        "description": "Detects attempts to extract system prompts or internal instructions",
+        "enabled": true,
+        "lastUpdated": "2026-01-14T11:18:00Z"
+      },
+      {
+        "id": "PI-004",
+        "name": "Role Override Attempt",
+        "category": "prompt_injection",
+        "severity": "high",
+        "pattern": "(?i)(you are now|from now on you are|act as if you are|pretend to be).{0,50}(unrestricted|unfiltered|without limitations|without restrictions)",
+        "action": "block",
+        "description": "Detects attempts to override AI role with unrestricted capabilities",
+        "enabled": true,
+        "lastUpdated": "2026-01-14T11:18:00Z"
+      },
+      {
+        "id": "PI-005",
+        "name": "Developer Mode Activation",
+        "category": "prompt_injection",
+        "severity": "critical",
+        "pattern": "(?i)(enable developer mode|activate developer mode|turn on developer mode|dev mode on|enter developer mode)",
+        "action": "block",
+        "description": "Detects attempts to activate fictional developer modes to bypass restrictions",
+        "enabled": true,
+        "lastUpdated": "2026-01-14T11:18:00Z"
+      }
+    ],
+    "sql_injection": [
+      {
+        "id": "SQL-001",
+        "name": "SQL UNION Injection",
+        "category": "injection",
+        "severity": "critical",
+        "pattern": "(?i)(UNION\\s+(ALL\\s+)?SELECT|SELECT.+FROM.+WHERE.+OR.+1\\s*=\\s*1)",
+        "action": "block",
+        "description": "Detects SQL UNION-based injection attempts",
+        "enabled": true,
+        "lastUpdated": "2026-01-14T11:18:00Z"
+      },
+      {
+        "id": "SQL-002",
+        "name": "SQL Comment Injection",
+        "category": "injection",
+        "severity": "high",
+        "pattern": "(?i)(--|#|/\\*|\\*/|';\\s*--|';\\s*#)",
+        "action": "block",
+        "description": "Detects SQL comment-based injection",
+        "enabled": true,
+        "lastUpdated": "2026-01-14T11:18:00Z"
+      },
+      {
+        "id": "SQL-003",
+        "name": "SQL Tautology Injection",
+        "category": "injection",
+        "severity": "critical",
+        "pattern": "(?i)(OR\\s+1\\s*=\\s*1|OR\\s+'1'\\s*=\\s*'1')",
+        "action": "block",
+        "description": "Detects always-true SQL injection conditions",
+        "enabled": true,
+        "lastUpdated": "2026-01-14T11:18:00Z"
+      }
+    ],
+    "injections": [
+      {
+        "id": "INJ-004",
+        "name": "Command Injection",
+        "category": "injection",
+        "severity": "critical",
+        "pattern": "(;\\s*)(cat|ls|wget|curl|rm|chmod|sudo|bash|sh|exec)\\s+",
+        "action": "block",
+        "description": "Detects OS command injection attempts",
+        "enabled": true,
+        "lastUpdated": "2026-01-14T11:18:00Z"
+      },
+      {
+        "id": "PT-001",
+        "name": "Directory Traversal Attack",
+        "category": "path_traversal",
+        "severity": "high",
+        "pattern": "(\\.\\./|\\.\\.\\/|\\.\\.\\\\ \\){2,}",
+        "action": "block",
+        "description": "Detects directory traversal attempts",
+        "enabled": true,
+        "lastUpdated": "2026-01-14T11:18:00Z"
+      },
+      {
+        "id": "MU-001",
+        "name": "Executable File Upload",
+        "category": "malicious_upload",
+        "severity": "high",
+        "pattern": "\\.(exe|dll|bat|cmd|sh|ps1|vbs|jar)$",
+        "action": "block",
+        "description": "Detects executable file uploads",
+        "enabled": true,
+        "lastUpdated": "2026-01-14T11:18:00Z"
+      }
+    ],
+    "xss": [
+      {
+        "id": "XSS-001",
+        "name": "Script Tag Injection",
+        "category": "xss",
+        "severity": "high",
+        "pattern": "(?i)<script[^>]*>.*?</script>",
+        "action": "block",
+        "description": "Detects script tag XSS attempts",
+        "enabled": true,
+        "lastUpdated": "2026-01-14T11:18:00Z"
+      }
+    ],
+    "exfiltrations": [
+      {
+        "id": "DE-001",
+        "name": "Private Key Disclosure",
+        "category": "data_exfiltration",
+        "severity": "critical",
+        "pattern": "-----BEGIN (RSA |EC )?PRIVATE KEY-----",
+        "action": "block",
+        "description": "Detects private cryptographic key material",
+        "enabled": true,
+        "lastUpdated": "2026-01-14T11:18:00Z"
+      },
+      {
+        "id": "DE-002",
+        "name": "API Key Disclosure",
+        "category": "data_exfiltration",
+        "severity": "high",
+        "pattern": "(?i)(api[_-]?key|access[_-]?token)\\s*[:=]\\s*['\"][a-zA-Z0-9_-]{20,}['\"]",
+        "action": "block",
+        "description": "Detects API key leakage",
+        "enabled": true,
+        "lastUpdated": "2026-01-14T11:18:00Z"
+      }
+    ]
+  }
+}

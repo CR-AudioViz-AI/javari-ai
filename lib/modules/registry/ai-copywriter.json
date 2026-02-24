@@ -1,0 +1,19 @@
+{
+  "slug": "ai-copywriter",
+  "name": "AI Copywriter",
+  "description": "Generate compelling marketing copy, product descriptions, headlines, and CTAs using AI with tone and brand voice controls",
+  "family": "creative-suite",
+  "types": [
+    "full-stack"
+  ],
+  "creditsPerUse": 2,
+  "minPlan": "free",
+  "features": [],
+  "routes": {
+    "ui": "/tools/ai-copywriter",
+    "api": "/api/tools/ai-copywriter/process"
+  },
+  "generatedAt": "2026-02-20T04:33:34.831Z",
+  "generatedBy": "javari-module-factory@2.1",
+  "status": "ready"
+}

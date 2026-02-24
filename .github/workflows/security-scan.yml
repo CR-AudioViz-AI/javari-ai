@@ -1,0 +1,31 @@
+name: Security Scan
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - name: Run Security Scan
+        run: npm run security:scan
+      - name: Upload Security Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report
+          path: security-scan-results.json
+      - name: Fail on Critical Findings
+        run: |
+          if grep -q '"severity":"critical"' security-scan-results.json; then
+            echo "::error::Critical security issues detected"
+            exit 1
+          fi

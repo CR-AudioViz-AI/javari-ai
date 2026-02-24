@@ -1,0 +1,19 @@
+{
+  "slug": "sentiment-analyzer",
+  "name": "Sentiment Analyzer",
+  "description": "Analyze text sentiment, emotion detection, and intent classification with confidence scores for reviews, feedback, and social content",
+  "family": "business-intelligence",
+  "types": [
+    "api"
+  ],
+  "creditsPerUse": 1,
+  "minPlan": "free",
+  "features": [],
+  "routes": {
+    "ui": "/tools/sentiment-analyzer",
+    "api": "/api/tools/sentiment-analyzer/process"
+  },
+  "generatedAt": "2026-02-20T04:34:49.957Z",
+  "generatedBy": "javari-module-factory@2.1",
+  "status": "ready"
+}

@@ -1,0 +1,1 @@
+# Canonical documentation moved to https://github.com/CR-AudioViz-AI/crav-docs

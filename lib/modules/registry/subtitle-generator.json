@@ -1,0 +1,25 @@
+{
+  "slug": "subtitle-generator",
+  "name": "Subtitle Generator",
+  "description": "Automatically generate accurate subtitles and captions for videos using AI speech recognition, with SRT and VTT export formats",
+  "family": "creative-suite",
+  "types": [
+    "full-stack"
+  ],
+  "creditsPerUse": 4,
+  "minPlan": "free",
+  "features": [
+    "AI speech recognition",
+    "SRT export",
+    "VTT export",
+    "multi-language support",
+    "timestamp editing"
+  ],
+  "routes": {
+    "ui": "/tools/subtitle-generator",
+    "api": "/api/tools/subtitle-generator/process"
+  },
+  "generatedAt": "2026-02-20T00:12:18.981Z",
+  "generatedBy": "javari-module-factory@2.0",
+  "status": "ready"
+}
