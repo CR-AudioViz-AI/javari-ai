@@ -139,6 +139,12 @@ async function r2Fetch(
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
+
+export interface R2Object {
+  key: string;
+  lastModified: string;
+  size: number;
+}
  * listCanonicalKeys — returns all R2 keys under the configured prefix.
  *
  * Returns an empty array (never throws) if the bucket exists but has no
@@ -146,10 +152,10 @@ async function r2Fetch(
  *
  * Only returns keys that start with the configured prefix — safe by design.
  */
-export async function listCanonicalKeys(prefix?: string): Promise<string[]> {
+export async function listCanonicalKeys(prefix?: string): Promise<R2Object[]> {
   const cfg    = getConfig();
   const pfx    = prefix ?? cfg.prefix;
-  const keys: string[] = [];
+  const objects: R2Object[] = [];
   let   continuationToken: string | undefined;
 
   do {
@@ -182,13 +188,25 @@ export async function listCanonicalKeys(prefix?: string): Promise<string[]> {
 
     const xml = await res.text();
 
-    // Parse XML — no external dependency
-    const keyMatches = xml.matchAll(/<Key>([^<]+)<\/Key>/g);
-    for (const m of keyMatches) {
-      const key = m[1];
-      // Enforce prefix guard — only yield keys within configured prefix
-      if (key.startsWith(pfx)) {
-        keys.push(key);
+// Parse XML — extract Contents blocks with metadata
+    const contentsMatches = xml.matchAll(/<Contents>(.*?)<\/Contents>/gs);
+    for (const match of contentsMatches) {
+      const contentsBlock = match[1];
+      
+      const keyMatch = contentsBlock.match(/<Key>([^<]+)<\/Key>/);
+      const lastModifiedMatch = contentsBlock.match(/<LastModified>([^<]+)<\/LastModified>/);
+      const sizeMatch = contentsBlock.match(/<Size>([^<]+)<\/Size>/);
+      
+      if (keyMatch) {
+        const key = keyMatch[1];
+        // Enforce prefix guard — only yield keys within configured prefix
+        if (key.startsWith(pfx)) {
+          objects.push({
+            key,
+            lastModified: lastModifiedMatch?.[1] || new Date().toISOString(),
+            size: parseInt(sizeMatch?.[1] || "0", 10),
+          });
+        }
       }
     }
 
@@ -201,7 +219,7 @@ export async function listCanonicalKeys(prefix?: string): Promise<string[]> {
     }
   } while (continuationToken);
 
-  return keys;
+  return objects;
 }
 
 /**
