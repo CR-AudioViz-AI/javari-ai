@@ -31,7 +31,7 @@ async function searchChunks(query: string, topK: number): Promise<SearchResult[]
     if (error.message?.includes("does not exist")) {
       return await searchDirect(embedding, topK);
     }
-    throw new Error(\`Search failed: \${error.message}\`);
+    throw new Error(`Search failed: ${error.message}`);
   }
 
   return (data || []).map((row: any) => ({
@@ -49,7 +49,7 @@ async function searchDirect(embedding: number[], topK: number): Promise<SearchRe
     .select("id, doc_id, chunk_text, embedding")
     .limit(1000);
 
-  if (error) throw new Error(\`Direct query failed: \${error.message}\`);
+  if (error) throw new Error(`Direct query failed: ${error.message}`);
   if (!data) return [];
 
   const results = data
