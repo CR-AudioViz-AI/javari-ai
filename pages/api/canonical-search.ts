@@ -1,9 +1,6 @@
-import { NextResponse } from "next/server";
+import type { NextApiRequest, NextApiResponse } from "next";
 import { createClient } from "@supabase/supabase-js";
 import { embedText } from "@/lib/canonical/embed";
-
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
 
 interface SearchResult {
   doc_key: string;
@@ -95,37 +92,39 @@ async function searchDirect(embedding: number[], topK: number): Promise<SearchRe
   }));
 }
 
-export async function POST(req: Request) {
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
   const start = Date.now();
 
+  if (req.method !== "POST") {
+    return res.status(405).json({ ok: false, error: "Method not allowed" });
+  }
+
   try {
-    let body: any;
-    try {
-      body = await req.json();
-    } catch {
-      return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 400 });
-    }
+    const body = req.body;
 
     if (!body?.query || typeof body.query !== "string") {
-      return NextResponse.json({ ok: false, error: "query required" }, { status: 400 });
+      return res.status(400).json({ ok: false, error: "query required" });
     }
 
     const query = body.query.trim();
     if (!query || query.length > 1000) {
-      return NextResponse.json({ ok: false, error: "query 1-1000 chars" }, { status: 400 });
+      return res.status(400).json({ ok: false, error: "query 1-1000 chars" });
     }
 
     let topK = 8;
     if (body.topK !== undefined) {
       if (!Number.isInteger(body.topK) || body.topK < 1 || body.topK > 25) {
-        return NextResponse.json({ ok: false, error: "topK 1-25" }, { status: 400 });
+        return res.status(400).json({ ok: false, error: "topK 1-25" });
       }
       topK = body.topK;
     }
 
     const results = await searchChunks(query, topK);
 
-    return NextResponse.json({
+    return res.status(200).json({
       ok: true,
       query,
       count: results.length,
@@ -134,12 +133,12 @@ export async function POST(req: Request) {
     });
 
   } catch (err: any) {
-    console.error("[canonical:search]", err);
-    return NextResponse.json({
+    console.error("[canonical-search]", err);
+    return res.status(500).json({
       ok: false,
       error: "Search failed",
       message: err.message,
       durationMs: Date.now() - start,
-    }, { status: 500 });
+    });
   }
 }
