@@ -253,7 +253,7 @@ async function searchCanonicalChunksDirect(
 // ROUTE HANDLER
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-export async function POST(req: NextRequest): Promise<NextResponse> {
+export async function POST(req: Request): Promise<Response> {
   const startTime = Date.now();
 
   try {
@@ -328,7 +328,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 // METHOD NOT ALLOWED
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-export async function GET(): Promise<NextResponse> {
+export async function GET(): Promise<Response> {
   return NextResponse.json(
     {
       ok: false,
