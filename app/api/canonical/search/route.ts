@@ -1,36 +1,14 @@
 /**
  * app/api/canonical/search/route.ts
- * Canonical Documentation Vector Search Endpoint
- * 
- * POST /api/canonical/search
- * Searches canonical documentation using pgvector cosine similarity
- * 
- * Input:
- *   { "query": string, "topK"?: number }
- * 
- * Output:
- *   { ok: true, query, count, durationMs, results: [...] }
- * 
- * @version 1.0.0
- * @timestamp Wednesday, February 25, 2026 at 2:30 AM EST
+ * Canonical Documentation Vector Search
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { embedText } from "@/lib/canonical/embed";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// TYPES
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-interface SearchRequest {
-  query: string;
-  topK?: number;
-}
 
 interface SearchResult {
   doc_key: string;
@@ -38,303 +16,157 @@ interface SearchResult {
   similarity: number;
 }
 
-interface SearchResponse {
-  ok: boolean;
-  query: string;
-  count: number;
-  durationMs: number;
-  results: SearchResult[];
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// VALIDATION
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-function validateSearchRequest(body: unknown): { valid: true; data: SearchRequest } | { valid: false; error: string } {
-  if (!body || typeof body !== "object") {
-    return { valid: false, error: "Request body must be a JSON object" };
-  }
-
-  const req = body as Record<string, unknown>;
-
-  // Validate query
-  if (!req.query || typeof req.query !== "string") {
-    return { valid: false, error: "Field 'query' is required and must be a string" };
-  }
-
-  const query = req.query.trim();
-  if (query.length === 0) {
-    return { valid: false, error: "Field 'query' cannot be empty" };
-  }
-
-  if (query.length > 1000) {
-    return { valid: false, error: "Field 'query' cannot exceed 1000 characters" };
-  }
-
-  // Validate topK
-  let topK = 8; // default
-  if (req.topK !== undefined) {
-    if (typeof req.topK !== "number" || !Number.isInteger(req.topK)) {
-      return { valid: false, error: "Field 'topK' must be an integer" };
-    }
-    if (req.topK < 1) {
-      return { valid: false, error: "Field 'topK' must be at least 1" };
-    }
-    if (req.topK > 25) {
-      return { valid: false, error: "Field 'topK' cannot exceed 25" };
-    }
-    topK = req.topK;
-  }
-
-  return {
-    valid: true,
-    data: { query, topK }
-  };
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// SUPABASE CLIENT
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-function getSupabaseClient() {
+function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!url || !key) {
-    throw new Error("Supabase environment variables not configured");
-  }
-
-  return createClient(url, key, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-  });
+  if (!url || !key) throw new Error("Supabase not configured");
+  return createClient(url, key, { auth: { persistSession: false } });
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// VECTOR SEARCH
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function searchChunks(query: string, topK: number): Promise<SearchResult[]> {
+  const embedding = await embedText(query);
+  const supabase = getSupabase();
 
-async function searchCanonicalChunks(
-  query: string,
-  topK: number
-): Promise<SearchResult[]> {
-  const startEmbed = Date.now();
-
-  // Generate query embedding
-  const queryEmbedding = await embedText(query);
-  const embedDurationMs = Date.now() - startEmbed;
-
-  console.log(`[canonical:search] Generated query embedding in ${embedDurationMs}ms`);
-
-  // Search with pgvector
-  const startSearch = Date.now();
-  const supabase = getSupabaseClient();
-
-  // SQL query using pgvector cosine distance operator (<=>)
-  // similarity = 1 - (embedding <=> query_embedding)
-  // Results ordered by distance (lower distance = higher similarity)
   const { data, error } = await supabase.rpc("search_canonical_chunks", {
-    query_embedding: queryEmbedding,
+    query_embedding: embedding,
     match_count: topK,
   });
 
-  const searchDurationMs = Date.now() - startSearch;
-
   if (error) {
-    // If RPC function doesn't exist, fall back to direct query
-    if (error.message?.includes("function") && error.message?.includes("does not exist")) {
-      console.log("[canonical:search] RPC function not found, using direct query");
-      return await searchCanonicalChunksDirect(queryEmbedding, topK);
+    if (error.message?.includes("does not exist")) {
+      return await searchDirect(embedding, topK);
     }
-    throw new Error(`Supabase search failed: ${error.message}`);
+    throw new Error(`Search failed: ${error.message}`);
   }
 
-  console.log(`[canonical:search] Found ${data?.length || 0} results in ${searchDurationMs}ms`);
-
-  if (!data || data.length === 0) {
-    return [];
-  }
-
-  // Map results to SearchResult format
-  return data.map((row: any) => ({
+  return (data || []).map((row: any) => ({
     doc_key: row.doc_key || "",
     chunk_text: row.chunk_text || "",
     similarity: row.similarity || 0,
   }));
 }
 
-// Direct query fallback if RPC function doesn't exist
-async function searchCanonicalChunksDirect(
-  queryEmbedding: number[],
-  topK: number
-): Promise<SearchResult[]> {
-  const supabase = getSupabaseClient();
-
-  // Direct SQL with embedding comparison
+async function searchDirect(embedding: number[], topK: number): Promise<SearchResult[]> {
+  const supabase = getSupabase();
+  
   const { data, error } = await supabase
     .from("canonical_doc_chunks")
-    .select(`
-      id,
-      doc_id,
-      chunk_text,
-      embedding
-    `)
-    .limit(1000); // Get a reasonable subset first
+    .select("id, doc_id, chunk_text, embedding")
+    .limit(1000);
 
-  if (error) {
-    throw new Error(`Direct query failed: ${error.message}`);
-  }
+  if (error) throw new Error(`Direct query failed: ${error.message}`);
+  if (!data) return [];
 
-  if (!data || data.length === 0) {
-    return [];
-  }
+  const results = data
+    .map((row: any) => {
+      if (!row.embedding || !Array.isArray(row.embedding)) return null;
+      
+      let dot = 0, normA = 0, normB = 0;
+      for (let i = 0; i < embedding.length; i++) {
+        dot += embedding[i] * row.embedding[i];
+        normA += embedding[i] * embedding[i];
+        normB += row.embedding[i] * row.embedding[i];
+      }
+      
+      return {
+        id: row.id,
+        doc_id: row.doc_id,
+        chunk_text: row.chunk_text,
+        similarity: dot / (Math.sqrt(normA) * Math.sqrt(normB)),
+        doc_key: "",
+      };
+    })
+    .filter(Boolean)
+    .sort((a: any, b: any) => b.similarity - a.similarity)
+    .slice(0, topK);
 
-  // Calculate cosine similarity manually
-  const results = data.map((row: any) => {
-    const embedding = row.embedding;
-    if (!embedding || !Array.isArray(embedding)) {
-      return null;
-    }
-
-    // Cosine similarity calculation
-    let dotProduct = 0;
-    let normA = 0;
-    let normB = 0;
-
-    for (let i = 0; i < queryEmbedding.length; i++) {
-      dotProduct += queryEmbedding[i] * embedding[i];
-      normA += queryEmbedding[i] * queryEmbedding[i];
-      normB += embedding[i] * embedding[i];
-    }
-
-    const similarity = dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-
-    return {
-      id: row.id,
-      doc_id: row.doc_id,
-      chunk_text: row.chunk_text,
-      similarity: similarity,
-      doc_key: "", // Will need to join with canonical_docs table
-    };
-  }).filter((r): r is NonNullable<typeof r> => r !== null);
-
-  // Sort by similarity descending
-  results.sort((a, b) => b.similarity - a.similarity);
-
-  // Take topK
-  const topResults = results.slice(0, topK);
-
-  // Get doc_keys for the top results
-  if (topResults.length > 0) {
-    const docIds = [...new Set(topResults.map(r => r.doc_id))];
+  if (results.length > 0) {
+    const docIds = [...new Set(results.map((r: any) => r.doc_id))];
     const { data: docs } = await supabase
       .from("canonical_docs")
       .select("id, r2_key")
       .in("id", docIds);
 
     if (docs) {
-      const docMap = new Map(docs.map(d => [d.id, d.r2_key]));
-      topResults.forEach(r => {
-        r.doc_key = docMap.get(r.doc_id) || "";
-      });
+      const map = new Map(docs.map(d => [d.id, d.r2_key]));
+      results.forEach((r: any) => { r.doc_key = map.get(r.doc_id) || ""; });
     }
   }
 
-  return topResults.map(r => ({
+  return results.map((r: any) => ({
     doc_key: r.doc_key,
     chunk_text: r.chunk_text,
     similarity: r.similarity,
   }));
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// ROUTE HANDLER
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-export async function POST(req: Request): Promise<Response> {
-  const startTime = Date.now();
+export async function POST(req: Request) {
+  const start = Date.now();
 
   try {
-    // Parse request body
-    let body: unknown;
+    let body: any;
     try {
       body = await req.json();
-    } catch (err) {
+    } catch {
       return NextResponse.json(
-        {
-          ok: false,
-          error: "Invalid JSON",
-          message: "Request body must be valid JSON",
-        },
+        { ok: false, error: "Invalid JSON" },
         { status: 400 }
       );
     }
 
-    // Validate request
-    const validation = validateSearchRequest(body);
-    if (!validation.valid) {
+    if (!body?.query || typeof body.query !== "string") {
       return NextResponse.json(
-        {
-          ok: false,
-          error: "Validation failed",
-          message: validation.error,
-        },
+        { ok: false, error: "Field 'query' required and must be string" },
         { status: 400 }
       );
     }
 
-    const { query, topK } = validation.data;
+    const query = body.query.trim();
+    if (!query || query.length > 1000) {
+      return NextResponse.json(
+        { ok: false, error: "Query must be 1-1000 characters" },
+        { status: 400 }
+      );
+    }
 
-    console.log(`[canonical:search] Query: "${query}" (topK=${topK})`);
+    let topK = 8;
+    if (body.topK !== undefined) {
+      if (!Number.isInteger(body.topK) || body.topK < 1 || body.topK > 25) {
+        return NextResponse.json(
+          { ok: false, error: "topK must be integer 1-25" },
+          { status: 400 }
+        );
+      }
+      topK = body.topK;
+    }
 
-    // Perform search
-    const results = await searchCanonicalChunks(query, topK);
+    const results = await searchChunks(query, topK);
 
-    const durationMs = Date.now() - startTime;
-
-    // Return results
-    const response: SearchResponse = {
+    return NextResponse.json({
       ok: true,
       query,
       count: results.length,
-      durationMs,
+      durationMs: Date.now() - start,
       results,
-    };
+    });
 
-    return NextResponse.json(response, { status: 200 });
-
-  } catch (err) {
-    const durationMs = Date.now() - startTime;
-    const error = err as Error;
-
-    console.error("[canonical:search] Error:", error.message);
-    console.error(error.stack);
-
+  } catch (err: any) {
+    console.error("[canonical:search]", err);
     return NextResponse.json(
       {
         ok: false,
         error: "Search failed",
-        message: error.message,
-        durationMs,
+        message: err.message,
+        durationMs: Date.now() - start,
       },
       { status: 500 }
     );
   }
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// METHOD NOT ALLOWED
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-export async function GET(): Promise<Response> {
+export async function GET() {
   return NextResponse.json(
-    {
-      ok: false,
-      error: "Method not allowed",
-      message: "Use POST with JSON body: { query: string, topK?: number }",
-    },
+    { ok: false, error: "Use POST with { query: string, topK?: number }" },
     { status: 405 }
   );
 }
