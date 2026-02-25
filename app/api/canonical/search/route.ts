@@ -1,8 +1,3 @@
-/**
- * app/api/canonical/search/route.ts
- * Canonical Documentation Vector Search
- */
-
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { embedText } from "@/lib/canonical/embed";
@@ -36,7 +31,7 @@ async function searchChunks(query: string, topK: number): Promise<SearchResult[]
     if (error.message?.includes("does not exist")) {
       return await searchDirect(embedding, topK);
     }
-    throw new Error(`Search failed: ${error.message}`);
+    throw new Error(\`Search failed: \${error.message}\`);
   }
 
   return (data || []).map((row: any) => ({
@@ -54,7 +49,7 @@ async function searchDirect(embedding: number[], topK: number): Promise<SearchRe
     .select("id, doc_id, chunk_text, embedding")
     .limit(1000);
 
-  if (error) throw new Error(`Direct query failed: ${error.message}`);
+  if (error) throw new Error(\`Direct query failed: \${error.message}\`);
   if (!data) return [];
 
   const results = data
@@ -108,34 +103,22 @@ export async function POST(req: Request) {
     try {
       body = await req.json();
     } catch {
-      return NextResponse.json(
-        { ok: false, error: "Invalid JSON" },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 400 });
     }
 
     if (!body?.query || typeof body.query !== "string") {
-      return NextResponse.json(
-        { ok: false, error: "Field 'query' required and must be string" },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: "query required" }, { status: 400 });
     }
 
     const query = body.query.trim();
     if (!query || query.length > 1000) {
-      return NextResponse.json(
-        { ok: false, error: "Query must be 1-1000 characters" },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: "query 1-1000 chars" }, { status: 400 });
     }
 
     let topK = 8;
     if (body.topK !== undefined) {
       if (!Number.isInteger(body.topK) || body.topK < 1 || body.topK > 25) {
-        return NextResponse.json(
-          { ok: false, error: "topK must be integer 1-25" },
-          { status: 400 }
-        );
+        return NextResponse.json({ ok: false, error: "topK 1-25" }, { status: 400 });
       }
       topK = body.topK;
     }
@@ -152,21 +135,11 @@ export async function POST(req: Request) {
 
   } catch (err: any) {
     console.error("[canonical:search]", err);
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "Search failed",
-        message: err.message,
-        durationMs: Date.now() - start,
-      },
-      { status: 500 }
-    );
+    return NextResponse.json({
+      ok: false,
+      error: "Search failed",
+      message: err.message,
+      durationMs: Date.now() - start,
+    }, { status: 500 });
   }
-}
-
-export async function GET() {
-  return NextResponse.json(
-    { ok: false, error: "Use POST with { query: string, topK?: number }" },
-    { status: 405 }
-  );
 }
