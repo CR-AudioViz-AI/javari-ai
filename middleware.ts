@@ -4,11 +4,8 @@
  * Sets custom header 'x-is-javari' for all /javari/* routes.
  * Root layout reads this header to conditionally render navigation.
  * 
- * This is the CORRECT way to do server-side pathname detection in Next.js.
- * headers().get('x-invoke-path') does NOT exist - we create our own header.
- * 
- * @version 1.0.0
- * @timestamp Monday, February 24, 2026 at 1:25 AM EST
+ * @version 1.1.0 - FIXED: Corrected /api exclusion pattern
+ * @timestamp Thursday, February 26, 2026 at 3:45 AM EST
  */
 
 import { NextResponse } from 'next/server'
@@ -35,12 +32,12 @@ export const config = {
   matcher: [
     /*
      * Match all request paths except:
-     * - /api (API routes - must be excluded)
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - public files (public folder)
+     * - /api/* (all API routes - MUST start with /api/)
+     * - /_next/static (static files)
+     * - /_next/image (image optimization files)
+     * - /favicon.ico (favicon file)
+     * - /*.{svg,png,jpg,jpeg,gif,webp} (public image files)
      */
-    '/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!api/|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 }
