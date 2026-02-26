@@ -1,32 +1,7 @@
 /** @type {import('next').NextConfig} */
 // next.config.js
 // CR AudioViz AI — Production-Optimised Next.js Config
-// 2026-02-21 — Added instrumentationHook for Secret Authority
-// 2026-02-22 — Added build stability guards
-
-// Experimental features with fallback
-let experimentalConfig = {
-  instrumentationHook: true,
-  optimizePackageImports: [  // tree-shake large deps
-    "lucide-react",
-    "@radix-ui/react-dropdown-menu",
-    "@radix-ui/react-dialog",
-    "framer-motion",
-  ],
-};
-
-// Safe experimental features wrapper
-try {
-  // Validate experimental features are supported
-  if (typeof process.env.NEXT_SKIP_INSTRUMENTATION !== 'undefined') {
-    experimentalConfig = {
-      ...experimentalConfig,
-      instrumentationHook: false,
-    };
-  }
-} catch (error) {
-  console.warn('[next.config] Experimental features configuration warning:', error.message);
-}
+// VBS-FIX v1: Explicit API route enablement
 
 const nextConfig = {
   // ── TypeScript & ESLint ───────────────────────────────────────────────────
@@ -37,19 +12,30 @@ const nextConfig = {
     ignoreBuildErrors: true,
   },
 
-  // ── Secret Authority: enable instrumentation.ts ───────────────────────────
-  experimental: experimentalConfig,
+  // ── CRITICAL: Explicit App Router & API Routes Configuration ─────────────
+  experimental: {
+    instrumentationHook: true,
+    serverActions: {
+      allowedOrigins: ["localhost:3000", "*.vercel.app", "craudiovizai.com", "*.craudiovizai.com"],
+    },
+    optimizePackageImports: [
+      "lucide-react",
+      "@radix-ui/react-dropdown-menu",
+      "@radix-ui/react-dialog",
+      "framer-motion",
+    ],
+  },
 
   // ── Image Optimization ────────────────────────────────────────────────────
   images: {
-    formats:          ["image/avif", "image/webp"],
-    minimumCacheTTL:  86400,
-    deviceSizes:      [640, 750, 828, 1080, 1200, 1920],
-    imageSizes:       [16, 32, 48, 64, 96, 128, 256, 384],
+    formats: ["image/avif", "image/webp"],
+    minimumCacheTTL: 86400,
+    deviceSizes: [640, 750, 828, 1080, 1200, 1920],
+    imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
     remotePatterns: [
-      { protocol: "https", hostname: "*.supabase.co",        pathname: "/storage/v1/object/**" },
-      { protocol: "https", hostname: "*.vercel.app",         pathname: "/**" },
-      { protocol: "https", hostname: "craudiovizai.com",     pathname: "/**" },
+      { protocol: "https", hostname: "*.supabase.co", pathname: "/storage/v1/object/**" },
+      { protocol: "https", hostname: "*.vercel.app", pathname: "/**" },
+      { protocol: "https", hostname: "craudiovizai.com", pathname: "/**" },
       { protocol: "https", hostname: "www.craudiovizai.com", pathname: "/**" },
     ],
   },
@@ -60,11 +46,11 @@ const nextConfig = {
       {
         source: "/(.*)",
         headers: [
-          { key: "X-Content-Type-Options",  value: "nosniff"        },
-          { key: "X-Frame-Options",         value: "DENY"           },
-          { key: "X-XSS-Protection",        value: "1; mode=block"  },
-          { key: "Referrer-Policy",         value: "strict-origin-when-cross-origin" },
-          { key: "Permissions-Policy",      value: "camera=(), microphone=(), geolocation=()" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "X-XSS-Protection", value: "1; mode=block" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
         ],
       },
       {
@@ -98,20 +84,20 @@ const nextConfig = {
   async redirects() {
     return [
       {
-        source:      "/:path*",
-        has:         [{ type: "host", value: "www.craudiovizai.com" }],
+        source: "/:path*",
+        has: [{ type: "host", value: "www.craudiovizai.com" }],
         destination: "https://craudiovizai.com/:path*",
-        permanent:   true,
+        permanent: true,
       },
       {
-        source:      "/",
-        has:         [{ type: "host", value: "beta.craudiovizai.com" }],
+        source: "/",
+        has: [{ type: "host", value: "beta.craudiovizai.com" }],
         destination: "https://craudiovizai.com/beta",
-        permanent:   false,
+        permanent: false,
       },
-      { source: "/invite",   destination: "/beta",           permanent: false },
-      { source: "/join",     destination: "/beta",           permanent: false },
-      { source: "/waitlist", destination: "/beta#waitlist",  permanent: false },
+      { source: "/invite", destination: "/beta", permanent: false },
+      { source: "/join", destination: "/beta", permanent: false },
+      { source: "/waitlist", destination: "/beta#waitlist", permanent: false },
     ];
   },
 
@@ -119,23 +105,12 @@ const nextConfig = {
   async rewrites() {
     return [
       { source: "/health", destination: "/api/health/ready" },
-      { source: "/live",   destination: "/api/health/live"  },
+      { source: "/live", destination: "/api/health/live" },
     ];
   },
 
-  // ── Webpack: Node built-in safety for edge runtime ────────────────────────
-  webpack: (config, { isServer, nextRuntime }) => {
-    if (!isServer || nextRuntime === "edge") {
-      config.resolve = config.resolve || {};
-      config.resolve.fallback = {
-        ...(config.resolve.fallback || {}),
-        crypto: false,
-        stream: false,
-        buffer: false,
-        fs:     false,
-        path:   false,
-      };
-    }
+  // ── Webpack: Simplified for API route compatibility ───────────────────────
+  webpack: (config) => {
     return config;
   },
 };
