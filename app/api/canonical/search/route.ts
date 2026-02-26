@@ -19,7 +19,8 @@ function getSupabase() {
 }
 
 async function searchChunks(query: string, topK: number): Promise<SearchResult[]> {
-  const embedding = await embedText(query);
+  const embedResult = await embedText(query);
+  const embedding = embedResult.embedding; // Extract array from result object
   const supabase = getSupabase();
 
   const { data, error } = await supabase.rpc("search_canonical_chunks", {
@@ -29,7 +30,7 @@ async function searchChunks(query: string, topK: number): Promise<SearchResult[]
 
   if (error) {
     if (error.message?.includes("does not exist")) {
-      return await searchDirect(embedding, topK);
+      return await searchDirect(embedResult, topK);
     }
     throw new Error(`Search failed: ${error.message}`);
   }
@@ -41,7 +42,8 @@ async function searchChunks(query: string, topK: number): Promise<SearchResult[]
   }));
 }
 
-async function searchDirect(embedding: number[], topK: number): Promise<SearchResult[]> {
+async function searchDirect(embedResult: { embedding: number[], tokenCount: number }, topK: number): Promise<SearchResult[]> {
+  const embedding = embedResult.embedding; // Extract array
   const supabase = getSupabase();
   
   const { data, error } = await supabase
