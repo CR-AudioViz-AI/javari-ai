@@ -109,8 +109,19 @@ const nextConfig = {
     ];
   },
 
-  // ── Webpack: Simplified for API route compatibility ───────────────────────
-  webpack: (config) => {
+  // ── Webpack: Node built-in safety for edge runtime ────────────────────────
+  webpack: (config, { isServer, nextRuntime }) => {
+    if (!isServer || nextRuntime === "edge") {
+      config.resolve = config.resolve || {};
+      config.resolve.fallback = {
+        ...(config.resolve.fallback || {}),
+        crypto: false,
+        stream: false,
+        buffer: false,
+        fs: false,
+        path: false,
+      };
+    }
     return config;
   },
 };
