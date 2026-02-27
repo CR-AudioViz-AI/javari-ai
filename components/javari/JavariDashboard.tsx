@@ -10,8 +10,8 @@ import WorkLogViewer from '@/components/javari/WorkLogViewer';
 import ProjectAnalytics from '@/components/javari/ProjectAnalytics';
 import SessionSummary from '@/components/javari/SessionSummary';
 import { Settings } from '@/components/javari/Settings';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Sheet,

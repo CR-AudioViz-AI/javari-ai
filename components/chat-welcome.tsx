@@ -1,7 +1,7 @@
 'use client';
 
 import { Sparkles, Code, FileText, Lightbulb, MessageSquare, Zap, Brain } from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/Card';
 
 interface SuggestionCard {
   icon: React.ElementType;

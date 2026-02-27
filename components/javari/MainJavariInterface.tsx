@@ -4,8 +4,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { ChatService } from '@/lib/javari-services';
 import { PromptHintsBar } from '@/components/javari/PromptHintsBar';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   DropdownMenu,
