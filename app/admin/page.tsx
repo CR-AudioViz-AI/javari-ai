@@ -35,6 +35,7 @@ interface Stats {
 }
 
 interface RecentError {
+  error_type?: string;
   id: string;
   type: string;
   message: string;
@@ -430,3 +431,4 @@ function ActionButton({ icon: Icon, label }: {
     </button>
   );
 }
+
