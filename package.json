@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "doctor:ui": "node scripts/doctor-ui-case.mjs",
+    "doctor": "npm run doctor:ui"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
@@ -62,5 +64,5 @@
     "tailwindcss": "^3.4.15",
     "typescript": "^5.6.3"
   },
-  "description": "Javari AI — Autonomous build engine for CR AudioViz AI platform"
-}
+  "description": "Javari AI \u2014 Autonomous build engine for CR AudioViz AI platform"
+}\n
