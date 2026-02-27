@@ -1,7 +1,7 @@
 'use client';
 
 import { Brain, BookOpen, Sparkles } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
+import { Badge } from '@/components/ui/Badge';
 import {
   Tooltip,
   TooltipContent,

@@ -36,10 +36,17 @@ interface Stats {
 
 interface RecentError {
   id: string;
-  type: string;
-  message: string;
-  severity: string;
-  created_at: string;
+  type?: string;
+  message?: string;
+  severity?: string;
+  created_at?: string;
+  // Optional backend-provided fields
+  error_type?: string;
+  pattern_key?: string;
+  fix_result?: string | null;
+  metadata?: any;
+  // Allow additional unknown fields without breaking builds
+  [key: string]: any;
 }
 
 export default function AdminDashboard() {
@@ -430,3 +437,5 @@ function ActionButton({ icon: Icon, label }: {
     </button>
   );
 }
+
+

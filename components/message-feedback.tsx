@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { ThumbsUp, ThumbsDown, Copy, Check, RotateCcw } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/use-toast';
 
 interface MessageFeedbackProps {
