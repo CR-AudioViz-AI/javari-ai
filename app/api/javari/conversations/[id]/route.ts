@@ -18,10 +18,10 @@ const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const conversationId = params.id;
+    const conversationId = (await params).id;
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get('userId');
     
@@ -82,10 +82,10 @@ export async function GET(
  */
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const conversationId = params.id;
+    const conversationId = (await params).id;
     const body = await request.json();
     const { userId, title, starred, messages, addMessage } = body;
     
@@ -186,10 +186,10 @@ export async function PATCH(
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const conversationId = params.id;
+    const conversationId = (await params).id;
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get('userId');
     
