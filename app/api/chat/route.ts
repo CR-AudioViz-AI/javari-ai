@@ -1,16 +1,18 @@
 // app/api/chat/route.ts
-// Javari Chat API — v2.1 FINANCIAL CONTAINMENT
-// 2026-02-27 — PHASE 1: Budget enforcement + cost tracking
-//   - Monthly budget limits per user ($25 default)
-//   - Pre-execution cost estimation
-//   - Budget gate before AI call
-//   - Provider identity hidden (tier exposure only)
-//   - Preserved: streaming, fallback chain, existing response shape
+// Javari Chat API — v2 STREAMING
+// 2026-02-20 — STEP 0 repair:
+//   - Removed 23s/25s timeout (was blocking long responses)
+//   - True SSE streaming via ReadableStream passthrough
+//   - Incremental chunk forwarding — no response buffering
+//   - Null-safe chunk handling
+//   - Graceful fallback to buffered JSON when streaming not requested
+//   - Routes: POST /api/chat
 
 import { NextRequest } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
+// No maxDuration — streaming connections self-terminate when done
+// (Vercel hobby: 10s, Pro: 60s, Enterprise: 300s)
 
 interface ChatRequest {
   message?: string;
@@ -21,104 +23,8 @@ interface ChatRequest {
   history?: Array<{ role: string; content: string }>;
 }
 
-// ── Supabase Client ───────────────────────────────────────────────────────────
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
-// ── Cost Estimation ───────────────────────────────────────────────────────────
-function estimateRoughCost(provider: string, inputLength: number): number {
-  // Rough token estimate: ~4 chars per token
-  const baseTokenEstimate = Math.ceil(inputLength / 4);
-  const avgOutputTokens = 300; // Conservative average
-  
-  // Cost per 1K tokens (rough averages)
-  const pricing: Record<string, number> = {
-    groq: 0.0001,       // FREE tier
-    openai: 0.002,      // GPT-4o-mini
-    anthropic: 0.003,   // Claude Sonnet
-    mistral: 0.0015,    // Mistral Small
-    openrouter: 0.0025, // Average
-  };
-  
-  const per1k = pricing[provider] ?? 0.002;
-  const totalTokens = baseTokenEstimate + avgOutputTokens;
-  return (totalTokens / 1000) * per1k;
-}
-
-// ── Provider Tier Mapping ─────────────────────────────────────────────────────
-function getProviderTier(provider: string): string {
-  if (provider === "groq") return "free";
-  if (provider === "anthropic") return "advanced";
-  return "standard";
-}
-
-// ── Budget Enforcement ────────────────────────────────────────────────────────
-async function checkAndUpdateBudget(
-  userId: string,
-  estimatedCost: number
-): Promise<{ allowed: boolean; remaining: number; limit: number }> {
-  // Get or create user budget
-  const { data: budget, error: fetchError } = await supabase
-    .from("user_budgets")
-    .select("*")
-    .eq("user_id", userId)
-    .single();
-
-  if (fetchError || !budget) {
-    // Create default budget for new user
-    const { data: newBudget, error: createError } = await supabase
-      .from("user_budgets")
-      .insert({
-        user_id: userId,
-        monthly_limit_usd: 25.0,
-        current_spend_usd: 0,
-      })
-      .select()
-      .single();
-
-    if (createError || !newBudget) {
-      // If creation fails, allow request but log warning
-      console.warn(`[BUDGET] Failed to create budget for ${userId}`);
-      return { allowed: true, remaining: 25.0, limit: 25.0 };
-    }
-
-    return { allowed: true, remaining: 25.0, limit: 25.0 };
-  }
-
-  // Check if budget would be exceeded
-  const wouldExceed =
-    budget.current_spend_usd + estimatedCost > budget.monthly_limit_usd;
-
-  if (wouldExceed) {
-    return {
-      allowed: false,
-      remaining: Math.max(0, budget.monthly_limit_usd - budget.current_spend_usd),
-      limit: budget.monthly_limit_usd,
-    };
-  }
-
-  // Budget OK - will update after successful response
-  return {
-    allowed: true,
-    remaining: budget.monthly_limit_usd - budget.current_spend_usd - estimatedCost,
-    limit: budget.monthly_limit_usd,
-  };
-}
-
-async function incrementSpend(userId: string, actualCost: number): Promise<void> {
-  await supabase.rpc("exec_sql", {
-    sql: `
-      UPDATE user_budgets 
-      SET current_spend_usd = current_spend_usd + ${actualCost},
-          updated_at = NOW()
-      WHERE user_id = '${userId}'
-    `,
-  });
-}
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
 function errorResponse(msg: string, status = 200) {
   return new Response(
     JSON.stringify({ success: false, response: msg, error: msg }),
@@ -127,6 +33,7 @@ function errorResponse(msg: string, status = 200) {
 }
 
 function extractMessage(body: ChatRequest): string {
+  // Support both single-message and messages-array formats
   if (body.message && typeof body.message === "string") return body.message.trim();
   if (Array.isArray(body.messages)) {
     const last = [...body.messages].reverse().find((m) => m.role === "user");
@@ -135,30 +42,15 @@ function extractMessage(body: ChatRequest): string {
   return "";
 }
 
-// ── GET USER ID ───────────────────────────────────────────────────────────────
-async function getUserId(req: NextRequest): Promise<string | null> {
-  // Try to get from auth header
-  const authHeader = req.headers.get("authorization");
-  if (authHeader?.startsWith("Bearer ")) {
-    const token = authHeader.substring(7);
-    const { data } = await supabase.auth.getUser(token);
-    if (data?.user?.id) return data.user.id;
-  }
-
-  // Fallback: use first user from profiles (for testing)
-  const { data: profiles } = await supabase
-    .from("profiles")
-    .select("id")
-    .limit(1);
-  
-  if (profiles && profiles.length > 0) {
-    return profiles[0].id;
-  }
-
-  return null;
+// ── Provider Tier Mapping (hide provider identity) ────────────────────────────
+function getProviderTier(provider: string): string {
+  if (provider === "groq") return "free";
+  if (provider === "anthropic") return "advanced";
+  return "standard";
 }
 
 // ── POST handler ──────────────────────────────────────────────────────────────
+
 export async function POST(req: NextRequest) {
   const t0 = Date.now();
 
@@ -170,38 +62,10 @@ export async function POST(req: NextRequest) {
   }
 
   const message = extractMessage(body);
-  const {
-    mode = "single",
-    provider: requestedProvider = "groq",
-    stream: wantsStream = false,
-  } = body;
+  const { mode = "single", provider: requestedProvider = "groq", stream: wantsStream = false } = body;
 
   if (!message) {
     return errorResponse("Please provide a message");
-  }
-
-  // ── BUDGET ENFORCEMENT ──────────────────────────────────────────────────────
-  const userId = await getUserId(req);
-  
-  if (userId) {
-    const estimatedCost = estimateRoughCost(requestedProvider, message.length);
-    const budgetCheck = await checkAndUpdateBudget(userId, estimatedCost);
-
-    if (!budgetCheck.allowed) {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: "MONTHLY_BUDGET_EXCEEDED",
-          message: `Monthly budget exceeded. Remaining: $${budgetCheck.remaining.toFixed(4)} of $${budgetCheck.limit.toFixed(2)}`,
-          budgetInfo: {
-            limit: budgetCheck.limit,
-            remaining: budgetCheck.remaining,
-            exceeded: true,
-          },
-        }),
-        { status: 402, headers: { "Content-Type": "application/json" } }
-      );
-    }
   }
 
   // ── Resolve provider ──────────────────────────────────────────────────────
@@ -229,9 +93,8 @@ export async function POST(req: NextRequest) {
   if (!providerModule) {
     return errorResponse("No AI provider available. Check API keys.");
   }
-
+  
   const tier = getProviderTier(usedProvider);
-  const estimatedCost = estimateRoughCost(usedProvider, message.length);
 
   // ── STREAMING PATH ────────────────────────────────────────────────────────
   if (wantsStream) {
@@ -243,7 +106,7 @@ export async function POST(req: NextRequest) {
           try {
             controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
           } catch {
-            // Controller closed
+            // Controller may be closed if client disconnected
           }
         };
 
@@ -262,11 +125,6 @@ export async function POST(req: NextRequest) {
           }
 
           const elapsed = Date.now() - t0;
-
-          // Update budget after successful response
-          if (userId) {
-            await incrementSpend(userId, estimatedCost);
-          }
 
           enqueue({
             done: true,
@@ -311,18 +169,12 @@ export async function POST(req: NextRequest) {
 
     const elapsed = Date.now() - t0;
 
-    // Update budget after successful response
-    if (userId) {
-      await incrementSpend(userId, estimatedCost);
-    }
-
     return new Response(
       JSON.stringify({
         success: true,
         response: fullText,
         tier, // CHANGED: tier instead of provider
         latency: elapsed,
-        estimatedCost: estimatedCost.toFixed(6),
       }),
       { headers: { "Content-Type": "application/json" } }
     );
