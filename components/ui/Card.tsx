@@ -87,3 +87,34 @@ export function CardFooter({ className = '', children, ...props }: CardFooterPro
     </div>
   )
 }
+
+export interface CardTitleProps extends React.HTMLAttributes<HTMLHeadingElement> {
+  className?: string;
+}
+
+export function CardTitle({ className = '', children, ...props }: CardTitleProps) {
+  return (
+    <h3
+      className={`text-2xl font-semibold leading-none tracking-tight ${className}`}
+      {...props}
+    >
+      {children}
+    </h3>
+  )
+}
+
+export interface CardDescriptionProps extends React.HTMLAttributes<HTMLParagraphElement> {
+  className?: string;
+}
+
+export function CardDescription({ className = '', children, ...props }: CardDescriptionProps) {
+  return (
+    <p
+      className={`text-sm text-muted-foreground ${className}`}
+      {...props}
+    >
+      {children}
+    </p>
+  )
+}
+
