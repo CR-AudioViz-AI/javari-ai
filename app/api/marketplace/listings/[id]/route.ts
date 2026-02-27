@@ -62,10 +62,10 @@ async function verifyListingOwnership(listingId: string, userId: string) {
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string } }
 ) {
   try {
-    const listingId = params.id;
+    const listingId = (await params).id;
 
     // Authenticate user
     const authResult = await authenticateUser(request);
@@ -161,10 +161,10 @@ export async function PATCH(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string } }
 ) {
   try {
-    const listingId = params.id;
+    const listingId = (await params).id;
 
     // Authenticate user
     const authResult = await authenticateUser(request);
@@ -222,10 +222,10 @@ export async function DELETE(
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string } }
 ) {
   try {
-    const listingId = params.id;
+    const listingId = (await params).id;
 
     const { data: listing, error } = await supabase
       .from('marketplace_listings')
