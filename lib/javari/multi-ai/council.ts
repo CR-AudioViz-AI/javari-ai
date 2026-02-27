@@ -31,8 +31,8 @@ export interface CouncilConfig {
 
 export const DEFAULT_COUNCIL: CouncilConfig = {
   architect: 'gpt-4o-mini', // ChatGPT for planning
-  builder: 'claude-sonnet-4', // Claude for building
-  validator: 'claude-sonnet-4', // Claude for validation
+  builder: 'claude-sonnet-4-20250514', // Claude for building
+  validator: 'claude-sonnet-4-20250514', // Claude for validation
   summarizer: 'gpt-4o-mini' // ChatGPT for summary
 };
 
@@ -287,3 +287,4 @@ Be concise but complete.`;
     return inputCost + outputCost;
   }
 }
+
