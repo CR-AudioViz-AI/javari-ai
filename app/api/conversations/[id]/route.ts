@@ -24,11 +24,11 @@ interface UpdateBody {
 // GET /api/conversations/[id]
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   return await safeAsync(
     async () => {
-      const { id } = params;
+      const { id } = await params;
       if (!isDefined(id)) {
         return NextResponse.json({ error: 'ID required' }, { status: 400 });
       }
@@ -58,11 +58,11 @@ export async function GET(
 // PATCH /api/conversations/[id]
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   return await safeAsync(
     async () => {
-      const { id } = params;
+      const { id } = await params;
       if (!isDefined(id)) {
         return NextResponse.json({ error: 'ID required' }, { status: 400 });
       }
@@ -115,11 +115,11 @@ export async function PATCH(
 // DELETE /api/conversations/[id]
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   return await safeAsync(
     async () => {
-      const { id } = params;
+      const { id } = await params;
       if (!isDefined(id)) {
         return NextResponse.json({ error: 'ID required' }, { status: 400 });
       }
