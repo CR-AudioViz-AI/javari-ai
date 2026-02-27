@@ -18,7 +18,7 @@ export async function GET(
       );
     }
 
-    const { workflowId } = params;
+    const { workflowId } = await params;
 
     // Get workflow execution
     const { data: workflow, error: dbError } = await supabase
