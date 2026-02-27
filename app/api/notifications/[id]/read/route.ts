@@ -12,7 +12,7 @@ import { createClient } from '@/lib/supabase/server';
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string } }
 ) {
   try {
     const supabase = createClient();
@@ -27,7 +27,7 @@ export async function PATCH(
       );
     }
 
-    const notificationId = params.id;
+    const notificationId = (await params).id;
 
     // Mark as read
     const success = await NotificationService.markAsRead(notificationId, user.id);
