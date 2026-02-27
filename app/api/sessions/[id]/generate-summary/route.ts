@@ -26,12 +26,12 @@ function getOpenAI() {
  */
 export async function POST(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string } }
 ) {
   try {
     const supabase = createServerClient();
     const openai = getOpenAI();
-    const sessionId = params.id;
+    const sessionId = (await params).id;
 
     // Get conversation data
     const { data: conversation, error: convError } = await supabase
