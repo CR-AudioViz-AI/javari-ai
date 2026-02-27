@@ -6,11 +6,11 @@ import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-uti
 // PATCH /api/subprojects/[id]/credentials - Update credential overrides
 export async function PATCH(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const supabase = createServerClient();
-    const { id } = params;
+    const { id } = await params;
     const body = await request.json();
 
     if (!id) {
@@ -65,11 +65,11 @@ export async function PATCH(
 // GET /api/subprojects/[id]/credentials - Get credential overrides (masked)
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const supabase = createServerClient();
-    const { id } = params;
+    const { id } = await params;
 
     if (!id) {
       return NextResponse.json<ApiResponse<null>>(
@@ -135,11 +135,11 @@ export async function GET(
 // DELETE /api/subprojects/[id]/credentials - Clear all credential overrides
 export async function DELETE(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const supabase = createServerClient();
-    const { id } = params;
+    const { id } = await params;
 
     if (!id) {
       return NextResponse.json<ApiResponse<null>>(
