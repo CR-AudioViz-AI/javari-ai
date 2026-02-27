@@ -1,9 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ui/Button';
 import { Textarea } from '@/components/ui/textarea';
-import { Card } from '@/components/ui/card';
+import { Card } from '@/components/ui/Card';
 import { Loader2, Code2, GitCommit, Rocket, CheckCircle2, XCircle, Brain, Zap } from 'lucide-react';
 
 interface Generation {
