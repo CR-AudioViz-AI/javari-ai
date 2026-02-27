@@ -12,7 +12,7 @@ import { createClient } from '@/lib/supabase/server';
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const supabase = createClient();
