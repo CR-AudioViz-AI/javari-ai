@@ -1,54 +1,35 @@
-/**
- * Javari AI - Badge Component
- * SPEC 05 — Canonical UI Primitives
- * 
- * Small status/label indicator
- * - Default, success, warning, error variants
- * - Compact sizing
- * - Token-only styling via Tailwind
- * 
- * Server Component (no client state)
- * 
- * @version 1.0.0
- * @spec SPEC 05
- * @timestamp Tuesday, January 28, 2025 at 11:54 AM EST
- */
+import * as React from "react";
+import { cva, type VariantProps } from "class-variance-authority";
+import { cn } from "@/lib/utils";
 
-import { HTMLAttributes, ReactNode } from 'react'
+export const badgeVariants = cva(
+  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  {
+    variants: {
+      variant: {
+        default:
+          "border-transparent bg-primary text-primary-foreground hover:bg-primary/80",
+        secondary:
+          "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
+        outline: "text-foreground",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+    },
+  }
+);
 
-type BadgeVariant = 'secondary' | 'default' | 'success' | 'warning' | 'error'
+export type BadgeVariant = NonNullable<VariantProps<typeof badgeVariants>["variant"]>;
 
-interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
-  variant?: BadgeVariant
-  children: ReactNode
-}
+export interface BadgeProps
+  extends React.HTMLAttributes<HTMLDivElement>,
+    VariantProps<typeof badgeVariants> {}
 
-const variantStyles: Record<BadgeVariant, string> = {
-  default: 'bg-secondary text-secondary-foreground',
-  success: 'bg-success/10 text-success border border-success/20',
-  warning: 'bg-warning/10 text-warning border border-warning/20',
-  error: 'bg-error/10 text-error border border-error/20',
-}
-
-export function Badge({
-  variant = 'default',
-  className = '',
-  children,
-  ...props
-}: BadgeProps) {
+function Badge({ className, variant, ...props }: BadgeProps) {
   return (
-    <span
-      className={`
-        inline-flex items-center
-        px-2 py-0.5
-        text-xs font-medium
-        rounded-md
-        ${variantStyles[variant]}
-        ${className}
-      `}
-      {...props}
-    >
-      {children}
-    </span>
-  )
+    <div className={cn(badgeVariants({ variant }), className)} {...props} />
+  );
 }
+
+export { Badge };
