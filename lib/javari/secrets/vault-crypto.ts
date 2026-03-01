@@ -1,46 +1,102 @@
 // lib/javari/secrets/vault-crypto.ts
-// AES-256-GCM encryption utilities — Node.js runtime ONLY
-// DO NOT import in edge runtime routes (will fail to compile).
-// Use only in: API routes with runtime = "nodejs", server actions, scripts.
+// Vault v3 Hardened Encryption Engine
+// AES-256-GCM with PBKDF2 key derivation
+// Node.js runtime ONLY — DO NOT import in edge runtime
+// Date: 2025-01-02
 
-// This is a server-only file — importing in edge runtime throws at build time.
-import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
+import crypto from 'crypto';
 
-const ALGORITHM = "aes-256-gcm";
-const IV_BYTES   = 16;
+const ALGORITHM = 'aes-256-gcm';
+const KEY_LENGTH = 32;
+const IV_LENGTH = 16;
+const AUTH_TAG_LENGTH = 16;
+const SALT_LENGTH = 64;
+const PBKDF2_ITERATIONS = 150000;
 
-function getMasterKey(): Buffer {
-  const raw = process.env.CREDENTIAL_ENCRYPTION_KEY ?? "";
-  if (!raw) throw new Error("[VaultCrypto] CREDENTIAL_ENCRYPTION_KEY not set");
-  const hex = raw.replace(/[^a-fA-F0-9]/g, "");
-  if (hex.length >= 64) return Buffer.from(hex.slice(0, 64), "hex");
-  return Buffer.from(raw.padEnd(32, "0").slice(0, 32), "utf-8");
+/**
+ * Get master password from environment
+ * NO FALLBACKS - fails hard if not configured
+ */
+function getMasterPassword(): string {
+  const password = process.env.VAULT_MASTER_PASSWORD;
+  if (!password) {
+    throw new Error('[VaultCrypto] VAULT_MASTER_PASSWORD must be configured - no fallbacks allowed');
+  }
+  return password;
 }
 
 /**
- * Encrypt a plaintext string.
- * Returns: "<iv_hex>:<authTag_hex>:<ciphertext_hex>"
+ * Derive encryption key using PBKDF2 with 150k iterations
+ */
+function deriveKey(masterPassword: string, salt: Buffer): Buffer {
+  return crypto.pbkdf2Sync(
+    masterPassword,
+    salt,
+    PBKDF2_ITERATIONS,
+    KEY_LENGTH,
+    'sha512'
+  );
+}
+
+/**
+ * Encrypt plaintext using AES-256-GCM
+ * Returns: salt:iv:authTag:encrypted (all hex-encoded)
  */
 export function encryptValue(plaintext: string): string {
-  const key = getMasterKey();
-  const iv  = randomBytes(IV_BYTES);
-  const cipher = createCipheriv(ALGORITHM, key, iv);
-  const enc  = Buffer.concat([cipher.update(plaintext, "utf-8"), cipher.final()]);
-  const tag  = cipher.getAuthTag();
-  return `${iv.toString("hex")}:${tag.toString("hex")}:${enc.toString("hex")}`;
+  const salt = crypto.randomBytes(SALT_LENGTH);
+  const key = deriveKey(getMasterPassword(), salt);
+  const iv = crypto.randomBytes(IV_LENGTH);
+
+  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+
+  const encrypted = Buffer.concat([
+    cipher.update(plaintext, 'utf8'),
+    cipher.final()
+  ]);
+
+  const authTag = cipher.getAuthTag();
+
+  return [
+    salt.toString('hex'),
+    iv.toString('hex'),
+    authTag.toString('hex'),
+    encrypted.toString('hex')
+  ].join(':');
 }
 
 /**
- * Decrypt a value produced by encryptValue().
+ * Decrypt ciphertext using AES-256-GCM
+ * Validates format and auth tag deterministically
  */
 export function decryptValue(ciphertext: string): string {
-  const [ivH, tagH, encH] = ciphertext.split(":");
-  if (!ivH || !tagH || !encH) throw new Error("[VaultCrypto] Invalid ciphertext format");
-  const key = getMasterKey();
-  const iv  = Buffer.from(ivH,  "hex");
-  const tag = Buffer.from(tagH, "hex");
-  const enc = Buffer.from(encH, "hex");
-  const dec = createDecipheriv(ALGORITHM, key, iv);
-  dec.setAuthTag(tag);
-  return dec.update(enc).toString("utf-8") + dec.final("utf-8");
+  const parts = ciphertext.split(':');
+  if (parts.length !== 4) {
+    throw new Error('[VaultCrypto] Invalid ciphertext format - expected 4 parts');
+  }
+
+  const [saltHex, ivHex, authTagHex, encryptedHex] = parts;
+
+  const salt = Buffer.from(saltHex, 'hex');
+  const iv = Buffer.from(ivHex, 'hex');
+  const authTag = Buffer.from(authTagHex, 'hex');
+  const encrypted = Buffer.from(encryptedHex, 'hex');
+
+  const key = deriveKey(getMasterPassword(), salt);
+
+  const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+  decipher.setAuthTag(authTag);
+
+  const decrypted = Buffer.concat([
+    decipher.update(encrypted),
+    decipher.final()
+  ]);
+
+  return decrypted.toString('utf8');
+}
+
+/**
+ * Generate SHA-256 fingerprint of value
+ */
+export function fingerprint(value: string): string {
+  return crypto.createHash('sha256').update(value).digest('hex');
 }

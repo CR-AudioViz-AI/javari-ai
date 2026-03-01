@@ -1,8 +1,10 @@
-/**
- * Secrets Vault - Production Grade
- * Provides centralized credential management
- * Compatible with existing codebase imports
- */
+// lib/javari/secrets/vault.ts
+// Vault v3 Hardened Secret Authority
+// Provides centralized credential management with encrypted storage
+// Date: 2025-01-02
+
+import { createClient } from '@supabase/supabase-js';
+import { encryptValue, decryptValue, fingerprint } from './vault-crypto';
 
 // ═══════════════════════════════════════════════════════════════
 // TYPES
@@ -48,27 +50,128 @@ export const PROVIDER_ENV_MAP: Record<ProviderName, string> = {
 };
 
 // ═══════════════════════════════════════════════════════════════
-// VAULT INTERFACE
+// SUPABASE CLIENT FACTORY
+// ═══════════════════════════════════════════════════════════════
+
+function getSupabase() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !key) {
+    throw new Error('[SecretVault] Supabase service role not configured - NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY required');
+  }
+
+  return createClient(url, key);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SECRET VAULT CLASS
 // ═══════════════════════════════════════════════════════════════
 
 class SecretVault {
+  private cache = new Map<string, { value: string; timestamp: number }>();
+  private cacheTTL = 300000; // 5 minutes
+
   /**
-   * Get secret value from environment
+   * Get secret value - checks database first, falls back to env
+   * ALWAYS decrypts - NO plaintext storage
    */
-  get(provider: ProviderName, keyName?: string): string | null {
-    const envVar = keyName || PROVIDER_ENV_MAP[provider];
-    if (!envVar) return null;
-    return process.env[envVar] || null;
+  async get(provider: ProviderName, keyName?: string): Promise<string | null> {
+    const secretName = keyName || PROVIDER_ENV_MAP[provider];
+    
+    // Check cache first
+    const cached = this.cache.get(secretName);
+    if (cached && Date.now() - cached.timestamp < this.cacheTTL) {
+      return cached.value;
+    }
+
+    try {
+      const supabase = getSupabase();
+
+      // Fetch ONLY encrypted_value - NO plaintext column access
+      const { data, error } = await supabase
+        .from('platform_secrets_v2')
+        .select('encrypted_value')
+        .eq('name', secretName)
+        .eq('is_active', true)
+        .single();
+
+      if (error || !data) {
+        // Fall back to environment variable
+        return process.env[secretName] || null;
+      }
+
+      // Decrypt using vault-crypto
+      const value = decryptValue(data.encrypted_value);
+
+      // Cache decrypted value
+      this.cache.set(secretName, { value, timestamp: Date.now() });
+
+      // Increment access counter using RPC
+      await supabase.rpc('increment_secret_access', { secret_name: secretName });
+
+      return value;
+    } catch (error) {
+      console.error(`[SecretVault] Error fetching secret ${secretName}:`, error);
+      // Fall back to environment variable
+      return process.env[secretName] || null;
+    }
+  }
+
+  /**
+   * Set secret value in database
+   * ALWAYS encrypts - NO plaintext storage
+   */
+  async set(
+    provider: ProviderName,
+    value: string,
+    category: string = 'api_key',
+    notes?: string,
+    keyName?: string
+  ): Promise<void> {
+    const secretName = keyName || PROVIDER_ENV_MAP[provider];
+    const supabase = getSupabase();
+
+    // Encrypt value using vault-crypto
+    const encryptedValue = encryptValue(value);
+    const fp = fingerprint(value);
+
+    const { error } = await supabase.from('platform_secrets_v2').upsert({
+      name: secretName,
+      category,
+      notes,
+      encrypted_value: encryptedValue,
+      fingerprint: fp,
+      is_active: true,
+      updated_at: new Date().toISOString(),
+      updated_by: 'JAVARI_AI'
+    });
+
+    if (error) {
+      throw new Error(`[SecretVault] Failed to set secret ${secretName}: ${error.message}`);
+    }
+
+    // Invalidate cache
+    this.cache.delete(secretName);
+
+    // Audit log
+    await supabase.from('vault_audit_log').insert({
+      secret_name: secretName,
+      actor: 'JAVARI_AI',
+      action: 'SET',
+      fingerprint_after: fp,
+      outcome: 'SUCCESS'
+    });
   }
 
   /**
    * Assert secret exists (throws if missing)
    */
-  assert(provider: ProviderName, keyName?: string): string {
-    const value = this.get(provider, keyName);
+  async assert(provider: ProviderName, keyName?: string): Promise<string> {
+    const value = await this.get(provider, keyName);
     if (!value) {
       const envVar = keyName || PROVIDER_ENV_MAP[provider];
-      throw new Error(`Missing required secret: ${envVar}`);
+      throw new Error(`[SecretVault] Missing required secret: ${envVar}`);
     }
     return value;
   }
@@ -76,19 +179,26 @@ class SecretVault {
   /**
    * Check if secret exists
    */
-  has(provider: ProviderName, keyName?: string): boolean {
-    return this.get(provider, keyName) !== null;
+  async has(provider: ProviderName, keyName?: string): Promise<boolean> {
+    const value = await this.get(provider, keyName);
+    return value !== null;
   }
 
   /**
    * Get status of secret
    */
-  status(provider: ProviderName, keyName?: string): KeyStatus {
-    const value = this.get(provider, keyName);
+  async status(provider: ProviderName, keyName?: string): Promise<KeyStatus> {
+    const value = await this.get(provider, keyName);
     if (!value) return 'missing';
-    // Simple validation - could be enhanced
     if (value.length < 10) return 'expired';
     return 'active';
+  }
+
+  /**
+   * Clear cache
+   */
+  clearCache(): void {
+    this.cache.clear();
   }
 }
 
@@ -97,24 +207,3 @@ class SecretVault {
 // ═══════════════════════════════════════════════════════════════
 
 export const vault = new SecretVault();
-
-// ═══════════════════════════════════════════════════════════════
-// LEGACY CRYPTO FUNCTIONS (KEEP FOR COMPATIBILITY)
-// ═══════════════════════════════════════════════════════════════
-
-export async function encrypt(text: string, key: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(text);
-  return btoa(String.fromCharCode(...data));
-}
-
-export async function decrypt(encrypted: string, key: string): Promise<string> {
-  const decoded = atob(encrypted);
-  return decoded;
-}
-
-export function generateKey(): string {
-  const array = new Uint8Array(32);
-  crypto.getRandomValues(array);
-  return Array.from(array, b => b.toString(16).padStart(2, '0')).join('');
-}
