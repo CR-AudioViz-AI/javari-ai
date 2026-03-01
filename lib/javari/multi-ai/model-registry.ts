@@ -279,3 +279,125 @@ export function getProviderCost(provider: string): number {
 export function getActiveModelCount(): number {
   return MODEL_REGISTRY.filter((m) => m.active).length;
 }
+
+
+// ═══════════════════════════════════════════════════════════════
+// BACKWARD COMPATIBILITY (for router.ts legacy API)
+// ═══════════════════════════════════════════════════════════════
+// router.ts imports: ModelMetadata, selectModelByTask, getModel, getFallbackModel
+// These shims bridge the old API to the new ModelDefinition schema.
+
+export interface ModelMetadata {
+  id: string;
+  provider: string;
+  name: string;
+  speed: "ultra-fast" | "fast" | "medium" | "slow";
+  cost: "free" | "low" | "medium" | "high" | "premium";
+  reliability: number;
+  capabilities: {
+    reasoning: number;
+    coding: number;
+    analysis: number;
+    speed: number;
+  };
+  limits: {
+    rpm: number;
+    tpm: number;
+    contextWindow: number;
+  };
+  pricing: {
+    inputPerMillion: number;
+    outputPerMillion: number;
+  };
+  available: boolean;
+  fallbackPriority: number;
+}
+
+function _toMetadata(m: ModelDefinition): ModelMetadata {
+  const costBucket = m.cost_per_1k_tokens <= 0 ? "free"
+    : m.cost_per_1k_tokens <= 0.002 ? "low"
+    : m.cost_per_1k_tokens <= 0.01 ? "medium"
+    : m.cost_per_1k_tokens <= 0.05 ? "high"
+    : "premium";
+
+  const speedBucket = m.latency_class === "fast" ? "fast"
+    : m.latency_class === "medium" ? "medium"
+    : "slow";
+
+  return {
+    id: m.model_id,
+    provider: m.provider,
+    name: m.display_name,
+    speed: speedBucket,
+    cost: costBucket,
+    reliability: 0.95,
+    capabilities: {
+      reasoning: m.capabilities.reasoning * 2,  // Scale 1-5 → 2-10
+      coding: m.capabilities.code_quality * 2,
+      analysis: m.capabilities.reasoning * 2,
+      speed: m.capabilities.streaming * 2,
+    },
+    limits: {
+      rpm: 1000,
+      tpm: 200000,
+      contextWindow: m.context_window,
+    },
+    pricing: {
+      inputPerMillion: m.cost_per_1k_tokens * 1000,
+      outputPerMillion: m.cost_per_1k_tokens * 3000,
+    },
+    available: m.active,
+    fallbackPriority: Math.round(m.cost_per_1k_tokens * 1000) + (m.latency_class === "slow" ? 5 : 0),
+  };
+}
+
+export function getModel(modelId: string): ModelMetadata | null {
+  const m = MODEL_REGISTRY.find((r) => r.model_id === modelId || r.id === modelId || r.id.endsWith(":" + modelId));
+  return m ? _toMetadata(m) : null;
+}
+
+export function getFallbackModel(): ModelMetadata {
+  const cheapest = MODEL_REGISTRY
+    .filter((m) => m.active)
+    .sort((a, b) => a.cost_per_1k_tokens - b.cost_per_1k_tokens)[0];
+  return _toMetadata(cheapest ?? MODEL_REGISTRY[0]);
+}
+
+export function selectModelByTask(task: {
+  needsReasoning?: boolean;
+  needsSpeed?: boolean;
+  needsCoding?: boolean;
+  maxCost?: "free" | "low" | "medium" | "high" | "premium";
+}): ModelMetadata {
+  const costOrder = { free: 0, low: 1, medium: 2, high: 3, premium: 4 };
+  const maxCostLevel = task.maxCost ? costOrder[task.maxCost] : 4;
+
+  const available = MODEL_REGISTRY
+    .filter((m) => m.active)
+    .map((m) => ({ model: m, meta: _toMetadata(m) }))
+    .filter(({ meta }) => costOrder[meta.cost] <= maxCostLevel);
+
+  if (available.length === 0) return getFallbackModel();
+
+  const scored = available.map(({ model, meta }) => {
+    let score = 0;
+    if (task.needsReasoning) score += model.capabilities.reasoning * 2;
+    if (task.needsCoding) score += model.capabilities.code_quality * 2;
+    if (task.needsSpeed) score += model.capabilities.streaming * 2;
+    score += (5 - model.cost_per_1k_tokens * 100); // Cost bonus
+    return { meta, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored[0].meta;
+}
+
+export function getAvailableModels(): ModelMetadata[] {
+  return MODEL_REGISTRY.filter((m) => m.active).map(_toMetadata);
+}
+
+export function getFreeModels(): ModelMetadata[] {
+  return MODEL_REGISTRY
+    .filter((m) => m.active && m.cost_per_1k_tokens === 0)
+    .map(_toMetadata);
+}
