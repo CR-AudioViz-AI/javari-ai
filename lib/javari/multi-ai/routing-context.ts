@@ -15,7 +15,16 @@
 
 // ── Types (also exported to lib/types.ts barrel) ─────────────────────────────
 
-export const ROUTING_ENGINE_VERSION = "v1.1-adaptive-health";
+import {
+  buildCapabilityChain,
+  buildDefaultChain,
+  getRecommendedModel,
+  getProviderCost,
+  getActiveModelCount,
+  MODEL_REGISTRY_VERSION,
+} from "./model-registry";
+
+export const ROUTING_ENGINE_VERSION = "v2.0-registry-routing";
 
 export type CostSensitivity = "free" | "low" | "moderate" | "expensive";
 
@@ -130,6 +139,13 @@ function detectMultiStep(text: string): boolean {
   return MULTI_STEP_PATTERNS.some((p) => p.test(text));
 }
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function dedup(arr: string[]): string[] {
+  const seen = new Set<string>();
+  return arr.filter((p) => { if (seen.has(p)) return false; seen.add(p); return true; });
+}
+
 // ── Main analyzer ─────────────────────────────────────────────────────────────
 
 export function analyzeRoutingContext(
@@ -190,47 +206,65 @@ export function analyzeRoutingContext(
   complexity_score += has_multi_step ? 15 : 0;
   complexity_score = Math.min(Math.round(complexity_score), 100);
 
-  // ── Provider + model selection hints ─────────────────────────────────────
+  // ── Capability-based provider + model selection (from registry) ──────────
   let primary_provider_hint: string;
   let primary_model_hint: string;
   let fallback_chain: string[];
   let estimated_cost_usd: number;
 
   if (requires_json) {
-    // JSON-mode: Mistral first (best strict JSON compliance)
-    primary_provider_hint = "mistral";
-    primary_model_hint    = "mistral-large-latest";
-    fallback_chain        = ["mistral", "openai", "anthropic", "groq"];
-    estimated_cost_usd    = 0.008;
+    // JSON-mode: registry models with json_reliability >= 4
+    const jsonChain = buildCapabilityChain("json_reliability", 4);
+    const defaultChain = buildDefaultChain();
+    fallback_chain = dedup([...jsonChain, ...defaultChain]);
+    primary_provider_hint = fallback_chain[0] ?? "mistral";
+    const model = getRecommendedModel(primary_provider_hint, "json_reliability");
+    primary_model_hint = model?.model_id ?? "mistral-large-latest";
+    estimated_cost_usd = model?.cost_per_1k_tokens ? model.cost_per_1k_tokens * 4 : 0.008;
   } else if (requires_reasoning_depth) {
-    // Reasoning: o4-mini first, o3 for extreme cases, then GPT-4o
-    // Note: o3 / o4-mini availability gated at runtime via vault key check
-    primary_provider_hint = "openai";
-    primary_model_hint    = complexity_score >= 80 ? "o3" : "o4-mini";
-    fallback_chain        = ["openai", "anthropic", "groq", "mistral"];
-    estimated_cost_usd    = complexity_score >= 80 ? 0.25 : 0.05;
+    // Reasoning: registry models with reasoning >= 4, sorted by score
+    const reasonChain = buildCapabilityChain("reasoning", 4);
+    const defaultChain = buildDefaultChain();
+    fallback_chain = dedup([...reasonChain, ...defaultChain]);
+    primary_provider_hint = fallback_chain[0] ?? "openai";
+    // For extreme complexity, pick the deepest reasoning model from the primary provider
+    const model = getRecommendedModel(primary_provider_hint, "reasoning");
+    primary_model_hint = model?.model_id ?? "o4-mini";
+    estimated_cost_usd = model?.cost_per_1k_tokens ? model.cost_per_1k_tokens * 8 : 0.05;
+  } else if (has_code_request && codeScore >= 2) {
+    // Heavy code tasks: registry models with code_quality >= 4
+    const codeChain = buildCapabilityChain("code_quality", 4);
+    const defaultChain = buildDefaultChain();
+    fallback_chain = dedup([...codeChain, ...defaultChain]);
+    primary_provider_hint = fallback_chain[0] ?? "openai";
+    const model = getRecommendedModel(primary_provider_hint, "code_quality");
+    primary_model_hint = model?.model_id ?? "o4-mini";
+    estimated_cost_usd = model?.cost_per_1k_tokens ? model.cost_per_1k_tokens * 6 : 0.03;
   } else if (is_bulk_task && !high_risk) {
-    // Bulk/cheap tasks: Groq Llama (free tier)
-    primary_provider_hint = "groq";
-    primary_model_hint    = "llama-3.1-70b-versatile";
-    fallback_chain        = ["groq", "openrouter", "openai", "anthropic"];
-    estimated_cost_usd    = 0.0;
+    // Bulk/cheap tasks: cheapest models first (cost-optimized chain)
+    fallback_chain = buildDefaultChain();
+    primary_provider_hint = fallback_chain[0] ?? "groq";
+    const model = getRecommendedModel(primary_provider_hint);
+    primary_model_hint = model?.model_id ?? "llama-3.3-70b-versatile";
+    estimated_cost_usd = 0.0;
   } else {
-    // Default: Groq for speed/cost, then fallback
-    primary_provider_hint = requestedProvider ?? "groq";
-    primary_model_hint    = "llama-3.1-70b-versatile";
-    fallback_chain        = ["groq", "openai", "anthropic", "mistral", "openrouter", "xai", "perplexity"];
-    estimated_cost_usd    = 0.001;
+    // Default: cost-optimized chain from registry
+    fallback_chain = buildDefaultChain();
+    primary_provider_hint = requestedProvider ?? fallback_chain[0] ?? "groq";
+    const model = getRecommendedModel(primary_provider_hint);
+    primary_model_hint = model?.model_id ?? "llama-3.3-70b-versatile";
+    estimated_cost_usd = model?.cost_per_1k_tokens ?? 0.001;
   }
 
   // Honor explicit provider request (unless overridden by hard requirements)
   if (requestedProvider && !requires_json && !requires_reasoning_depth) {
     primary_provider_hint = requestedProvider;
-    // Move requested provider to front of chain, keep rest
-    fallback_chain = [
+    fallback_chain = dedup([
       requestedProvider,
       ...fallback_chain.filter((p) => p !== requestedProvider),
-    ];
+    ]);
+    const model = getRecommendedModel(requestedProvider);
+    if (model) primary_model_hint = model.model_id;
   }
 
   return {
@@ -281,16 +315,10 @@ const PRIMARY_BONUS   = -0.15;  // Negative = advantage for capability-selected 
 const COOLDOWN_PENALTY = 10.0;  // Massive penalty for providers in active cooldown
 const QUARANTINE_PENALTY = 100.0; // Providers in quarantine are effectively eliminated
 
-// Approximate cost per 1K tokens by provider (for scoring only)
-const PROVIDER_COST_MAP: Record<string, number> = {
-  groq:       0.0,
-  openrouter: 0.001,
-  mistral:    0.002,
-  openai:     0.003,
-  anthropic:  0.003,
-  xai:        0.002,
-  perplexity: 0.002,
-};
+// Cost per 1K tokens — driven by model registry (no hardcoded map)
+function getProviderCostForScoring(provider: string): number {
+  return getProviderCost(provider);
+}
 
 export interface HealthRankedProvider {
   provider: string;
@@ -368,8 +396,8 @@ export function applyHealthRanking(
     const total = (h?.total_successes ?? 0) + (h?.total_failures ?? 0);
     const failureRatio = total > 0 ? (h?.total_failures ?? 0) / total : 0;
     const avgLatency = h?.avg_latency_ms ?? 500; // Unknown → assume 500ms
-    const cost = PROVIDER_COST_MAP[provider] ?? 0.002;
-    const maxCost = Math.max(...Object.values(PROVIDER_COST_MAP), 0.001);
+    const cost = getProviderCostForScoring(provider);
+    const maxCost = Math.max(...chain.map(p => getProviderCostForScoring(p)), 0.001);
 
     // Normalize to 0–1
     const normalizedLatency = avgLatency / maxLatency;

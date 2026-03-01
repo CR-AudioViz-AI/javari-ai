@@ -343,7 +343,7 @@ async function _recordQuarantineEvent(provider: string, burstCount: number): Pro
       latency_ms: 0,
       error_type: 'quarantine_activated',
       tier: 'system',
-      routing_version: 'v1.1-adaptive-health',
+      routing_version: 'v2.0-registry-routing',
       routing_primary: provider,
       routing_scores: { burst_count: burstCount, window_ms: BURST_WINDOW_MS, quarantine_ms: QUARANTINE_DURATION_MS },
     });

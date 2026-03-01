@@ -1,255 +1,281 @@
 // lib/javari/multi-ai/model-registry.ts
-// Comprehensive model registry for Multi-AI Council
+// Capability-based Model Registry — static, in-memory, zero I/O
+// 2026-03-01
+//
+// Every model is defined with a capability vector and cost metadata.
+// Routing decisions are driven by capability scores, not provider names.
+// The registry is the single source of truth for model selection.
 
-export interface ModelMetadata {
-  id: string;
-  provider: string;
-  name: string;
-  speed: 'ultra-fast' | 'fast' | 'medium' | 'slow';
-  cost: 'free' | 'low' | 'medium' | 'high' | 'premium';
-  reliability: number; // 0-1 score
-  capabilities: {
-    reasoning: number; // 0-10
-    coding: number; // 0-10
-    analysis: number; // 0-10
-    speed: number; // 0-10 (requests/sec)
-  };
-  limits: {
-    rpm: number; // requests per minute
-    tpm: number; // tokens per minute
-    contextWindow: number;
-  };
-  pricing: {
-    inputPerMillion: number; // USD
-    outputPerMillion: number; // USD
-  };
-  available: boolean;
-  fallbackPriority: number; // Lower = higher priority
+export const MODEL_REGISTRY_VERSION = "v1.0";
+
+// ═══════════════════════════════════════════════════════════════
+// TYPES
+// ═══════════════════════════════════════════════════════════════
+
+export interface ModelCapabilities {
+  reasoning: number;       // 1-5: logical depth, multi-step analysis, planning
+  json_reliability: number; // 1-5: structured output accuracy, schema adherence
+  code_quality: number;    // 1-5: code generation, debugging, refactoring
+  multimodal: number;      // 1-5: image/audio understanding (0 = text only)
+  streaming: number;       // 1-5: streaming response quality and latency
+  tools: number;           // 1-5: function/tool calling reliability
 }
 
-export const MODEL_REGISTRY: Record<string, ModelMetadata> = {
-  // OpenAI - o-series (Reasoning)
-  'o1': {
-    id: 'o1',
-    provider: 'openai',
-    name: 'GPT-o1',
-    speed: 'slow',
-    cost: 'premium',
-    reliability: 0.98,
-    capabilities: { reasoning: 10, coding: 9, analysis: 10, speed: 3 },
-    limits: { rpm: 500, tpm: 150000, contextWindow: 128000 },
-    pricing: { inputPerMillion: 15.00, outputPerMillion: 60.00 },
-    available: true,
-    fallbackPriority: 10
+export type LatencyClass = "fast" | "medium" | "slow";
+
+export interface ModelDefinition {
+  id: string;              // Unique: "provider:model_id"
+  provider: string;        // groq, openai, anthropic, mistral, openrouter, xai, perplexity
+  model_id: string;        // API model identifier
+  display_name: string;    // Human-readable name
+  capabilities: ModelCapabilities;
+  cost_per_1k_tokens: number;  // USD per 1K tokens (blended input/output)
+  latency_class: LatencyClass;
+  max_tokens: number;      // Max output tokens
+  context_window: number;  // Max context window
+  active: boolean;         // Whether this model is currently available
+}
+
+// ═══════════════════════════════════════════════════════════════
+// REGISTRY
+// ═══════════════════════════════════════════════════════════════
+
+export const MODEL_REGISTRY: ModelDefinition[] = [
+  // ── Groq (ultra-fast inference, free/low cost) ───────────────
+  {
+    id: "groq:llama-3.3-70b-versatile",
+    provider: "groq",
+    model_id: "llama-3.3-70b-versatile",
+    display_name: "Llama 3.3 70B (Groq)",
+    capabilities: { reasoning: 3, json_reliability: 3, code_quality: 3, multimodal: 0, streaming: 5, tools: 2 },
+    cost_per_1k_tokens: 0.0,
+    latency_class: "fast",
+    max_tokens: 8192,
+    context_window: 131072,
+    active: true,
   },
-  'o1-mini': {
-    id: 'o1-mini',
-    provider: 'openai',
-    name: 'GPT-o1-mini',
-    speed: 'medium',
-    cost: 'high',
-    reliability: 0.97,
-    capabilities: { reasoning: 9, coding: 8, analysis: 9, speed: 5 },
-    limits: { rpm: 500, tpm: 150000, contextWindow: 128000 },
-    pricing: { inputPerMillion: 3.00, outputPerMillion: 12.00 },
-    available: true,
-    fallbackPriority: 8
+  {
+    id: "groq:llama-3.1-8b-instant",
+    provider: "groq",
+    model_id: "llama-3.1-8b-instant",
+    display_name: "Llama 3.1 8B Instant (Groq)",
+    capabilities: { reasoning: 2, json_reliability: 2, code_quality: 2, multimodal: 0, streaming: 5, tools: 1 },
+    cost_per_1k_tokens: 0.0,
+    latency_class: "fast",
+    max_tokens: 8192,
+    context_window: 131072,
+    active: true,
   },
-  
-  // OpenAI - GPT-4 series
-  'gpt-4o': {
-    id: 'gpt-4o',
-    provider: 'openai',
-    name: 'GPT-4o',
-    speed: 'fast',
-    cost: 'high',
-    reliability: 0.96,
-    capabilities: { reasoning: 8, coding: 9, analysis: 8, speed: 7 },
-    limits: { rpm: 5000, tpm: 800000, contextWindow: 128000 },
-    pricing: { inputPerMillion: 2.50, outputPerMillion: 10.00 },
-    available: true,
-    fallbackPriority: 5
+
+  // ── OpenAI (reasoning + tools powerhouse) ────────────────────
+  {
+    id: "openai:gpt-4o-mini",
+    provider: "openai",
+    model_id: "gpt-4o-mini",
+    display_name: "GPT-4o Mini",
+    capabilities: { reasoning: 3, json_reliability: 4, code_quality: 3, multimodal: 4, streaming: 4, tools: 5 },
+    cost_per_1k_tokens: 0.0015,
+    latency_class: "medium",
+    max_tokens: 16384,
+    context_window: 128000,
+    active: true,
   },
-  'gpt-4o-mini': {
-    id: 'gpt-4o-mini',
-    provider: 'openai',
-    name: 'GPT-4o-mini',
-    speed: 'fast',
-    cost: 'low',
-    reliability: 0.95,
-    capabilities: { reasoning: 7, coding: 8, analysis: 7, speed: 8 },
-    limits: { rpm: 10000, tpm: 2000000, contextWindow: 128000 },
-    pricing: { inputPerMillion: 0.15, outputPerMillion: 0.60 },
-    available: true,
-    fallbackPriority: 3
+  {
+    id: "openai:o4-mini",
+    provider: "openai",
+    model_id: "o4-mini",
+    display_name: "o4-mini (Reasoning)",
+    capabilities: { reasoning: 5, json_reliability: 4, code_quality: 5, multimodal: 3, streaming: 3, tools: 4 },
+    cost_per_1k_tokens: 0.011,
+    latency_class: "slow",
+    max_tokens: 65536,
+    context_window: 200000,
+    active: true,
   },
-  
-  // Anthropic - Claude series
-  'claude-sonnet-4': {
-    id: 'claude-sonnet-4-20250514',
-    provider: 'anthropic',
-    name: 'Claude Sonnet 4',
-    speed: 'medium',
-    cost: 'medium',
-    reliability: 0.97,
-    capabilities: { reasoning: 9, coding: 10, analysis: 9, speed: 6 },
-    limits: { rpm: 4000, tpm: 400000, contextWindow: 200000 },
-    pricing: { inputPerMillion: 3.00, outputPerMillion: 15.00 },
-    available: true,
-    fallbackPriority: 4
+  {
+    id: "openai:o3",
+    provider: "openai",
+    model_id: "o3",
+    display_name: "o3 (Deep Reasoning)",
+    capabilities: { reasoning: 5, json_reliability: 4, code_quality: 5, multimodal: 3, streaming: 2, tools: 4 },
+    cost_per_1k_tokens: 0.10,
+    latency_class: "slow",
+    max_tokens: 100000,
+    context_window: 200000,
+    active: true,
   },
-  'claude-haiku-4': {
-    id: 'claude-haiku-4-20250101',
-    provider: 'anthropic',
-    name: 'Claude Haiku 4',
-    speed: 'fast',
-    cost: 'low',
-    reliability: 0.94,
-    capabilities: { reasoning: 7, coding: 8, analysis: 7, speed: 9 },
-    limits: { rpm: 5000, tpm: 500000, contextWindow: 200000 },
-    pricing: { inputPerMillion: 0.25, outputPerMillion: 1.25 },
-    available: true,
-    fallbackPriority: 2
+
+  // ── Anthropic (reasoning + safety) ───────────────────────────
+  {
+    id: "anthropic:claude-sonnet-4-20250514",
+    provider: "anthropic",
+    model_id: "claude-sonnet-4-20250514",
+    display_name: "Claude Sonnet 4",
+    capabilities: { reasoning: 5, json_reliability: 4, code_quality: 5, multimodal: 4, streaming: 4, tools: 5 },
+    cost_per_1k_tokens: 0.009,
+    latency_class: "medium",
+    max_tokens: 8192,
+    context_window: 200000,
+    active: true,
   },
-  
-  // Google -series
-  '-2-flash': {
-    id: '-2.0-flash-exp',
-    provider: 'google',
-    name: '2.0 Flash',
-    speed: 'ultra-fast',
-    cost: 'free',
-    reliability: 0.92,
-    capabilities: { reasoning: 7, coding: 7, analysis: 8, speed: 10 },
-    limits: { rpm: 15, tpm: 1000000, contextWindow: 1000000 },
-    pricing: { inputPerMillion: 0.00, outputPerMillion: 0.00 },
-    available: false, // provider not implemented
-    fallbackPriority: 1
+
+  // ── Mistral (JSON specialist) ────────────────────────────────
+  {
+    id: "mistral:mistral-small-latest",
+    provider: "mistral",
+    model_id: "mistral-small-latest",
+    display_name: "Mistral Small",
+    capabilities: { reasoning: 3, json_reliability: 5, code_quality: 3, multimodal: 0, streaming: 4, tools: 4 },
+    cost_per_1k_tokens: 0.001,
+    latency_class: "medium",
+    max_tokens: 8192,
+    context_window: 32000,
+    active: true,
   },
-  '-pro': {
-    id: '-1.5-pro',
-    provider: 'google',
-    name: '1.5 Pro',
-    speed: 'medium',
-    cost: 'low',
-    reliability: 0.93,
-    capabilities: { reasoning: 8, coding: 7, analysis: 8, speed: 6 },
-    limits: { rpm: 360, tpm: 4000000, contextWindow: 2000000 },
-    pricing: { inputPerMillion: 1.25, outputPerMillion: 5.00 },
-    available: false, // provider not implemented
-    fallbackPriority: 6
+  {
+    id: "mistral:mistral-large-latest",
+    provider: "mistral",
+    model_id: "mistral-large-latest",
+    display_name: "Mistral Large",
+    capabilities: { reasoning: 4, json_reliability: 5, code_quality: 4, multimodal: 0, streaming: 4, tools: 5 },
+    cost_per_1k_tokens: 0.006,
+    latency_class: "medium",
+    max_tokens: 8192,
+    context_window: 128000,
+    active: true,
   },
-  
-  // Groq - Ultra-fast inference
-  'groq-llama': {
-    id: 'llama-3.3-70b-versatile',
-    provider: 'groq',
-    name: 'Llama 3.3 70B (Groq)',
-    speed: 'ultra-fast',
-    cost: 'free',
-    reliability: 0.90,
-    capabilities: { reasoning: 6, coding: 7, analysis: 6, speed: 10 },
-    limits: { rpm: 30, tpm: 20000, contextWindow: 128000 },
-    pricing: { inputPerMillion: 0.00, outputPerMillion: 0.00 },
-    available: true,
-    fallbackPriority: 1
+
+  // ── OpenRouter (Llama variants, fallback) ────────────────────
+  {
+    id: "openrouter:meta-llama/llama-3.3-70b-instruct",
+    provider: "openrouter",
+    model_id: "meta-llama/llama-3.3-70b-instruct",
+    display_name: "Llama 3.3 70B (OpenRouter)",
+    capabilities: { reasoning: 3, json_reliability: 3, code_quality: 3, multimodal: 0, streaming: 4, tools: 2 },
+    cost_per_1k_tokens: 0.0008,
+    latency_class: "medium",
+    max_tokens: 8192,
+    context_window: 131072,
+    active: true,
   },
-  
-  // DeepSeek - Low cost
-  'deepseek': {
-    id: 'deepseek-chat',
-    provider: 'deepseek',
-    name: 'DeepSeek Chat',
-    speed: 'medium',
-    cost: 'free',
-    reliability: 0.88,
-    capabilities: { reasoning: 7, coding: 8, analysis: 7, speed: 5 },
-    limits: { rpm: 60, tpm: 10000000, contextWindow: 64000 },
-    pricing: { inputPerMillion: 0.00, outputPerMillion: 0.00 },
-    available: true,
-    fallbackPriority: 1
+
+  // ── xAI (Grok) ──────────────────────────────────────────────
+  {
+    id: "xai:grok-2",
+    provider: "xai",
+    model_id: "grok-2",
+    display_name: "Grok 2",
+    capabilities: { reasoning: 3, json_reliability: 3, code_quality: 3, multimodal: 3, streaming: 4, tools: 3 },
+    cost_per_1k_tokens: 0.005,
+    latency_class: "medium",
+    max_tokens: 8192,
+    context_window: 131072,
+    active: true,
   },
-  
-  // Mistral
-  'mistral-large': {
-    id: 'mistral-large-latest',
-    provider: 'mistral',
-    name: 'Mistral Large',
-    speed: 'fast',
-    cost: 'medium',
-    reliability: 0.93,
-    capabilities: { reasoning: 8, coding: 8, analysis: 8, speed: 7 },
-    limits: { rpm: 1, tpm: 1000000, contextWindow: 128000 },
-    pricing: { inputPerMillion: 2.00, outputPerMillion: 6.00 },
-    available: true,
-    fallbackPriority: 7
+
+  // ── Perplexity (search-augmented) ────────────────────────────
+  {
+    id: "perplexity:llama-3.1-sonar-large-128k-online",
+    provider: "perplexity",
+    model_id: "llama-3.1-sonar-large-128k-online",
+    display_name: "Sonar Large (Perplexity)",
+    capabilities: { reasoning: 3, json_reliability: 2, code_quality: 2, multimodal: 0, streaming: 4, tools: 1 },
+    cost_per_1k_tokens: 0.005,
+    latency_class: "medium",
+    max_tokens: 4096,
+    context_window: 127072,
+    active: true,
+  },
+];
+
+// ═══════════════════════════════════════════════════════════════
+// QUERY API (all pure functions, zero I/O)
+// ═══════════════════════════════════════════════════════════════
+
+/** Get all active models */
+export function getActiveModels(): ModelDefinition[] {
+  return MODEL_REGISTRY.filter((m) => m.active);
+}
+
+/** Get models for a specific provider */
+export function getModelsByProvider(provider: string): ModelDefinition[] {
+  return MODEL_REGISTRY.filter((m) => m.active && m.provider === provider);
+}
+
+/** Get the best model for a capability requirement */
+export function getBestModelForCapability(
+  capability: keyof ModelCapabilities,
+  minScore: number = 4,
+): ModelDefinition[] {
+  return MODEL_REGISTRY
+    .filter((m) => m.active && m.capabilities[capability] >= minScore)
+    .sort((a, b) => b.capabilities[capability] - a.capabilities[capability] || a.cost_per_1k_tokens - b.cost_per_1k_tokens);
+}
+
+/**
+ * Build a capability-filtered provider chain.
+ * Returns unique providers ordered by best model score for the given capability,
+ * with cost as tiebreaker.
+ */
+export function buildCapabilityChain(
+  capability: keyof ModelCapabilities,
+  minScore: number,
+): string[] {
+  const models = getBestModelForCapability(capability, minScore);
+  const seen = new Set<string>();
+  const chain: string[] = [];
+  for (const m of models) {
+    if (!seen.has(m.provider)) {
+      seen.add(m.provider);
+      chain.push(m.provider);
+    }
   }
-};
-
-export function getModel(modelId: string): ModelMetadata | null {
-  return MODEL_REGISTRY[modelId] || null;
+  return chain;
 }
 
-export function getAvailableModels(): ModelMetadata[] {
-  return Object.values(MODEL_REGISTRY).filter(m => m.available);
-}
-
-export function getModelsByProvider(provider: string): ModelMetadata[] {
-  return Object.values(MODEL_REGISTRY).filter(
-    m => m.provider === provider && m.available
-  );
-}
-
-export function getFreeModels(): ModelMetadata[] {
-  return Object.values(MODEL_REGISTRY).filter(
-    m => m.cost === 'free' && m.available
-  );
-}
-
-export function getFallbackModel(): ModelMetadata {
-  const available = getAvailableModels();
-  return available.sort((a, b) => a.fallbackPriority - b.fallbackPriority)[0];
-}
-
-export function selectModelByTask(task: {
-  needsReasoning?: boolean;
-  needsSpeed?: boolean;
-  needsCoding?: boolean;
-  maxCost?: 'free' | 'low' | 'medium' | 'high' | 'premium';
-}): ModelMetadata {
-  const available = getAvailableModels();
-  
-  // Filter by cost constraint
-  const costOrder = { 'free': 0, 'low': 1, 'medium': 2, 'high': 3, 'premium': 4 };
-  const maxCostLevel = task.maxCost ? costOrder[task.maxCost] : 4;
-  const affordable = available.filter(m => costOrder[m.cost] <= maxCostLevel);
-  
-  if (affordable.length === 0) return getFallbackModel();
-  
-  // Score each model
-  const scored = affordable.map(model => {
-    let score = 0;
-    
-    if (task.needsReasoning) {
-      score += model.capabilities.reasoning * 2;
+/**
+ * Build a full fallback chain from all active providers,
+ * ordered by cost (cheapest first), then alphabetical.
+ */
+export function buildDefaultChain(): string[] {
+  const providers = new Map<string, number>(); // provider → lowest cost
+  for (const m of MODEL_REGISTRY) {
+    if (!m.active) continue;
+    const existing = providers.get(m.provider);
+    if (existing === undefined || m.cost_per_1k_tokens < existing) {
+      providers.set(m.provider, m.cost_per_1k_tokens);
     }
-    if (task.needsSpeed) {
-      score += model.capabilities.speed * 2;
-    }
-    if (task.needsCoding) {
-      score += model.capabilities.coding * 2;
-    }
-    
-    // Reliability bonus
-    score += model.reliability * 10;
-    
-    // Cost penalty (prefer cheaper when equal capability)
-    score -= costOrder[model.cost] * 0.5;
-    
-    return { model, score };
-  });
-  
-  // Return highest scoring model
-  scored.sort((a, b) => b.score - a.score);
-  return scored[0].model;
+  }
+  return [...providers.entries()]
+    .sort(([aP, aC], [bP, bC]) => aC - bC || aP.localeCompare(bP))
+    .map(([p]) => p);
+}
+
+/**
+ * Get the recommended model for a provider + capability combination.
+ * Returns the best model from that provider for the given capability.
+ */
+export function getRecommendedModel(
+  provider: string,
+  capability?: keyof ModelCapabilities,
+): ModelDefinition | undefined {
+  const models = getModelsByProvider(provider);
+  if (models.length === 0) return undefined;
+  if (!capability) return models[0]; // Return first active model
+  return models.sort((a, b) => b.capabilities[capability] - a.capabilities[capability])[0];
+}
+
+/**
+ * Get model cost per 1K tokens for a provider (uses cheapest model).
+ * Used by health ranking composite score.
+ */
+export function getProviderCost(provider: string): number {
+  const models = getModelsByProvider(provider);
+  if (models.length === 0) return 0.002; // Unknown provider fallback
+  return Math.min(...models.map((m) => m.cost_per_1k_tokens));
+}
+
+/** Total count of active models in the registry */
+export function getActiveModelCount(): number {
+  return MODEL_REGISTRY.filter((m) => m.active).length;
 }
