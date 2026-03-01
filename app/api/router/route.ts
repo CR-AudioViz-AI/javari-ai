@@ -39,6 +39,7 @@ import { getProvider, getProviderApiKey } from "@/lib/javari/providers";
 import { isOutputMalformed } from "@/lib/javari/multi-ai/validator";
 import { recordRouterExecution, classifyError } from "@/lib/javari/telemetry/router-telemetry";
 import { isProviderAvailable, updateProviderHealth } from "@/lib/javari/telemetry/provider-health";
+import { checkBudgetBeforeExecution, recordBudgetAfterExecution } from "@/lib/javari/telemetry/budget-governor";
 
 export const runtime = "nodejs";
 
@@ -136,7 +137,24 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ── 3. Execute with routing logic ───────────────────────────────────────
+  // ── 3. Budget gate ──────────────────────────────────────────────────────
+  const budgetCheck = await checkBudgetBeforeExecution(null, ctx.estimated_cost_usd ?? 0.01);
+  if (!budgetCheck.allowed) {
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: "budget_exceeded",
+        scope: budgetCheck.scope,
+        period: budgetCheck.period,
+        currentSpend: budgetCheck.currentSpend,
+        limit: budgetCheck.limit,
+        reason: budgetCheck.reason,
+      }),
+      { status: 402, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  // ── 4. Execute with routing logic ───────────────────────────────────────
 
   // Build system prompt hint for JSON mode
   const jsonInstruction = ctx.requires_json
@@ -295,6 +313,7 @@ export async function POST(req: NextRequest) {
 
   // Provider health — fire and forget
   updateProviderHealth(usedProvider, true, durationMs);
+  recordBudgetAfterExecution(null, ctx.estimated_cost_usd ?? 0);
 
   // Router telemetry — fire and forget
   recordRouterExecution({

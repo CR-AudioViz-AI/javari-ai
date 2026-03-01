@@ -13,6 +13,7 @@ import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
 import { recordRouterExecution, classifyError } from "@/lib/javari/telemetry/router-telemetry";
 import { isProviderAvailable, updateProviderHealth } from "@/lib/javari/telemetry/provider-health";
+import { checkBudgetBeforeExecution, recordBudgetAfterExecution } from "@/lib/javari/telemetry/budget-governor";
 
 export const runtime = "nodejs";
 
@@ -137,50 +138,15 @@ async function getUserCostSettings(userId: string) {
   return data;
 }
 
-async function updateMonthlySpend(userId: string, amount: number) {
-  await supabase.rpc("exec_sql", {
-    sql: `
-      UPDATE user_cost_settings 
-      SET current_month_spend = current_month_spend + ${amount},
-          updated_at = NOW()
-      WHERE user_id = '${userId}'
-    `,
-  });
-}
+// [CONSOLIDATED] updateMonthlySpend removed — handled by budget-governor.ts
 
 // ═══════════════════════════════════════════════════════════════
 // COST LOGGING
 // ═══════════════════════════════════════════════════════════════
 
-async function logExecution(data: {
-  requestId: string;
-  userId: string | null;
-  route: string;
-  tier: Tier;
-  providerInternal: string;
-  modelInternal: string;
-  inputTokens: number;
-  outputTokens: number;
-  projectedCost: number;
-  actualCost: number;
-  multiplier: number;
-  approved: boolean;
-}) {
-  await supabase.from("llm_execution_costs").insert({
-    request_id: data.requestId,
-    user_id: data.userId,
-    route: data.route,
-    tier: data.tier,
-    provider_internal: data.providerInternal,
-    model_internal: data.modelInternal,
-    input_tokens: data.inputTokens,
-    output_tokens: data.outputTokens,
-    projected_cost_usd: data.projectedCost,
-    actual_cost_usd: data.actualCost,
-    multiplier: data.multiplier,
-    approved: data.approved,
-  });
-}
+// [CONSOLIDATED] logExecution removed — cost logging via:
+//   router-telemetry.ts → ai_router_executions (per-execution)
+//   budget-governor.ts → ai_budget_state (aggregated spend)
 
 // ═══════════════════════════════════════════════════════════════
 // HELPERS
@@ -289,44 +255,28 @@ export async function POST(req: NextRequest) {
   const tier = getTier(usedProvider);
   const costEstimate = estimateCost(usedProvider, message.length, tier);
 
-  // ─── APPROVAL GATES ────────────────────────────────────────────
+  // ─── BUDGET GOVERNOR ──────────────────────────────────────────
+  const budgetCheck = await checkBudgetBeforeExecution(userId, costEstimate.projectedCost);
+  if (!budgetCheck.allowed) {
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: "budget_exceeded",
+        scope: budgetCheck.scope,
+        period: budgetCheck.period,
+        currentSpend: budgetCheck.currentSpend,
+        limit: budgetCheck.limit,
+        reason: budgetCheck.reason,
+        tier,
+        projectedCost: costEstimate.projectedCost,
+      }),
+      { status: 402, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  // Multiplier approval (orthogonal to budget)
   if (settings && !settings.is_admin) {
-    // Per-request limit check
-    if (costEstimate.projectedCost > settings.per_request_limit_usd) {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          needsApproval: true,
-          tier,
-          projectedCost: costEstimate.projectedCost,
-          multiplier: costEstimate.multiplier,
-          perRequestLimit: settings.per_request_limit_usd,
-          message: "This request exceeds your per-request cost limit. Premium tier escalation required.",
-        }),
-        { status: 402, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    // Monthly limit check
-    const projectedTotal = settings.current_month_spend + costEstimate.projectedCost;
-    if (projectedTotal > settings.monthly_limit_usd) {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          monthlyLimitReached: true,
-          tier,
-          projectedCost: costEstimate.projectedCost,
-          currentSpend: settings.current_month_spend,
-          monthlyLimit: settings.monthly_limit_usd,
-          remainingBudget: Math.max(0, settings.monthly_limit_usd - settings.current_month_spend),
-          message: "Monthly budget limit would be exceeded.",
-        }),
-        { status: 402, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    // Multiplier approval check
-    if (costEstimate.multiplier >= settings.require_approval_above && !approvePremium) {
+    if (costEstimate.multiplier >= (settings.require_approval_above ?? 2.0) && !approvePremium) {
       return new Response(
         JSON.stringify({
           success: false,
@@ -334,7 +284,7 @@ export async function POST(req: NextRequest) {
           tier,
           projectedCost: costEstimate.projectedCost,
           multiplier: costEstimate.multiplier,
-          message: `High-tier model (${tier}) requires explicit approval. Add "approvePremium: true" to request body.`,
+          message: `High-tier model (${tier}) requires explicit approval.`,
         }),
         { status: 402, headers: { "Content-Type": "application/json" } }
       );
@@ -372,26 +322,8 @@ export async function POST(req: NextRequest) {
           const elapsed = Date.now() - t0;
           const actualCost = costEstimate.projectedCost; // In production, calculate from actual tokens
 
-          // Update spend
-          if (userId && settings) {
-            await updateMonthlySpend(userId, actualCost);
-          }
-
-          // Log execution
-          await logExecution({
-            requestId,
-            userId,
-            route: "/api/chat",
-            tier,
-            providerInternal: usedProvider,
-            modelInternal: providerModule!.name ?? 'unknown',
-            inputTokens: costEstimate.tokens.input,
-            outputTokens: costEstimate.tokens.output,
-            projectedCost: costEstimate.projectedCost,
-            actualCost,
-            multiplier: costEstimate.multiplier,
-            approved: true,
-          });
+          // Budget governor — record spend (fire-and-forget)
+          recordBudgetAfterExecution(userId, actualCost);
 
           const remainingBudget = settings
             ? settings.monthly_limit_usd - settings.current_month_spend - actualCost
@@ -446,26 +378,8 @@ export async function POST(req: NextRequest) {
     const elapsed = Date.now() - t0;
     const actualCost = costEstimate.projectedCost;
 
-    // Update spend
-    if (userId && settings) {
-      await updateMonthlySpend(userId, actualCost);
-    }
-
-    // Log execution
-    await logExecution({
-      requestId,
-      userId,
-      route: "/api/chat",
-      tier,
-      providerInternal: usedProvider,
-      modelInternal: providerModule.name ?? 'unknown',
-      inputTokens: costEstimate.tokens.input,
-      outputTokens: costEstimate.tokens.output,
-      projectedCost: costEstimate.projectedCost,
-      actualCost,
-      multiplier: costEstimate.multiplier,
-      approved: true,
-    });
+    // Budget governor — record spend (fire-and-forget)
+    recordBudgetAfterExecution(userId, actualCost);
 
     const remainingBudget = settings
       ? settings.monthly_limit_usd - settings.current_month_spend - actualCost
