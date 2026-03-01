@@ -21,10 +21,11 @@ import {
   getRecommendedModel,
   getProviderCost,
   getActiveModelCount,
-  MODEL_REGISTRY_VERSION,
+  getRegistryVersion,
+  initRegistry,
 } from "./model-registry";
 
-export const ROUTING_ENGINE_VERSION = "v2.0-registry-routing";
+export const ROUTING_ENGINE_VERSION = "v2.1-externalized-registry";
 
 export type CostSensitivity = "free" | "low" | "moderate" | "expensive";
 
@@ -458,3 +459,7 @@ export function applyHealthRanking(
     },
   };
 }
+
+
+// Re-exports for telemetry consumers
+export { getRegistryVersion, initRegistry };

@@ -9,7 +9,7 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
-import { analyzeRoutingContext, applyHealthRanking, ROUTING_ENGINE_VERSION } from "@/lib/javari/multi-ai/routing-context";
+import { analyzeRoutingContext, applyHealthRanking, ROUTING_ENGINE_VERSION, getRegistryVersion } from "@/lib/javari/multi-ai/routing-context";
 import { isOutputMalformed } from "@/lib/javari/multi-ai/validator";
 import { recordRouterExecution, classifyError } from "@/lib/javari/telemetry/router-telemetry";
 import { isProviderAvailable, updateProviderHealth } from "@/lib/javari/telemetry/provider-health";
@@ -370,6 +370,7 @@ export async function POST(req: NextRequest) {
             success: !malformed,
             user_id: userId ?? undefined,
             routing_version: ROUTING_ENGINE_VERSION,
+            registry_version: getRegistryVersion(),
             routing_primary: primaryHint,
             routing_chain: fallbackChain,
             routing_scores: Object.fromEntries(healthScores.map(s => [s.provider, Math.round(s.score * 1000) / 1000])),
@@ -438,6 +439,7 @@ export async function POST(req: NextRequest) {
       success: !malformed,
       user_id: userId ?? undefined,
       routing_version: ROUTING_ENGINE_VERSION,
+      registry_version: getRegistryVersion(),
       routing_primary: primaryHint,
       routing_chain: fallbackChain,
       routing_scores: Object.fromEntries(healthScores.map(s => [s.provider, Math.round(s.score * 1000) / 1000])),
@@ -479,6 +481,7 @@ export async function POST(req: NextRequest) {
       error_type: classifyError(err),
       user_id: userId ?? undefined,
       routing_version: ROUTING_ENGINE_VERSION,
+      registry_version: getRegistryVersion(),
       routing_primary: primaryHint,
       routing_chain: fallbackChain,
       routing_scores: Object.fromEntries(healthScores.map(s => [s.provider, Math.round(s.score * 1000) / 1000])),

@@ -33,7 +33,7 @@
 //   SSE stream: data: { type, content, routing }
 
 import { NextRequest } from "next/server";
-import { analyzeRoutingContext, applyHealthRanking, ROUTING_ENGINE_VERSION } from "@/lib/javari/multi-ai/routing-context";
+import { analyzeRoutingContext, applyHealthRanking, ROUTING_ENGINE_VERSION, getRegistryVersion } from "@/lib/javari/multi-ai/routing-context";
 import { routeRequest, buildFallbackChain, globalRouterLogger } from "@/lib/javari/multi-ai/router";
 import { getProvider, getProviderApiKey } from "@/lib/javari/providers";
 import { isOutputMalformed } from "@/lib/javari/multi-ai/validator";
@@ -305,6 +305,7 @@ export async function POST(req: NextRequest) {
       success: false,
       error_type: 'all_providers_failed',
       routing_version: ROUTING_ENGINE_VERSION,
+      registry_version: getRegistryVersion(),
       routing_primary: ctx.primary_provider_hint,
       routing_chain: healthRankedChain,
       routing_scores: Object.fromEntries(healthScores.map(s => [s.provider, Math.round(s.score * 1000) / 1000])),
@@ -333,6 +334,7 @@ export async function POST(req: NextRequest) {
     latency_ms: durationMs,
     success: true,
     routing_version: ROUTING_ENGINE_VERSION,
+    registry_version: getRegistryVersion(),
     routing_primary: ctx.primary_provider_hint,
     routing_chain: healthRankedChain,
     routing_scores: Object.fromEntries(healthScores.map(s => [s.provider, Math.round(s.score * 1000) / 1000])),
@@ -346,6 +348,7 @@ export async function POST(req: NextRequest) {
       response,
       provider: usedProvider,
       routing_version: ROUTING_ENGINE_VERSION,
+      registry_version: getRegistryVersion(),
       routing: {
         provider:    ctx.primary_provider_hint,
         model:       ctx.primary_model_hint,

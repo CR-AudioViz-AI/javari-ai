@@ -28,6 +28,7 @@ export interface RouterTelemetryEvent {
   circuit_breaker_triggered?: boolean;
   // Routing audit fields (v1.1)
   routing_version?: string;
+  registry_version?: string;
   routing_primary?: string;
   routing_chain?: string[];
   routing_scores?: Record<string, number>;
@@ -126,6 +127,7 @@ function _coreRow(event: RouterTelemetryEvent) {
 function _auditFields(event: RouterTelemetryEvent) {
   return {
     routing_version:           event.routing_version ?? null,
+      registry_version:          event.registry_version ?? null,
     routing_primary:           event.routing_primary ?? null,
     routing_chain:             event.routing_chain ?? null,
     routing_scores:            event.routing_scores ?? null,
