@@ -1,5 +1,4 @@
 import { ProviderId } from "./types";
-import { getHealthPenalty } from "./health";
 import { aggregateHistory } from "../learning/history";
 
 // Base cost per 1K tokens in USD cents (simulated)
@@ -70,8 +69,8 @@ export function estimateProviderCost(
     simulatedLatency * 0.2 +
     (1 - reliability) * 200; // reliability penalty
 
-  // Apply health penalty multiplier (Step 87)
-  const healthPenalty = getHealthPenalty(providerId);
+  // Health penalty removed — cooldowns handled by provider-health.ts at routing layer
+  const healthPenalty = 1.0;
   
   // Apply history-based penalty (Step 89)
   const aggregate = aggregateHistory(providerId, 50);
