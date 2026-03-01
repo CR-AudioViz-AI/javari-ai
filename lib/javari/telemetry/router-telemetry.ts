@@ -102,39 +102,71 @@ export function classifyError(error: unknown): string {
 // INTERNAL
 // ═══════════════════════════════════════════════════════════════
 
+// Core row — always present in schema
+function _coreRow(event: RouterTelemetryEvent) {
+  return {
+    tier:                       event.tier ?? null,
+    provider:                   event.provider,
+    model:                      event.model ?? null,
+    prompt_tokens:              event.prompt_tokens ?? 0,
+    completion_tokens:          event.completion_tokens ?? 0,
+    total_tokens:               event.total_tokens ?? (event.prompt_tokens ?? 0) + (event.completion_tokens ?? 0),
+    cost:                       event.cost ?? 0,
+    latency_ms:                 event.latency_ms,
+    retries:                    event.retries ?? 0,
+    success:                    event.success,
+    error_type:                 event.error_type ?? null,
+    session_id:                 event.session_id ?? null,
+    user_id:                    event.user_id ?? null,
+    circuit_breaker_triggered:  event.circuit_breaker_triggered ?? false,
+  };
+}
+
+// Audit columns — may not exist yet (added in v1.1 migration)
+function _auditFields(event: RouterTelemetryEvent) {
+  return {
+    routing_version:           event.routing_version ?? null,
+    routing_primary:           event.routing_primary ?? null,
+    routing_chain:             event.routing_chain ?? null,
+    routing_scores:            event.routing_scores ?? null,
+    routing_weights:           event.routing_weights ?? null,
+    capability_override:       event.capability_override ?? null,
+  };
+}
+
+let _auditColumnsAvailable = true; // Assume yes, flip on first failure
+
 async function _insertEvent(event: RouterTelemetryEvent): Promise<boolean> {
   try {
     const supabase = getSupabase();
     if (!supabase) return false;
 
-    const { error } = await supabase.from('ai_router_executions').insert({
-      tier:                       event.tier ?? null,
-      provider:                   event.provider,
-      model:                      event.model ?? null,
-      prompt_tokens:              event.prompt_tokens ?? 0,
-      completion_tokens:          event.completion_tokens ?? 0,
-      total_tokens:               event.total_tokens ?? (event.prompt_tokens ?? 0) + (event.completion_tokens ?? 0),
-      cost:                       event.cost ?? 0,
-      latency_ms:                 event.latency_ms,
-      retries:                    event.retries ?? 0,
-      success:                    event.success,
-      error_type:                 event.error_type ?? null,
-      session_id:                 event.session_id ?? null,
-      user_id:                    event.user_id ?? null,
-      circuit_breaker_triggered:  event.circuit_breaker_triggered ?? false,
-      routing_version:           event.routing_version ?? null,
-      routing_primary:           event.routing_primary ?? null,
-      routing_chain:             event.routing_chain ?? null,
-      routing_scores:            event.routing_scores ?? null,
-      routing_weights:           event.routing_weights ?? null,
-      capability_override:       event.capability_override ?? null,
-    });
+    // Try with audit fields if we believe they exist
+    if (_auditColumnsAvailable) {
+      const { error } = await supabase.from('ai_router_executions').insert({
+        ..._coreRow(event),
+        ..._auditFields(event),
+      });
 
-    if (error) {
-      console.warn('[RouterTelemetry] Insert failed:', error.message);
-      return false;
+      if (!error) return true;
+
+      // If error mentions column/schema → audit columns don't exist yet
+      if (error.message?.includes('column') || error.message?.includes('schema cache')) {
+        _auditColumnsAvailable = false;
+        console.warn('[RouterTelemetry] Audit columns not yet migrated — falling back to core-only insert');
+        // Fall through to core-only insert
+      } else {
+        console.warn('[RouterTelemetry] Insert failed:', error.message);
+        return false;
+      }
     }
 
+    // Core-only insert (no audit fields)
+    const { error: coreError } = await supabase.from('ai_router_executions').insert(_coreRow(event));
+    if (coreError) {
+      console.warn('[RouterTelemetry] Core insert failed:', coreError.message);
+      return false;
+    }
     return true;
   } catch {
     // NEVER throw — telemetry is non-critical
