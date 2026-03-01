@@ -1,6 +1,7 @@
-// app/api/admin/migrate/route.ts  
-// ONE-TIME migration — adds routing audit columns via pg pooler
-// Protected by ADMIN_MODE. DELETE after migration.
+// app/api/admin/migrate/route.ts
+// ONE-TIME migration — adds routing audit columns
+// Uses Supabase pooler from DATABASE_URL components
+// DELETE after migration
 
 import { NextRequest } from "next/server";
 
@@ -13,35 +14,35 @@ export async function POST(_req: NextRequest) {
   }
 
   const results: string[] = [];
-  
-  // Build pooler connection string from components
-  const dbPassword = process.env.SUPABASE_DB_PASSWORD;
-  const projectRef = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").match(
-    /https:\/\/([a-z0-9]+)\.supabase\.co/
-  )?.[1];
-  
-  let connString = process.env.DATABASE_URL ?? "";
-  
-  // Fix: replace direct db hostname with pooler hostname
-  if (connString.includes(".supabase.co")) {
-    connString = connString
-      .replace(/db\.[a-z0-9]+\.supabase\.co/, `aws-0-us-east-1.pooler.supabase.com`)
-      .replace(":5432/", ":6543/");
-    if (!connString.includes("pgbouncer=true")) {
-      connString += connString.includes("?") ? "&pgbouncer=true" : "?pgbouncer=true";
-    }
-    results.push(`Using pooler connection (ref: ${projectRef})`);
-  } else if (dbPassword && projectRef) {
-    connString = `postgresql://postgres.${projectRef}:${dbPassword}@aws-0-us-east-1.pooler.supabase.com:6543/postgres?pgbouncer=true`;
-    results.push("Built pooler connection from components");
-  } else {
-    results.push("No usable DATABASE_URL or components found");
-    return Response.json({ results }, { status: 500 });
+
+  // Parse DATABASE_URL for password, then build pooler URL
+  const origUrl = process.env.DATABASE_URL ?? "";
+  const sbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+  const refMatch = sbUrl.match(/https:\/\/([a-z0-9]+)\.supabase\.co/);
+  const projectRef = refMatch?.[1];
+
+  // Extract password from DATABASE_URL  
+  const passMatch = origUrl.match(/:([^@]+)@/);
+  const password = passMatch?.[1] ?? process.env.SUPABASE_DB_PASSWORD ?? "";
+
+  if (!projectRef || !password) {
+    return Response.json({
+      results: [`Missing: projectRef=${!!projectRef} password=${!!password}`],
+    }, { status: 500 });
   }
+
+  // Build pooler connection string
+  // Format: postgresql://postgres.{ref}:{password}@aws-0-us-east-1.pooler.supabase.com:6543/postgres
+  const poolerUrl = `postgresql://postgres.${projectRef}:${encodeURIComponent(password)}@aws-0-us-east-1.pooler.supabase.com:6543/postgres`;
+  results.push(`Connecting to pooler (ref: ${projectRef})`);
 
   try {
     const { Pool } = await import("pg");
-    const pool = new Pool({ connectionString: connString, ssl: { rejectUnauthorized: false } });
+    const pool = new Pool({ 
+      connectionString: poolerUrl, 
+      ssl: { rejectUnauthorized: false },
+      connectionTimeoutMillis: 10000,
+    });
 
     const columns = [
       "routing_version TEXT",
@@ -64,11 +65,11 @@ export async function POST(_req: NextRequest) {
       }
     }
 
-    // Verify columns exist
+    // Verify
     const { rows } = await pool.query(`
       SELECT column_name FROM information_schema.columns 
       WHERE table_name = 'ai_router_executions' 
-      AND column_name LIKE 'routing_%' OR column_name = 'capability_override'
+      AND (column_name LIKE 'routing_%' OR column_name = 'capability_override')
       ORDER BY column_name;
     `);
     results.push(`Verified columns: ${rows.map((r: any) => r.column_name).join(", ")}`);
