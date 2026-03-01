@@ -20,6 +20,9 @@
 
 import { getProvider, getProviderApiKey } from "@/lib/javari/providers";
 import { validateResponse, isOutputMalformed } from "@/lib/javari/multi-ai/validator";
+import { checkBudgetBeforeExecution, recordBudgetAfterExecution } from "@/lib/javari/telemetry/budget-governor";
+import { isProviderAvailable, updateProviderHealth } from "@/lib/javari/telemetry/provider-health";
+import { recordRouterExecution } from "@/lib/javari/telemetry/router-telemetry";
 import {
   orchestrateTask,
   isMultiAgentMode,
@@ -130,8 +133,26 @@ async function callProvider(
   task: TaskNode
 ): Promise<{ text: string; provider: string; model: string }> {
   const chain = task.routing.fallback_chain;
+  const estimatedCost = task.routing.estimated_cost_usd ?? 0.01;
+
+  // ── Budget guard (pre-execution) ──────────────────────────────────────────
+  try {
+    const budgetCheck = await checkBudgetBeforeExecution(null, estimatedCost);
+    if (!budgetCheck.allowed) {
+      throw new Error(`Budget guard denied: ${budgetCheck.reason} (anomaly:${budgetCheck.anomaly_score})`);
+    }
+  } catch (budgetErr) {
+    if (budgetErr instanceof Error && budgetErr.message.startsWith("Budget guard"))
+      throw budgetErr;
+    // Non-fatal: budget system down → proceed with caution
+  }
+
+  const t0 = Date.now();
 
   for (const pName of chain) {
+    // ── Provider health guard ────────────────────────────────────────────────
+    if (!(await isProviderAvailable(pName))) continue;
+
     let apiKey: string;
     try {
       apiKey = await getProviderApiKey(pName as Parameters<typeof getProviderApiKey>[0]);
@@ -162,8 +183,25 @@ async function callProvider(
         throw new Error("Empty/malformed response");
       }
 
+      const elapsed = Date.now() - t0;
+
+      // ── Post-execution: budget + health + telemetry (fire-and-forget) ──────
+      recordBudgetAfterExecution(null, estimatedCost);
+      updateProviderHealth(pName, true, elapsed);
+      recordRouterExecution({
+        tier: task.routing.cost_sensitivity ?? "unknown",
+        provider: pName,
+        model: perProviderModel ?? pName,
+        cost: estimatedCost,
+        latency_ms: elapsed,
+        success: true,
+      });
+
       return { text: text.trim(), provider: pName, model: perProviderModel ?? pName };
     } catch (err) {
+      const elapsed = Date.now() - t0;
+      // ── Record failure (fire-and-forget) ──────────────────────────────────
+      updateProviderHealth(pName, false, elapsed, err instanceof Error ? err.message : "unknown");
       console.warn(
         `[Executor] ${pName} failed for task ${task.id}:`,
         err instanceof Error ? err.message : err

@@ -12,6 +12,9 @@
 // or called directly from /api/autonomy when mode="multi_ai_team".
 
 import { getProvider, getProviderApiKey } from "@/lib/javari/providers";
+import { checkBudgetBeforeExecution, recordBudgetAfterExecution } from "@/lib/javari/telemetry/budget-governor";
+import { isProviderAvailable, updateProviderHealth } from "@/lib/javari/telemetry/provider-health";
+import { recordRouterExecution } from "@/lib/javari/telemetry/router-telemetry";
 import {
   AGENT_ROLES,
   determineAgentForTask,
@@ -135,6 +138,19 @@ async function callAgent(
   emit: (e: OrchestrationEvent) => void
 ): Promise<{ text: string; provider: string; model: string }> {
   const timeout = AGENT_TIMEOUT_MS[agent.role] ?? 30_000;
+  const estimatedCost = 0.01; // conservative per-agent estimate
+
+  // ── Budget guard (pre-execution) ──────────────────────────────────────────
+  try {
+    const budgetCheck = await checkBudgetBeforeExecution(null, estimatedCost);
+    if (!budgetCheck.allowed) {
+      throw new Error(`Budget guard denied for ${agent.role}: ${budgetCheck.reason}`);
+    }
+  } catch (budgetErr) {
+    if (budgetErr instanceof Error && budgetErr.message.startsWith("Budget guard"))
+      throw budgetErr;
+    // Non-fatal: budget system down → proceed
+  }
 
   // Try primary provider first, then fallback
   const attempts: Array<{ provider: string; model: string }> = [
@@ -142,8 +158,23 @@ async function callAgent(
     { provider: agent.fallbackProvider, model: agent.fallbackModel },
   ];
 
+  const t0 = Date.now();
+
   for (let i = 0; i < attempts.length; i++) {
     const { provider: pName, model } = attempts[i];
+
+    // ── Provider health guard ────────────────────────────────────────────────
+    if (!(await isProviderAvailable(pName))) {
+      if (i > 0) continue; // fallback also down → skip
+      // Primary down → try fallback immediately
+      emit({
+        type: "agent_fallback",
+        taskId, goalId, role: agent.role,
+        meta: { from: pName, to: attempts[1]?.provider ?? "none", reason: "cooldown" },
+        timestamp: new Date().toISOString(),
+      });
+      continue;
+    }
 
     if (i > 0) {
       emit({
@@ -184,7 +215,6 @@ async function callAgent(
         if (done) break;
         if (value) {
           accumulated += value;
-          // Emit streaming delta
           emit({
             type: "agent_output",
             taskId, goalId, role: agent.role,
@@ -201,10 +231,27 @@ async function callAgent(
         throw new Error("Malformed/empty agent output");
       }
 
+      const elapsed = Date.now() - t0;
+
+      // ── Post-execution: budget + health + telemetry (fire-and-forget) ──────
+      recordBudgetAfterExecution(null, estimatedCost);
+      updateProviderHealth(pName, true, elapsed);
+      recordRouterExecution({
+        tier: "autonomy",
+        provider: pName,
+        model,
+        cost: estimatedCost,
+        latency_ms: elapsed,
+        success: true,
+      });
+
       return { text: accumulated.trim(), provider: pName, model };
 
     } catch (err) {
       clearTimeout(undefined);
+      const elapsed = Date.now() - t0;
+      // ── Record failure (fire-and-forget) ──────────────────────────────────
+      updateProviderHealth(pName, false, elapsed, err instanceof Error ? err.message : "unknown");
       const msg = err instanceof Error ? err.message : String(err);
       if (i === attempts.length - 1) throw new Error(`All providers failed: ${msg}`);
     }
