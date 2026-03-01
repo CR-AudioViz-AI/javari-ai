@@ -45,6 +45,8 @@ const REBUILD_WINDOW = 200;        // Rows to scan on cold start
 const cache = new Map<string, ProviderHealthState>();
 let initialized = false;
 let initPromise: Promise<void> | null = null;
+let lastDbSync = 0;
+const DB_SYNC_INTERVAL_MS = 30_000; // Re-read DB every 30s on warm instances
 
 // ═══════════════════════════════════════════════════════════════
 // SUPABASE
@@ -72,6 +74,12 @@ function sb(): SupabaseClient | null {
 export async function isProviderAvailable(provider: string): Promise<boolean> {
   try {
     await ensureInitialized();
+
+    // Refresh from DB if cache is stale (warm instance may miss other writes)
+    if (Date.now() - lastDbSync > DB_SYNC_INTERVAL_MS) {
+      _syncFromDb().catch(() => {});
+    }
+
     const state = cache.get(provider);
     if (!state) return true; // Unknown provider = assume available
 
@@ -100,6 +108,8 @@ export function updateProviderHealth(
  */
 export async function getAllProviderHealth(): Promise<ProviderHealthState[]> {
   await ensureInitialized();
+  // Always sync for admin reads
+  await _syncFromDb();
   return Array.from(cache.values());
 }
 
@@ -113,6 +123,26 @@ export async function rebuildHealthFromExecutions(): Promise<number> {
 // ═══════════════════════════════════════════════════════════════
 // INITIALIZATION (once per cold start)
 // ═══════════════════════════════════════════════════════════════
+
+async function _syncFromDb(): Promise<void> {
+  try {
+    const client = sb();
+    if (!client) return;
+    const { data, error } = await client.from('ai_provider_health').select('*');
+    if (!error && data) {
+      for (const row of data) {
+        // Only overwrite cache if DB has a NEWER updated_at
+        const cached = cache.get(row.provider);
+        if (!cached || new Date(row.updated_at) >= new Date(cached.updated_at)) {
+          cache.set(row.provider, row as ProviderHealthState);
+        }
+      }
+    }
+    lastDbSync = Date.now();
+  } catch {
+    // Never throw
+  }
+}
 
 async function ensureInitialized(): Promise<void> {
   if (initialized) return;
@@ -143,6 +173,7 @@ async function _initialize(): Promise<void> {
       await _rebuildFromLog();
     }
 
+    lastDbSync = Date.now();
     initialized = true;
   } catch {
     initialized = true; // Don't retry on error, proceed with empty cache
