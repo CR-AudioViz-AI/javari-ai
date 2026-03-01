@@ -37,6 +37,7 @@ import { analyzeRoutingContext } from "@/lib/javari/multi-ai/routing-context";
 import { routeRequest, buildFallbackChain, globalRouterLogger } from "@/lib/javari/multi-ai/router";
 import { getProvider, getProviderApiKey } from "@/lib/javari/providers";
 import { isOutputMalformed } from "@/lib/javari/multi-ai/validator";
+import { recordRouterExecution, classifyError } from "@/lib/javari/telemetry/router-telemetry";
 
 export const runtime = "nodejs";
 
@@ -273,11 +274,29 @@ export async function POST(req: NextRequest) {
   }
 
   if (!response) {
+    recordRouterExecution({
+      provider: 'none',
+      latency_ms: Date.now() - t0,
+      success: false,
+      error_type: 'all_providers_failed',
+    });
     return new Response(
       JSON.stringify({ success: false, error: "All providers exhausted" }),
       { headers: { "Content-Type": "application/json" } }
     );
   }
+
+  const durationMs = Date.now() - t0;
+
+  // Router telemetry — fire and forget
+  recordRouterExecution({
+    tier: ctx.cost_sensitivity ?? 'unknown',
+    provider: usedProvider,
+    model: ctx.primary_model_hint,
+    cost: ctx.estimated_cost_usd ?? 0,
+    latency_ms: durationMs,
+    success: true,
+  });
 
   return new Response(
     JSON.stringify({
@@ -294,7 +313,7 @@ export async function POST(req: NextRequest) {
         high_risk:          ctx.high_risk,
         fallback_chain:     ctx.fallback_chain,
       },
-      durationMs: Date.now() - t0,
+      durationMs,
     }),
     { headers: { "Content-Type": "application/json" } }
   );

@@ -11,6 +11,7 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
+import { recordRouterExecution, classifyError } from "@/lib/javari/telemetry/router-telemetry";
 
 export const runtime = "nodejs";
 
@@ -467,6 +468,21 @@ export async function POST(req: NextRequest) {
       ? settings.monthly_limit_usd - settings.current_month_spend - actualCost
       : null;
 
+    // Router telemetry — fire and forget, never blocks response
+    recordRouterExecution({
+      tier,
+      provider: usedProvider,
+      model: providerModule.name ?? 'unknown',
+      prompt_tokens: costEstimate.tokens.input,
+      completion_tokens: costEstimate.tokens.output,
+      total_tokens: costEstimate.tokens.input + costEstimate.tokens.output,
+      cost: actualCost,
+      latency_ms: elapsed,
+      retries: 0,
+      success: true,
+      user_id: userId ?? undefined,
+    });
+
     return new Response(
       JSON.stringify({
         success: true,
@@ -482,6 +498,15 @@ export async function POST(req: NextRequest) {
       { headers: { "Content-Type": "application/json" } }
     );
   } catch (err: any) {
+    // Telemetry for failures
+    recordRouterExecution({
+      tier: tier ?? 'unknown',
+      provider: usedProvider ?? 'none',
+      latency_ms: Date.now() - t0,
+      success: false,
+      error_type: classifyError(err),
+      user_id: userId ?? undefined,
+    });
     return errorResponse(err?.message || "Provider error", 500);
   }
 }
