@@ -1,10 +1,8 @@
-// app/api/admin/migrate/route.ts
-// ONE-TIME migration endpoint — adds routing audit columns
-// Protected by ADMIN_MODE env var
-// DELETE THIS FILE after migration completes
+// app/api/admin/migrate/route.ts  
+// ONE-TIME migration — adds routing audit columns via pg pooler
+// Protected by ADMIN_MODE. DELETE after migration.
 
 import { NextRequest } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,72 +12,70 @@ export async function POST(_req: NextRequest) {
     return Response.json({ error: "Admin mode disabled" }, { status: 403 });
   }
 
-  const sb = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-
   const results: string[] = [];
-  const columns = [
-    "routing_version TEXT",
-    "routing_primary TEXT",
-    "routing_chain JSONB",
-    "routing_scores JSONB",
-    "routing_weights JSONB",
-    "capability_override TEXT",
-  ];
-
-  // Approach: Use Supabase's raw SQL via the pg_net extension or 
-  // the database connection string directly
-  const dbUrl = process.env.DATABASE_URL;
   
-  if (dbUrl) {
-    // Use pg directly
-    try {
-      const { Pool } = await import("pg");
-      const pool = new Pool({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } });
-      
-      for (const colDef of columns) {
-        const colName = colDef.split(" ")[0];
-        try {
-          await pool.query(
-            `ALTER TABLE ai_router_executions ADD COLUMN IF NOT EXISTS ${colDef};`
-          );
-          results.push(`${colName}: ✅ added/exists`);
-        } catch (err: any) {
-          results.push(`${colName}: ❌ ${err.message}`);
-        }
-      }
-      
-      await pool.end();
-      results.push("Connection: closed cleanly");
-    } catch (err: any) {
-      results.push(`pg connection failed: ${err.message}`);
+  // Build pooler connection string from components
+  const dbPassword = process.env.SUPABASE_DB_PASSWORD;
+  const projectRef = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").match(
+    /https:\/\/([a-z0-9]+)\.supabase\.co/
+  )?.[1];
+  
+  let connString = process.env.DATABASE_URL ?? "";
+  
+  // Fix: replace direct db hostname with pooler hostname
+  if (connString.includes(".supabase.co")) {
+    connString = connString
+      .replace(/db\.[a-z0-9]+\.supabase\.co/, `aws-0-us-east-1.pooler.supabase.com`)
+      .replace(":5432/", ":6543/");
+    if (!connString.includes("pgbouncer=true")) {
+      connString += connString.includes("?") ? "&pgbouncer=true" : "?pgbouncer=true";
     }
+    results.push(`Using pooler connection (ref: ${projectRef})`);
+  } else if (dbPassword && projectRef) {
+    connString = `postgresql://postgres.${projectRef}:${dbPassword}@aws-0-us-east-1.pooler.supabase.com:6543/postgres?pgbouncer=true`;
+    results.push("Built pooler connection from components");
   } else {
-    results.push("DATABASE_URL not set — cannot run DDL");
-    
-    // Fallback: try inserting a row with the new columns to test
-    const { error } = await sb.from("ai_router_executions").insert({
-      provider: "__migration_test__",
-      latency_ms: 0,
-      success: true,
-      routing_version: "test",
-      routing_primary: "test",
-      routing_chain: ["test"],
-      routing_scores: { test: 0 },
-      routing_weights: { test: 0 },
-      capability_override: "test",
-    });
-    
-    if (error) {
-      results.push(`Test insert: ${error.message}`);
-    } else {
-      results.push("Test insert succeeded — columns exist!");
-      // Clean up test row
-      await sb.from("ai_router_executions").delete().eq("provider", "__migration_test__");
-      results.push("Test row cleaned up");
+    results.push("No usable DATABASE_URL or components found");
+    return Response.json({ results }, { status: 500 });
+  }
+
+  try {
+    const { Pool } = await import("pg");
+    const pool = new Pool({ connectionString: connString, ssl: { rejectUnauthorized: false } });
+
+    const columns = [
+      "routing_version TEXT",
+      "routing_primary TEXT",
+      "routing_chain JSONB",
+      "routing_scores JSONB",
+      "routing_weights JSONB",
+      "capability_override TEXT",
+    ];
+
+    for (const colDef of columns) {
+      const colName = colDef.split(" ")[0];
+      try {
+        await pool.query(
+          `ALTER TABLE ai_router_executions ADD COLUMN IF NOT EXISTS ${colDef};`
+        );
+        results.push(`${colName}: ✅ added/exists`);
+      } catch (err: any) {
+        results.push(`${colName}: ❌ ${err.message}`);
+      }
     }
+
+    // Verify columns exist
+    const { rows } = await pool.query(`
+      SELECT column_name FROM information_schema.columns 
+      WHERE table_name = 'ai_router_executions' 
+      AND column_name LIKE 'routing_%' OR column_name = 'capability_override'
+      ORDER BY column_name;
+    `);
+    results.push(`Verified columns: ${rows.map((r: any) => r.column_name).join(", ")}`);
+
+    await pool.end();
+  } catch (err: any) {
+    results.push(`Connection error: ${err.message}`);
   }
 
   return Response.json({ results }, { status: 200 });
