@@ -6,7 +6,7 @@ import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getAllProviderHealth } from "@/lib/javari/telemetry/provider-health";
 import { getBudgetState } from "@/lib/javari/telemetry/budget-governor";
-import { applyHealthRanking } from "@/lib/javari/multi-ai/routing-context";
+import { applyHealthRanking, ROUTING_ENGINE_VERSION } from "@/lib/javari/multi-ai/routing-context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -119,6 +119,7 @@ export async function GET(req: NextRequest) {
         emergency_stop: emergencyStop,
         system_paused: systemPaused,
         admin_mode: true,
+        routing_engine: ROUTING_ENGINE_VERSION,
         max_escalation_level: maxEscalation,
         escalation_label:
           maxEscalation === 0
@@ -137,6 +138,18 @@ export async function GET(req: NextRequest) {
       budget: budgetRows,
 
       recent_executions: recentExecutions,
+
+      migration: {
+        sql: [
+          "routing_version TEXT",
+          "routing_primary TEXT",
+          "routing_chain JSONB",
+          "routing_scores JSONB",
+          "routing_weights JSONB",
+          "capability_override TEXT",
+        ].map(c => `ALTER TABLE ai_router_executions ADD COLUMN IF NOT EXISTS ${c};`).join("\n"),
+        note: "Run in Supabase Dashboard SQL Editor if audit columns are missing",
+      },
 
       summary: {
         total_providers: providers.length,
