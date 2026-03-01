@@ -8,7 +8,7 @@ import { useState, useEffect, useCallback } from "react";
 
 interface ProviderStatus {
   provider: string;
-  status: "healthy" | "degraded" | "cooldown" | "unknown";
+  status: "healthy" | "degraded" | "cooldown" | "quarantined" | "unknown";
   success_rate: number;
   total_successes: number;
   total_failures: number;
@@ -16,6 +16,9 @@ interface ProviderStatus {
   avg_latency_ms: number;
   in_cooldown: boolean;
   cooldown_remaining_s: number;
+  quarantined: boolean;
+  quarantine_remaining_s: number;
+  failure_burst_count: number;
   last_success_at: string | null;
   last_failure_at: string | null;
 }
@@ -91,6 +94,7 @@ const STATUS_COLORS: Record<string, string> = {
   healthy: "#22c55e",
   degraded: "#f59e0b",
   cooldown: "#ef4444",
+  quarantined: "#dc2626",
   unknown: "#6b7280",
 };
 
@@ -200,6 +204,7 @@ export default function ControlTower() {
         <MetricCard label="Providers" value={`${summary.healthy_providers}/${summary.total_providers} healthy`} />
         <MetricCard label="Degraded" value={String(summary.degraded_providers)} alert={summary.degraded_providers > 0} />
         <MetricCard label="In Cooldown" value={String(summary.cooldown_providers)} alert={summary.cooldown_providers > 0} />
+        <MetricCard label="Quarantined" value={String(summary.quarantined_providers ?? 0)} alert={(summary.quarantined_providers ?? 0) > 0} />
         <MetricCard label="Spend (60s)" value={`$${summary.spend_last_60s.toFixed(4)}`} />
         <MetricCard label="Spend (10m)" value={`$${summary.spend_last_10m.toFixed(4)}`} />
         <MetricCard label="Req/60s" value={String(summary.requests_last_60s)} />
@@ -222,7 +227,7 @@ export default function ControlTower() {
                 <td style={{ padding: "6px 8px", fontWeight: "bold" }}>{p.provider}</td>
                 <td style={{ padding: "6px 8px" }}>
                   <span style={{ color: STATUS_COLORS[p.status], fontWeight: "bold" }}>
-                    {p.status === "cooldown" ? "🔴" : p.status === "degraded" ? "⚠️" : p.status === "healthy" ? "✅" : "⚪"} {p.status}
+                    {p.status === "quarantined" ? "🚫" : p.status === "cooldown" ? "🔴" : p.status === "degraded" ? "⚠️" : p.status === "healthy" ? "✅" : "⚪"} {p.status}
                   </span>
                 </td>
                 <td style={{ padding: "6px 8px", color: p.success_rate < 70 ? "#ef4444" : p.success_rate < 90 ? "#f59e0b" : "#22c55e" }}>
@@ -232,8 +237,8 @@ export default function ControlTower() {
                 <td style={{ padding: "6px 8px", color: p.total_failures > 0 ? "#ef4444" : "#888" }}>{p.total_failures}</td>
                 <td style={{ padding: "6px 8px", color: p.consecutive_failures >= 3 ? "#ef4444" : "#888" }}>{p.consecutive_failures}</td>
                 <td style={{ padding: "6px 8px" }}>{p.avg_latency_ms}ms</td>
-                <td style={{ padding: "6px 8px", color: p.in_cooldown ? "#ef4444" : "#888" }}>
-                  {p.in_cooldown ? `${p.cooldown_remaining_s}s` : "—"}
+                <td style={{ padding: "6px 8px", color: p.quarantined ? "#dc2626" : p.in_cooldown ? "#ef4444" : "#888" }}>
+                  {p.quarantined ? `🚫 Q:${p.quarantine_remaining_s}s (burst:${p.failure_burst_count})` : p.in_cooldown ? `${p.cooldown_remaining_s}s` : "—"}
                 </td>
                 <td style={{ padding: "6px 8px", color: "#888", fontSize: 11 }}>{ago(p.last_success_at)}</td>
                 <td style={{ padding: "6px 8px", color: "#888", fontSize: 11 }}>{ago(p.last_failure_at)}</td>
@@ -267,8 +272,8 @@ export default function ControlTower() {
                 </td>
                 <td style={{ padding: "6px 8px" }}>{r.breakdown.cost_component.toFixed(3)}</td>
                 <td style={{ padding: "6px 8px" }}>{r.breakdown.primary_bonus ? "★" : ""}</td>
-                <td style={{ padding: "6px 8px", color: r.breakdown.in_cooldown ? "#ef4444" : "#888" }}>
-                  {r.breakdown.in_cooldown ? "🔴 YES" : "—"}
+                <td style={{ padding: "6px 8px", color: r.breakdown.in_quarantine ? "#dc2626" : r.breakdown.in_cooldown ? "#ef4444" : "#888" }}>
+                  {r.breakdown.in_quarantine ? "🚫 QUARANTINED" : r.breakdown.in_cooldown ? "🔴 COOLDOWN" : "—"}
                 </td>
                 <td style={{ padding: "6px 8px", fontSize: 11, color: "#888" }}>
                   {r.health ? `${r.health.avg_latency_ms}ms / ${r.health.success_rate}%` : "no data"}

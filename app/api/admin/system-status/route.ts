@@ -64,8 +64,16 @@ export async function GET(req: NextRequest) {
         ? Math.ceil((new Date(p.cooldown_until!).getTime() - now) / 1000)
         : 0;
 
-      let status: "healthy" | "degraded" | "cooldown" | "unknown" = "unknown";
-      if (inCooldown) status = "cooldown";
+      const isQuarantined = (p as any).quarantined === true
+        && (p as any).quarantine_until
+        && new Date((p as any).quarantine_until).getTime() > now;
+      const quarantineRemaining = isQuarantined
+        ? Math.ceil((new Date((p as any).quarantine_until).getTime() - now) / 1000)
+        : 0;
+
+      let status: "healthy" | "degraded" | "cooldown" | "quarantined" | "unknown" = "unknown";
+      if (isQuarantined) status = "quarantined";
+      else if (inCooldown) status = "cooldown";
       else if (successRate >= 80) status = "healthy";
       else if (total > 0) status = "degraded";
 
@@ -79,6 +87,9 @@ export async function GET(req: NextRequest) {
         avg_latency_ms: Math.round(p.avg_latency_ms),
         in_cooldown: inCooldown,
         cooldown_remaining_s: cooldownRemaining,
+        quarantined: isQuarantined,
+        quarantine_remaining_s: quarantineRemaining,
+        failure_burst_count: (p as any).failure_burst_count ?? 0,
         last_success_at: p.last_success_at,
         last_failure_at: p.last_failure_at,
       };
@@ -156,6 +167,7 @@ export async function GET(req: NextRequest) {
         healthy_providers: providers.filter((p) => p.status === "healthy").length,
         degraded_providers: providers.filter((p) => p.status === "degraded").length,
         cooldown_providers: providers.filter((p) => p.status === "cooldown").length,
+        quarantined_providers: providers.filter((p) => p.status === "quarantined").length,
         total_spend: budgetRows.reduce((s: number, r: any) => s + (r.total_spend ?? 0), 0),
         spend_last_60s: budgetRows.reduce((s: number, r: any) => s + (r.spend_last_60s ?? 0), 0),
         spend_last_10m: budgetRows.reduce((s: number, r: any) => s + (r.spend_last_10m ?? 0), 0),

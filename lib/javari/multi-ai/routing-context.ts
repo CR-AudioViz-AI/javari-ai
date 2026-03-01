@@ -279,6 +279,7 @@ const FAILURE_WEIGHT  = 0.40;
 const COST_WEIGHT     = 0.25;
 const PRIMARY_BONUS   = -0.15;  // Negative = advantage for capability-selected primary
 const COOLDOWN_PENALTY = 10.0;  // Massive penalty for providers in active cooldown
+const QUARANTINE_PENALTY = 100.0; // Providers in quarantine are effectively eliminated
 
 // Approximate cost per 1K tokens by provider (for scoring only)
 const PROVIDER_COST_MAP: Record<string, number> = {
@@ -300,6 +301,7 @@ export interface HealthRankedProvider {
     cost_component: number;
     primary_bonus: boolean;
     in_cooldown: boolean;
+    in_quarantine: boolean;
   };
   health?: {
     avg_latency_ms: number;
@@ -340,6 +342,7 @@ export function applyHealthRanking(
           cost_component: 0,
           primary_bonus: i === 0,
           in_cooldown: false,
+          in_quarantine: false,
         },
       })),
       weights: {
@@ -377,6 +380,11 @@ export function applyHealthRanking(
       ? new Date(h.cooldown_until).getTime() > Date.now()
       : false;
 
+    // Quarantine check (burst-based, more severe than cooldown)
+    const inQuarantine = (h as any)?.quarantined === true && (h as any)?.quarantine_until
+      ? new Date((h as any).quarantine_until).getTime() > Date.now()
+      : false;
+
     // Composite score
     let score =
       LATENCY_WEIGHT * normalizedLatency +
@@ -385,7 +393,8 @@ export function applyHealthRanking(
 
     // Bonuses / penalties
     if (provider === primary) score += PRIMARY_BONUS;
-    if (inCooldown) score += COOLDOWN_PENALTY;
+    if (inQuarantine) score += QUARANTINE_PENALTY;
+    else if (inCooldown) score += COOLDOWN_PENALTY;
 
     return {
       provider,
@@ -396,6 +405,7 @@ export function applyHealthRanking(
         cost_component: Math.round(COST_WEIGHT * normalizedCost * 1000) / 1000,
         primary_bonus: provider === primary,
         in_cooldown: inCooldown,
+        in_quarantine: inQuarantine,
       },
       health: h ? {
         avg_latency_ms: Math.round(h.avg_latency_ms),
