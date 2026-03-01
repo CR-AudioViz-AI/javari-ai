@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
       getBudgetState().catch(() => []),
       sb
         .from("ai_router_executions")
-        .select("provider, model, tier, cost, latency_ms, success, error_type, created_at, user_id")
+        .select("provider, model, tier, cost, latency_ms, success, error_type, created_at, user_id, routing_version, routing_primary, routing_chain, routing_scores, routing_weights, capability_override")
         .order("created_at", { ascending: false })
         .limit(10)
         .then((r) => r.data ?? [])
