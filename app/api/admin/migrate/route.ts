@@ -1,5 +1,5 @@
 // app/api/admin/migrate/route.ts
-// ONE-TIME migration endpoint — runs schema updates
+// ONE-TIME migration endpoint — adds routing audit columns
 // Protected by ADMIN_MODE env var
 // DELETE THIS FILE after migration completes
 
@@ -9,9 +9,9 @@ import { createClient } from "@supabase/supabase-js";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(req: NextRequest) {
+export async function POST(_req: NextRequest) {
   if (process.env.ADMIN_MODE !== "1") {
-    return new Response(JSON.stringify({ error: "Admin mode disabled" }), { status: 403 });
+    return Response.json({ error: "Admin mode disabled" }, { status: 403 });
   }
 
   const sb = createClient(
@@ -20,67 +20,67 @@ export async function POST(req: NextRequest) {
   );
 
   const results: string[] = [];
-
-  // Add columns one by one (idempotent — Supabase ignores if already exists via RPC)
   const columns = [
-    { name: "routing_version", type: "text" },
-    { name: "routing_primary", type: "text" },
-    { name: "routing_chain", type: "jsonb" },
-    { name: "routing_scores", type: "jsonb" },
-    { name: "routing_weights", type: "jsonb" },
-    { name: "capability_override", type: "text" },
+    "routing_version TEXT",
+    "routing_primary TEXT",
+    "routing_chain JSONB",
+    "routing_scores JSONB",
+    "routing_weights JSONB",
+    "capability_override TEXT",
   ];
 
-  for (const col of columns) {
+  // Approach: Use Supabase's raw SQL via the pg_net extension or 
+  // the database connection string directly
+  const dbUrl = process.env.DATABASE_URL;
+  
+  if (dbUrl) {
+    // Use pg directly
     try {
-      // Try selecting the column — if it works, it exists
-      const { error: testErr } = await sb
-        .from("ai_router_executions")
-        .select(col.name)
-        .limit(1);
-
-      if (!testErr) {
-        results.push(`${col.name}: already exists`);
-        continue;
+      const { Pool } = await import("pg");
+      const pool = new Pool({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } });
+      
+      for (const colDef of columns) {
+        const colName = colDef.split(" ")[0];
+        try {
+          await pool.query(
+            `ALTER TABLE ai_router_executions ADD COLUMN IF NOT EXISTS ${colDef};`
+          );
+          results.push(`${colName}: ✅ added/exists`);
+        } catch (err: any) {
+          results.push(`${colName}: ❌ ${err.message}`);
+        }
       }
-
-      // Column doesn't exist — use raw SQL via RPC if available, or use alter
-      // Since Supabase REST doesn't support DDL, we'll use the rpc approach
-      const { error: rpcErr } = await sb.rpc("exec_sql", {
-        query: `ALTER TABLE ai_router_executions ADD COLUMN IF NOT EXISTS ${col.name} ${col.type};`
-      });
-
-      if (rpcErr) {
-        // Fallback: try inserting a test row with the column to trigger auto-creation
-        // (This won't work for Supabase — columns must be added manually)
-        results.push(`${col.name}: needs manual creation (${rpcErr.message})`);
-      } else {
-        results.push(`${col.name}: created`);
-      }
-    } catch (err) {
-      results.push(`${col.name}: error — ${err instanceof Error ? err.message : String(err)}`);
+      
+      await pool.end();
+      results.push("Connection: closed cleanly");
+    } catch (err: any) {
+      results.push(`pg connection failed: ${err.message}`);
+    }
+  } else {
+    results.push("DATABASE_URL not set — cannot run DDL");
+    
+    // Fallback: try inserting a row with the new columns to test
+    const { error } = await sb.from("ai_router_executions").insert({
+      provider: "__migration_test__",
+      latency_ms: 0,
+      success: true,
+      routing_version: "test",
+      routing_primary: "test",
+      routing_chain: ["test"],
+      routing_scores: { test: 0 },
+      routing_weights: { test: 0 },
+      capability_override: "test",
+    });
+    
+    if (error) {
+      results.push(`Test insert: ${error.message}`);
+    } else {
+      results.push("Test insert succeeded — columns exist!");
+      // Clean up test row
+      await sb.from("ai_router_executions").delete().eq("provider", "__migration_test__");
+      results.push("Test row cleaned up");
     }
   }
 
-  // Also try the DO $$ block approach via raw SQL
-  const migrationSql = `
-    ALTER TABLE ai_router_executions ADD COLUMN IF NOT EXISTS routing_version TEXT;
-    ALTER TABLE ai_router_executions ADD COLUMN IF NOT EXISTS routing_primary TEXT;
-    ALTER TABLE ai_router_executions ADD COLUMN IF NOT EXISTS routing_chain JSONB;
-    ALTER TABLE ai_router_executions ADD COLUMN IF NOT EXISTS routing_scores JSONB;
-    ALTER TABLE ai_router_executions ADD COLUMN IF NOT EXISTS routing_weights JSONB;
-    ALTER TABLE ai_router_executions ADD COLUMN IF NOT EXISTS capability_override TEXT;
-  `;
-
-  // Try exec_sql RPC
-  const { error: sqlErr } = await sb.rpc("exec_sql", { query: migrationSql });
-  if (sqlErr) {
-    results.push(`exec_sql RPC: ${sqlErr.message}`);
-  } else {
-    results.push("exec_sql RPC: SUCCESS — all columns added");
-  }
-
-  return new Response(JSON.stringify({ results }, null, 2), {
-    headers: { "Content-Type": "application/json" },
-  });
+  return Response.json({ results }, { status: 200 });
 }
