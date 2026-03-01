@@ -12,6 +12,7 @@ import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
 import { recordRouterExecution, classifyError } from "@/lib/javari/telemetry/router-telemetry";
+import { isProviderAvailable, updateProviderHealth } from "@/lib/javari/telemetry/provider-health";
 
 export const runtime = "nodejs";
 
@@ -267,6 +268,8 @@ export async function POST(req: NextRequest) {
   for (const p of providerPriority) {
     if (seen.has(p)) continue;
     seen.add(p);
+    // Skip providers in cooldown
+    if (!(await isProviderAvailable(p))) continue;
     try {
       const { getProvider, getProviderApiKey } = await import("@/lib/javari/providers");
       const key = await getProviderApiKey(p as Parameters<typeof getProviderApiKey>[0]);
@@ -468,6 +471,9 @@ export async function POST(req: NextRequest) {
       ? settings.monthly_limit_usd - settings.current_month_spend - actualCost
       : null;
 
+    // Provider health — fire and forget
+    updateProviderHealth(usedProvider, true, elapsed);
+
     // Router telemetry — fire and forget, never blocks response
     recordRouterExecution({
       tier,
@@ -498,6 +504,11 @@ export async function POST(req: NextRequest) {
       { headers: { "Content-Type": "application/json" } }
     );
   } catch (err: any) {
+    // Provider health — record failure
+    if (usedProvider) {
+      updateProviderHealth(usedProvider, false, Date.now() - t0, classifyError(err));
+    }
+
     // Telemetry for failures
     recordRouterExecution({
       tier: tier ?? 'unknown',

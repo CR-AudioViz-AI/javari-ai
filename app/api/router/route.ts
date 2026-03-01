@@ -38,6 +38,7 @@ import { routeRequest, buildFallbackChain, globalRouterLogger } from "@/lib/java
 import { getProvider, getProviderApiKey } from "@/lib/javari/providers";
 import { isOutputMalformed } from "@/lib/javari/multi-ai/validator";
 import { recordRouterExecution, classifyError } from "@/lib/javari/telemetry/router-telemetry";
+import { isProviderAvailable, updateProviderHealth } from "@/lib/javari/telemetry/provider-health";
 
 export const runtime = "nodejs";
 
@@ -243,6 +244,9 @@ export async function POST(req: NextRequest) {
   let usedProvider = "";
 
   for (const pName of chain) {
+    // Skip providers in cooldown
+    if (!(await isProviderAvailable(pName))) continue;
+
     let apiKey: string;
     try {
       apiKey = await getProviderApiKey(pName as Parameters<typeof getProviderApiKey>[0]);
@@ -280,6 +284,7 @@ export async function POST(req: NextRequest) {
       success: false,
       error_type: 'all_providers_failed',
     });
+    // Note: individual provider failures already recorded in chain loop
     return new Response(
       JSON.stringify({ success: false, error: "All providers exhausted" }),
       { headers: { "Content-Type": "application/json" } }
@@ -287,6 +292,9 @@ export async function POST(req: NextRequest) {
   }
 
   const durationMs = Date.now() - t0;
+
+  // Provider health — fire and forget
+  updateProviderHealth(usedProvider, true, durationMs);
 
   // Router telemetry — fire and forget
   recordRouterExecution({
