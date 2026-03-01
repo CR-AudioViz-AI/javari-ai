@@ -7,6 +7,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getAllProviderHealth } from "@/lib/javari/telemetry/provider-health";
 import { getBudgetState } from "@/lib/javari/telemetry/budget-governor";
 import { applyHealthRanking, ROUTING_ENGINE_VERSION } from "@/lib/javari/multi-ai/routing-context";
+import { getRegistryVersion, getActiveModelCount, initRegistry } from "@/lib/javari/multi-ai/model-registry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -131,6 +132,8 @@ export async function GET(req: NextRequest) {
         system_paused: systemPaused,
         admin_mode: true,
         routing_engine: ROUTING_ENGINE_VERSION,
+        registry_version: getRegistryVersion(),
+        active_models: getActiveModelCount(),
         max_escalation_level: maxEscalation,
         escalation_label:
           maxEscalation === 0
