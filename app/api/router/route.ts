@@ -137,20 +137,21 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ── 3. Budget gate ──────────────────────────────────────────────────────
+  // ── 3. Velocity guardrail ────────────────────────────────────────────────
   const budgetCheck = await checkBudgetBeforeExecution(null, ctx.estimated_cost_usd ?? 0.01);
   if (!budgetCheck.allowed) {
     return new Response(
       JSON.stringify({
         success: false,
-        error: "budget_exceeded",
-        scope: budgetCheck.scope,
-        period: budgetCheck.period,
-        currentSpend: budgetCheck.currentSpend,
-        limit: budgetCheck.limit,
+        error: "velocity_throttle",
         reason: budgetCheck.reason,
+        escalation_level: budgetCheck.escalation_level,
+        anomaly_score: budgetCheck.anomaly_score,
+        spend_last_60s: budgetCheck.spend_last_60s,
+        requests_last_60s: budgetCheck.requests_last_60s,
+        throttle_seconds: budgetCheck.throttle_seconds,
       }),
-      { status: 402, headers: { "Content-Type": "application/json" } }
+      { status: 429, headers: { "Content-Type": "application/json", "Retry-After": String(budgetCheck.throttle_seconds ?? 60) } }
     );
   }
 

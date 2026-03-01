@@ -255,22 +255,28 @@ export async function POST(req: NextRequest) {
   const tier = getTier(usedProvider);
   const costEstimate = estimateCost(usedProvider, message.length, tier);
 
-  // ─── BUDGET GOVERNOR ──────────────────────────────────────────
+  // ─── VELOCITY GUARDRAIL ──────────────────────────────────────
   const budgetCheck = await checkBudgetBeforeExecution(userId, costEstimate.projectedCost);
   if (!budgetCheck.allowed) {
     return new Response(
       JSON.stringify({
         success: false,
-        error: "budget_exceeded",
-        scope: budgetCheck.scope,
-        period: budgetCheck.period,
-        currentSpend: budgetCheck.currentSpend,
-        limit: budgetCheck.limit,
+        error: "velocity_throttle",
         reason: budgetCheck.reason,
+        escalation_level: budgetCheck.escalation_level,
+        anomaly_score: budgetCheck.anomaly_score,
+        spend_last_60s: budgetCheck.spend_last_60s,
+        requests_last_60s: budgetCheck.requests_last_60s,
+        throttle_seconds: budgetCheck.throttle_seconds,
         tier,
         projectedCost: costEstimate.projectedCost,
+        message: budgetCheck.reason === "emergency_stop"
+          ? "Platform spending paused by administrator."
+          : budgetCheck.reason === "per_request_ceiling"
+            ? "This request exceeds the per-request cost ceiling."
+            : `Anomalous velocity detected (score: ${budgetCheck.anomaly_score}). Throttled for ${budgetCheck.throttle_seconds}s.`,
       }),
-      { status: 402, headers: { "Content-Type": "application/json" } }
+      { status: 429, headers: { "Content-Type": "application/json", "Retry-After": String(budgetCheck.throttle_seconds ?? 60) } }
     );
   }
 
