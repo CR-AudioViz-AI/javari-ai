@@ -1,16 +1,16 @@
 // app/api/chat/route.ts
-// Javari Chat API — v3 AUTONOMOUS COST-AWARE ORCHESTRATION
-// 2026-02-27 — Full implementation:
-//   - Tier-based cost multipliers
-//   - Real-time approval gates
-//   - Monthly + per-request limits
-//   - Full cost transparency
-//   - Admin bypass
-//   - Preserved: streaming, fallback chain, no provider exposure
+// Javari Chat API — v4 UNIFIED SMART ROUTING
+// 2026-03-01 — Replaced hardcoded provider loop with analyzeRoutingContext
+//   - Context-aware provider selection based on prompt complexity
+//   - Smart fallback chain from routing-context (not static list)
+//   - Output validation via isOutputMalformed
+//   - Preserved: streaming, tier system, budget gates, telemetry
 
 import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
+import { analyzeRoutingContext } from "@/lib/javari/multi-ai/routing-context";
+import { isOutputMalformed } from "@/lib/javari/multi-ai/validator";
 import { recordRouterExecution, classifyError } from "@/lib/javari/telemetry/router-telemetry";
 import { isProviderAvailable, updateProviderHealth } from "@/lib/javari/telemetry/provider-health";
 import { checkBudgetBeforeExecution, recordBudgetAfterExecution } from "@/lib/javari/telemetry/budget-governor";
@@ -24,7 +24,7 @@ interface ChatRequest {
   provider?: string;
   stream?: boolean;
   history?: Array<{ role: string; content: string }>;
-  approvePremium?: boolean; // Explicit approval for high-tier
+  approvePremium?: boolean;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -61,7 +61,6 @@ const TIER_MULTIPLIERS: Record<Tier, number> = {
   high: 4.0,
 };
 
-// Base cost per 1K tokens (approximate)
 const BASE_COSTS: Record<string, number> = {
   groq: 0.0,
   "openai-mini": 0.00015,
@@ -82,20 +81,16 @@ function estimateCost(
   tier: Tier
 ): { projectedCost: number; multiplier: number; tokens: { input: number; output: number } } {
   const inputTokens = Math.ceil(inputLength / 4);
-  const outputTokens = 300; // Conservative estimate
-  
+  const outputTokens = 300;
+
   const baseCost = BASE_COSTS[provider] || 0.001;
   const totalTokens = inputTokens + outputTokens;
   const providerCost = (totalTokens / 1000) * baseCost;
-  
+
   const multiplier = TIER_MULTIPLIERS[tier];
   const projectedCost = providerCost * multiplier;
-  
-  return {
-    projectedCost,
-    multiplier,
-    tokens: { input: inputTokens, output: outputTokens },
-  };
+
+  return { projectedCost, multiplier, tokens: { input: inputTokens, output: outputTokens } };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -110,7 +105,6 @@ async function getUserCostSettings(userId: string) {
     .single();
 
   if (error || !data) {
-    // Create default settings
     const { data: newSettings } = await supabase
       .from("user_cost_settings")
       .insert({
@@ -137,16 +131,6 @@ async function getUserCostSettings(userId: string) {
 
   return data;
 }
-
-// [CONSOLIDATED] updateMonthlySpend removed — handled by budget-governor.ts
-
-// ═══════════════════════════════════════════════════════════════
-// COST LOGGING
-// ═══════════════════════════════════════════════════════════════
-
-// [CONSOLIDATED] logExecution removed — cost logging via:
-//   router-telemetry.ts → ai_router_executions (per-execution)
-//   budget-governor.ts → ai_budget_state (aggregated spend)
 
 // ═══════════════════════════════════════════════════════════════
 // HELPERS
@@ -179,10 +163,78 @@ async function getUserId(req: NextRequest): Promise<string | null> {
     const { data } = await supabase.auth.getUser(token);
     if (data?.user?.id) return data.user.id;
   }
-
-  // Fallback for testing
   const { data: profiles } = await supabase.from("profiles").select("id").limit(1);
   return profiles && profiles.length > 0 ? profiles[0].id : null;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PROVIDER RESOLUTION — SMART ROUTING
+// ═══════════════════════════════════════════════════════════════
+
+async function resolveProvider(
+  message: string,
+  mode: ChatRequest["mode"],
+  requestedProvider: string
+): Promise<{
+  providerModule: Awaited<ReturnType<typeof import("@/lib/javari/providers").getProvider>>;
+  usedProvider: string;
+  fallbackChain: string[];
+  routingReason: string;
+  complexityScore: number;
+}> {
+  // Analyze prompt for intelligent routing
+  const ctx = analyzeRoutingContext(message, mode ?? "single", requestedProvider);
+
+  // Use the smart fallback chain from routing context
+  const chain = ctx.fallback_chain;
+
+  const { getProvider, getProviderApiKey } = await import("@/lib/javari/providers");
+
+  for (const pName of chain) {
+    if (!(await isProviderAvailable(pName))) continue;
+
+    try {
+      const key = await getProviderApiKey(pName as Parameters<typeof getProviderApiKey>[0]);
+      if (!key) continue;
+      const providerModule = getProvider(pName as Parameters<typeof getProvider>[0], key);
+      return {
+        providerModule,
+        usedProvider: pName,
+        fallbackChain: chain,
+        routingReason: `Smart route: ${ctx.primary_provider_hint} (complexity=${ctx.complexity_score})`,
+        complexityScore: ctx.complexity_score,
+      };
+    } catch {
+      continue;
+    }
+  }
+
+  throw new Error("No AI provider available");
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EXECUTE + COLLECT — shared by stream and buffered paths
+// ═══════════════════════════════════════════════════════════════
+
+async function executeAndCollect(
+  providerModule: Awaited<ReturnType<typeof import("@/lib/javari/providers").getProvider>>,
+  message: string,
+  onChunk?: (chunk: string) => void
+): Promise<string> {
+  const gen = providerModule.generateStream(message, {
+    maxTokens: 2000,
+    temperature: 0.7,
+  });
+
+  let fullText = "";
+  for await (const chunk of gen) {
+    if (chunk) {
+      fullText += chunk;
+      if (onChunk) onChunk(chunk);
+    }
+  }
+
+  return fullText;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -212,7 +264,6 @@ export async function POST(req: NextRequest) {
     return errorResponse("Please provide a message");
   }
 
-  // Check system pause (kill switch)
   if (process.env.JAVARI_AUTONOMY_PAUSED === "1") {
     return new Response(
       JSON.stringify({ success: false, systemPaused: true, message: "System maintenance in progress" }),
@@ -224,38 +275,19 @@ export async function POST(req: NextRequest) {
   const userId = await getUserId(req);
   const settings = userId ? await getUserCostSettings(userId) : null;
 
-  // ─── PROVIDER RESOLUTION ───────────────────────────────────────
-  let providerModule: Awaited<ReturnType<typeof import("@/lib/javari/providers").getProvider>> | null = null;
-  let usedProvider = requestedProvider;
-
-  const providerPriority = [requestedProvider, "groq", "openai", "anthropic", "mistral", "openrouter"];
-  const seen = new Set<string>();
-
-  for (const p of providerPriority) {
-    if (seen.has(p)) continue;
-    seen.add(p);
-    // Skip providers in cooldown
-    if (!(await isProviderAvailable(p))) continue;
-    try {
-      const { getProvider, getProviderApiKey } = await import("@/lib/javari/providers");
-      const key = await getProviderApiKey(p as Parameters<typeof getProviderApiKey>[0]);
-      if (!key) continue;
-      providerModule = getProvider(p as Parameters<typeof getProvider>[0], key);
-      usedProvider = p;
-      break;
-    } catch {
-      continue;
-    }
-  }
-
-  if (!providerModule) {
+  // ─── SMART PROVIDER RESOLUTION ─────────────────────────────────
+  let resolved: Awaited<ReturnType<typeof resolveProvider>>;
+  try {
+    resolved = await resolveProvider(message, mode, requestedProvider);
+  } catch {
     return errorResponse("No AI provider available. Check API keys.");
   }
 
+  const { providerModule, usedProvider, fallbackChain, routingReason, complexityScore } = resolved;
   const tier = getTier(usedProvider);
   const costEstimate = estimateCost(usedProvider, message.length, tier);
 
-  // ─── VELOCITY GUARDRAIL ──────────────────────────────────────
+  // ─── VELOCITY GUARDRAIL ────────────────────────────────────────
   const budgetCheck = await checkBudgetBeforeExecution(userId, costEstimate.projectedCost);
   if (!budgetCheck.allowed) {
     return new Response(
@@ -280,7 +312,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Multiplier approval (orthogonal to budget)
+  // Multiplier approval gate
   if (settings && !settings.is_admin) {
     if (costEstimate.multiplier >= (settings.require_approval_above ?? 2.0) && !approvePremium) {
       return new Response(
@@ -306,30 +338,30 @@ export async function POST(req: NextRequest) {
         const enqueue = (data: object) => {
           try {
             controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
-          } catch {
-            // Closed
-          }
+          } catch { /* client disconnected */ }
         };
 
         try {
-          const stream = providerModule!.generateStream(message, {
-            maxTokens: 2000,
-            temperature: 0.7,
+          const fullText = await executeAndCollect(providerModule, message, (chunk) => {
+            enqueue({ token: chunk, done: false });
           });
 
-          let fullText = "";
-          for await (const chunk of stream) {
-            if (chunk) {
-              fullText += chunk;
-              enqueue({ token: chunk, done: false });
-            }
-          }
-
           const elapsed = Date.now() - t0;
-          const actualCost = costEstimate.projectedCost; // In production, calculate from actual tokens
+          const actualCost = costEstimate.projectedCost;
+          const malformed = isOutputMalformed(fullText);
 
-          // Budget governor — record spend (fire-and-forget)
           recordBudgetAfterExecution(userId, actualCost);
+          updateProviderHealth(usedProvider, !malformed, elapsed);
+          recordRouterExecution({
+            tier,
+            provider: usedProvider,
+            prompt_tokens: costEstimate.tokens.input,
+            completion_tokens: costEstimate.tokens.output,
+            cost: actualCost,
+            latency_ms: elapsed,
+            success: !malformed,
+            user_id: userId ?? undefined,
+          });
 
           const remainingBudget = settings
             ? settings.monthly_limit_usd - settings.current_month_spend - actualCost
@@ -339,6 +371,9 @@ export async function POST(req: NextRequest) {
             done: true,
             response: fullText,
             tier,
+            routing: routingReason,
+            complexity_score: complexityScore,
+            fallback_chain: fallbackChain,
             projected_cost_usd: costEstimate.projectedCost,
             actual_cost_usd: actualCost,
             multiplier: costEstimate.multiplier,
@@ -346,15 +381,13 @@ export async function POST(req: NextRequest) {
             remaining_month_budget: remainingBudget,
             latency: elapsed,
             success: true,
+            output_valid: !malformed,
           });
 
           controller.close();
         } catch (err: any) {
-          enqueue({
-            error: err?.message || "Stream error",
-            done: true,
-            success: false,
-          });
+          updateProviderHealth(usedProvider, false, Date.now() - t0, classifyError(err));
+          enqueue({ error: err?.message || "Stream error", done: true, success: false });
           controller.close();
         }
       },
@@ -371,68 +404,53 @@ export async function POST(req: NextRequest) {
 
   // ─── BUFFERED PATH ─────────────────────────────────────────────
   try {
-    const stream = providerModule.generateStream(message, {
-      maxTokens: 2000,
-      temperature: 0.7,
-    });
-
-    let fullText = "";
-    for await (const chunk of stream) {
-      if (chunk) fullText += chunk;
-    }
+    const fullText = await executeAndCollect(providerModule, message);
 
     const elapsed = Date.now() - t0;
     const actualCost = costEstimate.projectedCost;
+    const malformed = isOutputMalformed(fullText);
 
-    // Budget governor — record spend (fire-and-forget)
     recordBudgetAfterExecution(userId, actualCost);
-
-    const remainingBudget = settings
-      ? settings.monthly_limit_usd - settings.current_month_spend - actualCost
-      : null;
-
-    // Provider health — fire and forget
-    updateProviderHealth(usedProvider, true, elapsed);
-
-    // Router telemetry — fire and forget, never blocks response
+    updateProviderHealth(usedProvider, !malformed, elapsed);
     recordRouterExecution({
       tier,
       provider: usedProvider,
-      model: providerModule.name ?? 'unknown',
       prompt_tokens: costEstimate.tokens.input,
       completion_tokens: costEstimate.tokens.output,
       total_tokens: costEstimate.tokens.input + costEstimate.tokens.output,
       cost: actualCost,
       latency_ms: elapsed,
-      retries: 0,
-      success: true,
+      success: !malformed,
       user_id: userId ?? undefined,
     });
+
+    const remainingBudget = settings
+      ? settings.monthly_limit_usd - settings.current_month_spend - actualCost
+      : null;
 
     return new Response(
       JSON.stringify({
         success: true,
         response: fullText,
         tier,
+        routing: routingReason,
+        complexity_score: complexityScore,
+        fallback_chain: fallbackChain,
         projected_cost_usd: costEstimate.projectedCost,
         actual_cost_usd: actualCost,
         multiplier: costEstimate.multiplier,
         cumulative_month_spend: settings ? settings.current_month_spend + actualCost : null,
         remaining_month_budget: remainingBudget,
         latency: elapsed,
+        output_valid: !malformed,
       }),
       { headers: { "Content-Type": "application/json" } }
     );
   } catch (err: any) {
-    // Provider health — record failure
-    if (usedProvider) {
-      updateProviderHealth(usedProvider, false, Date.now() - t0, classifyError(err));
-    }
-
-    // Telemetry for failures
+    updateProviderHealth(usedProvider, false, Date.now() - t0, classifyError(err));
     recordRouterExecution({
-      tier: tier ?? 'unknown',
-      provider: usedProvider ?? 'none',
+      tier,
+      provider: usedProvider,
       latency_ms: Date.now() - t0,
       success: false,
       error_type: classifyError(err),
