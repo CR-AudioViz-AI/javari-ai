@@ -5,6 +5,7 @@
 // Cold start: fetches enabled models from model_registry table.
 // Hot path: reads from in-memory cache (zero DB queries).
 // Refresh: every 30s in background.
+// DB table: model_registry (created via migration)
 // Fallback: embedded static snapshot if DB unavailable.
 
 import { createClient, SupabaseClient } from "@supabase/supabase-js";

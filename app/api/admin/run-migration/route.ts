@@ -109,6 +109,8 @@ export async function POST(_req: NextRequest) {
   }
 
   await runSQL("create_table", CREATE_TABLE_SQL);
+  // Force PostgREST schema reload
+  await runSQL("schema_reload", "NOTIFY pgrst, 'reload schema';");
   await runSQL("add_column", ADD_COLUMN_SQL);
   await runSQL("seed_models", SEED_SQL);
   await runSQL("verify_models", VERIFY_TABLE_SQL);
