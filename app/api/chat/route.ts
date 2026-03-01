@@ -9,7 +9,7 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
-import { analyzeRoutingContext, applyHealthRanking } from "@/lib/javari/multi-ai/routing-context";
+import { analyzeRoutingContext, applyHealthRanking, ROUTING_ENGINE_VERSION } from "@/lib/javari/multi-ai/routing-context";
 import { isOutputMalformed } from "@/lib/javari/multi-ai/validator";
 import { recordRouterExecution, classifyError } from "@/lib/javari/telemetry/router-telemetry";
 import { isProviderAvailable, updateProviderHealth } from "@/lib/javari/telemetry/provider-health";
@@ -182,12 +182,15 @@ async function resolveProvider(
   routingReason: string;
   complexityScore: number;
   healthScores: ReturnType<typeof applyHealthRanking>["scores"];
+  routingWeights: ReturnType<typeof applyHealthRanking>["weights"];
+  primaryHint: string;
+  capabilityOverride: string | null;
 }> {
   // Step 1: Analyze prompt for capability-based routing
   const ctx = analyzeRoutingContext(message, mode ?? "single", requestedProvider);
 
   // Step 2: Re-rank chain by live health metrics (no DB query)
-  const { ranked, scores } = applyHealthRanking(ctx.fallback_chain);
+  const { ranked, scores, weights } = applyHealthRanking(ctx.fallback_chain);
 
   const { getProvider, getProviderApiKey } = await import("@/lib/javari/providers");
 
@@ -205,6 +208,9 @@ async function resolveProvider(
         routingReason: `Adaptive: ${ctx.primary_provider_hint}→${pName} (complexity=${ctx.complexity_score}, score=${scores.find(s => s.provider === pName)?.score.toFixed(3) ?? "?"})`,
         complexityScore: ctx.complexity_score,
         healthScores: scores,
+        routingWeights: weights,
+        primaryHint: ctx.primary_provider_hint,
+        capabilityOverride: ctx.requires_json ? "requires_json" : ctx.requires_reasoning_depth ? "requires_reasoning" : null,
       };
     } catch {
       continue;
@@ -285,7 +291,7 @@ export async function POST(req: NextRequest) {
     return errorResponse("No AI provider available. Check API keys.");
   }
 
-  const { providerModule, usedProvider, fallbackChain, routingReason, complexityScore, healthScores } = resolved;
+  const { providerModule, usedProvider, fallbackChain, routingReason, complexityScore, healthScores, routingWeights, primaryHint, capabilityOverride } = resolved;
   const tier = getTier(usedProvider);
   const costEstimate = estimateCost(usedProvider, message.length, tier);
 
@@ -363,6 +369,12 @@ export async function POST(req: NextRequest) {
             latency_ms: elapsed,
             success: !malformed,
             user_id: userId ?? undefined,
+            routing_version: ROUTING_ENGINE_VERSION,
+            routing_primary: primaryHint,
+            routing_chain: fallbackChain,
+            routing_scores: Object.fromEntries(healthScores.map(s => [s.provider, Math.round(s.score * 1000) / 1000])),
+            routing_weights: routingWeights,
+            capability_override: capabilityOverride ?? undefined,
           });
 
           const remainingBudget = settings
@@ -374,6 +386,7 @@ export async function POST(req: NextRequest) {
             response: fullText,
             tier,
             routing: routingReason,
+            routing_version: ROUTING_ENGINE_VERSION,
             complexity_score: complexityScore,
             fallback_chain: fallbackChain,
             projected_cost_usd: costEstimate.projectedCost,
@@ -424,6 +437,12 @@ export async function POST(req: NextRequest) {
       latency_ms: elapsed,
       success: !malformed,
       user_id: userId ?? undefined,
+      routing_version: ROUTING_ENGINE_VERSION,
+      routing_primary: primaryHint,
+      routing_chain: fallbackChain,
+      routing_scores: Object.fromEntries(healthScores.map(s => [s.provider, Math.round(s.score * 1000) / 1000])),
+      routing_weights: routingWeights,
+      capability_override: capabilityOverride ?? undefined,
     });
 
     const remainingBudget = settings
@@ -436,6 +455,7 @@ export async function POST(req: NextRequest) {
         response: fullText,
         tier,
         routing: routingReason,
+        routing_version: ROUTING_ENGINE_VERSION,
         complexity_score: complexityScore,
         fallback_chain: fallbackChain,
         health_ranking: healthScores,
@@ -458,6 +478,12 @@ export async function POST(req: NextRequest) {
       success: false,
       error_type: classifyError(err),
       user_id: userId ?? undefined,
+      routing_version: ROUTING_ENGINE_VERSION,
+      routing_primary: primaryHint,
+      routing_chain: fallbackChain,
+      routing_scores: Object.fromEntries(healthScores.map(s => [s.provider, Math.round(s.score * 1000) / 1000])),
+      routing_weights: routingWeights,
+      capability_override: capabilityOverride ?? undefined,
     });
     return errorResponse(err?.message || "Provider error", 500);
   }

@@ -33,7 +33,7 @@
 //   SSE stream: data: { type, content, routing }
 
 import { NextRequest } from "next/server";
-import { analyzeRoutingContext, applyHealthRanking } from "@/lib/javari/multi-ai/routing-context";
+import { analyzeRoutingContext, applyHealthRanking, ROUTING_ENGINE_VERSION } from "@/lib/javari/multi-ai/routing-context";
 import { routeRequest, buildFallbackChain, globalRouterLogger } from "@/lib/javari/multi-ai/router";
 import { getProvider, getProviderApiKey } from "@/lib/javari/providers";
 import { isOutputMalformed } from "@/lib/javari/multi-ai/validator";
@@ -104,7 +104,7 @@ export async function POST(req: NextRequest) {
 
   // ── 1. Analyze routing context ──────────────────────────────────────────
   const ctx = analyzeRoutingContext(message, mode, body.provider);
-  const { ranked: healthRankedChain, scores: healthScores } = applyHealthRanking(ctx.fallback_chain);
+  const { ranked: healthRankedChain, scores: healthScores, weights: healthWeights } = applyHealthRanking(ctx.fallback_chain);
   const decision = routeRequest({ prompt: message, mode });
 
   // Log the decision
@@ -304,6 +304,12 @@ export async function POST(req: NextRequest) {
       latency_ms: Date.now() - t0,
       success: false,
       error_type: 'all_providers_failed',
+      routing_version: ROUTING_ENGINE_VERSION,
+      routing_primary: ctx.primary_provider_hint,
+      routing_chain: healthRankedChain,
+      routing_scores: Object.fromEntries(healthScores.map(s => [s.provider, Math.round(s.score * 1000) / 1000])),
+      routing_weights: healthWeights,
+      capability_override: ctx.requires_json ? "requires_json" : ctx.requires_reasoning_depth ? "requires_reasoning" : undefined,
     });
     // Note: individual provider failures already recorded in chain loop
     return new Response(
@@ -326,6 +332,12 @@ export async function POST(req: NextRequest) {
     cost: ctx.estimated_cost_usd ?? 0,
     latency_ms: durationMs,
     success: true,
+    routing_version: ROUTING_ENGINE_VERSION,
+    routing_primary: ctx.primary_provider_hint,
+    routing_chain: healthRankedChain,
+    routing_scores: Object.fromEntries(healthScores.map(s => [s.provider, Math.round(s.score * 1000) / 1000])),
+    routing_weights: healthWeights,
+    capability_override: ctx.requires_json ? "requires_json" : ctx.requires_reasoning_depth ? "requires_reasoning" : undefined,
   });
 
   return new Response(
@@ -333,6 +345,7 @@ export async function POST(req: NextRequest) {
       success:  true,
       response,
       provider: usedProvider,
+      routing_version: ROUTING_ENGINE_VERSION,
       routing: {
         provider:    ctx.primary_provider_hint,
         model:       ctx.primary_model_hint,

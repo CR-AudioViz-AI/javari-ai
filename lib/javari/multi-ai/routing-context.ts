@@ -15,6 +15,8 @@
 
 // ── Types (also exported to lib/types.ts barrel) ─────────────────────────────
 
+export const ROUTING_ENGINE_VERSION = "v1.1-adaptive-health";
+
 export type CostSensitivity = "free" | "low" | "moderate" | "expensive";
 
 export interface RoutingContext {
@@ -318,7 +320,11 @@ export interface HealthRankedProvider {
  */
 export function applyHealthRanking(
   chain: string[]
-): { ranked: string[]; scores: HealthRankedProvider[] } {
+): {
+  ranked: string[];
+  scores: HealthRankedProvider[];
+  weights: { latency: number; failure: number; cost: number; primary_bonus: number; cooldown_penalty: number };
+} {
   const snapshot = getHealthSnapshot();
 
   // If no health data yet (cold start), return chain unchanged
@@ -327,7 +333,7 @@ export function applyHealthRanking(
       ranked: chain,
       scores: chain.map((p, i) => ({
         provider: p,
-        score: i * 0.01, // Preserve original order
+        score: i * 0.01,
         breakdown: {
           latency_component: 0,
           failure_component: 0,
@@ -336,6 +342,13 @@ export function applyHealthRanking(
           in_cooldown: false,
         },
       })),
+      weights: {
+        latency: LATENCY_WEIGHT,
+        failure: FAILURE_WEIGHT,
+        cost: COST_WEIGHT,
+        primary_bonus: PRIMARY_BONUS,
+        cooldown_penalty: COOLDOWN_PENALTY,
+      },
     };
   }
 
@@ -392,11 +405,18 @@ export function applyHealthRanking(
     };
   });
 
-  // Sort by score (ascending = better)
-  scored.sort((a, b) => a.score - b.score);
+  // Sort by score (ascending = better), alphabetical tie-breaker for determinism
+  scored.sort((a, b) => a.score - b.score || a.provider.localeCompare(b.provider));
 
   return {
     ranked: scored.map((s) => s.provider),
     scores: scored,
+    weights: {
+      latency: LATENCY_WEIGHT,
+      failure: FAILURE_WEIGHT,
+      cost: COST_WEIGHT,
+      primary_bonus: PRIMARY_BONUS,
+      cooldown_penalty: COOLDOWN_PENALTY,
+    },
   };
 }

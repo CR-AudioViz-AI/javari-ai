@@ -26,6 +26,13 @@ export interface RouterTelemetryEvent {
   session_id?: string;
   user_id?: string;
   circuit_breaker_triggered?: boolean;
+  // Routing audit fields (v1.1)
+  routing_version?: string;
+  routing_primary?: string;
+  routing_chain?: string[];
+  routing_scores?: Record<string, number>;
+  routing_weights?: Record<string, number>;
+  capability_override?: string;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -115,6 +122,12 @@ async function _insertEvent(event: RouterTelemetryEvent): Promise<boolean> {
       session_id:                 event.session_id ?? null,
       user_id:                    event.user_id ?? null,
       circuit_breaker_triggered:  event.circuit_breaker_triggered ?? false,
+      routing_version:           event.routing_version ?? null,
+      routing_primary:           event.routing_primary ?? null,
+      routing_chain:             event.routing_chain ?? null,
+      routing_scores:            event.routing_scores ?? null,
+      routing_weights:           event.routing_weights ?? null,
+      capability_override:       event.capability_override ?? null,
     });
 
     if (error) {
