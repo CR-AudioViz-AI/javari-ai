@@ -5,6 +5,7 @@
 // Branch: feature/router-v4-hardening
 
 import { createClient } from '@supabase/supabase-js';
+import { isProviderAvailable, updateProviderHealth } from "@/lib/javari/telemetry/provider-health";
 
 // ═══════════════════════════════════════════════════════════════
 // TYPES
@@ -25,11 +26,7 @@ interface ProviderConfig {
   outputCostPer1M: number;
 }
 
-interface ProviderHealth {
-  failures: number;
-  lastFailure: number;
-  isHealthy: boolean;
-}
+// [CONSOLIDATED] ProviderHealth interface moved to lib/javari/telemetry/provider-health.ts
 
 // ═══════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -39,8 +36,7 @@ const MAX_TOKENS_DEFAULT = 2048;
 const MAX_COST_DEFAULT = 0.05; // $0.05 per request
 const MAX_RETRIES = 3;
 const RETRY_DELAYS = [250, 500, 1000]; // Exponential backoff in ms
-const HEALTH_FAILURE_THRESHOLD = 3;
-const HEALTH_RESET_MS = 300000; // 5 minutes
+// [CONSOLIDATED] Health thresholds now in provider-health.ts
 
 // Provider configurations with costs (December 2025)
 const PROVIDERS: Record<string, ProviderConfig> = {
@@ -75,49 +71,9 @@ const PROVIDERS: Record<string, ProviderConfig> = {
 };
 
 // ═══════════════════════════════════════════════════════════════
-// IN-MEMORY PROVIDER HEALTH TRACKING
+// PROVIDER HEALTH — delegated to persistent provider-health.ts
+// (in-memory tracking removed — all health state is in Supabase)
 // ═══════════════════════════════════════════════════════════════
-
-const providerHealth = new Map<string, ProviderHealth>();
-
-function getProviderHealth(provider: string): ProviderHealth {
-  if (!providerHealth.has(provider)) {
-    providerHealth.set(provider, {
-      failures: 0,
-      lastFailure: 0,
-      isHealthy: true
-    });
-  }
-  return providerHealth.get(provider)!;
-}
-
-function recordProviderFailure(provider: string): void {
-  const health = getProviderHealth(provider);
-  health.failures++;
-  health.lastFailure = Date.now();
-  health.isHealthy = health.failures < HEALTH_FAILURE_THRESHOLD;
-  providerHealth.set(provider, health);
-}
-
-function recordProviderSuccess(provider: string): void {
-  const health = getProviderHealth(provider);
-  health.failures = 0;
-  health.isHealthy = true;
-  providerHealth.set(provider, health);
-}
-
-function isProviderHealthy(provider: string): boolean {
-  const health = getProviderHealth(provider);
-  
-  // Reset health if enough time has passed since last failure
-  if (!health.isHealthy && Date.now() - health.lastFailure > HEALTH_RESET_MS) {
-    health.failures = 0;
-    health.isHealthy = true;
-    providerHealth.set(provider, health);
-  }
-  
-  return health.isHealthy;
-}
 
 // ═══════════════════════════════════════════════════════════════
 // COST CALCULATION
@@ -368,7 +324,7 @@ async function callProviderWithRetry(
       }
 
       // Success - record and return
-      recordProviderSuccess(provider);
+      updateProviderHealth(provider, true, Date.now() - Date.now()); // latency handled by caller
       return result;
       
     } catch (error) {
@@ -382,7 +338,7 @@ async function callProviderWithRetry(
   }
 
   // All retries failed - record failure
-  recordProviderFailure(provider);
+  updateProviderHealth(provider, false, 0);
   throw lastError || new Error(`${provider} failed after ${MAX_RETRIES} attempts`);
 }
 
@@ -461,8 +417,8 @@ export async function routeAIRequest(
   let lastError: Error | null = null;
 
   for (const provider of providerOrder) {
-    // Skip unhealthy providers
-    if (!isProviderHealthy(provider)) {
+    // Skip providers in cooldown (persistent health check)
+    if (!(await isProviderAvailable(provider))) {
       continue;
     }
 
@@ -510,10 +466,5 @@ export async function routeAIRequest(
 // HEALTH CHECK EXPORT
 // ═══════════════════════════════════════════════════════════════
 
-export function getProviderHealthStatus(): Record<string, ProviderHealth> {
-  const status: Record<string, ProviderHealth> = {};
-  for (const provider of Object.keys(PROVIDERS)) {
-    status[provider] = getProviderHealth(provider);
-  }
-  return status;
-}
+// [CONSOLIDATED] getProviderHealthStatus removed — use GET /api/provider-health instead
+// import { getAllProviderHealth } from "@/lib/javari/telemetry/provider-health";

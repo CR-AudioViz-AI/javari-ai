@@ -1,4 +1,12 @@
 /**
+ * @deprecated CONSOLIDATION NOTE (2026-03-01):
+ * This module performs LIVE health pings to providers (connectivity checks).
+ * It is SEPARATE from the persistent provider-health.ts which tracks
+ * runtime success/failure/cooldown from actual API calls.
+ *
+ * Used by: /api/universe/info only.
+ * Canonical runtime health: lib/javari/telemetry/provider-health.ts
+ *
  * Universe Health Monitoring - Phase 2.7
  * Health checks and availability monitoring for all 13 providers
  * 

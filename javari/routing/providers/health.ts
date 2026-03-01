@@ -1,4 +1,9 @@
 /**
+ * @deprecated CONSOLIDATION NOTE (2026-03-01):
+ * This module is SUPERSEDED by lib/javari/telemetry/provider-health.ts
+ * which provides persistent health tracking via Supabase.
+ * Kept only because benchmark.ts imports it. Not on any active code path.
+ *
  * Provider Health Engine (Step 87)
  *
  * Tracks live provider reliability using:
