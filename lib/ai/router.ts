@@ -1,3 +1,4 @@
+// Router v4 - Preview build validation trigger: 2026-02-28T23:30:00-05:00
 // lib/ai/router.ts
 // Router v4 - Hardened Provider Validation & Cost Guardrails
 // Created: 2026-01-02
