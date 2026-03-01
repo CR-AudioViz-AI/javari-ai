@@ -268,7 +268,7 @@ export async function POST(req: NextRequest) {
     seen.add(p);
     try {
       const { getProvider, getProviderApiKey } = await import("@/lib/javari/providers");
-      const key = getProviderApiKey(p as Parameters<typeof getProviderApiKey>[0]);
+      const key = await getProviderApiKey(p as Parameters<typeof getProviderApiKey>[0]);
       if (!key) continue;
       providerModule = getProvider(p as Parameters<typeof getProvider>[0], key);
       usedProvider = p;

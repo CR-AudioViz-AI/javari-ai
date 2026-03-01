@@ -488,7 +488,7 @@ export async function unifiedJavariEngine({
 
     let apiKey: string;
     try {
-      apiKey = getProviderApiKey(pName as Parameters<typeof getProviderApiKey>[0]);
+      apiKey = await getProviderApiKey(pName as Parameters<typeof getProviderApiKey>[0]);
     } catch {
       errors.push({ provider: pName, error: "Key unavailable", fatal: true });
       continue;

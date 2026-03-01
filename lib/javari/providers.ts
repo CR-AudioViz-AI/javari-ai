@@ -14,10 +14,10 @@ export interface JavariProvider {
 }
 
 /** Resolve an API key by provider name — throws if missing. */
-export function getProviderApiKey(
+export async function getProviderApiKey(
   providerName: "openai" | "anthropic" | "mistral" | "groq" | "gemini" | "openrouter" | "perplexity" | "xai"
-): string {
-  const key = vault.get(providerName as ProviderName);
+): Promise<string> {
+  const key = await vault.get(providerName as ProviderName);
   if (!key) throw new Error(`[Providers] API key missing for: ${providerName}`);
   return key;
 }
@@ -191,7 +191,7 @@ export function getProvider(
 
 // ── Perplexity via OpenRouter (avoids Cloudflare interference on direct API) ──
 function createPerplexityViaOpenRouterProvider(apiKey: string): JavariProvider {
-  const openRouterKey = vault.get("openrouter") ?? apiKey;
+  let openRouterKeyCache: string | null = null;
   return {
     name: "perplexity",
     async *generateStream(prompt, { rolePrompt } = {}) {
@@ -199,10 +199,13 @@ function createPerplexityViaOpenRouterProvider(apiKey: string): JavariProvider {
       const messages: Array<{role:string;content:string}> = [];
       if (rolePrompt) messages.push({ role: "system", content: rolePrompt });
       messages.push({ role: "user", content: prompt });
+      if (!openRouterKeyCache) {
+        openRouterKeyCache = await vault.get("openrouter" as ProviderName) ?? apiKey;
+      }
       const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${openRouterKey}`,
+          Authorization: `Bearer ${openRouterKeyCache}`,
           "Content-Type": "application/json",
           "HTTP-Referer": "https://craudiovizai.com",
           "X-Title": "Javari AI",

@@ -156,7 +156,7 @@ async function callAgent(
 
     let apiKey: string;
     try {
-      apiKey = getProviderApiKey(pName as Parameters<typeof getProviderApiKey>[0]);
+      apiKey = await getProviderApiKey(pName as Parameters<typeof getProviderApiKey>[0]);
       if (!apiKey) throw new Error("empty key");
     } catch {
       continue;
@@ -406,7 +406,7 @@ async function signalPipeline(
   // signal_reader is optional — skip if xAI key unavailable
   let apiKey = "";
   try {
-    apiKey = getProviderApiKey("xai");
+    apiKey = await getProviderApiKey("xai");
   } catch { /* no key */ }
   if (!apiKey) {
     // Graceful skip → delegate to architect instead

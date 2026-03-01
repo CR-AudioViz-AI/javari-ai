@@ -128,7 +128,7 @@ export class AutonomousExecutor {
    * PHASE 5-B: Task decomposition using o-series + Claude
    */
   async breakDownTask(prompt: string, type: TaskType = 'design'): Promise<RoadmapTask[]> {
-    const architect = getProvider(AI_ROLES.architect, getProviderApiKey(AI_ROLES.architect));
+    const architect = getProvider(AI_ROLES.architect, await getProviderApiKey(AI_ROLES.architect));
     
     const decompositionPrompt = `You are an expert system architect. Break down this request into executable subtasks:
 
@@ -170,7 +170,7 @@ Rules:
     const tasks = JSON.parse(jsonMatch[0]);
     
     // Validate with Claude
-    const validator = getProvider(AI_ROLES.validator, getProviderApiKey(AI_ROLES.validator));
+    const validator = getProvider(AI_ROLES.validator, await getProviderApiKey(AI_ROLES.validator));
     let validationResult = '';
     
     for await (const chunk of validator.generateStream(
@@ -275,7 +275,7 @@ Rules:
     type: 'typescript' | 'react' | 'api' | 'test';
     description: string;
   }): Promise<string> {
-    const coder = getProvider(AI_ROLES.coder, getProviderApiKey(AI_ROLES.coder));
+    const coder = getProvider(AI_ROLES.coder, await getProviderApiKey(AI_ROLES.coder));
     
     const prompt = `Generate a ${spec.type} file for: ${spec.description}
 
@@ -299,7 +299,7 @@ Return ONLY the complete file content, no explanation.`;
     }
 
     // Validate with Claude
-    const validator = getProvider(AI_ROLES.validator, getProviderApiKey(AI_ROLES.validator));
+    const validator = getProvider(AI_ROLES.validator, await getProviderApiKey(AI_ROLES.validator));
     let validation = '';
     
     for await (const chunk of validator.generateStream(

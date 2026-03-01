@@ -15,7 +15,7 @@ export async function validateCouncilResult(
   
   // Try Claude first (if available)
   try {
-    const claudeKey = getProviderApiKey('anthropic');
+    const claudeKey = await getProviderApiKey('anthropic');
     const claude = getProvider('anthropic', claudeKey);
     
     const validationPrompt = `You are validating an AI council decision. 
@@ -39,7 +39,7 @@ Is this response accurate, helpful, and appropriate? Respond with "VALID" or sug
   } catch (claudeError) {
     // Fallback to OpenAI
     try {
-      const openaiKey = getProviderApiKey('openai');
+      const openaiKey = await getProviderApiKey('openai');
       const openai = getProvider('openai', openaiKey);
       
       const validationPrompt = `Validate this AI response for accuracy and helpfulness: "${merged.finalText}"`;

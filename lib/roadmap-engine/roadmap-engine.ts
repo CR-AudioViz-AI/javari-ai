@@ -101,7 +101,7 @@ export class RoadmapEngine {
 
     try {
       // Use OpenAI for task breakdown
-      const provider = getProvider('openai', getProviderApiKey('openai'));
+      const provider = getProvider('openai', await getProviderApiKey('openai'));
       
       const planningPrompt = `You are a roadmap planning AI. Break down this request into discrete, executable tasks:
 
@@ -255,7 +255,7 @@ Consider:
     try {
       // Get provider for this task
       const providerName = task.provider || 'mistral';
-      const provider = getProvider(providerName, getProviderApiKey(providerName));
+      const provider = getProvider(providerName, await getProviderApiKey(providerName));
 
       // Execute task
       let result = '';
@@ -269,7 +269,7 @@ Consider:
 
       // Validate result with Claude if critical task
       if (task.dependencies.length > 0 || task.title.includes('validate')) {
-        const validator = getProvider('anthropic', getProviderApiKey('anthropic'));
+        const validator = getProvider('anthropic', await getProviderApiKey('anthropic'));
         let validationResult = '';
         
         for await (const chunk of validator.generateStream(

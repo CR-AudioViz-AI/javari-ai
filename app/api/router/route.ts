@@ -171,7 +171,7 @@ export async function POST(req: NextRequest) {
         for (const pName of chain) {
           let apiKey: string;
           try {
-            apiKey = getProviderApiKey(pName as Parameters<typeof getProviderApiKey>[0]);
+            apiKey = await getProviderApiKey(pName as Parameters<typeof getProviderApiKey>[0]);
           } catch {
             enq({ type: "fallback", from: pName, reason: "key_missing" });
             continue;
@@ -244,7 +244,7 @@ export async function POST(req: NextRequest) {
   for (const pName of chain) {
     let apiKey: string;
     try {
-      apiKey = getProviderApiKey(pName as Parameters<typeof getProviderApiKey>[0]);
+      apiKey = await getProviderApiKey(pName as Parameters<typeof getProviderApiKey>[0]);
     } catch { continue; }
 
     try {

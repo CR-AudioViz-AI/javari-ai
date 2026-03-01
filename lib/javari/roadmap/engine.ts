@@ -12,11 +12,11 @@ export async function generateRoadmap(
   let apiKey;
   
   try {
-    apiKey = getProviderApiKey('openai');
+    apiKey = await getProviderApiKey('openai');
     provider = getProvider('openai', apiKey);
   } catch {
     try {
-      apiKey = getProviderApiKey('mistral');
+      apiKey = await getProviderApiKey('mistral');
       provider = getProvider('mistral', apiKey);
     } catch {
       throw new Error('No reasoning provider available for roadmap generation');

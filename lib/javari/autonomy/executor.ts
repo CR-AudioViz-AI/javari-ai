@@ -134,7 +134,7 @@ async function callProvider(
   for (const pName of chain) {
     let apiKey: string;
     try {
-      apiKey = getProviderApiKey(pName as Parameters<typeof getProviderApiKey>[0]);
+      apiKey = await getProviderApiKey(pName as Parameters<typeof getProviderApiKey>[0]);
     } catch {
       continue;
     }

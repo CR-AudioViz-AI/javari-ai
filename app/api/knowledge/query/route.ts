@@ -40,7 +40,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     
     const { getProvider, getProviderApiKey } = await import('@/lib/javari/providers');
     
-    const apiKey = getProviderApiKey('anthropic');
+    const apiKey = await getProviderApiKey('anthropic');
     const provider = getProvider('anthropic', apiKey);
     
     let response = '';
