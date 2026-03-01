@@ -114,6 +114,15 @@ export async function getAllProviderHealth(): Promise<ProviderHealthState[]> {
 }
 
 /**
+ * Synchronous health snapshot for routing decisions.
+ * Returns whatever is in the in-memory cache — NO DB queries.
+ * Safe for hot-path use (called on every request).
+ */
+export function getHealthSnapshot(): Map<string, ProviderHealthState> {
+  return cache;
+}
+
+/**
  * Force rebuild health from execution log. Admin use.
  */
 export async function rebuildHealthFromExecutions(): Promise<number> {

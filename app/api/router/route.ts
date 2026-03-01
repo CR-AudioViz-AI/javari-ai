@@ -33,7 +33,7 @@
 //   SSE stream: data: { type, content, routing }
 
 import { NextRequest } from "next/server";
-import { analyzeRoutingContext } from "@/lib/javari/multi-ai/routing-context";
+import { analyzeRoutingContext, applyHealthRanking } from "@/lib/javari/multi-ai/routing-context";
 import { routeRequest, buildFallbackChain, globalRouterLogger } from "@/lib/javari/multi-ai/router";
 import { getProvider, getProviderApiKey } from "@/lib/javari/providers";
 import { isOutputMalformed } from "@/lib/javari/multi-ai/validator";
@@ -104,6 +104,7 @@ export async function POST(req: NextRequest) {
 
   // ── 1. Analyze routing context ──────────────────────────────────────────
   const ctx = analyzeRoutingContext(message, mode, body.provider);
+  const { ranked: healthRankedChain, scores: healthScores } = applyHealthRanking(ctx.fallback_chain);
   const decision = routeRequest({ prompt: message, mode });
 
   // Log the decision
@@ -130,7 +131,8 @@ export async function POST(req: NextRequest) {
           estimated_cost_usd:       ctx.estimated_cost_usd,
           confidence:               decision.confidence,
         },
-        fallback_chain: ctx.fallback_chain,
+        fallback_chain: healthRankedChain,
+        health_ranking: healthScores,
         durationMs: Date.now() - t0,
       }),
       { headers: { "Content-Type": "application/json" } }
@@ -165,7 +167,7 @@ export async function POST(req: NextRequest) {
   // ── STREAMING PATH ──────────────────────────────────────────────────────
   if (stream) {
     const encoder = new TextEncoder();
-    const chain   = ctx.fallback_chain;
+    const chain   = healthRankedChain;
 
     const readable = new ReadableStream({
       async start(controller) {
@@ -258,7 +260,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── BUFFERED PATH ───────────────────────────────────────────────────────
-  const chain = ctx.fallback_chain;
+  const chain = healthRankedChain;
   let response = "";
   let usedProvider = "";
 

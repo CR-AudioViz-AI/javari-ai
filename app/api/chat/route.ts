@@ -9,7 +9,7 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
-import { analyzeRoutingContext } from "@/lib/javari/multi-ai/routing-context";
+import { analyzeRoutingContext, applyHealthRanking } from "@/lib/javari/multi-ai/routing-context";
 import { isOutputMalformed } from "@/lib/javari/multi-ai/validator";
 import { recordRouterExecution, classifyError } from "@/lib/javari/telemetry/router-telemetry";
 import { isProviderAvailable, updateProviderHealth } from "@/lib/javari/telemetry/provider-health";
@@ -181,16 +181,17 @@ async function resolveProvider(
   fallbackChain: string[];
   routingReason: string;
   complexityScore: number;
+  healthScores: ReturnType<typeof applyHealthRanking>["scores"];
 }> {
-  // Analyze prompt for intelligent routing
+  // Step 1: Analyze prompt for capability-based routing
   const ctx = analyzeRoutingContext(message, mode ?? "single", requestedProvider);
 
-  // Use the smart fallback chain from routing context
-  const chain = ctx.fallback_chain;
+  // Step 2: Re-rank chain by live health metrics (no DB query)
+  const { ranked, scores } = applyHealthRanking(ctx.fallback_chain);
 
   const { getProvider, getProviderApiKey } = await import("@/lib/javari/providers");
 
-  for (const pName of chain) {
+  for (const pName of ranked) {
     if (!(await isProviderAvailable(pName))) continue;
 
     try {
@@ -200,9 +201,10 @@ async function resolveProvider(
       return {
         providerModule,
         usedProvider: pName,
-        fallbackChain: chain,
-        routingReason: `Smart route: ${ctx.primary_provider_hint} (complexity=${ctx.complexity_score})`,
+        fallbackChain: ranked,
+        routingReason: `Adaptive: ${ctx.primary_provider_hint}→${pName} (complexity=${ctx.complexity_score}, score=${scores.find(s => s.provider === pName)?.score.toFixed(3) ?? "?"})`,
         complexityScore: ctx.complexity_score,
+        healthScores: scores,
       };
     } catch {
       continue;
@@ -283,7 +285,7 @@ export async function POST(req: NextRequest) {
     return errorResponse("No AI provider available. Check API keys.");
   }
 
-  const { providerModule, usedProvider, fallbackChain, routingReason, complexityScore } = resolved;
+  const { providerModule, usedProvider, fallbackChain, routingReason, complexityScore, healthScores } = resolved;
   const tier = getTier(usedProvider);
   const costEstimate = estimateCost(usedProvider, message.length, tier);
 
@@ -436,6 +438,7 @@ export async function POST(req: NextRequest) {
         routing: routingReason,
         complexity_score: complexityScore,
         fallback_chain: fallbackChain,
+        health_ranking: healthScores,
         projected_cost_usd: costEstimate.projectedCost,
         actual_cost_usd: actualCost,
         multiplier: costEstimate.multiplier,
