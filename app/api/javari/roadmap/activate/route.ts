@@ -235,7 +235,7 @@ export async function POST(req: NextRequest) {
         };
 
         // Upsert roadmap record
-        await fetch(`${SUPA_URL}/rest/v1/javari_roadmaps`, {
+        const roadmapRes = await fetch(`${SUPA_URL}/rest/v1/javari_roadmaps`, {
           method: 'POST',
           headers,
           body: JSON.stringify({
@@ -267,6 +267,11 @@ export async function POST(req: NextRequest) {
           }),
         });
 
+        if (!roadmapRes.ok) {
+          const errorText = await roadmapRes.text();
+          throw new Error(`Roadmap insert failed: ${roadmapRes.status} ${errorText}`);
+        }
+
         // Upsert all tasks in batches
         const taskRows = roadmap.tasks.map((t, idx) => ({
           id: t.id,
@@ -287,16 +292,22 @@ export async function POST(req: NextRequest) {
 
         for (let i = 0; i < taskRows.length; i += 50) {
           const batch = taskRows.slice(i, i + 50);
-          await fetch(`${SUPA_URL}/rest/v1/javari_tasks`, {
+          const taskRes = await fetch(`${SUPA_URL}/rest/v1/javari_tasks`, {
             method: 'POST',
             headers,
             body: JSON.stringify(batch),
           });
+          
+          if (!taskRes.ok) {
+            const errorText = await taskRes.text();
+            throw new Error(`Task batch ${i / 50} insert failed: ${taskRes.status} ${errorText}`);
+          }
         }
 
         persisted = true;
       } catch (e) {
-        console.warn('[RoadmapActivate] Supabase persist failed:', e);
+        console.error('[RoadmapActivate] Supabase persist failed:', e);
+        throw e; // Re-throw to prevent claiming success
       }
     }
 
