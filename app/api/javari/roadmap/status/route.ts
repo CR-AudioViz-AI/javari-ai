@@ -11,12 +11,11 @@ import { stateManager } from '@/lib/roadmap-engine/roadmap-state';
 
 export async function GET(req: NextRequest) {
   try {
-    // TEMPORARY: Expose raw DB rows for forensic verification
-    const rows = await stateManager.listAsync();
+    // DEPLOYMENT MARKER FOR VERIFICATION
     return NextResponse.json({
-      success: true,
-      rawCount: rows.length,
-      raw: rows
+      DEPLOYMENT_MARKER: "ROADMAP_STATUS_FORENSIC_V1",
+      timestamp: new Date().toISOString(),
+      commitSHA: "13331a3"
     });
 
   } catch (error) {
