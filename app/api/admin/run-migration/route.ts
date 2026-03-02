@@ -1,6 +1,6 @@
 // app/api/admin/run-migration/route.ts
-// Schema migration: model_registry table + registry_version column + seed data
-// Delete after successful migration
+// TEMPORARY: Create model_registry table + seed 11 models + add registry_version to executions
+// Delete after migration succeeds
 
 import { NextRequest } from "next/server";
 
@@ -26,51 +26,33 @@ CREATE TABLE IF NOT EXISTS model_registry (
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   CONSTRAINT model_registry_pkey PRIMARY KEY (provider, model)
 );
-`;
 
-const ADD_COLUMN_SQL = `
 ALTER TABLE ai_router_executions ADD COLUMN IF NOT EXISTS registry_version TEXT;
 `;
 
 const SEED_SQL = `
 INSERT INTO model_registry (provider, model, reasoning, json_reliability, code_quality, multimodal, streaming, tools, cost_input, cost_output, latency_class, cost_tier, enabled, registry_version)
 VALUES
-  ('groq', 'llama-3.3-70b-versatile', 3, 3, 3, FALSE, TRUE, FALSE, 0, 0, 'fast', 'free', TRUE, 'v1.0'),
-  ('groq', 'llama-3.1-8b-instant', 2, 2, 2, FALSE, TRUE, FALSE, 0, 0, 'fast', 'free', TRUE, 'v1.0'),
-  ('openai', 'gpt-4o-mini', 3, 4, 3, TRUE, TRUE, TRUE, 0.00015, 0.0006, 'medium', 'low', TRUE, 'v1.0'),
-  ('openai', 'o4-mini', 5, 4, 5, FALSE, TRUE, TRUE, 0.0011, 0.0044, 'slow', 'medium', TRUE, 'v1.0'),
-  ('openai', 'o3', 5, 4, 5, FALSE, FALSE, TRUE, 0.01, 0.04, 'slow', 'premium', TRUE, 'v1.0'),
-  ('anthropic', 'claude-sonnet-4-20250514', 5, 4, 5, TRUE, TRUE, TRUE, 0.003, 0.015, 'medium', 'medium', TRUE, 'v1.0'),
-  ('mistral', 'mistral-small-latest', 3, 5, 3, FALSE, TRUE, TRUE, 0.0001, 0.0003, 'medium', 'low', TRUE, 'v1.0'),
-  ('mistral', 'mistral-large-latest', 4, 5, 4, FALSE, TRUE, TRUE, 0.002, 0.006, 'medium', 'medium', TRUE, 'v1.0'),
-  ('openrouter', 'meta-llama/llama-3.3-70b-instruct', 3, 3, 3, FALSE, TRUE, FALSE, 0.00059, 0.00079, 'medium', 'low', TRUE, 'v1.0'),
-  ('xai', 'grok-2', 3, 3, 3, TRUE, TRUE, TRUE, 0.002, 0.01, 'medium', 'medium', TRUE, 'v1.0'),
-  ('perplexity', 'llama-3.1-sonar-large-128k-online', 3, 2, 2, FALSE, TRUE, FALSE, 0.001, 0.001, 'medium', 'low', TRUE, 'v1.0')
-ON CONFLICT (provider, model) DO UPDATE SET
-  reasoning = EXCLUDED.reasoning,
-  json_reliability = EXCLUDED.json_reliability,
-  code_quality = EXCLUDED.code_quality,
-  multimodal = EXCLUDED.multimodal,
-  streaming = EXCLUDED.streaming,
-  tools = EXCLUDED.tools,
-  cost_input = EXCLUDED.cost_input,
-  cost_output = EXCLUDED.cost_output,
-  latency_class = EXCLUDED.latency_class,
-  cost_tier = EXCLUDED.cost_tier,
-  enabled = EXCLUDED.enabled,
-  registry_version = EXCLUDED.registry_version,
-  updated_at = NOW();
+  ('groq','llama-3.3-70b-versatile',3,3,3,false,true,false,0,0,'fast','free',true,'v1.0'),
+  ('groq','llama-3.1-8b-instant',2,2,2,false,true,false,0,0,'fast','free',true,'v1.0'),
+  ('openai','gpt-4o-mini',3,4,3,true,true,true,0.00015,0.0006,'medium','low',true,'v1.0'),
+  ('openai','o4-mini',5,4,5,false,true,true,0.0011,0.0044,'slow','medium',true,'v1.0'),
+  ('openai','o3',5,4,5,false,false,true,0.01,0.04,'slow','high',true,'v1.0'),
+  ('anthropic','claude-sonnet-4-20250514',5,4,5,true,true,true,0.003,0.015,'medium','medium',true,'v1.0'),
+  ('mistral','mistral-small-latest',3,5,3,false,true,true,0.0001,0.0003,'medium','low',true,'v1.0'),
+  ('mistral','mistral-large-latest',4,5,4,false,true,true,0.002,0.006,'medium','medium',true,'v1.0'),
+  ('openrouter','meta-llama/llama-3.3-70b-instruct',3,3,3,false,true,false,0.00059,0.00079,'medium','low',true,'v1.0'),
+  ('xai','grok-2',3,3,3,true,true,true,0.002,0.01,'medium','medium',true,'v1.0'),
+  ('perplexity','llama-3.1-sonar-large-128k-online',3,2,2,false,true,false,0.001,0.001,'medium','low',true,'v1.0')
+ON CONFLICT (provider, model) DO NOTHING;
 `;
 
-const VERIFY_TABLE_SQL = `
-SELECT provider, model, reasoning, json_reliability, code_quality, enabled, registry_version
-FROM model_registry ORDER BY provider, model;
-`;
-
-const VERIFY_COLUMN_SQL = `
-SELECT column_name, data_type
-FROM information_schema.columns
-WHERE table_name = 'ai_router_executions' AND column_name = 'registry_version';
+const VERIFY_SQL = `
+SELECT
+  (SELECT count(*) FROM model_registry) as total_models,
+  (SELECT count(*) FROM model_registry WHERE enabled = true) as enabled_models,
+  (SELECT count(DISTINCT provider) FROM model_registry) as providers,
+  (SELECT column_name FROM information_schema.columns WHERE table_name = 'ai_router_executions' AND column_name = 'registry_version' LIMIT 1) as exec_col;
 `;
 
 export async function POST(_req: NextRequest) {
@@ -91,37 +73,33 @@ export async function POST(_req: NextRequest) {
     return Response.json({ error: "Cannot extract project ref" }, { status: 500 });
   }
 
-  const results: Record<string, any> = {};
+  const mgmtUrl = `https://api.supabase.com/v1/projects/${projectRef}/database/query`;
+  const headers = { "Content-Type": "application/json", "Authorization": `Bearer ${mgmtToken}` };
 
-  async function runSQL(label: string, sql: string) {
-    const r = await fetch(`https://api.supabase.com/v1/projects/${projectRef}/database/query`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${mgmtToken}` },
-      body: JSON.stringify({ query: sql }),
-    });
-    if (!r.ok) {
-      const text = await r.text();
-      results[label] = { error: r.status, detail: text.slice(0, 300) };
-      return false;
-    }
-    results[label] = await r.json();
-    return true;
+  // Step 1: Create table + add column
+  const r1 = await fetch(mgmtUrl, { method: "POST", headers, body: JSON.stringify({ query: CREATE_TABLE_SQL }) });
+  if (!r1.ok) {
+    return Response.json({ error: "Create table failed", detail: (await r1.text()).slice(0, 300) }, { status: 500 });
   }
 
-  await runSQL("create_table", CREATE_TABLE_SQL);
-  // Force PostgREST schema reload
-  await runSQL("schema_reload", "NOTIFY pgrst, 'reload schema';");
-  await runSQL("add_column", ADD_COLUMN_SQL);
-  await runSQL("seed_models", SEED_SQL);
-  await runSQL("verify_models", VERIFY_TABLE_SQL);
-  await runSQL("verify_column", VERIFY_COLUMN_SQL);
+  // Step 2: Seed models
+  const r2 = await fetch(mgmtUrl, { method: "POST", headers, body: JSON.stringify({ query: SEED_SQL }) });
+  if (!r2.ok) {
+    return Response.json({ error: "Seed failed", detail: (await r2.text()).slice(0, 300) }, { status: 500 });
+  }
 
-  const modelCount = Array.isArray(results.verify_models) ? results.verify_models.length : 0;
+  // Step 3: Verify
+  const r3 = await fetch(mgmtUrl, { method: "POST", headers, body: JSON.stringify({ query: VERIFY_SQL }) });
+  const verify = r3.ok ? await r3.json() : null;
+
+  // Step 4: Read all models back
+  const r4 = await fetch(mgmtUrl, { method: "POST", headers, body: JSON.stringify({ query: "SELECT provider, model, reasoning, json_reliability, code_quality, enabled, registry_version FROM model_registry ORDER BY provider, model;" }) });
+  const models = r4.ok ? await r4.json() : [];
 
   return Response.json({
     success: true,
     duration_ms: Date.now() - t0,
-    model_count: modelCount,
-    results,
+    verify: verify?.[0] ?? null,
+    models,
   });
 }
