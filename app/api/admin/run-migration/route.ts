@@ -77,6 +77,9 @@ INSERT INTO model_registry (provider, model, reasoning, json_reliability, code_q
   ('perplexity', 'llama-3.1-sonar-large-128k-online',     3, 2, 2, false, true,  false, 0.001,  0.001,  'medium', 'low',      true,  'v1.0')
 ON CONFLICT (provider, model) DO NOTHING;`, "seed_models"));
 
+  // Step 2b: Reload PostgREST schema cache so Supabase JS client can see the new table
+  results.push(await runSql("NOTIFY pgrst, 'reload schema';", "reload_schema_cache"));
+
   // Step 3: Add registry_version column to ai_router_executions
   results.push(await runSql(`
 ALTER TABLE ai_router_executions ADD COLUMN IF NOT EXISTS registry_version TEXT;`, "add_registry_version_col"));
