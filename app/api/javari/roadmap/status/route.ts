@@ -11,34 +11,12 @@ import { stateManager } from '@/lib/roadmap-engine/roadmap-state';
 
 export async function GET(req: NextRequest) {
   try {
-    const searchParams = req.nextUrl.searchParams;
-    const roadmapId = searchParams.get('roadmapId') || searchParams.get('id');
-
-    if (!roadmapId) {
-      // Return all active roadmaps from DB
-      const active = await stateManager.listAsync();
-      const activeFiltered = active.filter(
-        (s) => s.status === 'planning' || s.status === 'executing'
-      );
-      return NextResponse.json({
-        success: true,
-        roadmaps: activeFiltered,
-      });
-    }
-
-    // Return specific roadmap from DB
-    const state = await stateManager.loadAsync(roadmapId);
-    
-    if (!state) {
-      return NextResponse.json(
-        { error: 'Roadmap not found' },
-        { status: 404 }
-      );
-    }
-
+    // TEMPORARY: Expose raw DB rows for forensic verification
+    const rows = await stateManager.listAsync();
     return NextResponse.json({
       success: true,
-      state,
+      rawCount: rows.length,
+      raw: rows
     });
 
   } catch (error) {
