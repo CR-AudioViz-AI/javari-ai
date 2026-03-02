@@ -34,7 +34,7 @@
 
 import { NextRequest } from "next/server";
 import { analyzeRoutingContext, applyHealthRanking, ROUTING_ENGINE_VERSION, getRegistryVersion } from "@/lib/javari/multi-ai/routing-context";
-import { routeRequest, buildFallbackChain, globalRouterLogger } from "@/lib/javari/multi-ai/router";
+import { routeRequest, buildFallbackChain } from "@/lib/javari/multi-ai/router";
 import { getProvider, getProviderApiKey } from "@/lib/javari/providers";
 import { isOutputMalformed } from "@/lib/javari/multi-ai/validator";
 import { recordRouterExecution, classifyError } from "@/lib/javari/telemetry/router-telemetry";
@@ -46,14 +46,12 @@ export const runtime = "nodejs";
 // ── GET — health + stats ──────────────────────────────────────────────────────
 
 export async function GET() {
-  const stats = globalRouterLogger.getStats();
   return new Response(
     JSON.stringify({
       success: true,
       status: "operational",
       engine: "v2",
       timestamp: new Date().toISOString(),
-      stats,
       capabilities: [
         "reasoning_depth_routing",
         "json_mode_routing",
@@ -106,9 +104,6 @@ export async function POST(req: NextRequest) {
   const ctx = analyzeRoutingContext(message, mode, body.provider);
   const { ranked: healthRankedChain, scores: healthScores, weights: healthWeights } = applyHealthRanking(ctx.fallback_chain);
   const decision = routeRequest({ prompt: message, mode });
-
-  // Log the decision
-  globalRouterLogger.log({ prompt: message, mode }, decision);
 
   // ── 2. Inspect-only mode ────────────────────────────────────────────────
   if (!execute) {
