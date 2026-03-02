@@ -82,6 +82,15 @@ export async function POST(_req: NextRequest) {
     return Response.json({ error: "Create table failed", detail: (await r1.text()).slice(0, 300) }, { status: 500 });
   }
 
+  // Step 1b: Grant access + reload PostgREST schema cache
+  const grantSql = `
+    GRANT ALL ON model_registry TO service_role;
+    GRANT ALL ON model_registry TO anon;
+    GRANT ALL ON model_registry TO authenticated;
+    NOTIFY pgrst, 'reload schema';
+  `;
+  await fetch(mgmtUrl, { method: "POST", headers, body: JSON.stringify({ query: grantSql }) });
+
   // Step 2: Seed models
   const r2 = await fetch(mgmtUrl, { method: "POST", headers, body: JSON.stringify({ query: SEED_SQL }) });
   if (!r2.ok) {
