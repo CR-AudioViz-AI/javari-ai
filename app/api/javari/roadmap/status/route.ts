@@ -11,10 +11,12 @@ import { stateManager } from '@/lib/roadmap-engine/roadmap-state';
 
 export async function GET() {
   const rows = await stateManager.listAsync();
+  const active = rows.filter(
+    (s) => s.status === "planning" || s.status === "executing"
+  );
   return NextResponse.json({
-    DEPLOYMENT_MARKER: "RAW_DB_PHASE_2",
-    rawCount: rows.length,
-    raw: rows
+    success: true,
+    roadmaps: active
   });
 }
 

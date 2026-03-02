@@ -211,14 +211,6 @@ export class RoadmapStateManager {
 
     const rows = await res.json() as Record<string, unknown>[];
     
-    // FORENSIC LOGGING
-    console.log('[FORENSIC] RAW_DB_ROWS:', JSON.stringify(rows.map(r => ({ 
-      id: r.id, 
-      status: r.status,
-      created_at: r.created_at 
-    }))));
-    console.log('[FORENSIC] RAW_ROW_COUNT:', rows.length);
-    
     const mapped = rows.map((r) => ({
       id: r.id as string,
       title: r.title as string,
@@ -235,12 +227,6 @@ export class RoadmapStateManager {
         progress: parseFloat(String(r.progress || '0')),
       },
     }));
-    
-    console.log('[FORENSIC] FINAL_RETURN_ROWS:', JSON.stringify(mapped.map(m => ({ 
-      id: m.id, 
-      status: m.status 
-    }))));
-    console.log('[FORENSIC] FINAL_ROW_COUNT:', mapped.length);
     
     return mapped;
   }
