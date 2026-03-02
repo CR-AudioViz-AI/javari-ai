@@ -1,10 +1,10 @@
 // app/api/chat/route.ts
-// Javari Chat API — v4 UNIFIED SMART ROUTING + RUNTIME VERIFICATION
-// 2026-03-02 — Added runtime logging for execution path verification
-//   - Logs: selectedModel.id, provider, routingMeta, mode
-//   - Global routing logger for debug endpoint
-//   - Council mode detection
-//   - Fallback chain metadata tracking
+// Javari Chat API — v4 UNIFIED SMART ROUTING
+// 2026-03-01 — Replaced hardcoded provider loop with analyzeRoutingContext
+//   - Context-aware provider selection based on prompt complexity
+//   - Smart fallback chain from routing-context (not static list)
+//   - Output validation via isOutputMalformed
+//   - Preserved: streaming, tier system, budget gates, telemetry
 
 import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -20,30 +20,12 @@ export const runtime = "nodejs";
 interface ChatRequest {
   message?: string;
   messages?: Array<{ role: string; content: string }>;
-  mode?: "single" | "super" | "advanced" | "roadmap" | "council";
+  mode?: "single" | "super" | "advanced" | "roadmap";
   provider?: string;
   stream?: boolean;
   history?: Array<{ role: string; content: string }>;
   approvePremium?: boolean;
 }
-
-// ═══════════════════════════════════════════════════════════════
-// GLOBAL ROUTING LOGGER (for debug endpoint)
-// ═══════════════════════════════════════════════════════════════
-
-export const globalRouterLogger = {
-  lastDecision: null as {
-    timestamp: string;
-    mode: string;
-    provider: string;
-    model: string;
-    routingMeta: any;
-    fallbackChain: string[];
-    complexityScore: number;
-    healthScores: any[];
-    requestId: string;
-  } | null,
-};
 
 // ═══════════════════════════════════════════════════════════════
 // SUPABASE CLIENT
@@ -192,8 +174,7 @@ async function getUserId(req: NextRequest): Promise<string | null> {
 async function resolveProvider(
   message: string,
   mode: ChatRequest["mode"],
-  requestedProvider: string,
-  requestId: string
+  requestedProvider: string
 ): Promise<{
   providerModule: Awaited<ReturnType<typeof import("@/lib/javari/providers").getProvider>>;
   usedProvider: string;
@@ -204,61 +185,22 @@ async function resolveProvider(
   routingWeights: ReturnType<typeof applyHealthRanking>["weights"];
   primaryHint: string;
   capabilityOverride: string | null;
-  routingMeta: any;
 }> {
-  console.log(`[ROUTER] ${requestId} | analyzeRoutingContext() invoked | mode=${mode}`);
-  
   // Step 1: Analyze prompt for capability-based routing
   const ctx = analyzeRoutingContext(message, mode ?? "single", requestedProvider);
-
-  console.log(`[ROUTER] ${requestId} | Routing context analyzed | complexity=${ctx.complexity_score} | primary=${ctx.primary_provider_hint}`);
 
   // Step 2: Re-rank chain by live health metrics (no DB query)
   const { ranked, scores, weights } = applyHealthRanking(ctx.fallback_chain);
 
-  console.log(`[ROUTER] ${requestId} | Health ranking applied | chain=[${ranked.join(", ")}]`);
-
   const { getProvider, getProviderApiKey } = await import("@/lib/javari/providers");
 
   for (const pName of ranked) {
-    if (!(await isProviderAvailable(pName))) {
-      console.log(`[ROUTER] ${requestId} | Provider unavailable: ${pName}`);
-      continue;
-    }
+    if (!(await isProviderAvailable(pName))) continue;
 
     try {
       const key = await getProviderApiKey(pName as Parameters<typeof getProviderApiKey>[0]);
-      if (!key) {
-        console.log(`[ROUTER] ${requestId} | No API key for: ${pName}`);
-        continue;
-      }
+      if (!key) continue;
       const providerModule = getProvider(pName as Parameters<typeof getProvider>[0], key);
-      
-      const routingMeta = {
-        requires_reasoning_depth: ctx.requires_reasoning_depth,
-        requires_json: ctx.requires_json,
-        requires_validation: ctx.requires_validation,
-        high_risk: ctx.high_risk,
-        cost_sensitivity: ctx.cost_sensitivity,
-        complexity_score: ctx.complexity_score,
-      };
-
-      console.log(`[ROUTER] ${requestId} | Provider selected: ${pName} | model=${providerModule.config?.modelId || "default"}`);
-      console.log(`[ROUTER] ${requestId} | Routing metadata:`, JSON.stringify(routingMeta, null, 2));
-
-      // Update global logger
-      globalRouterLogger.lastDecision = {
-        timestamp: new Date().toISOString(),
-        mode: mode ?? "single",
-        provider: pName,
-        model: providerModule.config?.modelId || "default",
-        routingMeta,
-        fallbackChain: ranked,
-        complexityScore: ctx.complexity_score,
-        healthScores: scores,
-        requestId,
-      };
-
       return {
         providerModule,
         usedProvider: pName,
@@ -269,10 +211,8 @@ async function resolveProvider(
         routingWeights: weights,
         primaryHint: ctx.primary_provider_hint,
         capabilityOverride: ctx.requires_json ? "requires_json" : ctx.requires_reasoning_depth ? "requires_reasoning" : null,
-        routingMeta,
       };
-    } catch (err) {
-      console.error(`[ROUTER] ${requestId} | Provider error: ${pName}`, err);
+    } catch {
       continue;
     }
   }
@@ -281,7 +221,7 @@ async function resolveProvider(
 }
 
 // ═══════════════════════════════════════════════════════════════
-// EXECUTION HELPERS
+// EXECUTE + COLLECT — shared by stream and buffered paths
 // ═══════════════════════════════════════════════════════════════
 
 async function executeAndCollect(
@@ -289,57 +229,50 @@ async function executeAndCollect(
   message: string,
   onChunk?: (chunk: string) => void
 ): Promise<string> {
-  const chunks: string[] = [];
-
-  await providerModule.chat(message, {
-    onChunk: (chunk: string) => {
-      chunks.push(chunk);
-      onChunk?.(chunk);
-    },
+  const gen = providerModule.generateStream(message, {
+    maxTokens: 2000,
+    temperature: 0.7,
   });
 
-  return chunks.join("");
+  let fullText = "";
+  for await (const chunk of gen) {
+    if (chunk) {
+      fullText += chunk;
+      if (onChunk) onChunk(chunk);
+    }
+  }
+
+  return fullText;
 }
 
 // ═══════════════════════════════════════════════════════════════
-// MAIN HANDLER
+// POST HANDLER
 // ═══════════════════════════════════════════════════════════════
 
 export async function POST(req: NextRequest) {
   const t0 = Date.now();
-  const requestId = randomUUID().substring(0, 8);
-
-  console.log(`[CHAT] ${requestId} | Request received | timestamp=${new Date().toISOString()}`);
+  const requestId = randomUUID();
 
   let body: ChatRequest;
   try {
     body = await req.json();
   } catch {
-    return errorResponse("Invalid JSON");
+    return errorResponse("Invalid JSON in request body");
   }
 
   const message = extractMessage(body);
-  if (!message) return errorResponse("Missing message");
+  const {
+    mode = "single",
+    provider: requestedProvider = "groq",
+    stream: wantsStream = false,
+    approvePremium = false,
+  } = body;
 
-  const { mode, provider: requestedProvider, stream: wantsStream, approvePremium } = body;
-
-  console.log(`[CHAT] ${requestId} | Parsed request | mode=${mode || "single"} | wantsStream=${wantsStream} | requestedProvider=${requestedProvider || "auto"}`);
-
-  // ─── COUNCIL MODE DETECTION ────────────────────────────────────
-  if (mode === "council") {
-    console.log(`[CHAT] ${requestId} | COUNCIL MODE DETECTED — delegating to CouncilOrchestrator`);
-    // Council mode would invoke CouncilOrchestrator here
-    // For now, just log detection
+  if (!message) {
+    return errorResponse("Please provide a message");
   }
 
-  // ─── SYSTEM PAUSE CHECK ────────────────────────────────────────
-  const { data: pauseFlag } = await supabase
-    .from("system_flags")
-    .select("value")
-    .eq("key", "pause_all_requests")
-    .single();
-
-  if (pauseFlag?.value === true) {
+  if (process.env.JAVARI_AUTONOMY_PAUSED === "1") {
     return new Response(
       JSON.stringify({ success: false, systemPaused: true, message: "System maintenance in progress" }),
       { status: 503, headers: { "Content-Type": "application/json" } }
@@ -353,27 +286,12 @@ export async function POST(req: NextRequest) {
   // ─── SMART PROVIDER RESOLUTION ─────────────────────────────────
   let resolved: Awaited<ReturnType<typeof resolveProvider>>;
   try {
-    resolved = await resolveProvider(message, mode, requestedProvider || "", requestId);
-  } catch (err) {
-    console.error(`[CHAT] ${requestId} | Provider resolution failed:`, err);
+    resolved = await resolveProvider(message, mode, requestedProvider);
+  } catch {
     return errorResponse("No AI provider available. Check API keys.");
   }
 
-  const { 
-    providerModule, 
-    usedProvider, 
-    fallbackChain, 
-    routingReason, 
-    complexityScore, 
-    healthScores, 
-    routingWeights, 
-    primaryHint, 
-    capabilityOverride,
-    routingMeta 
-  } = resolved;
-
-  console.log(`[CHAT] ${requestId} | Provider resolved | provider=${usedProvider} | fallbackChain=[${fallbackChain.join(", ")}]`);
-
+  const { providerModule, usedProvider, fallbackChain, routingReason, complexityScore, healthScores, routingWeights, primaryHint, capabilityOverride } = resolved;
   const tier = getTier(usedProvider);
   const costEstimate = estimateCost(usedProvider, message.length, tier);
 
@@ -421,7 +339,6 @@ export async function POST(req: NextRequest) {
 
   // ─── STREAMING PATH ────────────────────────────────────────────
   if (wantsStream) {
-    console.log(`[CHAT] ${requestId} | Streaming mode initiated`);
     const encoder = new TextEncoder();
 
     const readable = new ReadableStream({
@@ -440,8 +357,6 @@ export async function POST(req: NextRequest) {
           const elapsed = Date.now() - t0;
           const actualCost = costEstimate.projectedCost;
           const malformed = isOutputMalformed(fullText);
-
-          console.log(`[CHAT] ${requestId} | Stream complete | duration=${elapsed}ms | malformed=${malformed}`);
 
           recordBudgetAfterExecution(userId, actualCost);
           updateProviderHealth(usedProvider, !malformed, elapsed);
@@ -476,7 +391,6 @@ export async function POST(req: NextRequest) {
             registry_version: getRegistryVersion(),
             complexity_score: complexityScore,
             fallback_chain: fallbackChain,
-            routing_meta: routingMeta,
             projected_cost_usd: costEstimate.projectedCost,
             actual_cost_usd: actualCost,
             multiplier: costEstimate.multiplier,
@@ -489,7 +403,6 @@ export async function POST(req: NextRequest) {
 
           controller.close();
         } catch (err: any) {
-          console.error(`[CHAT] ${requestId} | Stream error:`, err);
           updateProviderHealth(usedProvider, false, Date.now() - t0, classifyError(err));
           enqueue({ error: err?.message || "Stream error", done: true, success: false });
           controller.close();
@@ -507,15 +420,12 @@ export async function POST(req: NextRequest) {
   }
 
   // ─── BUFFERED PATH ─────────────────────────────────────────────
-  console.log(`[CHAT] ${requestId} | Buffered mode initiated`);
   try {
     const fullText = await executeAndCollect(providerModule, message);
 
     const elapsed = Date.now() - t0;
     const actualCost = costEstimate.projectedCost;
     const malformed = isOutputMalformed(fullText);
-
-    console.log(`[CHAT] ${requestId} | Request complete | duration=${elapsed}ms | malformed=${malformed} | provider=${usedProvider}`);
 
     recordBudgetAfterExecution(userId, actualCost);
     updateProviderHealth(usedProvider, !malformed, elapsed);
@@ -552,7 +462,6 @@ export async function POST(req: NextRequest) {
         registry_version: getRegistryVersion(),
         complexity_score: complexityScore,
         fallback_chain: fallbackChain,
-        routing_meta: routingMeta,
         health_ranking: healthScores,
         projected_cost_usd: costEstimate.projectedCost,
         actual_cost_usd: actualCost,
@@ -565,7 +474,6 @@ export async function POST(req: NextRequest) {
       { headers: { "Content-Type": "application/json" } }
     );
   } catch (err: any) {
-    console.error(`[CHAT] ${requestId} | Execution error:`, err);
     updateProviderHealth(usedProvider, false, Date.now() - t0, classifyError(err));
     recordRouterExecution({
       tier,
