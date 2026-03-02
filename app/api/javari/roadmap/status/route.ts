@@ -9,22 +9,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { stateManager } from '@/lib/roadmap-engine/roadmap-state';
 
-export async function GET(req: NextRequest) {
-  try {
-    // DEPLOYMENT MARKER FOR VERIFICATION
-    return NextResponse.json({
-      DEPLOYMENT_MARKER: "ROADMAP_STATUS_FORENSIC_V1",
-      timestamp: new Date().toISOString(),
-      commitSHA: "13331a3"
-    });
-
-  } catch (error) {
-    console.error('[Roadmap Status] Error:', error);
-    return NextResponse.json(
-      { error: String(error) },
-      { status: 500 }
-    );
-  }
+export async function GET() {
+  const rows = await stateManager.listAsync();
+  return NextResponse.json({
+    DEPLOYMENT_MARKER: "RAW_DB_PHASE_2",
+    rawCount: rows.length,
+    raw: rows
+  });
 }
 
 export const runtime = 'nodejs';
