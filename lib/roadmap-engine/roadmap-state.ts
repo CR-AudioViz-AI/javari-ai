@@ -170,14 +170,22 @@ export class RoadmapStateManager {
 
   /** List all roadmaps from Supabase */
   async listAsync(): Promise<RoadmapState[]> {
+    console.log('[DIAG] listAsync() called');
+    console.log('[DIAG] SUPA_URL exists:', !!SUPA_URL, 'value:', SUPA_URL);
+    console.log('[DIAG] SUPA_KEY exists:', !!SUPA_KEY, 'length:', SUPA_KEY.length);
+    
     if (!SUPA_URL || !SUPA_KEY) return this.list();
     try {
       const res = await fetch(
         `${SUPA_URL}/rest/v1/javari_roadmaps?order=created_at.desc&limit=50`,
         { headers: supaHeaders() }
       );
+      console.log('[DIAG] Fetch response status:', res.status, 'ok:', res.ok);
+      
       if (!res.ok) return this.list();
       const rows = await res.json() as Record<string, unknown>[];
+      console.log('[DIAG] Rows fetched:', rows.length);
+      
       return rows.map((r) => ({
         id: r.id as string,
         title: r.title as string,
@@ -194,7 +202,8 @@ export class RoadmapStateManager {
           progress: parseFloat(String(r.progress || '0')),
         },
       }));
-    } catch {
+    } catch (e) {
+      console.error('[DIAG] listAsync() error:', e);
       return this.list();
     }
   }
