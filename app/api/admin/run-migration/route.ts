@@ -77,7 +77,10 @@ INSERT INTO model_registry (provider, model, reasoning, json_reliability, code_q
   ('perplexity', 'llama-3.1-sonar-large-128k-online',     3, 2, 2, false, true,  false, 0.001,  0.001,  'medium', 'low',      true,  'v1.0')
 ON CONFLICT (provider, model) DO NOTHING;`, "seed_models"));
 
-  // Step 2b: Reload PostgREST schema cache so Supabase JS client can see the new table
+  // Step 2b: Disable RLS on model_registry (internal table, service_role access only)
+  results.push(await runSql("ALTER TABLE model_registry DISABLE ROW LEVEL SECURITY;", "disable_rls"));
+
+  // Step 2c: Reload PostgREST schema cache
   results.push(await runSql("NOTIFY pgrst, 'reload schema';", "reload_schema_cache"));
 
   // Step 3: Add registry_version column to ai_router_executions
