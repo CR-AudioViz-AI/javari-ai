@@ -224,6 +224,12 @@ export async function POST(req: NextRequest) {
     const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
     const SUPA_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
+    // DIAGNOSTIC LOGGING
+    console.log('[DIAG] SUPA_URL:', SUPA_URL);
+    console.log('[DIAG] SUPA_KEY present:', !!SUPA_KEY, 'length:', SUPA_KEY.length);
+    console.log('[DIAG] Target table: javari_roadmaps');
+    console.log('[DIAG] Full URL:', `${SUPA_URL}/rest/v1/javari_roadmaps`);
+
     let persisted = false;
     if (SUPA_URL && SUPA_KEY) {
       try {
@@ -235,6 +241,7 @@ export async function POST(req: NextRequest) {
         };
 
         // Upsert roadmap record
+        console.log('[DIAG] Attempting roadmap insert for ID:', roadmap.id);
         const roadmapRes = await fetch(`${SUPA_URL}/rest/v1/javari_roadmaps`, {
           method: 'POST',
           headers,
@@ -267,9 +274,15 @@ export async function POST(req: NextRequest) {
           }),
         });
 
+        console.log('[DIAG] Roadmap response status:', roadmapRes.status);
+        console.log('[DIAG] Roadmap response ok:', roadmapRes.ok);
+        console.log('[DIAG] Roadmap response statusText:', roadmapRes.statusText);
+        
+        const responseBody = await roadmapRes.text();
+        console.log('[DIAG] Roadmap response body:', responseBody);
+
         if (!roadmapRes.ok) {
-          const errorText = await roadmapRes.text();
-          throw new Error(`Roadmap insert failed: ${roadmapRes.status} ${errorText}`);
+          throw new Error(`Roadmap insert failed: ${roadmapRes.status} ${responseBody}`);
         }
 
         // Upsert all tasks in batches
