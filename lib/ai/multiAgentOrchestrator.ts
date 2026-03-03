@@ -25,7 +25,12 @@ ${prompt}
   }
   // 2️⃣ Builder executes plan
   const builder = await executeWithFailover(
-    `You are the Builder AI. Execute the following plan precisely and produce final output.\n\nPlan:\n${architect.content}`,
+    `You are the Builder AI operating under production-grade engineering standards.
+Execute the following structured plan in full detail.
+Output must be implementation-ready.
+Plan JSON:
+${architect.content}
+`,
     "builder"
   )
   if (!builder.success) {
