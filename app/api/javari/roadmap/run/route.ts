@@ -16,7 +16,8 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { roadmapId, prompt, title, strategy = 'dependency-driven' } = body;
 
-    // If roadmapId is provided, advance existing roadmap
+    // If roadmapId is provided, load and return existing roadmap
+    // (actual execution happens via separate execution endpoint or cron)
     if (roadmapId) {
       const existingState = await stateManager.loadAsync(roadmapId);
       
@@ -27,30 +28,11 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Create engine from existing state
-      const engine = new RoadmapEngine(
-        existingState.title,
-        existingState.description,
-        'dependency-driven'
-      );
-
-      // Restore state
-      engine.setState(existingState);
-
-      // Subscribe to state changes
-      engine.onStateChange(async (state) => {
-        await stateManager.saveAsync(state);
-      });
-
-      // Execute next task (non-blocking)
-      engine.execute().catch((error) => {
-        console.error('[Roadmap] Execution error:', error);
-      });
-
       return NextResponse.json({
         success: true,
         roadmapId: existingState.id,
-        state: engine.getState(),
+        state: existingState,
+        message: 'Roadmap loaded. Use /api/javari/roadmap/execute for task execution.'
       });
     }
 
