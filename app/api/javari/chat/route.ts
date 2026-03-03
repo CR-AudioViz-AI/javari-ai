@@ -21,6 +21,7 @@ import { retrieveRelevantMemory } from "@/lib/javari/memory/retrieval";
 import { JAVARI_SYSTEM_PROMPT } from "@/lib/javari/engine/systemPrompt";
 import type { Message } from "@/lib/types";
 import { executeWithFailover } from "@/lib/ai/executeWithFailover";
+import { runMultiAgent } from "@/lib/ai/multiAgentOrchestrator";
 
 // System commands can run long (diagnostics = 30-60s, module gen = 60-90s)
 export const maxDuration = 120;
@@ -117,6 +118,35 @@ export async function POST(req: Request) {
     }
     augmented.push({ role: "system", content: JAVARI_SYSTEM_PROMPT } as Message);
     augmented.push(...(messages ?? []));
+
+    const useMulti = true;
+    
+    if (useMulti) {
+      const multi = await runMultiAgent(lastUserContent);
+      if (!multi.success) {
+        return NextResponse.json({
+          systemCommandMode: false,
+          success: false,
+          messages: [
+            {
+              role: "assistant",
+              content: multi.error,
+            },
+          ],
+        }, { status: 200 });
+      }
+      return NextResponse.json({
+        systemCommandMode: false,
+        success: true,
+        architect: multi.architect,
+        messages: [
+          {
+            role: "assistant",
+            content: multi.builder,
+          },
+        ],
+      }, { status: 200 });
+    }
 
     const result = await executeWithFailover(lastUserContent);
     
