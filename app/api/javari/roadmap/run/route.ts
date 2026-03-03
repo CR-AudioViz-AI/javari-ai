@@ -3,7 +3,7 @@
  * ROADMAP EXECUTION ENDPOINT
  * 
  * POST /api/javari/roadmap/run
- * - With roadmapId: Advances existing roadmap
+ * - With roadmapId: Advances existing roadmap (pure state update)
  * - Without roadmapId: Creates new roadmap from prompt
  */
 
@@ -16,23 +16,48 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { roadmapId, prompt, title, strategy = 'dependency-driven' } = body;
 
-    // If roadmapId is provided, load and return existing roadmap
-    // (actual execution happens via separate execution endpoint or cron)
+    // If roadmapId is provided, advance existing roadmap via pure state update
     if (roadmapId) {
-      const existingState = await stateManager.loadAsync(roadmapId);
+      const roadmap = await stateManager.loadAsync(roadmapId);
       
-      if (!existingState) {
+      if (!roadmap) {
         return NextResponse.json(
           { error: 'Roadmap not found' },
           { status: 404 }
         );
       }
 
+      // Find first eligible task (pending with satisfied dependencies)
+      const eligibleTask = roadmap.tasks?.find(task => {
+        if (task.status !== 'pending') return false;
+        
+        // Check if all dependencies are complete
+        if (!task.dependencies || task.dependencies.length === 0) return true;
+        
+        return task.dependencies.every(depId => {
+          const depTask = roadmap.tasks?.find(t => t.id === depId);
+          return depTask && depTask.status === 'complete';
+        });
+      });
+
+      if (eligibleTask) {
+        // Advance task to running
+        eligibleTask.status = 'running';
+        eligibleTask.startedAt = Date.now();
+        roadmap.currentTaskId = eligibleTask.id;
+      }
+
+      // Update roadmap timestamp
+      roadmap.updatedAt = Date.now();
+
+      // Persist state
+      await stateManager.saveAsync(roadmap);
+
       return NextResponse.json({
         success: true,
-        roadmapId: existingState.id,
-        state: existingState,
-        message: 'Roadmap loaded. Use /api/javari/roadmap/execute for task execution.'
+        roadmapId: roadmap.id,
+        state: roadmap,
+        advancedTask: eligibleTask ? eligibleTask.id : null
       });
     }
 
