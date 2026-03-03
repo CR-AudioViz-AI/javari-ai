@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Find next eligible pending task
+    // Find next eligible pending task (prevent re-execution)
     const nextTask = roadmap.tasks?.find(task =>
       task.status === 'pending' &&
       (!task.dependencies || task.dependencies.length === 0 || 
@@ -41,10 +41,49 @@ export async function POST(req: NextRequest) {
         ))
     );
 
+    // Recompute metadata first
+    const total = roadmap.tasks?.length || 0;
+    const completed = roadmap.tasks?.filter(t => t.status === 'complete').length || 0;
+    const failed = roadmap.tasks?.filter(t => t.status === 'failed').length || 0;
+
+    roadmap.metadata.totalTasks = total;
+    roadmap.metadata.completedTasks = completed;
+    roadmap.metadata.failedTasks = failed;
+    roadmap.metadata.progress = total === 0 ? 0 : completed / total;
+
     if (!nextTask) {
+      // Check if roadmap is complete
+      if (completed === total && total > 0) {
+        roadmap.status = 'completed';
+        roadmap.updatedAt = Date.now();
+        await stateManager.saveAsync(roadmap);
+        
+        return NextResponse.json({
+          success: true,
+          message: 'Roadmap completed. All tasks finished.',
+          roadmapId,
+          state: roadmap
+        });
+      }
+      
+      // Otherwise roadmap is blocked (incomplete but no eligible tasks)
+      if (completed < total) {
+        roadmap.status = 'blocked';
+        roadmap.updatedAt = Date.now();
+        await stateManager.saveAsync(roadmap);
+        
+        return NextResponse.json({
+          success: true,
+          message: 'Roadmap blocked. No eligible tasks available.',
+          roadmapId,
+          state: roadmap
+        });
+      }
+
+      // Edge case: no tasks at all
       return NextResponse.json({
         success: true,
-        message: 'No eligible tasks to execute.',
+        message: 'No tasks in roadmap.',
         roadmapId,
         state: roadmap
       });
@@ -58,15 +97,16 @@ export async function POST(req: NextRequest) {
     nextTask.status = 'complete';
     nextTask.completedAt = Date.now();
 
-    // Recompute metadata
-    const total = roadmap.tasks?.length || 0;
-    const completed = roadmap.tasks?.filter(t => t.status === 'complete').length || 0;
-    const failed = roadmap.tasks?.filter(t => t.status === 'failed').length || 0;
+    // Recompute metadata after task completion
+    const newCompleted = roadmap.tasks?.filter(t => t.status === 'complete').length || 0;
+    roadmap.metadata.completedTasks = newCompleted;
+    roadmap.metadata.progress = total === 0 ? 0 : newCompleted / total;
 
-    roadmap.metadata.totalTasks = total;
-    roadmap.metadata.completedTasks = completed;
-    roadmap.metadata.failedTasks = failed;
-    roadmap.metadata.progress = total === 0 ? 0 : completed / total;
+    // Check if this was the final task
+    if (newCompleted === total && total > 0) {
+      roadmap.status = 'completed';
+    }
+
     roadmap.updatedAt = Date.now();
 
     // Persist state
