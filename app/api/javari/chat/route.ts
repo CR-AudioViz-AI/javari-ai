@@ -1,29 +1,15 @@
 // app/api/javari/chat/route.ts
-// Javari Chat API v4 — XML System Command intercept layer
-// 2026-02-20 — JAVARI_PATCH upgrade_system_command_engine
-//
-// Pipeline:
-//   1. Detect JAVARI_COMMAND / JAVARI_SYSTEM_COMMAND / JAVARI_EXECUTE / JAVARI_PATCH / JAVARI_SYSTEM_REPAIR
-//   2. If found → bypass all provider routing → systemCommandEngine v2
-//   3. If not found → memory retrieval → unifiedJavariEngine (normal chat)
-//
-// Response additions (v4):
-//   - progress[]       — step-by-step progress events
-//   - finalReport      — human-readable formatted summary
-//   - structuredLogs   — leveled timestamped log array
-//   - parseLogs        — XML parser trace for debugging
+// Javari Chat API v5 — Parallel Multi-Agent Orchestration
+// 2026-03-03 — Added true parallel 3-role execution (architect + builder + validator)
 
 import { NextResponse } from "next/server";
 import { detectXmlCommand } from "@/lib/javari/engine/commandDetector";
 import { executeSystemCommand } from "@/lib/javari/engine/systemCommandEngine";
-import { unifiedJavariEngine } from "@/lib/javari/engine/unified";
 import { retrieveRelevantMemory } from "@/lib/javari/memory/retrieval";
 import { JAVARI_SYSTEM_PROMPT } from "@/lib/javari/engine/systemPrompt";
 import type { Message } from "@/lib/types";
 import { executeWithFailover } from "@/lib/ai/executeWithFailover";
-import { runMultiAgent } from "@/lib/ai/multiAgentOrchestrator";
 
-// System commands can run long (diagnostics = 30-60s, module gen = 60-90s)
 export const maxDuration = 120;
 
 export async function POST(req: Request) {
@@ -31,14 +17,14 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { messages, persona, context, files } = body as {
+    const { messages, persona, context, files, mode } = body as {
       messages?: Message[];
       persona?: string;
       context?: Record<string, unknown>;
       files?: unknown[];
+      mode?: string;
     };
 
-    // ── Extract last user message ──────────────────────────────────────────
     const userMessages = (messages ?? []).filter((m) => m.role === "user");
     const lastUserContent = userMessages[userMessages.length - 1]?.content ?? "";
 
@@ -50,45 +36,36 @@ export async function POST(req: Request) {
       const detectMs = Date.now() - t0;
 
       console.info(
-        `[ChatRoute v4] SystemCommandMode | tag=${cmd.tagName} action=${cmd.action} valid=${cmd.valid} detectMs=${detectMs}`
+        `[ChatRoute v5] SystemCommandMode | tag=${cmd.tagName} action=${cmd.action} valid=${cmd.valid} detectMs=${detectMs}`
       );
 
-      // Execute through system command engine v2 — bypasses ALL provider routing
       const cmdResult = await executeSystemCommand(cmd);
       const totalMs = Date.now() - t0;
 
       console.info(
-        `[ChatRoute v4] SystemCommand complete | action=${cmd.action} success=${cmdResult.success} totalMs=${totalMs}`
+        `[ChatRoute v5] SystemCommand complete | action=${cmd.action} success=${cmdResult.success} totalMs=${totalMs}`
       );
 
-      // ── Build assistant message for chat UI ──────────────────────────
-      // finalReport is the primary human-readable output from SCE v2
       const assistantContent = cmdResult.success
         ? cmdResult.finalReport
         : formatCommandError(cmd.action, cmdResult.error ?? "Unknown error");
 
       return NextResponse.json({
-        // Core command metadata
         systemCommandMode: true,
         action: cmd.action,
         commandDetected: true,
         tagName: cmd.tagName,
         valid: cmd.valid,
         success: cmdResult.success,
-        // Payload
         result: cmdResult.result,
-        // Observability
         progress: cmdResult.progress,
         finalReport: cmdResult.finalReport,
         structuredLogs: cmdResult.logs,
         parseLogs: cmd.parseLogs ?? [],
-        // Timing
         executionMs: cmdResult.executionMs,
         totalMs,
         timestamp: cmdResult.timestamp,
-        // Error (if any)
         error: cmdResult.error ?? null,
-        // Chat UI message
         messages: [
           {
             role: "assistant",
@@ -100,7 +77,6 @@ export async function POST(req: Request) {
 
     // ── STEP 2: Normal chat path ─────────────────────────────────────────
 
-    // Retrieve R2 semantic memory (5s timeout — never block chat)
     let memoryContext = "";
     try {
       memoryContext = await Promise.race([
@@ -108,10 +84,9 @@ export async function POST(req: Request) {
         new Promise<string>((resolve) => setTimeout(() => resolve(""), 5_000)),
       ]);
     } catch {
-      // Non-fatal — memory retrieval failure never blocks chat
+      // Non-fatal
     }
 
-    // Build augmented message list with memory + system prompt
     const augmented: Message[] = [];
     if (memoryContext) {
       augmented.push({ role: "system", content: memoryContext } as Message);
@@ -119,37 +94,89 @@ export async function POST(req: Request) {
     augmented.push({ role: "system", content: JAVARI_SYSTEM_PROMPT } as Message);
     augmented.push(...(messages ?? []));
 
-    const useMulti = true;
-    
-    if (useMulti) {
-      const multi = await runMultiAgent(lastUserContent);
-      if (!multi.success) {
+    // ── PARALLEL MULTI-AGENT MODE ──────────────────────────────────────
+    if (mode === "multi") {
+      const [architect, builder, validator] = await Promise.all([
+        executeWithFailover(
+          `You are the Architect AI.
+Analyze this task and produce a structured execution plan.
+Return ONLY JSON:
+{
+  "phases": [{
+    "name": "string",
+    "objectives": ["string"],
+    "components": ["string"],
+    "risks": ["string"]
+  }]
+}
+Task: ${lastUserContent}`,
+          "architect"
+        ),
+        executeWithFailover(
+          `You are the Builder AI.
+Execute this task with full technical detail and production-ready implementation.
+Task: ${lastUserContent}`,
+          "builder"
+        ),
+        executeWithFailover(
+          `You are the Validator AI.
+Review this task for completeness, correctness, and edge cases.
+Task: ${lastUserContent}`,
+          "validator"
+        ),
+      ]);
+
+      if (!architect.success || !builder.success || !validator.success) {
         return NextResponse.json({
           systemCommandMode: false,
           success: false,
           messages: [
             {
               role: "assistant",
-              content: multi.error,
+              content: "Multi-agent execution failed. One or more agents unavailable.",
             },
           ],
         }, { status: 200 });
       }
+
+      // Consensus step
+      const consensus = await executeWithFailover(
+        `You are the Consensus AI.
+Analyze these 3 perspectives and produce a unified recommended direction:
+
+ARCHITECT:
+${architect.content}
+
+BUILDER:
+${builder.content}
+
+VALIDATOR:
+${validator.content}
+
+Provide final synthesis and recommended next steps.`,
+        "architect"
+      );
+
       return NextResponse.json({
         systemCommandMode: false,
         success: true,
-        architect: multi.architect,
+        mode: "multi",
+        architect: architect.content,
+        builder: builder.content,
+        validator: validator.content,
+        consensus: consensus.success ? consensus.content : "Consensus synthesis unavailable.",
         messages: [
           {
             role: "assistant",
-            content: multi.builder,
+            content: consensus.success ? consensus.content : builder.content,
           },
         ],
       }, { status: 200 });
     }
 
+    // ── SINGLE-AGENT FALLBACK ──────────────────────────────────────────
     const result = await executeWithFailover(lastUserContent);
-    
+
     if (!result.success) {
       return NextResponse.json({
         systemCommandMode: false,
@@ -178,7 +205,7 @@ export async function POST(req: Request) {
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     const totalMs = Date.now() - t0;
-    console.error("[ChatRoute v4] Error:", msg, `(${totalMs}ms)`);
+    console.error("[ChatRoute v5] Error:", msg, `(${totalMs}ms)`);
 
     return NextResponse.json(
       {
@@ -197,8 +224,6 @@ export async function POST(req: Request) {
     );
   }
 }
-
-// ── Error formatter (kept for non-SCE errors) ────────────────────────────────
 
 function formatCommandError(action: string, error: string): string {
   return [
