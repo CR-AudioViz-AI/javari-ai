@@ -1,6 +1,6 @@
 // app/api/javari/chat/route.ts
-// Javari Chat API v5 — Parallel Multi-Agent Orchestration
-// 2026-03-03 — Added true parallel 3-role execution (architect + builder + validator)
+// Javari Chat API v5 — Hard-enforced Multi-Agent Orchestration
+// 2026-03-03 — Explicit mode branching with no silent fallback
 
 import { NextResponse } from "next/server";
 import { detectXmlCommand } from "@/lib/javari/engine/commandDetector";
@@ -17,6 +17,8 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
+    console.log("CHAT REQUEST BODY:", body);
+
     const { messages, persona, context, files, mode } = body as {
       messages?: Message[];
       persona?: string;
@@ -27,6 +29,80 @@ export async function POST(req: Request) {
 
     const userMessages = (messages ?? []).filter((m) => m.role === "user");
     const lastUserContent = userMessages[userMessages.length - 1]?.content ?? "";
+
+    // ── MULTI-AGENT MODE (HARD ENFORCED) ─────────────────────────────
+    if (mode === "multi") {
+      console.log("MULTI MODE ACTIVATED");
+      
+      try {
+        const [architect, builder] = await Promise.all([
+          executeWithFailover(
+            `You are the Architect AI.
+Analyze this task and produce a structured execution plan.
+Task: ${lastUserContent}`,
+            "architect"
+          ),
+          executeWithFailover(
+            `You are the Builder AI.
+Execute this task with full technical detail and production-ready implementation.
+Task: ${lastUserContent}`,
+            "builder"
+          ),
+        ]);
+
+        const validator = await executeWithFailover(
+          `You are the Validator AI.
+Validate and reconcile the following outputs:
+
+ARCHITECT:
+${architect.content ?? architect.error ?? "No output"}
+
+BUILDER:
+${builder.content ?? builder.error ?? "No output"}
+
+Provide final synthesis and recommended next steps.`,
+          "validator"
+        );
+
+        return Response.json({
+          mode: "multi",
+          success: true,
+          architect: architect.success ? architect.content : { error: architect.content },
+          builder: builder.success ? builder.content : { error: builder.content },
+          validator: validator.success ? validator.content : { error: validator.content },
+          messages: [
+            {
+              role: "assistant",
+              content: validator.success ? validator.content : "Multi-agent execution completed with partial results.",
+            },
+          ],
+        });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Unknown multi-agent error";
+        console.error("[ChatRoute v5] Multi-agent error:", msg);
+        
+        return Response.json({
+          mode: "multi",
+          success: false,
+          error: msg,
+          messages: [
+            {
+              role: "assistant",
+              content: `Multi-agent orchestration failed: ${msg}`,
+            },
+          ],
+        });
+      }
+    }
+
+    // ── MODE LOGGING ───────────────────────────────────────────────────
+    if (mode && mode !== "multi") {
+      console.log(`MODE PROVIDED BUT NOT MULTI: ${mode}`);
+    }
+
+    if (!mode) {
+      console.log("NO MODE PROVIDED - defaulting to single-agent");
+    }
 
     // ── STEP 1: Detect XML system command ────────────────────────────────
     const detection = detectXmlCommand(lastUserContent);
@@ -75,7 +151,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // ── STEP 2: Normal chat path ─────────────────────────────────────────
+    // ── STEP 2: Normal single-agent chat path ─────────────────────────
 
     let memoryContext = "";
     try {
@@ -94,87 +170,6 @@ export async function POST(req: Request) {
     augmented.push({ role: "system", content: JAVARI_SYSTEM_PROMPT } as Message);
     augmented.push(...(messages ?? []));
 
-    // ── PARALLEL MULTI-AGENT MODE ──────────────────────────────────────
-    if (mode === "multi") {
-      const [architect, builder, validator] = await Promise.all([
-        executeWithFailover(
-          `You are the Architect AI.
-Analyze this task and produce a structured execution plan.
-Return ONLY JSON:
-{
-  "phases": [{
-    "name": "string",
-    "objectives": ["string"],
-    "components": ["string"],
-    "risks": ["string"]
-  }]
-}
-Task: ${lastUserContent}`,
-          "architect"
-        ),
-        executeWithFailover(
-          `You are the Builder AI.
-Execute this task with full technical detail and production-ready implementation.
-Task: ${lastUserContent}`,
-          "builder"
-        ),
-        executeWithFailover(
-          `You are the Validator AI.
-Review this task for completeness, correctness, and edge cases.
-Task: ${lastUserContent}`,
-          "validator"
-        ),
-      ]);
-
-      if (!architect.success || !builder.success || !validator.success) {
-        return NextResponse.json({
-          systemCommandMode: false,
-          success: false,
-          messages: [
-            {
-              role: "assistant",
-              content: "Multi-agent execution failed. One or more agents unavailable.",
-            },
-          ],
-        }, { status: 200 });
-      }
-
-      // Consensus step
-      const consensus = await executeWithFailover(
-        `You are the Consensus AI.
-Analyze these 3 perspectives and produce a unified recommended direction:
-
-ARCHITECT:
-${architect.content}
-
-BUILDER:
-${builder.content}
-
-VALIDATOR:
-${validator.content}
-
-Provide final synthesis and recommended next steps.`,
-        "architect"
-      );
-
-      return NextResponse.json({
-        systemCommandMode: false,
-        success: true,
-        mode: "multi",
-        architect: architect.content,
-        builder: builder.content,
-        validator: validator.content,
-        consensus: consensus.success ? consensus.content : "Consensus synthesis unavailable.",
-        messages: [
-          {
-            role: "assistant",
-            content: consensus.success ? consensus.content : builder.content,
-          },
-        ],
-      }, { status: 200 });
-    }
-
-    // ── SINGLE-AGENT FALLBACK ──────────────────────────────────────────
     const result = await executeWithFailover(lastUserContent);
 
     if (!result.success) {
