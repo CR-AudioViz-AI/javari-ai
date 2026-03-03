@@ -2,7 +2,22 @@ import { executeWithFailover } from "@/lib/ai/executeWithFailover"
 export async function runMultiAgent(prompt: string) {
   // 1️⃣ Architect plans
   const architect = await executeWithFailover(
-    `You are the Architect AI. Break down the task into a structured execution plan.\n\nTask:\n${prompt}`,
+    `You are the Architect AI operating under the Henderson Standard.
+Return ONLY structured JSON in this format:
+{
+  "phases": [
+    {
+      "name": "Phase Name",
+      "objectives": [],
+      "components": [],
+      "risks": [],
+      "dependencies": []
+    }
+  ]
+}
+Task:
+${prompt}
+`,
     "architect"
   )
   if (!architect.success) {
