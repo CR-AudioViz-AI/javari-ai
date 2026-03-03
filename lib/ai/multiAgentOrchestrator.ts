@@ -23,14 +23,21 @@ ${prompt}
   if (!architect.success) {
     return { success: false, error: architect.content }
   }
+  let parsedPlan
+  try {
+    parsedPlan = JSON.parse(architect.content as string)
+  } catch {
+    return {
+      success: false,
+      error: "Architect did not return valid JSON plan."
+    }
+  }
   // 2️⃣ Builder executes plan
   const builder = await executeWithFailover(
     `You are the Builder AI operating under production-grade engineering standards.
-Execute the following structured plan in full detail.
-Output must be implementation-ready.
-Plan JSON:
-${architect.content}
-`,
+You must strictly follow this execution plan:
+${JSON.stringify(parsedPlan, null, 2)}
+Produce a complete, enterprise-grade implementation strategy.`,
     "builder"
   )
   if (!builder.success) {
