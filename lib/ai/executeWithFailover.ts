@@ -13,7 +13,7 @@ function getProviders(): Provider[] {
     {
       name: "anthropic",
       execute: async (prompt: string) => {
-        const key = process.env.ANTHROPIC_API_KEY
+        const key = null
         if (!key) return null
         const res = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
