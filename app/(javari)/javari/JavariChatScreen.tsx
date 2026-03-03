@@ -78,6 +78,7 @@ export default function JavariChatScreen() {
             messages: [{ role: "user", content }],
             persona: "default",
             identity: "javari",
+            mode: "multi"
           }),
         });
 
