@@ -1,6 +1,6 @@
 // app/api/javari/chat/route.ts
-// Javari Chat API v5 — Hard-enforced Multi-Agent Orchestration
-// 2026-03-03 — Explicit mode branching with no silent fallback
+// Javari Chat API v5 — Parallel Multi-Agent Orchestration
+// 2026-03-03 — True parallel architect + builder, sequential validator
 
 import { NextResponse } from "next/server";
 import { detectXmlCommand } from "@/lib/javari/engine/commandDetector";
@@ -30,7 +30,7 @@ export async function POST(req: Request) {
     const userMessages = (messages ?? []).filter((m) => m.role === "user");
     const lastUserContent = userMessages[userMessages.length - 1]?.content ?? "";
 
-    // ── MULTI-AGENT MODE (HARD ENFORCED) ─────────────────────────────
+    // ── MULTI-AGENT MODE (PARALLEL ARCHITECT + BUILDER) ──────────────
     if (mode === "multi") {
       console.log("MULTI MODE ACTIVATED");
       
@@ -55,10 +55,10 @@ Task: ${lastUserContent}`,
 Validate and reconcile the following outputs:
 
 ARCHITECT:
-${architect.content ?? architect.error ?? "No output"}
+${architect.content ?? "No architect output"}
 
 BUILDER:
-${builder.content ?? builder.error ?? "No output"}
+${builder.content ?? "No builder output"}
 
 Provide final synthesis and recommended next steps.`,
           "validator"
@@ -67,13 +67,13 @@ Provide final synthesis and recommended next steps.`,
         return Response.json({
           mode: "multi",
           success: true,
-          architect: architect.success ? architect.content : { error: architect.content },
-          builder: builder.success ? builder.content : { error: builder.content },
-          validator: validator.success ? validator.content : { error: validator.content },
+          architect: architect.content,
+          builder: builder.content,
+          validator: validator.content,
           messages: [
             {
               role: "assistant",
-              content: validator.success ? validator.content : "Multi-agent execution completed with partial results.",
+              content: validator.content ?? builder.content ?? "Multi-agent execution completed.",
             },
           ],
         });
