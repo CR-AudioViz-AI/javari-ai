@@ -8,57 +8,66 @@ interface Provider {
   name: string
   execute: ProviderExecutor
 }
-function getProviders(): Provider[] {
-  return [
-    {
-      name: "anthropic",
-      execute: async (prompt: string) => {
-        const key = process.env.ANTHROPIC_API_KEY
-        if (!key) return null
-        const res = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": key,
-            "anthropic-version": "2023-06-01"
-          },
-          body: JSON.stringify({
-            model: "claude-3-5-sonnet-20240620",
-            max_tokens: 2048,
-            messages: [{ role: "user", content: prompt }]
-          })
-        })
-        if (!res.ok) return null
-        const data = await res.json()
-        return data.content?.[0]?.text ?? null
-      }
-    },
-    {
-      name: "openai",
-      execute: async (prompt: string) => {
-        const key = process.env.OPENAI_API_KEY
-        if (!key) return null
-        const res = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${key}`
-          },
-          body: JSON.stringify({
-            model: "gpt-4o-mini",
-            messages: [{ role: "user", content: prompt }],
-            max_tokens: 2048
-          })
-        })
-        if (!res.ok) return null
-        const data = await res.json()
-        return data.choices?.[0]?.message?.content ?? null
-      }
-    }
-  ]
+
+const anthropicProvider: Provider = {
+  name: "anthropic",
+  execute: async (prompt: string) => {
+    const key = process.env.ANTHROPIC_API_KEY
+    if (!key) return null
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01"
+      },
+      body: JSON.stringify({
+        model: "claude-3-5-sonnet-20240620",
+        max_tokens: 2048,
+        messages: [{ role: "user", content: prompt }]
+      })
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    return data.content?.[0]?.text ?? null
+  }
 }
-export async function executeWithFailover(prompt: string): Promise<ProviderResult> {
-  const providers = getProviders()
+
+const openaiProvider: Provider = {
+  name: "openai",
+  execute: async (prompt: string) => {
+    const key = process.env.OPENAI_API_KEY
+    if (!key) return null
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${key}`
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 2048
+      })
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    return data.choices?.[0]?.message?.content ?? null
+  }
+}
+
+function getProviders(role?: string): Provider[] {
+  if (role === "architect") {
+    return [ openaiProvider, anthropicProvider ]
+  }
+  if (role === "builder") {
+    return [ anthropicProvider, openaiProvider ]
+  }
+  return [ anthropicProvider, openaiProvider ]
+}
+export async function executeWithFailover(prompt: string, role?: string): Promise<ProviderResult> {
+  const roleHint = role ?? "default"
+  const providers = getProviders(role)
   for (const provider of providers) {
     try {
       const result = await provider.execute(prompt)
