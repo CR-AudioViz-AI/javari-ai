@@ -14,6 +14,7 @@ import { isOutputMalformed } from "@/lib/javari/multi-ai/validator";
 import { recordRouterExecution, classifyError } from "@/lib/javari/telemetry/router-telemetry";
 import { isProviderAvailable, updateProviderHealth } from "@/lib/javari/telemetry/provider-health";
 import { checkBudgetBeforeExecution, recordBudgetAfterExecution } from "@/lib/javari/telemetry/budget-governor";
+import { executeWithFailover } from "@/lib/ai/executeWithFailover";
 
 export const runtime = "nodejs";
 
@@ -221,28 +222,19 @@ async function resolveProvider(
 }
 
 // ═══════════════════════════════════════════════════════════════
-// EXECUTE + COLLECT — shared by stream and buffered paths
+// EXECUTE WITH FAILOVER — centralized provider routing
 // ═══════════════════════════════════════════════════════════════
 
 async function executeAndCollect(
-  providerModule: Awaited<ReturnType<typeof import("@/lib/javari/providers").getProvider>>,
+  _providerModule: any,
   message: string,
-  onChunk?: (chunk: string) => void
+  _onChunk?: (chunk: string) => void
 ): Promise<string> {
-  const gen = providerModule.generateStream(message, {
-    maxTokens: 2000,
-    temperature: 0.7,
-  });
-
-  let fullText = "";
-  for await (const chunk of gen) {
-    if (chunk) {
-      fullText += chunk;
-      if (onChunk) onChunk(chunk);
-    }
+  const result = await executeWithFailover(message);
+  if (!result.success) {
+    throw new Error(result.content || "All providers failed");
   }
-
-  return fullText;
+  return result.content!;
 }
 
 // ═══════════════════════════════════════════════════════════════
