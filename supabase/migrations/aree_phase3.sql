@@ -51,3 +51,19 @@ create table if not exists user_monthly_usage (
 create unique index if not exists user_monthly_unique
 on user_monthly_usage(user_id, month);
 
+
+create table if not exists user_subscriptions (
+  id bigserial primary key,
+  user_id text not null,
+  provider text not null, -- stripe | paypal | etc
+  provider_subscription_id text,
+  plan_tier text not null,
+  status text not null, -- active | canceled | past_due
+  current_period_end bigint,
+  created_at bigint,
+  updated_at bigint
+);
+
+create unique index if not exists user_subscription_unique
+on user_subscriptions(user_id);
+
