@@ -1,9 +1,9 @@
 import { Roadmap, RoadmapTask } from "./types";
 import { executeWithRouting } from "@/lib/router/executeWithRouting";
 import { saveRoadmap } from "./persistence";
+import { logCost } from "./cost-logger";
 const MAX_RETRIES = 2;
 export class RoadmapExecutionEngine {
-  private executionId = Date.now();
   constructor(private roadmap: Roadmap) {}
   private canExecute(task: RoadmapTask): boolean {
     return (
@@ -45,9 +45,19 @@ export class RoadmapExecutionEngine {
         task.status = "running";
         attempts++;
         const response = await executeWithRouting(task.description);
+        const tokens = response?.usage?.total_tokens ?? 0;
+        const cost = response?.estimatedCost ?? 0;
         task.result = JSON.stringify(response);
         task.status = "completed";
-        task.cost = 0;
+        task.cost = cost;
+        await logCost({
+          roadmapId: this.roadmap.id,
+          taskId: task.id,
+          model: response?.model ?? "unknown",
+          provider: response?.provider ?? "unknown",
+          tokens,
+          cost,
+        });
         return;
       } catch (err: any) {
         if (attempts > MAX_RETRIES) {
