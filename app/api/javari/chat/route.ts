@@ -9,6 +9,7 @@ import { retrieveRelevantMemory } from "@/lib/javari/memory/retrieval";
 import { JAVARI_SYSTEM_PROMPT } from "@/lib/javari/engine/systemPrompt";
 import type { Message } from "@/lib/types";
 import { executeWithFailover } from "@/lib/ai/executeWithFailover";
+import { executeWithRouting } from "@/lib/router/executeWithRouting";
 
 export const maxDuration = 120;
 
@@ -45,7 +46,7 @@ export async function POST(req: Request) {
       !/architecture|build|design|plan|roadmap|execute|code|deploy|strategy|analyze|synthesize/i.test(rawInput);
     if (simpleInput) {
       console.log("FAST PATH ACTIVATED");
-      const fastResult = await executeWithFailover(rawInput, "general");
+      const fastResult = await executeWithRouting(rawInput, "general");
       return Response.json({
         ok: true,
         mode: "fast",
@@ -62,13 +63,13 @@ export async function POST(req: Request) {
       
       try {
         const [architect, builder] = await Promise.all([
-          executeWithFailover(
+          executeWithRouting(
             `You are the Architect AI.
 Analyze this task and produce a structured execution plan.
 Task: ${lastUserContent}`,
             "architect"
           ),
-          executeWithFailover(
+          executeWithRouting(
             `You are the Builder AI.
 Execute this task with full technical detail and production-ready implementation.
 Task: ${lastUserContent}`,
@@ -76,7 +77,7 @@ Task: ${lastUserContent}`,
           ),
         ]);
 
-        const validator = await executeWithFailover(
+        const validator = await executeWithRouting(
           `You are the Validator AI.
 Validate and reconcile the following outputs:
 
@@ -196,7 +197,7 @@ Provide final synthesis and recommended next steps.`,
     augmented.push({ role: "system", content: JAVARI_SYSTEM_PROMPT } as Message);
     augmented.push(...(messages ?? []));
 
-    const result = await executeWithFailover(lastUserContent);
+    const result = await executeWithRouting(lastUserContent);
 
     if (!result.success) {
       return NextResponse.json({
