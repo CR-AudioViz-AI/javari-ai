@@ -32,7 +32,8 @@ export default function JavariChatScreen() {
     setPendingSpeech,
   } = useJavariState();
 
-  const { avatarEnabled, voiceEnabled, realtimeEnabled } = useJavariSettings();
+  const { avatarEnabled, voiceEnabled } = useJavariSettings();
+  const realtimeEnabled = false;
 
   const handleSend = useCallback(
     async (content: string) => {
