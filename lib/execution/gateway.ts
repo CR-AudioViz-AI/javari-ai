@@ -2,69 +2,63 @@ import { PlanTier } from "@/lib/billing/plans";
 import { enforceRoadmapBudget } from "@/lib/billing/enforcement";
 import { executeWithRouting } from "@/lib/router/executeWithRouting";
 import { selectBestModel } from "@/lib/router/model-registry";
+
 export type ExecutionMode = "auto" | "multi";
+
 export interface ExecutionRequest {
   input: string;
   mode: ExecutionMode;
   planTier: PlanTier;
   requestedBudget?: number;
+  allowedModels?: string[];
+  excludedModels?: string[];
+  routingPriority?: "cost" | "quality" | "latency";
   roles?: {
     architect?: string;
     builder?: string;
     tester?: string;
   };
 }
-export interface ExecutionResponse {
-  output: string;
-  model: string;
-  provider: string;
-  estimatedCost: number;
-  usage?: any;
-}
-export async function executeGateway(
-  req: ExecutionRequest
-): Promise<ExecutionResponse> {
-  // 1️⃣ Plan-based budget enforcement
-  const allowedBudget = enforceRoadmapBudget(
-    req.planTier,
-    req.requestedBudget ?? 0
-  );
-  // 2️⃣ AUTO MODE
+
+export async function executeGateway(req: ExecutionRequest) {
+  enforceRoadmapBudget(req.planTier, req.requestedBudget ?? 0);
+
   if (req.mode === "auto") {
-    const response = await executeWithRouting(req.input);
-    return {
-      output: response.output,
-      model: response.model,
-      provider: response.provider,
-      estimatedCost: response.estimatedCost,
-      usage: response.usage,
-    };
+    const model = selectBestModel("standard", {
+      allowedModels: req.allowedModels,
+      excludedModels: req.excludedModels,
+      routingPriority: req.routingPriority,
+    });
+
+    const response = await executeWithRouting(req.input, model.id);
+
+    return response;
   }
-  // 3️⃣ MULTI MODE (explicit role selection)
+
   if (req.mode === "multi") {
-    if (!req.roles || Object.keys(req.roles).length === 0) {
-      throw new Error("Multi mode requires explicit role models.");
-    }
-    // For Phase 1: sequential execution
-    let combinedOutput = "";
-    let lastMeta: any = {};
+    if (!req.roles) throw new Error("Multi mode requires role models.");
+
+    let combined = "";
+
     for (const role of Object.keys(req.roles)) {
       const modelId = (req.roles as any)[role];
+
       const response = await executeWithRouting(
         `[${role.toUpperCase()}]\n${req.input}`,
         modelId
       );
-      combinedOutput += `\n\n=== ${role.toUpperCase()} ===\n`;
-      combinedOutput += response.output;
-      lastMeta = response;
+
+      combined += `\n\n=== ${role.toUpperCase()} ===\n`;
+      combined += response.output;
     }
+
     return {
-      output: combinedOutput.trim(),
-      model: lastMeta.model,
-      provider: lastMeta.provider,
-      estimatedCost: lastMeta.estimatedCost,
-      usage: lastMeta.usage,
+      output: combined.trim(),
+      model: "multi",
+      provider: "mixed",
+      estimatedCost: 0,
     };
   }
+
   throw new Error("Invalid execution mode.");
 }

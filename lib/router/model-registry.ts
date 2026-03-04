@@ -1,13 +1,15 @@
 export type ModelCapability = "light" | "standard" | "high";
+
 export interface ModelDefinition {
   id: string;
   provider: string;
   capability: ModelCapability;
-  costPer1k: number; // USD per 1k tokens (approximate)
-  reasoningScore: number; // 1–10
-  reliabilityScore: number; // 1–10
-  latencyScore: number; // 1–10 (lower latency = higher score)
+  costPer1k: number;
+  reasoningScore: number;
+  reliabilityScore: number;
+  latencyScore: number;
 }
+
 export const MODEL_REGISTRY: ModelDefinition[] = [
   {
     id: "mistral-small",
@@ -37,26 +39,62 @@ export const MODEL_REGISTRY: ModelDefinition[] = [
     latencyScore: 7,
   },
 ];
-export interface RoutingRequest {
-  requiredCapability: ModelCapability;
+
+export interface RoutingPreferences {
+  allowedModels?: string[];
+  excludedModels?: string[];
+  routingPriority?: "cost" | "quality" | "latency";
 }
-export function selectBestModel(req: RoutingRequest): ModelDefinition {
-  const candidates = MODEL_REGISTRY.filter(
-    (m) => m.capability === req.requiredCapability
+
+export function selectBestModel(
+  capability: ModelCapability,
+  preferences?: RoutingPreferences
+): ModelDefinition {
+  let candidates = MODEL_REGISTRY.filter(
+    (m) => m.capability === capability
   );
-  if (candidates.length === 0) {
-    throw new Error("No models available for required capability");
+
+  // Apply allowed filter
+  if (preferences?.allowedModels?.length) {
+    candidates = candidates.filter((m) =>
+      preferences.allowedModels!.includes(m.id)
+    );
   }
-  // Score = reliability + reasoning + latency - costPenalty
+
+  // Apply excluded filter
+  if (preferences?.excludedModels?.length) {
+    candidates = candidates.filter(
+      (m) => !preferences.excludedModels!.includes(m.id)
+    );
+  }
+
+  if (!candidates.length) {
+    throw new Error("No models available after applying preferences.");
+  }
+
   const scored = candidates.map((m) => {
-    const costPenalty = m.costPer1k;
-    const score =
+    let score =
       m.reliabilityScore +
       m.reasoningScore +
       m.latencyScore -
-      costPenalty;
+      m.costPer1k;
+
+    if (preferences?.routingPriority === "cost") {
+      score += 10 - m.costPer1k * 2;
+    }
+
+    if (preferences?.routingPriority === "quality") {
+      score += m.reasoningScore * 2;
+    }
+
+    if (preferences?.routingPriority === "latency") {
+      score += m.latencyScore * 2;
+    }
+
     return { model: m, score };
   });
+
   scored.sort((a, b) => b.score - a.score);
+
   return scored[0].model;
 }
