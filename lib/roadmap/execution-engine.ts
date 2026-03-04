@@ -1,5 +1,6 @@
 import { Roadmap, RoadmapTask } from "./types";
 import { executeWithRouting } from "@/lib/router/executeWithRouting";
+import { saveRoadmap } from "./persistence";
 const MAX_RETRIES = 2;
 export class RoadmapExecutionEngine {
   private executionId = Date.now();
@@ -25,13 +26,16 @@ export class RoadmapExecutionEngine {
       for (const task of phase.tasks) {
         if (this.canExecute(task)) {
           await this.executeTask(task);
+          await saveRoadmap(this.roadmap);
         }
       }
       phase.status = phase.tasks.every((t) => t.status === "completed")
         ? "completed"
         : "running";
+      await saveRoadmap(this.roadmap);
     }
     this.roadmap.updatedAt = Date.now();
+    await saveRoadmap(this.roadmap);
     return this.roadmap;
   }
   private async executeTask(task: RoadmapTask) {
