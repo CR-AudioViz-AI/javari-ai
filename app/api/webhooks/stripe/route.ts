@@ -1,135 +1,51 @@
-import { NextRequest, NextResponse } from 'next/server';
-import Stripe from 'stripe';
-import { createClient } from '@supabase/supabase-js';
-import { Resend } from 'resend';
-
-// Lazy initialization to prevent build-time execution
-function getStripe() {
-  return new Stripe(process.env.STRIPE_SECRET_KEY!, {
-    apiVersion: '2024-06-20',
-  });
+import { NextResponse } from "next/server";
+import Stripe from "stripe";
+import { createAdminClient } from "@/lib/supabase/server";
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: "2023-10-16",
+});
+const db = createAdminClient();
+function mapStripePlanToTier(priceId: string): string {
+  if (priceId.includes("pro")) return "pro";
+  if (priceId.includes("enterprise")) return "enterprise";
+  return "free";
 }
-
-function getResend() {
-  return new Resend(process.env.RESEND_API_KEY);
-}
-
-function getSupabase() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-}
-
-const CREDITS_BY_PLAN = {
-  creator: 1000,
-  pro: 5000
-};
-
-export async function POST(request: NextRequest) {
-  const stripe = getStripe();
-  const resend = getResend();
-  const supabase = getSupabase();
-  const body = await request.text();
-  const sig = request.headers.get('stripe-signature')!;
-  
-  let event: Stripe.Event;
-  
+export async function POST(req: Request) {
+  const sig = req.headers.get("stripe-signature")!;
+  const body = await req.text();
+  let event;
   try {
-    event = stripe.webhooks.constructEvent(body, sig, process.env.STRIPE_WEBHOOK_SECRET!);
-  } catch (err) {
-    console.error('Webhook signature verification failed');
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
+    event = stripe.webhooks.constructEvent(
+      body,
+      sig,
+      process.env.STRIPE_WEBHOOK_SECRET!
+    );
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 400 });
   }
-  
-  try {
-    switch (event.type) {
-      case 'checkout.session.completed': {
-        const session = event.data.object as Stripe.Checkout.Session;
-        const customerId = session.customer as string;
-        const userId = session.metadata?.userId;
-        const plan = session.metadata?.plan as 'creator' | 'pro';
-        
-        if (userId && plan) {
-          // Get customer email
-          const customer = await stripe.customers.retrieve(customerId);
-          const email = (customer as Stripe.Customer).email;
-          const name = (customer as Stripe.Customer).name || 'Valued Customer';
-          
-          // Add credits
-          const credits = CREDITS_BY_PLAN[plan] || 1000;
-          await supabase.from('profiles').update({
-            credits: supabase.rpc('increment_credits', { amount: credits }),
-            subscription_tier: plan,
-            subscription_status: 'active'
-          }).eq('id', userId);
-          
-          // Create subscription record
-          await supabase.from('subscriptions').insert({
-            user_id: userId,
-            stripe_customer_id: customerId,
-            stripe_subscription_id: session.subscription as string,
-            plan_type: plan,
-            status: 'active',
-            current_period_start: new Date().toISOString(),
-            current_period_end: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
-          });
-          
-          // Send welcome email
-          if (email) {
-            await resend.emails.send({
-              from: 'Javari Library <library@craudiovizai.com>',
-              to: email,
-              subject: '🎊 Welcome to Javari Library Premium!',
-              html: `
-                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                  <h1 style="color: #059669;">Welcome to Premium!</h1>
-                  <p>Hi ${name},</p>
-                  <p>Congratulations! You now have full access to:</p>
-                  <ul>
-                    <li>✅ <strong>301 Professional eBooks</strong></li>
-                    <li>✅ <strong>${credits.toLocaleString()} Credits Added</strong></li>
-                    <li>✅ <strong>Audiobook Conversions</strong></li>
-                    <li>✅ <strong>Priority Support</strong></li>
-                  </ul>
-                  <p><a href="https://craudiovizai.com/apps/javari-library" style="background: #059669; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Explore Your Library →</a></p>
-                  <p>Thank you for your support!</p>
-                  <p>The Javari Library Team</p>
-                </div>
-              `
-            });
-          }
-        }
-        break;
-      }
-      
-      case 'customer.subscription.deleted': {
-        const subscription = event.data.object as Stripe.Subscription;
-        const customerId = subscription.customer as string;
-        
-        // Update subscription status
-        await supabase.from('subscriptions')
-          .update({ status: 'cancelled', cancelled_at: new Date().toISOString() })
-          .eq('stripe_customer_id', customerId);
-        
-        // Note: User keeps access until current_period_end (annual protection)
-        break;
-      }
-      
-      case 'invoice.payment_failed': {
-        const invoice = event.data.object as Stripe.Invoice;
-        const customerId = invoice.customer as string;
-        
-        await supabase.from('subscriptions')
-          .update({ status: 'past_due' })
-          .eq('stripe_customer_id', customerId);
-        break;
-      }
-    }
-    
-    return NextResponse.json({ received: true });
-  } catch (error) {
-    console.error('Webhook processing error:', error);
-    return NextResponse.json({ error: 'Webhook processing failed' }, { status: 500 });
+  if (event.type === "customer.subscription.created" ||
+      event.type === "customer.subscription.updated") {
+    const subscription = event.data.object as any;
+    const userId = subscription.metadata.userId;
+    const priceId = subscription.items.data[0].price.id;
+    const tier = mapStripePlanToTier(priceId);
+    await db.from("user_subscriptions").upsert({
+      user_id: userId,
+      provider: "stripe",
+      provider_subscription_id: subscription.id,
+      plan_tier: tier,
+      status: subscription.status,
+      current_period_end: subscription.current_period_end * 1000,
+      created_at: Date.now(),
+      updated_at: Date.now()
+    });
   }
+  if (event.type === "customer.subscription.deleted") {
+    const subscription = event.data.object as any;
+    const userId = subscription.metadata.userId;
+    await db.from("user_subscriptions")
+      .update({ status: "canceled", updated_at: Date.now() })
+      .eq("user_id", userId);
+  }
+  return NextResponse.json({ received: true });
 }
