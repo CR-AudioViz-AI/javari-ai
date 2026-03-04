@@ -24,3 +24,7 @@ create table if not exists roadmap_executions (
   completed_at bigint,
   status text
 );
+create table if not exists roadmap_locks (
+  roadmap_id text primary key,
+  locked_at bigint not null
+);
