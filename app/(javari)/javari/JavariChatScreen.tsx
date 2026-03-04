@@ -41,6 +41,7 @@ export default function JavariChatScreen() {
       addUserMessage(content);
       setStreaming(true);
 
+      console.log("REALTIME ENABLED:", realtimeEnabled);
       // ── PATH A: OpenAI Realtime (when connected) ────────────────────────
       const rt =
         typeof window !== "undefined"
@@ -48,6 +49,7 @@ export default function JavariChatScreen() {
           : null;
 
       if (realtimeEnabled && rt?.isConnected()) {
+        console.log("USING REALTIME PATH");
         let rtBuf = "";
         const rtId = beginStreamingMessage();
 
@@ -68,6 +70,7 @@ export default function JavariChatScreen() {
       }
 
       // ── PATH B: Streaming REST ─────────────────────────────────────────
+      console.log("USING REST PATH");
       const assistantId = beginStreamingMessage();
 
       try {
