@@ -1,10 +1,12 @@
 import { PlanTier } from "@/lib/billing/plans";
 import { enforceRoadmapBudget } from "@/lib/billing/enforcement";
 import { executeWithRouting } from "@/lib/router/executeWithRouting";
-import { selectBestModel } from "@/lib/router/model-registry";
-
+import {
+  selectBestModel,
+  RoutingPreferences,
+} from "@/lib/router/model-registry";
+import { classifyCapability } from "@/lib/router/capability-classifier";
 export type ExecutionMode = "auto" | "multi";
-
 export interface ExecutionRequest {
   input: string;
   mode: ExecutionMode;
@@ -19,39 +21,30 @@ export interface ExecutionRequest {
     tester?: string;
   };
 }
-
 export async function executeGateway(req: ExecutionRequest) {
   enforceRoadmapBudget(req.planTier, req.requestedBudget ?? 0);
-
   if (req.mode === "auto") {
-    const model = selectBestModel("standard", {
+    const capability = classifyCapability(req.input);
+    const model = selectBestModel(capability, {
       allowedModels: req.allowedModels,
       excludedModels: req.excludedModels,
       routingPriority: req.routingPriority,
-    });
-
+    } as RoutingPreferences);
     const response = await executeWithRouting(req.input, model.id);
-
     return response;
   }
-
   if (req.mode === "multi") {
     if (!req.roles) throw new Error("Multi mode requires role models.");
-
     let combined = "";
-
     for (const role of Object.keys(req.roles)) {
       const modelId = (req.roles as any)[role];
-
       const response = await executeWithRouting(
         `[${role.toUpperCase()}]\n${req.input}`,
         modelId
       );
-
       combined += `\n\n=== ${role.toUpperCase()} ===\n`;
       combined += response.output;
     }
-
     return {
       output: combined.trim(),
       model: "multi",
@@ -59,6 +52,5 @@ export async function executeGateway(req: ExecutionRequest) {
       estimatedCost: 0,
     };
   }
-
   throw new Error("Invalid execution mode.");
 }
