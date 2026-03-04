@@ -32,6 +32,27 @@ export async function POST(req: Request) {
     const userMessages = (messages ?? []).filter((m) => m.role === "user");
     const lastUserContent = userMessages[userMessages.length - 1]?.content ?? "";
 
+    // --- FAST PATH LIGHTWEIGHT ROUTING ---
+    const rawInput =
+      typeof body?.message === "string"
+        ? body.message
+        : Array.isArray(body?.messages)
+          ? body.messages.map((m: any) => m.content).join(" ")
+          : "";
+    const simpleInput =
+      rawInput &&
+      rawInput.trim().split(/\s+/).length < 20 &&
+      !/architecture|build|design|plan|roadmap|execute|code|deploy|strategy|analyze|synthesize/i.test(rawInput);
+    if (simpleInput) {
+      console.log("FAST PATH ACTIVATED");
+      const fastResult = await executeWithFailover(rawInput, "general");
+      return Response.json({
+        ok: true,
+        mode: "fast",
+        answer: fastResult ?? "No response",
+      });
+    }
+
     // ── MULTI-AGENT MODE (PARALLEL ARCHITECT + BUILDER) ──────────────
     if (mode === "multi") {
       console.log("MULTI MODE ACTIVATED");
