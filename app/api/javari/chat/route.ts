@@ -13,6 +13,7 @@ import { executeWithFailover } from "@/lib/ai/executeWithFailover";
 export const maxDuration = 120;
 
 export async function POST(req: Request) {
+  console.log("HIT /api/javari/chat");
   const t0 = Date.now();
 
   try {

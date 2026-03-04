@@ -242,6 +242,7 @@ async function executeAndCollect(
 // ═══════════════════════════════════════════════════════════════
 
 export async function POST(req: NextRequest) {
+  console.log("HIT /api/chat");
   const t0 = Date.now();
   const requestId = randomUUID();
 
