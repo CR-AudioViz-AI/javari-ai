@@ -28,3 +28,13 @@ create table if not exists roadmap_locks (
   roadmap_id text primary key,
   locked_at bigint not null
 );
+create table if not exists roadmap_costs (
+  id bigserial primary key,
+  roadmap_id text,
+  task_id text,
+  model text,
+  provider text,
+  tokens_used numeric,
+  estimated_cost numeric,
+  created_at bigint
+);
