@@ -1,27 +1,19 @@
 import { NextResponse } from "next/server";
 import { RoadmapExecutionEngine } from "@/lib/roadmap/execution-engine";
-import { loadRoadmap, saveRoadmap } from "@/lib/roadmap/persistence";
-import { acquireLock, releaseLock } from "@/lib/roadmap/lock";
-import type { Roadmap } from "@/lib/roadmap/types";
+import { enforceRoadmapBudget } from "@/lib/billing/enforcement";
 export async function POST(req: Request) {
-  const incoming = (await req.json()) as Roadmap;
-  const locked = await acquireLock(incoming.id);
-  if (!locked) {
-    return NextResponse.json(
-      { ok: false, error: "Roadmap is already running" },
-      { status: 409 }
-    );
-  }
-  try {
-    const existing = await loadRoadmap(incoming.id);
-    const roadmap = existing ?? incoming;
-    if (!existing) {
-      await saveRoadmap(roadmap);
-    }
-    const engine = new RoadmapExecutionEngine(roadmap);
-    const updated = await engine.run();
-    return NextResponse.json({ ok: true, roadmap: updated });
-  } finally {
-    await releaseLock(incoming.id);
-  }
+  const body = await req.json();
+  const { roadmap, planTier } = body;
+  const allowedBudget = enforceRoadmapBudget(
+    planTier ?? "free",
+    roadmap.maxBudget ?? 0
+  );
+  roadmap.maxBudget = allowedBudget;
+  const engine = new RoadmapExecutionEngine(roadmap);
+  const result = await engine.run();
+  return NextResponse.json({
+    ok: true,
+    roadmap: result,
+    enforcedBudget: allowedBudget,
+  });
 }
