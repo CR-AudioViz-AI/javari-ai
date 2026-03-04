@@ -38,3 +38,16 @@ create table if not exists roadmap_costs (
   estimated_cost numeric,
   created_at bigint
 );
+
+create table if not exists user_monthly_usage (
+  id bigserial primary key,
+  user_id text,
+  month text,
+  execution_count integer default 0,
+  total_cost numeric default 0,
+  updated_at bigint
+);
+
+create unique index if not exists user_monthly_unique
+on user_monthly_usage(user_id, month);
+
