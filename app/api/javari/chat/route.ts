@@ -49,7 +49,10 @@ export async function POST(req: Request) {
       return Response.json({
         ok: true,
         mode: "fast",
-        answer: fastResult ?? "No response",
+        answer:
+          typeof fastResult === "string"
+            ? fastResult
+            : fastResult?.content ?? JSON.stringify(fastResult),
       });
     }
 
