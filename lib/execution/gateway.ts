@@ -6,6 +6,7 @@ import {
   RoutingPreferences,
 } from "@/lib/router/model-registry";
 import { classifyCapability } from "@/lib/router/capability-classifier";
+import { enforceRequestCost } from "@/lib/billing/profit-guard";
 export type ExecutionMode = "auto" | "multi";
 export interface ExecutionRequest {
   input: string;
@@ -31,25 +32,29 @@ export async function executeGateway(req: ExecutionRequest) {
       routingPriority: req.routingPriority,
     } as RoutingPreferences);
     const response = await executeWithRouting(req.input, model.id);
+    enforceRequestCost(req.planTier, response.estimatedCost ?? 0);
     return response;
   }
   if (req.mode === "multi") {
     if (!req.roles) throw new Error("Multi mode requires role models.");
     let combined = "";
+    let totalCost = 0;
     for (const role of Object.keys(req.roles)) {
       const modelId = (req.roles as any)[role];
       const response = await executeWithRouting(
         `[${role.toUpperCase()}]\n${req.input}`,
         modelId
       );
+      totalCost += response.estimatedCost ?? 0;
       combined += `\n\n=== ${role.toUpperCase()} ===\n`;
       combined += response.output;
     }
+    enforceRequestCost(req.planTier, totalCost);
     return {
       output: combined.trim(),
       model: "multi",
       provider: "mixed",
-      estimatedCost: 0,
+      estimatedCost: totalCost,
     };
   }
   throw new Error("Invalid execution mode.");
