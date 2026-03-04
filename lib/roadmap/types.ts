@@ -26,4 +26,5 @@ export interface Roadmap {
   phases: RoadmapPhase[];
   createdAt: number;
   updatedAt: number;
+  maxBudget?: number; // USD
 }

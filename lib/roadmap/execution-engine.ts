@@ -4,6 +4,7 @@ import { saveRoadmap } from "./persistence";
 import { logCost } from "./cost-logger";
 const MAX_RETRIES = 2;
 export class RoadmapExecutionEngine {
+  private totalCost = 0;
   constructor(private roadmap: Roadmap) {}
   private canExecute(task: RoadmapTask): boolean {
     return (
@@ -20,10 +21,18 @@ export class RoadmapExecutionEngine {
       if (task) return task;
     }
   }
+  private isBudgetExceeded(): boolean {
+    if (!this.roadmap.maxBudget) return false;
+    return this.totalCost >= this.roadmap.maxBudget;
+  }
   async run(): Promise<Roadmap> {
     for (const phase of this.roadmap.phases) {
       if (phase.status === "completed") continue;
       for (const task of phase.tasks) {
+        if (this.isBudgetExceeded()) {
+          task.status = "blocked";
+          continue;
+        }
         if (this.canExecute(task)) {
           await this.executeTask(task);
           await saveRoadmap(this.roadmap);
@@ -47,14 +56,20 @@ export class RoadmapExecutionEngine {
         const response = await executeWithRouting(task.description);
         const tokens = response?.usage?.total_tokens ?? 0;
         const cost = response?.estimatedCost ?? 0;
-        task.result = JSON.stringify(response);
+        this.totalCost += cost;
+        if (this.isBudgetExceeded()) {
+          task.status = "blocked";
+          task.error = "Budget exceeded";
+          return;
+        }
+        task.result = response.output;
         task.status = "completed";
         task.cost = cost;
         await logCost({
           roadmapId: this.roadmap.id,
           taskId: task.id,
-          model: response?.model ?? "unknown",
-          provider: response?.provider ?? "unknown",
+          model: response.model,
+          provider: response.provider,
           tokens,
           cost,
         });
