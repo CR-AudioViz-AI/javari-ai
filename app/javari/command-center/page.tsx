@@ -32,9 +32,9 @@ export default function CommandCenter() {
   const [history, setHistory] = useState<ExecutionLog[]>([]);
   const [stats, setStats] = useState<ExecutionStats | null>(null);
   const [loading, setLoading] = useState(false);
+  const [autonomousLoading, setAutonomousLoading] = useState(false);
   const [message, setMessage] = useState("");
 
-  // Fetch queue status
   const fetchQueueStatus = async () => {
     try {
       const res = await fetch("/api/javari/run-next-task");
@@ -46,7 +46,6 @@ export default function CommandCenter() {
     }
   };
 
-  // Fetch execution history
   const fetchHistory = async () => {
     try {
       const res = await fetch("/api/javari/execution-history?limit=20");
@@ -58,7 +57,6 @@ export default function CommandCenter() {
     }
   };
 
-  // Run next task
   const runNextTask = async () => {
     setLoading(true);
     setMessage("Executing next task...");
@@ -87,7 +85,34 @@ export default function CommandCenter() {
     }
   };
 
-  // Auto-refresh
+  const runAutonomous = async () => {
+    setAutonomousLoading(true);
+    setMessage("🚀 Starting autonomous execution mode...");
+    
+    try {
+      const res = await fetch("/api/javari/run-autonomous", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: "command_center_auto" }),
+      });
+      
+      const data = await res.json();
+      
+      if (data.ok) {
+        setMessage(`✅ Autonomous mode complete: ${data.tasksExecuted} tasks executed (${data.tasksSucceeded} succeeded, ${data.tasksFailed} failed)`);
+      } else {
+        setMessage(`❌ ${data.error}`);
+      }
+      
+      await fetchQueueStatus();
+      await fetchHistory();
+    } catch (error: any) {
+      setMessage(`❌ Error: ${error.message}`);
+    } finally {
+      setAutonomousLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchQueueStatus();
     fetchHistory();
@@ -95,7 +120,7 @@ export default function CommandCenter() {
     const interval = setInterval(() => {
       fetchQueueStatus();
       fetchHistory();
-    }, 5000); // Refresh every 5 seconds
+    }, 5000);
     
     return () => clearInterval(interval);
   }, []);
@@ -103,13 +128,11 @@ export default function CommandCenter() {
   return (
     <div className="min-h-screen bg-gray-50 p-8">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <div className="mb-8">
           <h1 className="text-4xl font-bold text-gray-900">Javari Command Center</h1>
           <p className="text-gray-600 mt-2">Monitor and control autonomous AI execution</p>
         </div>
 
-        {/* System Status Banner */}
         <div className={`mb-6 p-4 rounded-lg ${isRunning ? "bg-green-100 border-green-300" : "bg-blue-100 border-blue-300"} border-2`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -118,22 +141,17 @@ export default function CommandCenter() {
                 {isRunning ? "🚀 Task Executing" : "⏸️ System Idle"}
               </span>
             </div>
-            <div className="text-sm text-gray-700">
-              Auto-refresh: 5s
-            </div>
+            <div className="text-sm text-gray-700">Auto-refresh: 5s</div>
           </div>
         </div>
 
-        {/* Message */}
         {message && (
           <div className="mb-6 p-4 bg-white rounded-lg border-2 border-gray-200">
             <p className="text-gray-800">{message}</p>
           </div>
         )}
 
-        {/* Main Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-          {/* Queue Status */}
           <div className="bg-white rounded-lg shadow-lg p-6 border-2 border-gray-200">
             <h2 className="text-xl font-bold mb-4 text-gray-900">Queue Status</h2>
             {queueStats && (
@@ -162,7 +180,6 @@ export default function CommandCenter() {
             )}
           </div>
 
-          {/* Statistics */}
           <div className="bg-white rounded-lg shadow-lg p-6 border-2 border-gray-200">
             <h2 className="text-xl font-bold mb-4 text-gray-900">Execution Stats</h2>
             {stats && (
@@ -185,36 +202,32 @@ export default function CommandCenter() {
             )}
           </div>
 
-          {/* System Controls */}
           <div className="bg-white rounded-lg shadow-lg p-6 border-2 border-gray-200">
             <h2 className="text-xl font-bold mb-4 text-gray-900">Controls</h2>
             <div className="space-y-3">
               <button
                 onClick={runNextTask}
-                disabled={loading || isRunning}
+                disabled={loading || isRunning || autonomousLoading}
                 className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold py-3 px-4 rounded-lg transition-colors"
               >
                 {loading ? "Executing..." : "▶️ Run Next Task"}
               </button>
               
               <button
-                disabled
-                className="w-full bg-gray-300 text-gray-600 font-semibold py-3 px-4 rounded-lg cursor-not-allowed"
+                onClick={runAutonomous}
+                disabled={autonomousLoading || isRunning || loading}
+                className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-semibold py-3 px-4 rounded-lg transition-colors"
               >
-                ⏸️ Pause Execution
+                {autonomousLoading ? "Running..." : "🚀 Start Autonomous Mode"}
               </button>
               
-              <button
-                disabled
-                className="w-full bg-gray-300 text-gray-600 font-semibold py-3 px-4 rounded-lg cursor-not-allowed"
-              >
-                🗑️ Clear Failed
-              </button>
+              <p className="text-xs text-gray-500 text-center">
+                Max 5 tasks per run • 3s delay
+              </p>
             </div>
           </div>
         </div>
 
-        {/* Execution History */}
         <div className="bg-white rounded-lg shadow-lg p-6 border-2 border-gray-200">
           <h2 className="text-2xl font-bold mb-4 text-gray-900">Recent Executions</h2>
           
@@ -263,7 +276,6 @@ export default function CommandCenter() {
           </div>
         </div>
 
-        {/* Footer */}
         <div className="mt-8 text-center text-sm text-gray-500">
           <p>Javari AI Autonomous Execution Engine • Version 1.0</p>
         </div>
