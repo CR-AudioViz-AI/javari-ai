@@ -1,10 +1,11 @@
 /**
  * Javari Roadmap Execution Engine
- * Executes roadmap tasks using the 4-role multi-agent system
+ * Executes roadmap tasks using the 4-role multi-agent system with self-repair
  */
 
 import { executeGateway } from "@/lib/execution/gateway";
 import { storeExecutionResult } from "./execution-memory";
+import { analyzeAndRepair, shouldRetry, getRetryDelay } from "./self-repair";
 
 export interface RoadmapTask {
   id: string;
@@ -17,6 +18,7 @@ export interface RoadmapTask {
   rolesExecuted?: string[];
   executedAt?: Date;
   completedAt?: Date;
+  retryCount?: number;
 }
 
 export interface RoadmapExecutionResult {
@@ -26,10 +28,12 @@ export interface RoadmapExecutionResult {
   estimatedCost?: number;
   rolesExecuted?: string[];
   error?: string;
+  repairAttempted?: boolean;
+  repairedDescription?: string;
 }
 
 /**
- * Execute a roadmap task using the multi-agent system
+ * Execute a roadmap task using the multi-agent system with self-repair
  */
 export async function executeRoadmapTask(
   task: RoadmapTask,
@@ -38,10 +42,12 @@ export async function executeRoadmapTask(
   console.log("[roadmap-executor] ====== TASK EXECUTION START ======");
   console.log("[roadmap-executor] Task ID:", task.id);
   console.log("[roadmap-executor] Title:", task.title);
+  console.log("[roadmap-executor] Retry count:", task.retryCount || 0);
   console.log("[roadmap-executor] User:", userId);
 
   task.status = "running";
   task.executedAt = new Date();
+  const currentRetryCount = task.retryCount || 0;
 
   try {
     const prompt = `
@@ -49,6 +55,7 @@ ROADMAP TASK EXECUTION
 
 Task ID: ${task.id}
 Title: ${task.title}
+Retry Attempt: ${currentRetryCount + 1}
 
 Description:
 ${task.description}
@@ -86,7 +93,7 @@ Please analyze, implement, validate, and document this task comprehensively.
       output: gatewayResponse.output,
       estimatedCost: gatewayResponse.estimatedCost,
       rolesExecuted: task.rolesExecuted,
-    });
+    }, currentRetryCount);
 
     console.log("[roadmap-executor] ✅ Task completed successfully");
 
@@ -104,17 +111,56 @@ Please analyze, implement, validate, and document this task comprehensively.
     task.error = error.message;
     task.completedAt = new Date();
 
-    // Store failure in execution memory
+    // Check if we should attempt self-repair
+    if (shouldRetry(currentRetryCount)) {
+      console.log("[roadmap-executor] 🔧 Attempting self-repair...");
+
+      const repairResult = await analyzeAndRepair(
+        task.id,
+        task.title,
+        task.description,
+        error.message,
+        currentRetryCount
+      );
+
+      if (repairResult.success && repairResult.repairedDescription) {
+        console.log("[roadmap-executor] ✅ Repair strategy generated");
+        
+        // Store failure with repair attempt
+        await storeExecutionResult(task.id, task.title, {
+          success: false,
+          error: `${error.message} (repair attempted)`,
+        }, currentRetryCount);
+
+        // Update task for retry
+        task.description = repairResult.repairedDescription;
+        task.retryCount = currentRetryCount + 1;
+        task.status = "pending"; // Re-queue for retry
+
+        console.log("[roadmap-executor] Task re-queued for retry");
+
+        return {
+          success: false,
+          task,
+          error: error.message,
+          repairAttempted: true,
+          repairedDescription: repairResult.repairedDescription,
+        };
+      }
+    }
+
+    // Store failure without retry
     console.log("[roadmap-executor] Storing failure in execution memory...");
     await storeExecutionResult(task.id, task.title, {
       success: false,
       error: error.message,
-    });
+    }, currentRetryCount);
 
     return {
       success: false,
       task,
       error: error.message,
+      repairAttempted: false,
     };
   }
 }

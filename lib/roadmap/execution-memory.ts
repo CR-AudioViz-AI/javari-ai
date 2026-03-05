@@ -1,6 +1,6 @@
 /**
  * Javari Execution Memory System
- * Persists and retrieves task execution results
+ * Persists and retrieves task execution results with retry tracking
  */
 
 import { createAdminClient } from "@/lib/supabase/server";
@@ -14,6 +14,7 @@ export interface ExecutionLog {
   error?: string;
   estimated_cost?: number;
   roles_executed?: string[];
+  retry_count?: number;
   created_at: string;
 }
 
@@ -29,9 +30,11 @@ export async function storeExecutionResult(
     error?: string;
     estimatedCost?: number;
     rolesExecuted?: string[];
-  }
+  },
+  retryCount: number = 0
 ): Promise<{ success: boolean; logId?: string; error?: string }> {
   console.log("[execution-memory] Storing execution result for task:", taskId);
+  console.log("[execution-memory] Retry count:", retryCount);
 
   try {
     const db = createAdminClient();
@@ -44,6 +47,7 @@ export async function storeExecutionResult(
       error: result.error || null,
       estimated_cost: result.estimatedCost || 0,
       roles_executed: result.rolesExecuted || null,
+      retry_count: retryCount,
     };
 
     const { data, error } = await db
@@ -124,13 +128,14 @@ export async function getExecutionByTask(taskId: string): Promise<ExecutionLog[]
 }
 
 /**
- * Get execution statistics
+ * Get execution statistics including retry data
  */
 export async function getExecutionStats(): Promise<{
   total: number;
   completed: number;
   failed: number;
   totalCost: number;
+  retriesAttempted: number;
 }> {
   console.log("[execution-memory] Fetching execution statistics");
 
@@ -139,11 +144,11 @@ export async function getExecutionStats(): Promise<{
 
     const { data, error } = await db
       .from("javari_execution_logs")
-      .select("status, estimated_cost");
+      .select("status, estimated_cost, retry_count");
 
     if (error) {
       console.error("[execution-memory] Failed to fetch stats:", error);
-      return { total: 0, completed: 0, failed: 0, totalCost: 0 };
+      return { total: 0, completed: 0, failed: 0, totalCost: 0, retriesAttempted: 0 };
     }
 
     const stats = {
@@ -151,13 +156,14 @@ export async function getExecutionStats(): Promise<{
       completed: data.filter(r => r.status === "completed").length,
       failed: data.filter(r => r.status === "failed").length,
       totalCost: data.reduce((sum, r) => sum + (Number(r.estimated_cost) || 0), 0),
+      retriesAttempted: data.filter(r => (r.retry_count || 0) > 0).length,
     };
 
     console.log("[execution-memory] Stats:", stats);
     return stats;
   } catch (err: any) {
     console.error("[execution-memory] Unexpected error:", err.message);
-    return { total: 0, completed: 0, failed: 0, totalCost: 0 };
+    return { total: 0, completed: 0, failed: 0, totalCost: 0, retriesAttempted: 0 };
   }
 }
 
