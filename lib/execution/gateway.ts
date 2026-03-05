@@ -10,6 +10,7 @@ import { enforceMonthlyLimit, recordUsage } from "@/lib/billing/usage-meter";
 import { enforceModeEntitlement } from "@/lib/billing/entitlements";
 import { getUserPlan } from "@/lib/billing/subscription-service";
 import { PlanTier } from "@/lib/billing/plans";
+import { logTelemetry } from "@/lib/telemetry/telemetry";
 
 export type ExecutionMode = "auto" | "multi";
 
@@ -30,6 +31,7 @@ export interface ExecutionRequest {
     validator?: string;
     documenter?: string;
   };
+  taskId?: string; // For telemetry tracking
 }
 
 export async function executeGateway(req: ExecutionRequest) {
@@ -72,20 +74,60 @@ export async function executeGateway(req: ExecutionRequest) {
       routingPriority: req.routingPriority,
     } as RoutingPreferences);
 
-    const response = await executeWithRouting(req.input, model.id);
+    // Start timing for telemetry
+    const executionStart = Date.now();
 
-    // Cost Guard: Check if cost exceeds limit
-    const estimatedCost = response.estimatedCost ?? 0;
-    console.log("[gateway] Cost check: $", estimatedCost.toFixed(4), "/ $", MAX_REQUEST_COST);
-    
-    if (estimatedCost > MAX_REQUEST_COST) {
-      throw new Error(`Request blocked: cost limit exceeded ($${estimatedCost.toFixed(2)} > $${MAX_REQUEST_COST})`);
+    try {
+      const response = await executeWithRouting(req.input, model.id);
+      const latencyMs = Date.now() - executionStart;
+
+      // Cost Guard: Check if cost exceeds limit
+      const estimatedCost = response.estimatedCost ?? 0;
+      console.log("[gateway] Cost check: $", estimatedCost.toFixed(4), "/ $", MAX_REQUEST_COST);
+      
+      if (estimatedCost > MAX_REQUEST_COST) {
+        throw new Error(`Request blocked: cost limit exceeded ($${estimatedCost.toFixed(2)} > $${MAX_REQUEST_COST})`);
+      }
+
+      enforceRequestCost(planTier, estimatedCost);
+      await recordUsage(req.userId, estimatedCost);
+
+      // Log telemetry (wrapped to prevent breaking execution)
+      try {
+        await logTelemetry({
+          taskId: req.taskId,
+          model: model.id,
+          provider: model.provider,
+          tokensUsed: response.usage?.total_tokens || 0,
+          latencyMs,
+          cost: estimatedCost,
+          success: true,
+        });
+      } catch (telemetryError: any) {
+        console.warn("[gateway] Telemetry logging failed:", telemetryError.message);
+      }
+
+      return response;
+    } catch (error: any) {
+      const latencyMs = Date.now() - executionStart;
+
+      // Log failure telemetry
+      try {
+        await logTelemetry({
+          taskId: req.taskId,
+          model: model.id,
+          provider: model.provider,
+          tokensUsed: 0,
+          latencyMs,
+          cost: 0,
+          success: false,
+        });
+      } catch (telemetryError: any) {
+        console.warn("[gateway] Telemetry logging failed:", telemetryError.message);
+      }
+
+      throw error;
     }
-
-    enforceRequestCost(planTier, estimatedCost);
-    await recordUsage(req.userId, estimatedCost);
-
-    return response;
   }
 
   if (req.mode === "multi") {
@@ -112,45 +154,80 @@ export async function executeGateway(req: ExecutionRequest) {
       let prompt = "";
       
       if (role === "architect") {
-        // Architect: Plan and design
         prompt = `[ARCHITECT ROLE]\nYou are the system architect. Analyze the request and create a comprehensive plan.\n\nRequest: ${req.input}`;
       } else if (role === "builder") {
-        // Builder: Implementation based on architect's plan
         const architectOutput = roleOutputs["architect"] || "";
         prompt = `[BUILDER ROLE]\nYou are the implementation builder. Create the solution based on the architect's plan.\n\n${architectOutput ? `Architect's Plan:\n${architectOutput}\n\n` : ""}Request: ${req.input}`;
       } else if (role === "validator") {
-        // Validator: Verify builder's work
         const builderOutput = roleOutputs["builder"] || "";
         prompt = `[VALIDATOR ROLE]\nYou are the quality validator. Review the implementation for correctness, completeness, and best practices.\n\n${builderOutput ? `Implementation:\n${builderOutput}\n\n` : ""}Request: ${req.input}`;
       } else if (role === "documenter") {
-        // Documenter: Synthesize and document
         const architectOutput = roleOutputs["architect"] || "";
         const builderOutput = roleOutputs["builder"] || "";
         const validatorOutput = roleOutputs["validator"] || "";
         prompt = `[DOCUMENTER ROLE]\nYou are the technical documenter. Create clear, comprehensive documentation of the complete solution.\n\n${architectOutput ? `Plan:\n${architectOutput}\n\n` : ""}${builderOutput ? `Implementation:\n${builderOutput}\n\n` : ""}${validatorOutput ? `Validation:\n${validatorOutput}\n\n` : ""}Request: ${req.input}`;
       } else {
-        // Generic prompt for any other roles
         prompt = `[${role.toUpperCase()} ROLE]\n${req.input}`;
       }
 
-      const response = await executeWithRouting(prompt, modelId);
+      // Start timing for this role
+      const roleStart = Date.now();
 
-      const roleCost = response.estimatedCost ?? 0;
-      totalCost += roleCost;
-      
-      // Store output for subsequent roles
-      roleOutputs[role] = response.output;
-      
-      console.log(`[gateway] ${role} cost: $${roleCost.toFixed(4)} | Running total: $${totalCost.toFixed(4)}`);
-      
-      // Cost Guard: Check running total after each role
-      if (totalCost > MAX_REQUEST_COST) {
-        console.error("[gateway] ❌ COST LIMIT EXCEEDED during multi-mode execution");
-        throw new Error(`Request blocked: cost limit exceeded ($${totalCost.toFixed(2)} > $${MAX_REQUEST_COST})`);
+      try {
+        const response = await executeWithRouting(prompt, modelId);
+        const roleLatency = Date.now() - roleStart;
+
+        const roleCost = response.estimatedCost ?? 0;
+        totalCost += roleCost;
+        
+        // Store output for subsequent roles
+        roleOutputs[role] = response.output;
+        
+        console.log(`[gateway] ${role} cost: $${roleCost.toFixed(4)} | Running total: $${totalCost.toFixed(4)}`);
+        
+        // Cost Guard: Check running total after each role
+        if (totalCost > MAX_REQUEST_COST) {
+          console.error("[gateway] ❌ COST LIMIT EXCEEDED during multi-mode execution");
+          throw new Error(`Request blocked: cost limit exceeded ($${totalCost.toFixed(2)} > $${MAX_REQUEST_COST})`);
+        }
+
+        combined += `\n\n=== ${role.toUpperCase()} ===\n`;
+        combined += response.output;
+
+        // Log telemetry for this role
+        try {
+          await logTelemetry({
+            taskId: req.taskId,
+            model: modelId,
+            provider: response.provider || "unknown",
+            tokensUsed: response.usage?.total_tokens || 0,
+            latencyMs: roleLatency,
+            cost: roleCost,
+            success: true,
+          });
+        } catch (telemetryError: any) {
+          console.warn("[gateway] Telemetry logging failed for role:", role, telemetryError.message);
+        }
+      } catch (error: any) {
+        const roleLatency = Date.now() - roleStart;
+
+        // Log failure telemetry for this role
+        try {
+          await logTelemetry({
+            taskId: req.taskId,
+            model: modelId,
+            provider: "unknown",
+            tokensUsed: 0,
+            latencyMs: roleLatency,
+            cost: 0,
+            success: false,
+          });
+        } catch (telemetryError: any) {
+          console.warn("[gateway] Telemetry logging failed:", telemetryError.message);
+        }
+
+        throw error;
       }
-
-      combined += `\n\n=== ${role.toUpperCase()} ===\n`;
-      combined += response.output;
     }
 
     console.log("[gateway] ✅ Multi-mode complete with", activeRoles.length, "roles");
