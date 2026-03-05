@@ -15,7 +15,10 @@ export async function POST(req: Request) {
       roles,
     } = body;
 
-    console.log("[chat-route] Request received:", {
+    console.log("[chat-route] ====== NEW REQUEST ======");
+    console.log("[chat-route] Received request body userId:", userId);
+    console.log("[chat-route] This userId will be used for subscription lookup");
+    console.log("[chat-route] Request details:", {
       userId,
       mode,
       hasMessage: !!message,
@@ -28,6 +31,8 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+
+    console.log("[chat-route] Calling gateway with userId:", userId);
 
     const result = await executeGateway({
       input: message,

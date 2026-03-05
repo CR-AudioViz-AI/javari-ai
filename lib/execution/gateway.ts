@@ -28,14 +28,17 @@ export interface ExecutionRequest {
 }
 
 export async function executeGateway(req: ExecutionRequest) {
-  console.log("[gateway] Request:", {
+  console.log("[gateway] ====== GATEWAY EXECUTION START ======");
+  console.log("[gateway] Using userId from request body:", req.userId);
+  console.log("[gateway] Request details:", {
     userId: req.userId,
     mode: req.mode,
     hasRoles: !!req.roles,
   });
 
+  console.log("[gateway] Fetching subscription plan for userId:", req.userId);
   const planTier = await getUserPlan(req.userId);
-  console.log("[gateway] Plan tier for user:", req.userId, "=>", planTier);
+  console.log("[gateway] Retrieved plan tier for userId:", req.userId, "=>", planTier);
 
   enforceModeEntitlement(planTier, req.mode);
   enforceRoadmapBudget(planTier, req.requestedBudget ?? 0);
