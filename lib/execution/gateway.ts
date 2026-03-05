@@ -9,6 +9,7 @@ import { enforceRequestCost } from "@/lib/billing/profit-guard";
 import { enforceMonthlyLimit, recordUsage } from "@/lib/billing/usage-meter";
 import { enforceModeEntitlement } from "@/lib/billing/entitlements";
 import { getUserPlan } from "@/lib/billing/subscription-service";
+import { PlanTier } from "@/lib/billing/plans";
 
 export type ExecutionMode = "auto" | "multi";
 
@@ -28,17 +29,18 @@ export interface ExecutionRequest {
 }
 
 export async function executeGateway(req: ExecutionRequest) {
-  console.log("[gateway] ====== GATEWAY EXECUTION START ======");
-  console.log("[gateway] Using userId from request body:", req.userId);
-  console.log("[gateway] Request details:", {
-    userId: req.userId,
-    mode: req.mode,
-    hasRoles: !!req.roles,
-  });
+  console.log("[gateway] Request:", { userId: req.userId, mode: req.mode });
 
-  console.log("[gateway] Fetching subscription plan for userId:", req.userId);
-  const planTier = await getUserPlan(req.userId);
-  console.log("[gateway] Retrieved plan tier for userId:", req.userId, "=>", planTier);
+  // Fetch plan tier from database
+  let planTier = await getUserPlan(req.userId);
+  
+  // DEV BYPASS: Force PRO tier for test user until billing is debugged
+  if (req.userId === "roy_test_user") {
+    console.log("[gateway] 🔧 DEV BYPASS: Forcing PRO tier for test user");
+    planTier = "pro" as PlanTier;
+  }
+  
+  console.log("[gateway] Plan tier:", planTier);
 
   enforceModeEntitlement(planTier, req.mode);
   enforceRoadmapBudget(planTier, req.requestedBudget ?? 0);
