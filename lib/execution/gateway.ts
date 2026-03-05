@@ -13,6 +13,9 @@ import { PlanTier } from "@/lib/billing/plans";
 
 export type ExecutionMode = "auto" | "multi";
 
+// Cost Guard: Maximum cost per request (in USD)
+const MAX_REQUEST_COST = 0.50;
+
 export interface ExecutionRequest {
   input: string;
   mode: ExecutionMode;
@@ -60,8 +63,16 @@ export async function executeGateway(req: ExecutionRequest) {
 
     const response = await executeWithRouting(req.input, model.id);
 
-    enforceRequestCost(planTier, response.estimatedCost ?? 0);
-    await recordUsage(req.userId, response.estimatedCost ?? 0);
+    // Cost Guard: Check if cost exceeds limit
+    const estimatedCost = response.estimatedCost ?? 0;
+    console.log("[gateway] Cost check: $", estimatedCost.toFixed(4), "/ $", MAX_REQUEST_COST);
+    
+    if (estimatedCost > MAX_REQUEST_COST) {
+      throw new Error(`Request blocked: cost limit exceeded ($${estimatedCost.toFixed(2)} > $${MAX_REQUEST_COST})`);
+    }
+
+    enforceRequestCost(planTier, estimatedCost);
+    await recordUsage(req.userId, estimatedCost);
 
     return response;
   }
@@ -85,16 +96,26 @@ export async function executeGateway(req: ExecutionRequest) {
         modelId
       );
 
-      totalCost += response.estimatedCost ?? 0;
+      const roleCost = response.estimatedCost ?? 0;
+      totalCost += roleCost;
+      
+      console.log(`[gateway] ${role} cost: $${roleCost.toFixed(4)} | Running total: $${totalCost.toFixed(4)}`);
+      
+      // Cost Guard: Check running total after each role
+      if (totalCost > MAX_REQUEST_COST) {
+        console.error("[gateway] ❌ COST LIMIT EXCEEDED during multi-mode execution");
+        throw new Error(`Request blocked: cost limit exceeded ($${totalCost.toFixed(2)} > $${MAX_REQUEST_COST})`);
+      }
 
       combined += `\n\n=== ${role.toUpperCase()} ===\n`;
       combined += response.output;
     }
 
+    console.log("[gateway] ✅ Multi-mode complete. Total cost: $", totalCost.toFixed(4));
+    console.log("[gateway] Cost guard check: $", totalCost.toFixed(4), "/ $", MAX_REQUEST_COST, "✓");
+
     enforceRequestCost(planTier, totalCost);
     await recordUsage(req.userId, totalCost);
-
-    console.log("[gateway] ✅ Multi-mode complete. Total cost:", totalCost);
 
     return {
       output: combined.trim(),
