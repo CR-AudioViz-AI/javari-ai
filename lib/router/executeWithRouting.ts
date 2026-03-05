@@ -2,6 +2,41 @@ import { classifyCapability } from "./capability-classifier";
 import { selectBestModel, MODEL_REGISTRY } from "./model-registry";
 import { executeWithFailover } from "@/lib/ai/executeWithFailover";
 
+/**
+ * Normalize AI response content to clean JSON when possible
+ * Handles escaped JSON strings that break downstream parsers
+ */
+function normalizeResponseContent(content: any): any {
+  // If not a string, return as-is
+  if (typeof content !== "string") {
+    return content;
+  }
+
+  try {
+    // Remove common escape patterns
+    let cleaned = content
+      .replace(/\\n/g, "")           // Remove \n escapes
+      .replace(/\\"/g, '"')          // Replace \" with "
+      .replace(/\\\\/g, "\\")        // Replace \\ with \
+      .trim();
+
+    // If it looks like JSON, try to parse it
+    if (cleaned.startsWith("[") || cleaned.startsWith("{")) {
+      console.log("[executeWithRouting] Attempting to parse JSON response...");
+      const parsed = JSON.parse(cleaned);
+      console.log("[executeWithRouting] ✅ Successfully parsed JSON response");
+      return parsed;
+    }
+
+    // Return cleaned string
+    return cleaned;
+  } catch (error) {
+    // If parsing fails, return original content
+    console.log("[executeWithRouting] Could not parse as JSON, returning as string");
+    return content;
+  }
+}
+
 export async function executeWithRouting(prompt: string, modelId?: string) {
   console.log("[executeWithRouting] Prompt length:", prompt.length, "| Requested modelId:", modelId);
   
@@ -37,18 +72,26 @@ export async function executeWithRouting(prompt: string, modelId?: string) {
   try {
     const result = await executeWithFailover(prompt, selectedModel.provider);
     
-    // Normalize response shape
-    const output =
+    // Extract raw output
+    const rawOutput =
       typeof result === "string"
         ? result
         : result?.output ?? JSON.stringify(result);
+    
+    console.log("[executeWithRouting] Raw output type:", typeof rawOutput);
+    console.log("[executeWithRouting] Raw output preview:", String(rawOutput).substring(0, 200));
+    
+    // Normalize the output (will parse JSON if possible)
+    const normalizedOutput = normalizeResponseContent(rawOutput);
+    
+    console.log("[executeWithRouting] Normalized output type:", typeof normalizedOutput);
     
     const usage = result?.usage ?? { total_tokens: 0 };
     const estimatedCost =
       (usage.total_tokens / 1000) * selectedModel.costPer1k;
     
     return {
-      output,
+      output: normalizedOutput,
       model: selectedModel.id,
       provider: selectedModel.provider,
       usage,
