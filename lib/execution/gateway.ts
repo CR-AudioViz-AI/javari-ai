@@ -32,6 +32,16 @@ export interface ExecutionRequest {
 }
 
 export async function executeGateway(req: ExecutionRequest) {
+  // GLOBAL KILL SWITCH: Check if execution is enabled
+  const executionEnabled = process.env.JAVARI_EXECUTION_ENABLED;
+  console.log("[gateway] Kill switch check: JAVARI_EXECUTION_ENABLED =", executionEnabled);
+  
+  if (executionEnabled !== "true") {
+    console.error("[gateway] ❌ EXECUTION BLOCKED: Kill switch is OFF");
+    throw new Error("Javari execution is currently disabled.");
+  }
+  
+  console.log("[gateway] ✓ Kill switch: ENABLED - proceeding with execution");
   console.log("[gateway] ====== REQUEST START ======");
   console.log("[gateway] userId:", req.userId, "| mode:", req.mode);
 
