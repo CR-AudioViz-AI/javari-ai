@@ -10,6 +10,9 @@ export interface ModelDefinition {
   latencyScore: number;
 }
 
+// Guaranteed fallback model - always available
+const FALLBACK_MODEL_ID = "gpt-4o-mini";
+
 export const MODEL_REGISTRY: ModelDefinition[] = [
   {
     id: "mistral-small",
@@ -84,12 +87,17 @@ export function selectBestModel(
     );
   }
 
-  // FALLBACK: If no models after filtering, use gpt-4o-mini
+  // GUARANTEED FALLBACK: If no models after filtering, use fallback
   if (candidates.length === 0) {
-    console.warn("[selectBestModel] No models available after filtering - using fallback");
-    const fallback = MODEL_REGISTRY.find(m => m.id === "gpt-4o-mini");
-    if (fallback) return fallback;
-    return MODEL_REGISTRY[0]; // Last resort
+    console.warn("[selectBestModel] No models available after filtering - using guaranteed fallback:", FALLBACK_MODEL_ID);
+    const fallback = MODEL_REGISTRY.find(m => m.id === FALLBACK_MODEL_ID);
+    
+    if (!fallback) {
+      console.error("[selectBestModel] CRITICAL: Fallback model not in registry! Using first available model");
+      return MODEL_REGISTRY[0];
+    }
+    
+    return fallback;
   }
 
   const priority = preferences?.routingPriority ?? "quality";
@@ -109,4 +117,14 @@ export function selectBestModel(
   }
 
   return candidates[0];
+}
+
+// Helper function to get fallback model
+export function getFallbackModel(): ModelDefinition {
+  const fallback = MODEL_REGISTRY.find(m => m.id === FALLBACK_MODEL_ID);
+  if (!fallback) {
+    console.error("[getFallbackModel] CRITICAL: Fallback model missing from registry!");
+    return MODEL_REGISTRY[0];
+  }
+  return fallback;
 }
