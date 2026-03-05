@@ -4,6 +4,7 @@
  */
 
 import { executeGateway } from "@/lib/execution/gateway";
+import { storeExecutionResult } from "./execution-memory";
 
 export interface RoadmapTask {
   id: string;
@@ -29,12 +30,6 @@ export interface RoadmapExecutionResult {
 
 /**
  * Execute a roadmap task using the multi-agent system
- * 
- * Workflow:
- * 1. Architect - Design task plan and approach
- * 2. Builder - Implement the solution
- * 3. Validator - Verify correctness and quality
- * 4. Documenter - Create structured documentation
  */
 export async function executeRoadmapTask(
   task: RoadmapTask,
@@ -45,12 +40,10 @@ export async function executeRoadmapTask(
   console.log("[roadmap-executor] Title:", task.title);
   console.log("[roadmap-executor] User:", userId);
 
-  // Update task status to running
   task.status = "running";
   task.executedAt = new Date();
 
   try {
-    // Prepare comprehensive prompt for multi-agent execution
     const prompt = `
 ROADMAP TASK EXECUTION
 
@@ -65,7 +58,6 @@ Please analyze, implement, validate, and document this task comprehensively.
 
     console.log("[roadmap-executor] Executing via multi-agent gateway...");
 
-    // Execute through gateway with 4-role system
     const gatewayResponse = await executeGateway({
       input: prompt,
       mode: "multi",
@@ -81,12 +73,20 @@ Please analyze, implement, validate, and document this task comprehensively.
     console.log("[roadmap-executor] Execution complete");
     console.log("[roadmap-executor] Cost: $", (gatewayResponse.estimatedCost ?? 0).toFixed(4));
 
-    // Update task with results
     task.status = "completed";
     task.output = gatewayResponse.output;
     task.estimatedCost = gatewayResponse.estimatedCost;
     task.rolesExecuted = (gatewayResponse as any).rolesExecuted || ["architect", "builder", "validator", "documenter"];
     task.completedAt = new Date();
+
+    // Store in execution memory
+    console.log("[roadmap-executor] Storing result in execution memory...");
+    await storeExecutionResult(task.id, task.title, {
+      success: true,
+      output: gatewayResponse.output,
+      estimatedCost: gatewayResponse.estimatedCost,
+      rolesExecuted: task.rolesExecuted,
+    });
 
     console.log("[roadmap-executor] ✅ Task completed successfully");
 
@@ -100,10 +100,16 @@ Please analyze, implement, validate, and document this task comprehensively.
   } catch (error: any) {
     console.error("[roadmap-executor] ❌ Task execution failed:", error.message);
 
-    // Update task status to failed
     task.status = "failed";
     task.error = error.message;
     task.completedAt = new Date();
+
+    // Store failure in execution memory
+    console.log("[roadmap-executor] Storing failure in execution memory...");
+    await storeExecutionResult(task.id, task.title, {
+      success: false,
+      error: error.message,
+    });
 
     return {
       success: false,
@@ -128,7 +134,6 @@ export async function executeRoadmapTasks(
     const result = await executeRoadmapTask(task, userId);
     results.push(result);
 
-    // Stop on first failure if desired (can be made configurable)
     if (!result.success) {
       console.warn("[roadmap-executor] Task failed, continuing with remaining tasks");
     }
