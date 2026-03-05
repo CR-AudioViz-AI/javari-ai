@@ -27,7 +27,8 @@ export interface ExecutionRequest {
   roles?: {
     architect?: string;
     builder?: string;
-    tester?: string;
+    validator?: string;
+    documenter?: string;
   };
 }
 
@@ -92,22 +93,53 @@ export async function executeGateway(req: ExecutionRequest) {
       throw new Error("Multi mode requires role models.");
     }
 
-    console.log("[gateway] 🚀 EXECUTING MULTI-MODE with roles:", Object.keys(req.roles));
+    // Define execution order for 4-role multi-agent system
+    const executionOrder = ["architect", "builder", "validator", "documenter"];
+    const activeRoles = executionOrder.filter(role => (req.roles as any)[role]);
+    
+    console.log("[gateway] 🚀 EXECUTING MULTI-MODE with", activeRoles.length, "roles:", activeRoles);
 
     let combined = "";
     let totalCost = 0;
+    const roleOutputs: Record<string, string> = {};
 
-    for (const role of Object.keys(req.roles)) {
+    // Execute roles sequentially in defined order
+    for (const role of activeRoles) {
       const modelId = (req.roles as any)[role];
-      console.log(`[gateway] → Executing ${role} with model:`, modelId);
+      console.log(`[gateway] → Executing ${role.toUpperCase()} with model:`, modelId);
 
-      const response = await executeWithRouting(
-        `[${role.toUpperCase()}]\n${req.input}`,
-        modelId
-      );
+      // Build context-aware prompt based on previous role outputs
+      let prompt = "";
+      
+      if (role === "architect") {
+        // Architect: Plan and design
+        prompt = `[ARCHITECT ROLE]\nYou are the system architect. Analyze the request and create a comprehensive plan.\n\nRequest: ${req.input}`;
+      } else if (role === "builder") {
+        // Builder: Implementation based on architect's plan
+        const architectOutput = roleOutputs["architect"] || "";
+        prompt = `[BUILDER ROLE]\nYou are the implementation builder. Create the solution based on the architect's plan.\n\n${architectOutput ? `Architect's Plan:\n${architectOutput}\n\n` : ""}Request: ${req.input}`;
+      } else if (role === "validator") {
+        // Validator: Verify builder's work
+        const builderOutput = roleOutputs["builder"] || "";
+        prompt = `[VALIDATOR ROLE]\nYou are the quality validator. Review the implementation for correctness, completeness, and best practices.\n\n${builderOutput ? `Implementation:\n${builderOutput}\n\n` : ""}Request: ${req.input}`;
+      } else if (role === "documenter") {
+        // Documenter: Synthesize and document
+        const architectOutput = roleOutputs["architect"] || "";
+        const builderOutput = roleOutputs["builder"] || "";
+        const validatorOutput = roleOutputs["validator"] || "";
+        prompt = `[DOCUMENTER ROLE]\nYou are the technical documenter. Create clear, comprehensive documentation of the complete solution.\n\n${architectOutput ? `Plan:\n${architectOutput}\n\n` : ""}${builderOutput ? `Implementation:\n${builderOutput}\n\n` : ""}${validatorOutput ? `Validation:\n${validatorOutput}\n\n` : ""}Request: ${req.input}`;
+      } else {
+        // Generic prompt for any other roles
+        prompt = `[${role.toUpperCase()} ROLE]\n${req.input}`;
+      }
+
+      const response = await executeWithRouting(prompt, modelId);
 
       const roleCost = response.estimatedCost ?? 0;
       totalCost += roleCost;
+      
+      // Store output for subsequent roles
+      roleOutputs[role] = response.output;
       
       console.log(`[gateway] ${role} cost: $${roleCost.toFixed(4)} | Running total: $${totalCost.toFixed(4)}`);
       
@@ -121,7 +153,8 @@ export async function executeGateway(req: ExecutionRequest) {
       combined += response.output;
     }
 
-    console.log("[gateway] ✅ Multi-mode complete. Total cost: $", totalCost.toFixed(4));
+    console.log("[gateway] ✅ Multi-mode complete with", activeRoles.length, "roles");
+    console.log("[gateway] Total cost: $", totalCost.toFixed(4));
     console.log("[gateway] Cost guard check: $", totalCost.toFixed(4), "/ $", MAX_REQUEST_COST, "✓");
 
     enforceRequestCost(planTier, totalCost);
@@ -132,6 +165,7 @@ export async function executeGateway(req: ExecutionRequest) {
       model: "multi",
       provider: "mixed",
       estimatedCost: totalCost,
+      rolesExecuted: activeRoles,
     };
   }
 
