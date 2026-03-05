@@ -30,12 +30,30 @@ export const MODEL_REGISTRY: ModelDefinition[] = [
     latencyScore: 8,
   },
   {
+    id: "gpt-4o",
+    provider: "openai",
+    capability: "high",
+    costPer1k: 2.5,
+    reasoningScore: 9,
+    reliabilityScore: 9,
+    latencyScore: 7,
+  },
+  {
     id: "claude-3-sonnet",
     provider: "anthropic",
     capability: "high",
     costPer1k: 3.0,
     reasoningScore: 9,
     reliabilityScore: 9,
+    latencyScore: 7,
+  },
+  {
+    id: "claude-sonnet-4-20250514",
+    provider: "anthropic",
+    capability: "high",
+    costPer1k: 3.0,
+    reasoningScore: 10,
+    reliabilityScore: 10,
     latencyScore: 7,
   },
 ];
@@ -51,50 +69,44 @@ export function selectBestModel(
   preferences?: RoutingPreferences
 ): ModelDefinition {
   let candidates = MODEL_REGISTRY.filter(
-    (m) => m.capability === capability
+    (m) => m.capability === capability || capability === "light"
   );
 
-  // Apply allowed filter
-  if (preferences?.allowedModels?.length) {
+  if (preferences?.allowedModels) {
     candidates = candidates.filter((m) =>
       preferences.allowedModels!.includes(m.id)
     );
   }
 
-  // Apply excluded filter
-  if (preferences?.excludedModels?.length) {
+  if (preferences?.excludedModels) {
     candidates = candidates.filter(
       (m) => !preferences.excludedModels!.includes(m.id)
     );
   }
 
-  if (!candidates.length) {
-    throw new Error("No models available after applying preferences.");
+  // FALLBACK: If no models after filtering, use gpt-4o-mini
+  if (candidates.length === 0) {
+    console.warn("[selectBestModel] No models available after filtering - using fallback");
+    const fallback = MODEL_REGISTRY.find(m => m.id === "gpt-4o-mini");
+    if (fallback) return fallback;
+    return MODEL_REGISTRY[0]; // Last resort
   }
 
-  const scored = candidates.map((m) => {
-    let score =
-      m.reliabilityScore +
-      m.reasoningScore +
-      m.latencyScore -
-      m.costPer1k;
+  const priority = preferences?.routingPriority ?? "quality";
 
-    if (preferences?.routingPriority === "cost") {
-      score += 10 - m.costPer1k * 2;
-    }
+  if (priority === "cost") {
+    return candidates.sort((a, b) => a.costPer1k - b.costPer1k)[0];
+  }
 
-    if (preferences?.routingPriority === "quality") {
-      score += m.reasoningScore * 2;
-    }
+  if (priority === "quality") {
+    return candidates.sort(
+      (a, b) => b.reasoningScore - a.reasoningScore
+    )[0];
+  }
 
-    if (preferences?.routingPriority === "latency") {
-      score += m.latencyScore * 2;
-    }
+  if (priority === "latency") {
+    return candidates.sort((a, b) => b.latencyScore - a.latencyScore)[0];
+  }
 
-    return { model: m, score };
-  });
-
-  scored.sort((a, b) => b.score - a.score);
-
-  return scored[0].model;
+  return candidates[0];
 }
