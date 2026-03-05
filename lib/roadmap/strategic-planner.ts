@@ -15,13 +15,83 @@ export interface StrategicPlanResult {
 }
 
 /**
+ * Extract and clean JSON from AI response
+ */
+function extractJSON(text: string): any[] | null {
+  console.log("[strategic-planner] Extracting JSON from response...");
+  
+  // Try multiple extraction strategies
+  
+  // Strategy 1: Look for JSON array in the text
+  const arrayMatch = text.match(/\[\s*\{[\s\S]*?\}\s*\]/);
+  if (arrayMatch) {
+    try {
+      const cleaned = arrayMatch[0]
+        .replace(/\\n/g, '')
+        .replace(/\\"/g, '"')
+        .replace(/\\\\/g, '\\');
+      
+      console.log("[strategic-planner] Strategy 1: Found JSON array, attempting parse...");
+      return JSON.parse(cleaned);
+    } catch (e) {
+      console.warn("[strategic-planner] Strategy 1 parse failed, trying next...");
+    }
+  }
+  
+  // Strategy 2: Look for content field with escaped JSON
+  const contentMatch = text.match(/"content"\s*:\s*"([\s\S]*?)"/);
+  if (contentMatch) {
+    try {
+      // Unescape the content
+      let content = contentMatch[1]
+        .replace(/\\n/g, '\n')
+        .replace(/\\"/g, '"')
+        .replace(/\\\\/g, '\\');
+      
+      console.log("[strategic-planner] Strategy 2: Found content field...");
+      console.log("[strategic-planner] Content preview:", content.substring(0, 200));
+      
+      // Now extract array from unescaped content
+      const innerArrayMatch = content.match(/\[\s*\{[\s\S]*?\}\s*\]/);
+      if (innerArrayMatch) {
+        return JSON.parse(innerArrayMatch[0]);
+      }
+    } catch (e) {
+      console.warn("[strategic-planner] Strategy 2 parse failed, trying next...");
+    }
+  }
+  
+  // Strategy 3: Look for "tasks" field
+  const tasksMatch = text.match(/"tasks"\s*:\s*(\[\s*\{[\s\S]*?\}\s*\])/);
+  if (tasksMatch) {
+    try {
+      console.log("[strategic-planner] Strategy 3: Found tasks field...");
+      return JSON.parse(tasksMatch[1]);
+    } catch (e) {
+      console.warn("[strategic-planner] Strategy 3 parse failed...");
+    }
+  }
+  
+  // Strategy 4: Try to extract from DOCUMENTER section
+  const documenterMatch = text.match(/===\s*DOCUMENTER\s*===[\s\S]*?(\[\s*\{[\s\S]*?\}\s*\])/);
+  if (documenterMatch) {
+    try {
+      console.log("[strategic-planner] Strategy 4: Found in DOCUMENTER section...");
+      const cleaned = documenterMatch[1]
+        .replace(/\\n/g, '')
+        .replace(/\\"/g, '"');
+      return JSON.parse(cleaned);
+    } catch (e) {
+      console.warn("[strategic-planner] Strategy 4 parse failed...");
+    }
+  }
+  
+  console.error("[strategic-planner] All JSON extraction strategies failed");
+  return null;
+}
+
+/**
  * Generate a comprehensive roadmap from a high-level goal
- * 
- * Uses 4-role multi-agent system:
- * - Architect: Breaks goal into strategic phases
- * - Builder: Converts phases into actionable tasks
- * - Validator: Verifies task feasibility and completeness
- * - Documenter: Produces final structured roadmap
  */
 export async function generateRoadmap(
   goal: string,
@@ -63,18 +133,26 @@ DOCUMENTER:
 - Use format: phase{N}-task{M} for task IDs
 - Ensure tasks are ordered by priority and dependency
 
-OUTPUT FORMAT (REQUIRED):
-Return ONLY a valid JSON array with this exact structure:
+OUTPUT FORMAT (CRITICAL):
+Return a valid JSON array with NO markdown, NO code blocks, NO extra text.
+Just the raw JSON array starting with [ and ending with ]:
+
 [
   {
     "id": "phase1-task1",
-    "title": "Clear, concise task title",
-    "description": "Detailed description of what needs to be done, including specific requirements and expected outcomes",
+    "title": "Clear task title",
+    "description": "Detailed description of what needs to be done",
     "priority": 10
+  },
+  {
+    "id": "phase1-task2",
+    "title": "Another task",
+    "description": "Another description",
+    "priority": 9
   }
 ]
 
-CRITICAL: Return ONLY the JSON array, no additional text, markdown, or explanation.
+CRITICAL: Output ONLY the JSON array. No markdown formatting, no explanation, no code blocks.
     `.trim();
 
     console.log("[strategic-planner] Sending to planning team...");
@@ -94,78 +172,33 @@ CRITICAL: Return ONLY the JSON array, no additional text, markdown, or explanati
     console.log("[strategic-planner] ✅ Planning complete");
     console.log("[strategic-planner] Cost: $", (planningResponse.estimatedCost ?? 0).toFixed(4));
 
-    // Extract JSON from output
     const output = planningResponse.output;
-    console.log("[strategic-planner] Parsing roadmap from output...");
+    console.log("[strategic-planner] Response length:", output.length);
+    console.log("[strategic-planner] Response preview:", output.substring(0, 300));
 
-    // Try to extract JSON array from the output
-    let tasks: RoadmapItem[] = [];
+    // Extract JSON using robust strategies
+    const extractedTasks = extractJSON(output);
     
-    // Look for JSON array in the output
-    const jsonMatch = output.match(/\[\s*\{[\s\S]*\}\s*\]/);
-    
-    if (jsonMatch) {
-      try {
-        const parsed = JSON.parse(jsonMatch[0]);
-        
-        if (Array.isArray(parsed)) {
-          tasks = parsed.map((task: any) => ({
-            id: task.id || `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            title: task.title || "Untitled task",
-            description: task.description || "",
-            priority: task.priority || 5,
-          }));
-          
-          console.log("[strategic-planner] ✅ Parsed", tasks.length, "tasks from roadmap");
-        }
-      } catch (parseError: any) {
-        console.error("[strategic-planner] JSON parse error:", parseError.message);
-        return {
-          success: false,
-          error: `Failed to parse roadmap JSON: ${parseError.message}`,
-        };
-      }
-    } else {
-      console.warn("[strategic-planner] No JSON array found in output, attempting fallback parsing...");
+    if (!extractedTasks || !Array.isArray(extractedTasks) || extractedTasks.length === 0) {
+      console.error("[strategic-planner] ❌ JSON extraction failed");
+      console.error("[strategic-planner] Full response:", output);
       
-      // Fallback: Try to create tasks from the text output
-      // This is a simple fallback - in production would be more sophisticated
-      const sections = output.split(/===\s*\w+\s*===/);
-      
-      if (sections.length > 1) {
-        // Take the documenter's section (usually last)
-        const documenterSection = sections[sections.length - 1];
-        const jsonMatch2 = documenterSection.match(/\[\s*\{[\s\S]*\}\s*\]/);
-        
-        if (jsonMatch2) {
-          try {
-            const parsed = JSON.parse(jsonMatch2[0]);
-            if (Array.isArray(parsed)) {
-              tasks = parsed.map((task: any) => ({
-                id: task.id || `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                title: task.title || "Untitled task",
-                description: task.description || "",
-                priority: task.priority || 5,
-              }));
-              
-              console.log("[strategic-planner] ✅ Fallback parsing succeeded:", tasks.length, "tasks");
-            }
-          } catch {}
-        }
-      }
-    }
-
-    if (tasks.length === 0) {
-      console.error("[strategic-planner] Failed to extract tasks from output");
       return {
         success: false,
-        error: "AI team did not produce valid roadmap JSON. Please try again with a clearer goal.",
+        error: "Failed to extract valid roadmap from AI response. The AI team generated content but it could not be parsed.",
         analysis: output,
       };
     }
 
-    console.log("[strategic-planner] ✅ Roadmap generation complete");
-    console.log("[strategic-planner] Generated tasks:", tasks.length);
+    // Convert to RoadmapItem format
+    const tasks: RoadmapItem[] = extractedTasks.map((task: any, i: number) => ({
+      id: task.id || `task-${Date.now()}-${i}`,
+      title: task.title || "Untitled task",
+      description: task.description || "",
+      priority: task.priority || 5,
+    }));
+
+    console.log("[strategic-planner] ✅ Successfully parsed", tasks.length, "tasks");
 
     return {
       success: true,
