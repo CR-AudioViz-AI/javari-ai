@@ -162,3 +162,46 @@ export function loadRoadmapTemplate(templateName: string): LoadRoadmapResult {
 export function getAvailableTemplates(): string[] {
   return ["basic-auth", "api-backend"];
 }
+
+/**
+ * Load roadmap with optional AI enhancement
+ */
+export async function loadRoadmapWithEnhancement(
+  items: RoadmapItem[],
+  enhance: boolean = false
+): Promise<LoadRoadmapResult & { enhancement?: any }> {
+  console.log("[roadmap-loader] Loading roadmap with enhancement:", enhance);
+
+  if (!enhance) {
+    return loadRoadmap(items);
+  }
+
+  // Import enhancement (async to avoid circular dependency)
+  const { enhanceRoadmap } = await import("./roadmap-intelligence");
+  
+  console.log("[roadmap-loader] Enhancing roadmap before loading...");
+  const enhancement = await enhanceRoadmap(items);
+
+  if (!enhancement.success) {
+    console.warn("[roadmap-loader] Enhancement failed, loading original tasks only");
+    return {
+      ...loadRoadmap(items),
+      enhancement,
+    };
+  }
+
+  // Combine original and added tasks
+  const allTasks = [...enhancement.originalTasks, ...enhancement.addedTasks];
+  
+  console.log("[roadmap-loader] Loading enhanced roadmap:");
+  console.log("  Original tasks:", enhancement.originalTasks.length);
+  console.log("  Added tasks:", enhancement.addedTasks.length);
+  console.log("  Total tasks:", allTasks.length);
+
+  const result = loadRoadmap(allTasks);
+
+  return {
+    ...result,
+    enhancement,
+  };
+}
