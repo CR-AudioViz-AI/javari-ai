@@ -28,7 +28,14 @@ export interface ExecutionRequest {
 }
 
 export async function executeGateway(req: ExecutionRequest) {
+  console.log("[gateway] Request:", {
+    userId: req.userId,
+    mode: req.mode,
+    hasRoles: !!req.roles,
+  });
+
   const planTier = await getUserPlan(req.userId);
+  console.log("[gateway] Plan tier for user:", req.userId, "=>", planTier);
 
   enforceModeEntitlement(planTier, req.mode);
   enforceRoadmapBudget(planTier, req.requestedBudget ?? 0);
@@ -52,13 +59,18 @@ export async function executeGateway(req: ExecutionRequest) {
   }
 
   if (req.mode === "multi") {
-    if (!req.roles) throw new Error("Multi mode requires role models.");
+    if (!req.roles) {
+      throw new Error("Multi mode requires role models.");
+    }
+
+    console.log("[gateway] Executing multi-mode with roles:", Object.keys(req.roles));
 
     let combined = "";
     let totalCost = 0;
 
     for (const role of Object.keys(req.roles)) {
       const modelId = (req.roles as any)[role];
+      console.log(`[gateway] Executing ${role} with model:`, modelId);
 
       const response = await executeWithRouting(
         `[${role.toUpperCase()}]\n${req.input}`,
@@ -73,6 +85,8 @@ export async function executeGateway(req: ExecutionRequest) {
 
     enforceRequestCost(planTier, totalCost);
     await recordUsage(req.userId, totalCost);
+
+    console.log("[gateway] Multi-mode complete. Total cost:", totalCost);
 
     return {
       output: combined.trim(),

@@ -15,6 +15,13 @@ export async function POST(req: Request) {
       roles,
     } = body;
 
+    console.log("[chat-route] Request received:", {
+      userId,
+      mode,
+      hasMessage: !!message,
+      hasRoles: !!roles,
+    });
+
     if (!message || !userId) {
       return NextResponse.json(
         { ok: false, error: "Missing message or userId." },
@@ -32,11 +39,23 @@ export async function POST(req: Request) {
       roles,
     });
 
+    console.log("[chat-route] Execution complete:", {
+      userId,
+      mode,
+      model: result.model,
+      provider: result.provider,
+    });
+
     return NextResponse.json({
       ok: true,
       data: result,
     });
   } catch (err: any) {
+    console.error("[chat-route] Execution error:", {
+      message: err?.message,
+      stack: err?.stack?.split('\n')[0],
+    });
+
     return NextResponse.json(
       { ok: false, error: err?.message ?? "Execution failed." },
       { status: 500 }
