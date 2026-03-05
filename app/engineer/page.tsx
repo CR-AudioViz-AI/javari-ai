@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-export default function EngineerConsole() {
+export default function EngineerPage() {
   const [command, setCommand] = useState('');
   const [output, setOutput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -34,27 +34,20 @@ export default function EngineerConsole() {
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      runCommand();
-    }
-  };
-
   return (
-    <div style={{ 
-      padding: '20px', 
-      maxWidth: '1200px', 
-      margin: '0 auto',
-      fontFamily: 'monospace'
-    }}>
-      <h1 style={{ marginBottom: '20px' }}>Javari Engineering Console</h1>
+    <div style={{ padding: '40px', maxWidth: '1200px', margin: '0 auto', fontFamily: 'monospace' }}>
+      <h1>Javari Engineering Console</h1>
       
       <div style={{ marginBottom: '10px' }}>
         <input
           type="text"
           value={command}
           onChange={(e) => setCommand(e.target.value)}
-          onKeyDown={handleKeyPress}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+              runCommand();
+            }
+          }}
           placeholder="Enter command (Ctrl+Enter to run)"
           disabled={loading}
           style={{
@@ -94,21 +87,9 @@ export default function EngineerConsole() {
         whiteSpace: 'pre-wrap',
         fontFamily: 'monospace',
         fontSize: '13px',
-        lineHeight: '1.5',
         overflowX: 'auto',
       }}>
         {output || 'Output will appear here...'}
-      </div>
-
-      <div style={{ marginTop: '20px', fontSize: '12px', color: '#666' }}>
-        <strong>Quick commands:</strong>
-        <ul style={{ marginTop: '5px' }}>
-          <li>git status</li>
-          <li>git log --oneline -5</li>
-          <li>vercel ls</li>
-          <li>node --version</li>
-          <li>ls -la</li>
-        </ul>
       </div>
     </div>
   );
