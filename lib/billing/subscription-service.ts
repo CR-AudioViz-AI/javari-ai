@@ -6,8 +6,9 @@ export async function getUserPlan(userId: string): Promise<PlanTier> {
     const db = createAdminClient();
     
     console.log("[subscription-service] Looking up plan for userId:", userId);
+    console.log("[subscription-service] Query: SELECT plan_tier FROM user_subscriptions WHERE user_id =", userId, "LIMIT 1");
     
-    // Query WITHOUT status filter to maximize match probability
+    // Simplified query - no status filter
     const { data, error } = await db
       .from("user_subscriptions")
       .select("plan_tier")
@@ -16,7 +17,7 @@ export async function getUserPlan(userId: string): Promise<PlanTier> {
       .maybeSingle();
 
     if (error) {
-      console.error("[subscription-service] Query error:", error.message);
+      console.error("[subscription-service] Query error:", error);
       return "free";
     }
 
