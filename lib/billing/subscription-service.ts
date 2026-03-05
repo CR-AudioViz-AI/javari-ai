@@ -1,69 +1,60 @@
 import { createAdminClient } from "@/lib/supabase/server";
 import { PlanTier } from "./plans";
 
+/**
+ * Get user's plan tier from database
+ */
 export async function getUserPlan(userId: string): Promise<PlanTier> {
+  // DEV BYPASS: System users always get PRO tier
+  const devUsers = [
+    "roy_test_user",
+    "strategic-planner", 
+    "roadmap-intelligence",
+    "outcome-intelligence",
+    "self-repair-system",
+    "command_center",
+    "command_center_auto",
+    "api-user",
+    "anonymous"
+  ];
+  
+  if (devUsers.includes(userId)) {
+    console.log("[subscription-service] 🔧 DEV BYPASS → forcing PRO tier for", userId);
+    return "pro" as PlanTier;
+  }
+
+  console.log("[subscription-service] Fetching plan for user:", userId);
+
   try {
-    // Log runtime environment
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'NOT_SET';
-    console.log("[subscription-service] ==========================================");
-    console.log("[subscription-service] RUNTIME ENVIRONMENT CHECK");
-    console.log("[subscription-service] SUPABASE_URL:", supabaseUrl);
-    
-    // Extract project reference
-    let projectRef = 'UNKNOWN';
-    if (supabaseUrl.includes('supabase.co')) {
-      const match = supabaseUrl.match(/https:\/\/([^.]+)\.supabase\.co/);
-      if (match) {
-        projectRef = match[1];
-      }
-    }
-    
-    console.log("[subscription-service] PROJECT_REF:", projectRef);
-    console.log("[subscription-service] EXPECTED_REF: kteobfyferrukqeolofj");
-    console.log("[subscription-service] MATCH:", projectRef === 'kteobfyferrukqeolofj' ? '✅ YES' : '❌ NO');
-    console.log("[subscription-service] ==========================================");
-    
     const db = createAdminClient();
-    
-    console.log("[subscription-service] Looking up plan for userId:", userId);
-    console.log("[subscription-service] Query: SELECT plan_tier FROM user_subscriptions WHERE user_id =", userId);
-    
+
     const { data, error } = await db
       .from("user_subscriptions")
-      .select("plan_tier")
+      .select("plan_tier, status")
       .eq("user_id", userId)
-      .limit(1)
-      .maybeSingle();
+      .single();
 
     if (error) {
-      console.error("[subscription-service] Query error:", error);
-      console.error("[subscription-service] Error details:", JSON.stringify(error));
+      console.error("[subscription-service] Database error:", error.message);
+      console.log("[subscription-service] Defaulting to FREE tier");
       return "free";
     }
 
     if (!data) {
-      console.log("[subscription-service] ❌ No subscription found for:", userId);
-      
-      // Try to get table info for debugging
-      const { count, error: countError } = await db
-        .from("user_subscriptions")
-        .select("*", { count: 'exact', head: true });
-      
-      if (!countError && count !== null) {
-        console.log("[subscription-service] DEBUG: Total rows in user_subscriptions:", count);
-      }
-      
+      console.log("[subscription-service] No subscription found, defaulting to FREE");
       return "free";
     }
 
-    const planTier = data.plan_tier as PlanTier;
-    console.log("[subscription-service] ✅✅✅ FOUND SUBSCRIPTION!");
-    console.log("[subscription-service] plan_tier:", planTier);
-    console.log("[subscription-service] userId:", userId);
-    
-    return planTier;
-  } catch (err) {
-    console.error("[subscription-service] Unexpected error:", err);
+    if (data.status !== "active") {
+      console.log("[subscription-service] Subscription not active, defaulting to FREE");
+      return "free";
+    }
+
+    console.log("[subscription-service] ✅ Plan tier:", data.plan_tier);
+    return data.plan_tier as PlanTier;
+  } catch (err: any) {
+    console.error("[subscription-service] Unexpected error:", err.message);
+    console.log("[subscription-service] Defaulting to FREE tier");
     return "free";
   }
 }
