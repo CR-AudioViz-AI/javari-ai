@@ -1,6 +1,5 @@
 /**
  * Javari Strategic Planning Engine ("Javari Brain")
- * Generates comprehensive roadmaps from high-level goals using multi-agent system
  */
 
 import { executeGateway } from "@/lib/execution/gateway";
@@ -15,78 +14,60 @@ export interface StrategicPlanResult {
 }
 
 /**
- * Extract and clean JSON from AI response
+ * Extract JSON from multi-agent response with proper unescaping
  */
 function extractJSON(text: string): any[] | null {
   console.log("[strategic-planner] Extracting JSON from response...");
   
-  // Try multiple extraction strategies
+  // The response format is: {"success":true,"content":"[...]"}
+  // The content is triple-escaped, so we need to unescape it properly
   
-  // Strategy 1: Look for JSON array in the text
-  const arrayMatch = text.match(/\[\s*\{[\s\S]*?\}\s*\]/);
+  // Strategy 1: Extract from content field in success wrapper
+  const contentPattern = /"content"\s*:\s*"([\s\S]*?)"\s*,?\s*"provider"/;
+  const match = text.match(contentPattern);
+  
+  if (match) {
+    try {
+      let content = match[1];
+      console.log("[strategic-planner] Found content field, length:", content.length);
+      
+      // Unescape: \\\" -> \" and \\n -> \n
+      content = content
+        .replace(/\\\\n/g, '\n')           // \\n -> \n
+        .replace(/\\\\\"/g, '"')           // \\" -> "
+        .replace(/\\\\/g, '\\');           // \\ -> \
+      
+      console.log("[strategic-planner] After first unescape, preview:", content.substring(0, 200));
+      
+      // Parse to get the actual JSON array
+      const parsed = JSON.parse(content);
+      
+      if (Array.isArray(parsed)) {
+        console.log("[strategic-planner] ✅ Successfully extracted", parsed.length, "tasks");
+        return parsed;
+      }
+    } catch (e: any) {
+      console.error("[strategic-planner] Strategy 1 failed:", e.message);
+    }
+  }
+  
+  // Strategy 2: Direct array extraction (fallback)
+  const arrayPattern = /\[\s*\{[\s\S]*?\}\s*\]/;
+  const arrayMatch = text.match(arrayPattern);
+  
   if (arrayMatch) {
     try {
-      const cleaned = arrayMatch[0]
-        .replace(/\\n/g, '')
-        .replace(/\\"/g, '"')
-        .replace(/\\\\/g, '\\');
-      
-      console.log("[strategic-planner] Strategy 1: Found JSON array, attempting parse...");
-      return JSON.parse(cleaned);
-    } catch (e) {
-      console.warn("[strategic-planner] Strategy 1 parse failed, trying next...");
-    }
-  }
-  
-  // Strategy 2: Look for content field with escaped JSON
-  const contentMatch = text.match(/"content"\s*:\s*"([\s\S]*?)"/);
-  if (contentMatch) {
-    try {
-      // Unescape the content
-      let content = contentMatch[1]
-        .replace(/\\n/g, '\n')
-        .replace(/\\"/g, '"')
-        .replace(/\\\\/g, '\\');
-      
-      console.log("[strategic-planner] Strategy 2: Found content field...");
-      console.log("[strategic-planner] Content preview:", content.substring(0, 200));
-      
-      // Now extract array from unescaped content
-      const innerArrayMatch = content.match(/\[\s*\{[\s\S]*?\}\s*\]/);
-      if (innerArrayMatch) {
-        return JSON.parse(innerArrayMatch[0]);
+      const parsed = JSON.parse(arrayMatch[0]);
+      if (Array.isArray(parsed)) {
+        console.log("[strategic-planner] ✅ Fallback extraction successful:", parsed.length, "tasks");
+        return parsed;
       }
-    } catch (e) {
-      console.warn("[strategic-planner] Strategy 2 parse failed, trying next...");
+    } catch (e: any) {
+      console.error("[strategic-planner] Strategy 2 failed:", e.message);
     }
   }
   
-  // Strategy 3: Look for "tasks" field
-  const tasksMatch = text.match(/"tasks"\s*:\s*(\[\s*\{[\s\S]*?\}\s*\])/);
-  if (tasksMatch) {
-    try {
-      console.log("[strategic-planner] Strategy 3: Found tasks field...");
-      return JSON.parse(tasksMatch[1]);
-    } catch (e) {
-      console.warn("[strategic-planner] Strategy 3 parse failed...");
-    }
-  }
-  
-  // Strategy 4: Try to extract from DOCUMENTER section
-  const documenterMatch = text.match(/===\s*DOCUMENTER\s*===[\s\S]*?(\[\s*\{[\s\S]*?\}\s*\])/);
-  if (documenterMatch) {
-    try {
-      console.log("[strategic-planner] Strategy 4: Found in DOCUMENTER section...");
-      const cleaned = documenterMatch[1]
-        .replace(/\\n/g, '')
-        .replace(/\\"/g, '"');
-      return JSON.parse(cleaned);
-    } catch (e) {
-      console.warn("[strategic-planner] Strategy 4 parse failed...");
-    }
-  }
-  
-  console.error("[strategic-planner] All JSON extraction strategies failed");
+  console.error("[strategic-planner] ❌ All extraction strategies failed");
   return null;
 }
 
@@ -174,18 +155,17 @@ CRITICAL: Output ONLY the JSON array. No markdown formatting, no explanation, no
 
     const output = planningResponse.output;
     console.log("[strategic-planner] Response length:", output.length);
-    console.log("[strategic-planner] Response preview:", output.substring(0, 300));
 
     // Extract JSON using robust strategies
     const extractedTasks = extractJSON(output);
     
     if (!extractedTasks || !Array.isArray(extractedTasks) || extractedTasks.length === 0) {
       console.error("[strategic-planner] ❌ JSON extraction failed");
-      console.error("[strategic-planner] Full response:", output);
+      console.error("[strategic-planner] Response preview:", output.substring(0, 500));
       
       return {
         success: false,
-        error: "Failed to extract valid roadmap from AI response. The AI team generated content but it could not be parsed.",
+        error: "Failed to extract valid roadmap from AI response",
         analysis: output,
       };
     }
