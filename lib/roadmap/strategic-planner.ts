@@ -1,6 +1,6 @@
 /**
  * Javari Strategic Planning Engine ("Javari Brain")
- * Uses structured multi-agent responses
+ * Consumes structured multi-agent gateway responses
  */
 
 import { executeGateway } from "@/lib/execution/gateway";
@@ -12,44 +12,6 @@ export interface StrategicPlanResult {
   analysis?: string;
   error?: string;
   estimatedCost?: number;
-}
-
-/**
- * Extract tasks from structured role output
- */
-function extractTasksFromRoleOutput(output: any): RoadmapItem[] | null {
-  console.log("[strategic-planner] Extracting tasks from role output...");
-  console.log("[strategic-planner] Output type:", typeof output);
-  
-  // If already an array, return it
-  if (Array.isArray(output)) {
-    console.log("[strategic-planner] ✅ Output is already an array");
-    return output;
-  }
-  
-  // If it's a string, try to parse it
-  if (typeof output === "string") {
-    try {
-      const parsed = JSON.parse(output);
-      if (Array.isArray(parsed)) {
-        console.log("[strategic-planner] ✅ Parsed string to array");
-        return parsed;
-      }
-    } catch (e) {
-      console.warn("[strategic-planner] String is not valid JSON");
-    }
-  }
-  
-  // If it's an object with tasks property
-  if (output && typeof output === "object" && output.tasks) {
-    if (Array.isArray(output.tasks)) {
-      console.log("[strategic-planner] ✅ Found tasks property");
-      return output.tasks;
-    }
-  }
-  
-  console.error("[strategic-planner] Could not extract tasks from output");
-  return null;
 }
 
 /**
@@ -101,50 +63,91 @@ Return ONLY the JSON array. No markdown, no code blocks, no extra text.
         validator: "gpt-4o",
         documenter: "gpt-4o-mini",
       },
-    }) as any; // Cast to access roles property
+    }) as any;
 
     console.log("[strategic-planner] ✅ Planning complete");
     console.log("[strategic-planner] Cost: $", (planningResponse.estimatedCost ?? 0).toFixed(4));
 
-    // Check if we have structured role outputs
-    if (!planningResponse.roles) {
-      console.error("[strategic-planner] No structured role outputs in response");
+    // NEW: Read structured role outputs instead of parsing concatenated text
+    const roles = planningResponse.roles;
+    
+    if (!roles) {
+      console.error("[strategic-planner] ❌ Gateway did not return structured role outputs");
+      console.error("[strategic-planner] Response keys:", Object.keys(planningResponse));
+      
+      // Fallback: try legacy output field
+      if (planningResponse.output) {
+        console.warn("[strategic-planner] Falling back to legacy output parsing");
+        return {
+          success: false,
+          error: "Gateway returned legacy format instead of structured roles",
+          analysis: planningResponse.output,
+        };
+      }
+      
       return {
         success: false,
         error: "Gateway did not return structured role outputs",
-        analysis: planningResponse.output,
       };
     }
 
-    console.log("[strategic-planner] Available roles:", Object.keys(planningResponse.roles));
+    console.log("[strategic-planner] ✅ Structured roles received:", Object.keys(roles));
 
     // Try each role in order of preference: documenter > builder > architect > validator
     const roleOrder = ["documenter", "builder", "architect", "validator"];
     
-    let tasks: RoadmapItem[] | null = null;
+    let tasks: any = null;
+    let sourceRole = "";
     
     for (const role of roleOrder) {
-      if (planningResponse.roles[role]) {
+      if (roles[role]) {
         console.log(`[strategic-planner] Trying ${role} output...`);
-        tasks = extractTasksFromRoleOutput(planningResponse.roles[role]);
+        const roleOutput = roles[role];
         
-        if (tasks && tasks.length > 0) {
-          console.log(`[strategic-planner] ✅ Successfully extracted from ${role}`);
+        // If it's already an array, use it
+        if (Array.isArray(roleOutput)) {
+          tasks = roleOutput;
+          sourceRole = role;
           break;
+        }
+        
+        // If it's a string, try to parse it
+        if (typeof roleOutput === "string") {
+          try {
+            const parsed = JSON.parse(roleOutput);
+            if (Array.isArray(parsed)) {
+              tasks = parsed;
+              sourceRole = role;
+              break;
+            }
+          } catch (e) {
+            console.warn(`[strategic-planner] ${role} output is not valid JSON`);
+          }
+        }
+        
+        // If it's an object with tasks property
+        if (roleOutput && typeof roleOutput === "object" && roleOutput.tasks) {
+          if (Array.isArray(roleOutput.tasks)) {
+            tasks = roleOutput.tasks;
+            sourceRole = role;
+            break;
+          }
         }
       }
     }
 
-    if (!tasks || tasks.length === 0) {
-      console.error("[strategic-planner] Failed to extract tasks from any role");
-      console.error("[strategic-planner] Role outputs:", JSON.stringify(planningResponse.roles, null, 2).substring(0, 500));
+    if (!tasks || !Array.isArray(tasks) || tasks.length === 0) {
+      console.error("[strategic-planner] ❌ Could not extract task array from any role");
+      console.error("[strategic-planner] Available roles:", Object.keys(roles));
       
       return {
         success: false,
-        error: "Could not extract valid task array from any role output",
-        analysis: planningResponse.output,
+        error: "Could not extract valid task array from role outputs",
+        analysis: JSON.stringify(roles, null, 2),
       };
     }
+
+    console.log(`[strategic-planner] ✅ Extracted ${tasks.length} tasks from ${sourceRole}`);
 
     // Convert to RoadmapItem format
     const roadmapTasks: RoadmapItem[] = tasks.map((task: any, i: number) => ({
@@ -159,7 +162,7 @@ Return ONLY the JSON array. No markdown, no code blocks, no extra text.
     return {
       success: true,
       tasks: roadmapTasks,
-      analysis: planningResponse.output,
+      analysis: `Generated from ${sourceRole} role`,
       estimatedCost: planningResponse.estimatedCost,
     };
   } catch (error: any) {
