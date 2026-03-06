@@ -7,30 +7,45 @@ Built to Fortune 50 standards by CR AudioViz AI, LLC — Fort Myers, Florida.
 
 ---
 
-## Deployment Workflow
+## Deployment Policy
+
+### Development → Preview
 
 ```
-preview branch  →  automatic Preview deployment  →  test via preview URL
-                ↓
-         merge preview → main
-                ↓
-         main branch  →  Production deployment (javariai.com)
+push to main  →  Vercel Preview deployment  →  test via preview URL
 ```
 
-### Rules
+- Direct pushes to `main` are allowed and trigger **preview-only** deployments.
+- Every commit to `main` gets a Vercel preview URL for testing.
+- `main` does **not** trigger production. It is a development staging branch.
 
-- **Never push directly to `main`.** All changes go to `preview` first.
-- **Every commit to `preview`** triggers an automatic Vercel Preview deployment.
-- **Test the preview URL** before opening a pull request to `main`.
-- **Pull request required** to merge `preview` → `main`. Status checks must pass.
-- **Production deploys** happen only when a PR is merged into `main`.
+### Release → Production
+
+```
+PR: main → production  →  status checks pass  →  production deployment (javariai.com)
+```
+
+- **Production deploys only via pull request** from `main` → `production`.
+- The `production` branch is protected: PR required, Vercel status check required, no direct pushes, no force pushes.
+- One approving review required before merge.
 
 ### Branch Roles
 
-| Branch    | Purpose                    | Vercel Target |
-|-----------|----------------------------|---------------|
-| `preview` | Active development         | Preview       |
-| `main`    | Stable, production-ready   | Production    |
+| Branch       | Purpose                      | Vercel Target | Direct Push |
+|--------------|------------------------------|---------------|-------------|
+| `main`       | Active development           | Preview       | ✅ Allowed  |
+| `production` | Stable, released code        | Production    | ❌ Blocked  |
+
+### Protection Rules — `production` branch
+
+| Rule                          | Setting                    |
+|-------------------------------|----------------------------|
+| Required status checks        | `Vercel – javari-ai`       |
+| Require status to be up-to-date | Yes                      |
+| Required approving reviews    | 1                          |
+| Dismiss stale reviews         | Yes                        |
+| Allow force pushes            | ❌ Blocked                 |
+| Allow deletions               | ❌ Blocked                 |
 
 ---
 
@@ -38,7 +53,7 @@ preview branch  →  automatic Preview deployment  →  test via preview URL
 
 - **Framework:** Next.js 14 App Router + TypeScript (strict)
 - **Database:** Supabase PostgreSQL with Row Level Security
-- **Hosting:** Vercel (iad1)
+- **Hosting:** Vercel (iad1) — production branch: `production`
 - **Payments:** Stripe + PayPal (live)
 - **AI Routing:** Anthropic Claude, OpenAI GPT-4o, OpenRouter
 - **Domains:** javariai.com / craudiovizai.com
@@ -51,6 +66,9 @@ preview branch  →  automatic Preview deployment  →  test via preview URL
 |----------|----------|---------|
 | `GET /api/javari/queue` | Every 1 min (cron) | Execute pending roadmap tasks |
 | `GET /api/javari/autonomy/cycle` | Every 3 min (cron) | Trigger planner when queue is empty |
+
+The autonomy loop executes real platform work from the canonical roadmap (`MASTER_ROADMAP_v3.1`).
+Tasks are seeded by phase priority: `core_platform → autonomy_engine → multi_ai_chat → payments → creator_tools → ecosystem_modules`.
 
 ---
 
