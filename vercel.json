@@ -1,6 +1,8 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "github": {
-    "autoAlias": false
-  }
+  "crons": [
+    {
+      "path": "/api/javari/queue",
+      "schedule": "* * * * *"
+    }
+  ]
 }
