@@ -13,10 +13,19 @@ export const dynamic = "force-dynamic";
  * Process the execution queue.
  *
  * Called by:
- *   - Vercel cron (no body) → defaults to system tier
- *   - Manual trigger       → body may override userId and maxTasks
+ *   - Vercel cron (no body) → defaults to system tier, x-vercel-cron: 1 header present
+ *   - Manual trigger        → body may override userId and maxTasks
  */
 export async function POST(req: NextRequest) {
+  // CRON INSTRUMENTATION — log every invocation so we can confirm
+  // whether Vercel cron is calling this endpoint and at what cadence.
+  // x-vercel-cron: 1 is set by Vercel only on cron-triggered requests.
+  console.log("CRON INVOCATION", {
+    timestamp: new Date().toISOString(),
+    source: "vercel-cron-or-manual",
+    headers: Object.fromEntries(req.headers),
+  });
+
   try {
     // Cron jobs send POST with no body — req.json() throws on empty body.
     // Safe-parse: fall back to empty object if body is missing or unparseable.
@@ -35,12 +44,14 @@ export async function POST(req: NextRequest) {
     const maxTasks = typeof body.maxTasks === "number" ? body.maxTasks : 5;
     const userId   = typeof body.userId   === "string"  ? body.userId   : "system";
 
-    console.log(`[queue-api] POST — userId: ${userId}, maxTasks: ${maxTasks}`);
+    const isCron = req.headers.get("x-vercel-cron") === "1";
+    console.log(`[queue-api] POST — userId: ${userId}, maxTasks: ${maxTasks}, isCron: ${isCron}`);
 
     const result = await processQueue(maxTasks, userId);
 
     return NextResponse.json({
       ok: true,
+      isCron,
       ...result,
     });
 
