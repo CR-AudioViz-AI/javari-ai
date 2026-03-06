@@ -21,6 +21,13 @@ interface PlannerTask {
   depends_on: string[];
 }
 
+// Generate a short cycle suffix (base-36, 5 chars) from the current timestamp.
+// Appended to every task ID so repeated planning cycles never collide on the
+// roadmap_tasks primary key, even when the AI generates the same slugs.
+function cycleSuffix(): string {
+  return Date.now().toString(36).slice(-5);
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -33,12 +40,14 @@ export async function POST(req: Request) {
       );
     }
 
-    // phase_id is NOT NULL in roadmap_tasks — default to "planner" when not supplied
     const resolvedPhaseId: string = phaseId ?? "planner";
     const resolvedRoadmapId: string | null = roadmapId ?? null;
 
+    // Suffix shared across all tasks in this cycle so depends_on references stay valid
+    const suffix = cycleSuffix();
+
     console.log("[planner] Goal:", goal.slice(0, 120));
-    console.log("[planner] Phase:", resolvedPhaseId, "| Roadmap:", resolvedRoadmapId);
+    console.log("[planner] Phase:", resolvedPhaseId, "| Roadmap:", resolvedRoadmapId, "| Suffix:", suffix);
 
     const prompt = `
 You are an autonomous roadmap planner for an AI platform called Javari AI.
@@ -70,13 +79,11 @@ Return format (JSON array only):
       throw new Error("AI returned null output");
     }
 
-    // Strip markdown fences if present
     const cleaned = ai.output
       .replace(/```json\s*/g, "")
       .replace(/```\s*/g, "")
       .trim();
 
-    // Extract JSON array even if wrapped in surrounding text
     const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
     if (!arrayMatch) {
       throw new Error(`AI output did not contain a valid JSON array. Got: ${cleaned.slice(0, 200)}`);
@@ -93,25 +100,37 @@ Return format (JSON array only):
       throw new Error("AI returned an empty task list");
     }
 
-    // Validate and build rows — include all NOT NULL columns
+    // Build a remapping of original AI IDs → suffixed IDs so depends_on
+    // references are updated consistently within this cycle.
+    const idMap = new Map<string, string>();
+    for (const t of tasks) {
+      if (!t.id) throw new Error(`Task missing id: ${JSON.stringify(t)}`);
+      idMap.set(t.id, `${t.id}-${suffix}`);
+    }
+
     const now = Math.floor(Date.now() / 1000);
     const rows = tasks.map((t: PlannerTask) => {
-      if (!t.id || !t.title || !t.description) {
+      if (!t.title || !t.description) {
         throw new Error(`Task missing required fields: ${JSON.stringify(t)}`);
       }
+      const newId = idMap.get(t.id) ?? `${t.id}-${suffix}`;
+      // Remap any depends_on references to their suffixed equivalents
+      const newDeps = (Array.isArray(t.depends_on) ? t.depends_on : [])
+        .map((dep: string) => idMap.get(dep) ?? dep);
+
       return {
-        id: t.id,
+        id: newId,
         phase_id: resolvedPhaseId,
         ...(resolvedRoadmapId ? { roadmap_id: resolvedRoadmapId } : {}),
         title: t.title,
         description: t.description,
-        depends_on: Array.isArray(t.depends_on) ? t.depends_on : [],
+        depends_on: newDeps,
         status: "pending",
         updated_at: now,
       };
     });
 
-    console.log(`[planner] Inserting ${rows.length} tasks`);
+    console.log(`[planner] Inserting ${rows.length} tasks (cycle suffix: ${suffix})`);
 
     const { error: insertError } = await supabase
       .from("roadmap_tasks")
