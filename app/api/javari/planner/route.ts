@@ -1,5 +1,5 @@
 // app/api/javari/planner/route.ts
-// Purpose: Autonomous roadmap planner — accepts a goal, generates 3-5 tasks via AI, inserts into roadmap_tasks
+// Purpose: Hybrid planner — serves roadmap tasks first, falls back to AI discovery
 // Date: 2026-03-06
 
 import { NextResponse } from "next/server";
@@ -21,11 +21,45 @@ interface PlannerTask {
   depends_on: string[];
 }
 
-// Generate a short cycle suffix (base-36, 5 chars) from the current timestamp.
-// Appended to every task ID so repeated planning cycles never collide on the
-// roadmap_tasks primary key, even when the AI generates the same slugs.
+// ─── Cycle suffix ─────────────────────────────────────────────────────────────
+// Appended to every inserted task ID to prevent primary key collisions across
+// autonomy cycles. Shared within one planning call so depends_on refs stay valid.
 function cycleSuffix(): string {
   return Date.now().toString(36).slice(-5);
+}
+
+// ─── Roadmap task loader ──────────────────────────────────────────────────────
+// Fetches up to 5 pending tasks that were seeded by a human roadmap (source='roadmap').
+// Returns them directly without calling AI — they are already fully specified.
+async function loadRoadmapTasks(
+  phaseId: string,
+  roadmapId: string | null
+): Promise<Array<{ id: string; title: string; description: string; depends_on: string[] }>> {
+  let query = supabase
+    .from("roadmap_tasks")
+    .select("id, title, description, depends_on")
+    .eq("status", "pending")
+    .eq("source", "roadmap")
+    .limit(5);
+
+  // Scope to roadmap if provided
+  if (roadmapId) {
+    query = query.eq("roadmap_id", roadmapId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error("[planner] Roadmap task load error:", error.message);
+    return [];
+  }
+
+  return (data ?? []).map((t) => ({
+    id: t.id as string,
+    title: t.title as string,
+    description: t.description as string,
+    depends_on: Array.isArray(t.depends_on) ? (t.depends_on as string[]) : [],
+  }));
 }
 
 export async function POST(req: Request) {
@@ -42,12 +76,39 @@ export async function POST(req: Request) {
 
     const resolvedPhaseId: string = phaseId ?? "planner";
     const resolvedRoadmapId: string | null = roadmapId ?? null;
-
-    // Suffix shared across all tasks in this cycle so depends_on references stay valid
     const suffix = cycleSuffix();
 
     console.log("[planner] Goal:", goal.slice(0, 120));
     console.log("[planner] Phase:", resolvedPhaseId, "| Roadmap:", resolvedRoadmapId, "| Suffix:", suffix);
+
+    // ── Step 1: Check for human-seeded roadmap tasks first ────────────────────
+    const roadmapTasks = await loadRoadmapTasks(resolvedPhaseId, resolvedRoadmapId);
+
+    if (roadmapTasks.length > 0) {
+      console.log(`[planner] planner_source: roadmap | ${roadmapTasks.length} task(s) found — skipping AI`);
+
+      // Roadmap tasks already exist in the DB — no insert needed.
+      // Return them directly as planner output so the queue can pick them up.
+      return NextResponse.json({
+        success: true,
+        goal,
+        model: null,
+        planner_source: "roadmap",
+        phaseId: resolvedPhaseId,
+        tasksCreated: 0,
+        tasks: roadmapTasks.map((t) => ({
+          id: t.id,
+          title: t.title,
+          description: t.description,
+          depends_on: t.depends_on,
+          status: "pending",
+          source: "roadmap",
+        })),
+      });
+    }
+
+    // ── Step 2: No roadmap tasks — run AI discovery planner ───────────────────
+    console.log("[planner] planner_source: discovery | No roadmap tasks — running AI planner");
 
     const prompt = `
 You are an autonomous roadmap planner for an AI platform called Javari AI.
@@ -80,8 +141,8 @@ Return format (JSON array only):
     }
 
     const cleaned = ai.output
-      .replace(/```json\s*/g, "")
-      .replace(/```\s*/g, "")
+      .replace(/\`\`\`json\s*/g, "")
+      .replace(/\`\`\`\s*/g, "")
       .trim();
 
     const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
@@ -100,8 +161,7 @@ Return format (JSON array only):
       throw new Error("AI returned an empty task list");
     }
 
-    // Build a remapping of original AI IDs → suffixed IDs so depends_on
-    // references are updated consistently within this cycle.
+    // Remap AI-generated IDs → suffixed IDs (collision prevention)
     const idMap = new Map<string, string>();
     for (const t of tasks) {
       if (!t.id) throw new Error(`Task missing id: ${JSON.stringify(t)}`);
@@ -114,7 +174,6 @@ Return format (JSON array only):
         throw new Error(`Task missing required fields: ${JSON.stringify(t)}`);
       }
       const newId = idMap.get(t.id) ?? `${t.id}-${suffix}`;
-      // Remap any depends_on references to their suffixed equivalents
       const newDeps = (Array.isArray(t.depends_on) ? t.depends_on : [])
         .map((dep: string) => idMap.get(dep) ?? dep);
 
@@ -125,12 +184,13 @@ Return format (JSON array only):
         title: t.title,
         description: t.description,
         depends_on: newDeps,
+        source: "discovery",
         status: "pending",
         updated_at: now,
       };
     });
 
-    console.log(`[planner] Inserting ${rows.length} tasks (cycle suffix: ${suffix})`);
+    console.log(`[planner] Inserting ${rows.length} discovery tasks (suffix: ${suffix})`);
 
     const { error: insertError } = await supabase
       .from("roadmap_tasks")
@@ -140,21 +200,23 @@ Return format (JSON array only):
       throw new Error(`Supabase insert failed: ${insertError.message}`);
     }
 
-    console.log(`[planner] ✅ Inserted ${rows.length} tasks`);
-    rows.forEach(r => console.log(`[planner]  → ${r.id}: ${r.title}`));
+    console.log(`[planner] ✅ Inserted ${rows.length} discovery tasks`);
+    rows.forEach((r) => console.log(`[planner]  → ${r.id}: ${r.title}`));
 
     return NextResponse.json({
       success: true,
       goal,
       model: ai.model,
+      planner_source: "discovery",
       phaseId: resolvedPhaseId,
-      created: rows.length,
-      tasks: rows.map(r => ({
+      tasksCreated: rows.length,
+      tasks: rows.map((r) => ({
         id: r.id,
         title: r.title,
         description: r.description,
         depends_on: r.depends_on,
         status: r.status,
+        source: r.source,
       })),
     });
 
