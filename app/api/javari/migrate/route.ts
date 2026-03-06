@@ -1,58 +1,41 @@
-import { createClient } from '@supabase/supabase-js';
-import { NextResponse } from 'next/server';
+// app/api/javari/migrate/route.ts
+// Purpose: One-shot DDL runner — adds source column to roadmap_tasks
+// Date: 2026-03-06
+
+import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 export async function POST() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-  
-  const supabase = createClient(supabaseUrl, supabaseKey, {
-    auth: { persistSession: false }
-  });
+  const steps: Array<{ sql: string; ok: boolean; error?: string }> = [];
 
-  try {
-    // Create table via raw SQL
-    const { error: createError } = await supabase.rpc('exec_sql', {
-      sql: `
-        CREATE TABLE IF NOT EXISTS public.javari_roadmap (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          created_at TIMESTAMPTZ DEFAULT NOW(),
-          updated_at TIMESTAMPTZ DEFAULT NOW(),
-          title TEXT NOT NULL,
-          description TEXT,
-          status TEXT DEFAULT 'planned' CHECK (status IN ('planned', 'in_progress', 'completed', 'blocked')),
-          priority INTEGER DEFAULT 0,
-          category TEXT,
-          assigned_to TEXT,
-          evidence_links TEXT[],
-          metadata JSONB DEFAULT '{}'::jsonb
-        );
-        
-        ALTER TABLE public.javari_roadmap ENABLE ROW LEVEL SECURITY;
-        
-        DROP POLICY IF EXISTS "Enable all operations for javari_roadmap" ON public.javari_roadmap;
-        CREATE POLICY "Enable all operations for javari_roadmap" 
-        ON public.javari_roadmap 
-        FOR ALL 
-        USING (true) 
-        WITH CHECK (true);
-      `
-    });
+  const ddl = [
+    "ALTER TABLE roadmap_tasks ADD COLUMN IF NOT EXISTS source TEXT DEFAULT NULL",
+    "CREATE INDEX IF NOT EXISTS idx_roadmap_tasks_source ON roadmap_tasks (source) WHERE source IS NOT NULL",
+  ];
 
-    if (createError) throw createError;
-
-    // Insert initial data
-    const { error: insertError } = await supabase
-      .from('javari_roadmap')
-      .upsert([
-        { title: 'GitHub Write Access', description: 'Autonomous PR creation', status: 'completed', priority: 10, category: 'automation' },
-        { title: 'Roadmap Tracking', description: 'Database-backed tracking', status: 'in_progress', priority: 9, category: 'infrastructure' },
-        { title: 'Migration Complete', description: 'Table created', status: 'completed', priority: 8, category: 'infrastructure' }
-      ], { onConflict: 'title' });
-
-    if (insertError) throw insertError;
-
-    return NextResponse.json({ success: true, message: 'Migration complete' });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  for (const sql of ddl) {
+    const { error } = await supabase.rpc("exec_sql", { sql }) as { error: { message: string } | null };
+    steps.push({ sql: sql.slice(0, 80), ok: !error, error: error?.message });
   }
+
+  // Verify column now accessible
+  const { error: verifyErr } = await supabase
+    .from("roadmap_tasks")
+    .select("source")
+    .limit(1);
+
+  return NextResponse.json({
+    ok: !verifyErr,
+    column_accessible: !verifyErr,
+    verify_error: verifyErr?.message ?? null,
+    steps,
+  });
 }
