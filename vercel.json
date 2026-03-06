@@ -3,6 +3,10 @@
     {
       "path": "/api/javari/queue",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/javari/autonomy/cycle",
+      "schedule": "*/3 * * * *"
     }
   ]
 }
