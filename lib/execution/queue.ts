@@ -10,7 +10,7 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 export interface Task {
-  task_id: string;
+  id: string;
   title: string;
   description: string;
   status: "pending" | "in_progress" | "completed" | "retry" | "failed";
@@ -54,7 +54,7 @@ async function getExecutableTasks(): Promise<Task[]> {
 
   // Build a map of completed task IDs
   const completedTaskIds = new Set(
-    allTasks.filter(t => t.status === "completed").map(t => t.task_id)
+    allTasks.filter(t => t.status === "completed").map(t => t.id)
   );
 
   // Filter for executable tasks
@@ -90,7 +90,7 @@ async function updateTaskStatus(
   const { error } = await supabase
     .from("roadmap_tasks")
     .update({ status, updated_at: new Date().toISOString() })
-    .eq("task_id", taskId);
+    .eq("id", taskId);
 
   if (error) {
     console.error(`[queue] Error updating task ${taskId}:`, error.message);
@@ -147,7 +147,7 @@ async function executeTask(task: Task, userId: string = "queue-executor"): Promi
 
   try {
     // Mark task as in progress
-    await updateTaskStatus(task.task_id, "in_progress");
+    await updateTaskStatus(task.id, "in_progress");
 
     // Build execution prompt
     const prompt = `
@@ -173,7 +173,7 @@ Return a JSON object with:
       input: prompt,
       mode: "auto",
       userId,
-      taskId: task.task_id,
+      taskId: task.id,
     }) as any;
 
     const executionTime = Date.now() - startTime;
@@ -194,12 +194,12 @@ Return a JSON object with:
     const finalStatus = parsedResult.status === "needs_retry" ? "retry" : "completed";
 
     // Update task status
-    await updateTaskStatus(task.task_id, finalStatus);
+    await updateTaskStatus(task.id, finalStatus);
 
     // Create execution log
     const log: ExecutionLog = {
       execution_id: executionId,
-      task_id: task.task_id,
+      task_id: task.id,
       model_used: response.model || "unknown",
       cost: response.estimatedCost || 0,
       tokens_in: response.usage?.prompt_tokens || 0,
@@ -222,12 +222,12 @@ Return a JSON object with:
     console.error(`[queue] ❌ Task execution failed:`, error.message);
 
     // Mark as failed
-    await updateTaskStatus(task.task_id, "failed");
+    await updateTaskStatus(task.id, "failed");
 
     // Log failure
     const log: ExecutionLog = {
       execution_id: executionId,
-      task_id: task.task_id,
+      task_id: task.id,
       model_used: "unknown",
       cost: 0,
       tokens_in: 0,
