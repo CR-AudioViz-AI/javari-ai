@@ -6,13 +6,14 @@ export async function GET() {
 
   const supabase = createClient(url, key);
 
-  const { count, error } = await supabase
+  const { data, error } = await supabase
     .from("roadmap_tasks")
-    .select("*", { count: "exact", head: true });
+    .select("id,status");
 
   return Response.json({
     supabase_url: url,
-    roadmap_tasks_count: count ?? 0,
+    row_count: data ? data.length : 0,
+    rows: data ?? [],
     error: error?.message ?? null,
   });
 }
