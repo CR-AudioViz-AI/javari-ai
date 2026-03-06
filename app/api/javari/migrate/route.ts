@@ -249,4 +249,65 @@ export async function POST(req: NextRequest) {
     verify_error: verifyErr?.message ?? null,
     steps,
   });
+
+  // ── Create guardrail_audit_log table ─────────────────────────────────────
+  if (action === "create-guardrail-table") {
+    const steps: string[] = [];
+    const errs: string[] = [];
+
+    // guardrail_audit_log — one row per guardrail check per task execution
+    const ddl = `
+      CREATE TABLE IF NOT EXISTS guardrail_audit_log (
+        id            BIGSERIAL PRIMARY KEY,
+        execution_id  TEXT        NOT NULL,
+        task_id       TEXT        NOT NULL,
+        guardrail_check TEXT      NOT NULL,
+        outcome       TEXT        NOT NULL CHECK (outcome IN ('pass','block','rollback')),
+        reason        TEXT        NOT NULL,
+        meta          JSONB       NOT NULL DEFAULT '{}',
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_guardrail_audit_task_id
+        ON guardrail_audit_log (task_id);
+      CREATE INDEX IF NOT EXISTS idx_guardrail_audit_execution_id
+        ON guardrail_audit_log (execution_id);
+      CREATE INDEX IF NOT EXISTS idx_guardrail_audit_outcome
+        ON guardrail_audit_log (outcome);
+    `;
+
+    // Execute via rpc exec_sql if available, else insert a no-op row to verify connectivity
+    try {
+      const { error } = await supabase.rpc("exec_sql", { sql: ddl });
+      if (error) {
+        // exec_sql may not exist — try raw insert to detect table existence
+        const { error: checkErr } = await supabase
+          .from("guardrail_audit_log")
+          .select("id")
+          .limit(1);
+        if (checkErr && checkErr.message.includes("does not exist")) {
+          errs.push(`Table does not exist and exec_sql unavailable: ${error.message}`);
+          steps.push("MANUAL ACTION REQUIRED: run CREATE TABLE guardrail_audit_log via Supabase SQL editor");
+        } else {
+          steps.push("Table already exists or is accessible");
+        }
+      } else {
+        steps.push("guardrail_audit_log table created via exec_sql");
+      }
+    } catch (e: unknown) {
+      // Try select to check if table exists already
+      const { error: checkErr } = await supabase
+        .from("guardrail_audit_log")
+        .select("id")
+        .limit(1);
+      if (!checkErr) {
+        steps.push("Table already exists — connectivity confirmed");
+      } else {
+        errs.push(`DDL failed: ${(e as Error).message}`);
+        steps.push("MANUAL ACTION REQUIRED: see report");
+      }
+    }
+
+    return NextResponse.json({ ok: errs.length === 0, steps, errors: errs });
+  }
+
 }
