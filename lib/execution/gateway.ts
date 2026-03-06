@@ -14,7 +14,7 @@ import { logTelemetry } from "@/lib/telemetry/telemetry";
 
 export type ExecutionMode = "auto" | "multi";
 
-const MAX_REQUEST_COST = 1.25;
+const MAX_REQUEST_COST = 1.75;
 
 export interface ExecutionRequest {
   input: string;
