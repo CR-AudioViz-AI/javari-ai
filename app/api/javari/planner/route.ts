@@ -24,7 +24,7 @@ interface PlannerTask {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { goal } = body;
+    const { goal, phaseId, roadmapId } = body;
 
     if (!goal || typeof goal !== "string" || !goal.trim()) {
       return NextResponse.json(
@@ -33,7 +33,12 @@ export async function POST(req: Request) {
       );
     }
 
-    console.log("[planner] Goal received:", goal.slice(0, 120));
+    // phase_id is NOT NULL in roadmap_tasks — default to "planner" when not supplied
+    const resolvedPhaseId: string = phaseId ?? "planner";
+    const resolvedRoadmapId: string | null = roadmapId ?? null;
+
+    console.log("[planner] Goal:", goal.slice(0, 120));
+    console.log("[planner] Phase:", resolvedPhaseId, "| Roadmap:", resolvedRoadmapId);
 
     const prompt = `
 You are an autonomous roadmap planner for an AI platform called Javari AI.
@@ -71,7 +76,7 @@ Return format (JSON array only):
       .replace(/```\s*/g, "")
       .trim();
 
-    // Extract JSON array even if wrapped in text
+    // Extract JSON array even if wrapped in surrounding text
     const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
     if (!arrayMatch) {
       throw new Error(`AI output did not contain a valid JSON array. Got: ${cleaned.slice(0, 200)}`);
@@ -88,7 +93,7 @@ Return format (JSON array only):
       throw new Error("AI returned an empty task list");
     }
 
-    // Validate and normalise each task
+    // Validate and build rows — include all NOT NULL columns
     const now = Math.floor(Date.now() / 1000);
     const rows = tasks.map((t: PlannerTask) => {
       if (!t.id || !t.title || !t.description) {
@@ -96,6 +101,8 @@ Return format (JSON array only):
       }
       return {
         id: t.id,
+        phase_id: resolvedPhaseId,
+        ...(resolvedRoadmapId ? { roadmap_id: resolvedRoadmapId } : {}),
         title: t.title,
         description: t.description,
         depends_on: Array.isArray(t.depends_on) ? t.depends_on : [],
@@ -104,7 +111,7 @@ Return format (JSON array only):
       };
     });
 
-    console.log(`[planner] Inserting ${rows.length} tasks for goal: "${goal.slice(0, 60)}"`);
+    console.log(`[planner] Inserting ${rows.length} tasks`);
 
     const { error: insertError } = await supabase
       .from("roadmap_tasks")
@@ -121,6 +128,7 @@ Return format (JSON array only):
       success: true,
       goal,
       model: ai.model,
+      phaseId: resolvedPhaseId,
       created: rows.length,
       tasks: rows.map(r => ({
         id: r.id,
