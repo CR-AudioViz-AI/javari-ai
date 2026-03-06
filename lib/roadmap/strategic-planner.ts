@@ -1,6 +1,6 @@
 /**
  * Javari Strategic Planning Engine
- * Consumes strict JSON task schema from multi-agent gateway
+ * Optimized model routing for cost-effective multi-agent execution
  */
 
 import { executeGateway } from "@/lib/execution/gateway";
@@ -30,17 +30,17 @@ export async function generateRoadmap(
       mode: "multi",
       userId,
       roles: {
-        architect: "gpt-4o",
-        builder: "claude-sonnet-4-20250514",
-        validator: "gpt-4o",
-        documenter: "gpt-4o-mini",
+        architect: "gpt-4o",              // Strategic planning
+        builder: "claude-sonnet-4-20250514",  // Implementation details
+        validator: "gpt-4o-mini",         // Quality check (optimized)
+        documenter: "gpt-4o-mini",        // Documentation (optimized)
       },
     }) as any;
 
     console.log("[strategic-planner] ✅ Planning complete");
     console.log("[strategic-planner] Cost: $", (planningResponse.estimatedCost ?? 0).toFixed(4));
 
-    // Gateway now returns validated tasks array directly
+    // Gateway returns validated tasks array directly
     const tasks = planningResponse.tasks;
     
     if (!tasks || !Array.isArray(tasks) || tasks.length === 0) {
