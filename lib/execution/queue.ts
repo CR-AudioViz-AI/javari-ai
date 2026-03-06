@@ -65,7 +65,7 @@ async function getExecutableTasks(): Promise<Task[]> {
     }
 
     // All dependencies must be completed
-    const dependencies = Array.isArray(task.depends_on) ? task.depends_on : [];
+    const dependencies = task.depends_on ?? [];
     const allDependenciesMet = dependencies.every(depId => 
       completedTaskIds.has(depId)
     );
