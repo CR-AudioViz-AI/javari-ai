@@ -1,10 +1,11 @@
-/**
- * Javari Execution Queue
- * Sequential task execution with dependency resolution
- */
+// lib/execution/queue.ts
+// Purpose: Execution queue — sequential task execution with guardrails, dependency
+//          resolution, audit logging, and roadmap-only enforcement
+// Date: 2026-03-06
 
 import { createClient } from "@supabase/supabase-js";
 import { executeGateway } from "./gateway";
+import { runGuardrails, GuardrailReport } from "./guardrails";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -15,6 +16,7 @@ export interface Task {
   description: string;
   status: "pending" | "in_progress" | "completed" | "retry" | "failed";
   depends_on: string[] | null;
+  source?: string;
   created_at?: string;
 }
 
@@ -26,18 +28,29 @@ export interface ExecutionLog {
   tokens_in: number;
   tokens_out: number;
   execution_time: number;
-  status: "success" | "failed" | "retry";
+  status: "success" | "failed" | "retry" | "blocked";
   error_message?: string;
+  guardrail_report?: GuardrailReport;
   timestamp: string;
 }
 
-/**
- * Get all pending tasks with satisfied dependencies
- */
+// ─── Roadmap-only enforcement ─────────────────────────────────────────────────
+// The planner will never generate discovery tasks, but this is a defense-in-depth
+// check at the executor level. Any non-roadmap task is quarantined immediately.
+function enforceRoadmapOnly(task: Task): void {
+  if (task.source && task.source !== "roadmap") {
+    throw new Error(
+      `GUARDRAIL VIOLATION: Task "${task.id}" has source="${task.source}". ` +
+      `Only source="roadmap" tasks are permitted in autonomous execution. ` +
+      `Task quarantined — will not execute.`
+    );
+  }
+}
+
+// ─── Fetch executable tasks ───────────────────────────────────────────────────
 async function getExecutableTasks(): Promise<Task[]> {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-  // Get all tasks
   const { data: allTasks, error: tasksError } = await supabase
     .from("roadmap_tasks")
     .select("*")
@@ -48,45 +61,22 @@ async function getExecutableTasks(): Promise<Task[]> {
     return [];
   }
 
-  if (!allTasks || allTasks.length === 0) {
-    return [];
-  }
+  if (!allTasks || allTasks.length === 0) return [];
 
-  // Build a map of completed task IDs
-  const completedTaskIds = new Set(
-    allTasks.filter(t => t.status === "completed").map(t => t.id)
+  const completedIds = new Set(
+    allTasks.filter((t: Task) => t.status === "completed").map((t: Task) => t.id)
   );
 
-  // Filter for executable tasks
-  const executableTasks = allTasks.filter(task => {
-    // Must be pending or retry
-    if (task.status !== "pending" && task.status !== "retry") {
-      return false;
-    }
-
-    // All dependencies must be completed
-    const dependencies = task.depends_on ?? [];
-    const allDependenciesMet = dependencies.every(depId => 
-      completedTaskIds.has(depId)
-    );
-
-    return allDependenciesMet;
+  return allTasks.filter((task: Task) => {
+    if (task.status !== "pending" && task.status !== "retry") return false;
+    const deps = task.depends_on ?? [];
+    return deps.every((depId: string) => completedIds.has(depId));
   });
-
-  console.log(`[queue] Found ${executableTasks.length} executable tasks out of ${allTasks.length} total`);
-  
-  return executableTasks;
 }
 
-/**
- * Update task status
- */
-async function updateTaskStatus(
-  taskId: string,
-  status: Task["status"]
-): Promise<boolean> {
+// ─── Status update ────────────────────────────────────────────────────────────
+async function updateTaskStatus(taskId: string, status: Task["status"]): Promise<boolean> {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
   const { error } = await supabase
     .from("roadmap_tasks")
     .update({ status, updated_at: Math.floor(Date.now() / 1000) })
@@ -96,17 +86,13 @@ async function updateTaskStatus(
     console.error(`[queue] Error updating task ${taskId}:`, error.message);
     return false;
   }
-
-  console.log(`[queue] ✅ Task ${taskId} status → ${status}`);
+  console.log(`[queue] Task ${taskId} status → ${status}`);
   return true;
 }
 
-/**
- * Log task execution
- */
+// ─── Log execution ────────────────────────────────────────────────────────────
 async function logExecution(log: ExecutionLog): Promise<boolean> {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
   const { error } = await supabase
     .from("execution_logs")
     .insert([{
@@ -126,33 +112,92 @@ async function logExecution(log: ExecutionLog): Promise<boolean> {
     console.error("[queue] Error logging execution:", error.message);
     return false;
   }
-
-  console.log(`[queue] 📊 Logged execution ${log.execution_id}`);
   return true;
 }
 
-/**
- * Execute a single task
- */
-async function executeTask(task: Task, userId: string = "queue-executor"): Promise<{
-  success: boolean;
-  log: ExecutionLog;
-}> {
-  const executionId = `exec-${Date.now()}`;
+// ─── Execute single task ──────────────────────────────────────────────────────
+async function executeTask(
+  task: Task,
+  userId: string = "queue-executor"
+): Promise<{ success: boolean; log: ExecutionLog }> {
+  const executionId = `exec-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const startTime = Date.now();
 
   console.log(`[queue] ====== EXECUTING TASK ======`);
   console.log(`[queue] Execution ID: ${executionId}`);
-  console.log(`[queue] Task: ${task.title}`);
+  console.log(`[queue] Task: ${task.id} — ${task.title}`);
+  console.log(`[queue] Source: ${task.source ?? "unknown"}`);
 
+  // ── Guardrail: roadmap-only enforcement ────────────────────────────────────
   try {
-    // Mark task as in progress
-    await updateTaskStatus(task.id, "in_progress");
+    enforceRoadmapOnly(task);
+  } catch (err: unknown) {
+    const message = (err as Error).message;
+    console.error(`[queue] GUARDRAIL BLOCK (roadmap-only):`, message);
+    await updateTaskStatus(task.id, "failed");
+    const log: ExecutionLog = {
+      execution_id: executionId,
+      task_id: task.id,
+      model_used: "none",
+      cost: 0,
+      tokens_in: 0,
+      tokens_out: 0,
+      execution_time: Date.now() - startTime,
+      status: "blocked",
+      error_message: message,
+      timestamp: new Date().toISOString(),
+    };
+    await logExecution(log);
+    return { success: false, log };
+  }
 
-    // Build execution prompt
+  // Mark as in_progress before running guardrails (so migration check can detect it)
+  await updateTaskStatus(task.id, "in_progress");
+
+  // ── Run all guardrails ─────────────────────────────────────────────────────
+  const guardrailReport = await runGuardrails({
+    taskId: task.id,
+    executionId,
+    taskTitle: task.title,
+    estimatedCost: 0.005,   // conservative pre-execution estimate
+    tier: userId === "system" ? "system" : "free",
+  });
+
+  if (!guardrailReport.passed) {
+    const blockedBy = guardrailReport.blockedBy ?? "unknown";
+    const reason = guardrailReport.results.find(r => r.check === blockedBy)?.reason ?? "Guardrail blocked";
+
+    console.error(`[queue] GUARDRAIL BLOCK (${blockedBy}): ${reason}`);
+
+    // Revert to pending if rollback — retry later; failed if hard block
+    const revertStatus = blockedBy === "rollback_trigger" ? "pending" : "failed";
+    await updateTaskStatus(task.id, revertStatus);
+
+    const log: ExecutionLog = {
+      execution_id: executionId,
+      task_id: task.id,
+      model_used: "none",
+      cost: 0,
+      tokens_in: 0,
+      tokens_out: 0,
+      execution_time: Date.now() - startTime,
+      status: "blocked",
+      error_message: `Guardrail [${blockedBy}]: ${reason}`,
+      guardrail_report: guardrailReport,
+      timestamp: new Date().toISOString(),
+    };
+    await logExecution(log);
+    return { success: false, log };
+  }
+
+  console.log(`[queue] All guardrails passed for task ${task.id}`);
+
+  // ── Execute via gateway ────────────────────────────────────────────────────
+  try {
     const prompt = `
 TASK EXECUTION REQUEST
 
+Task ID: ${task.id}
 Task: ${task.title}
 Description: ${task.description}
 
@@ -168,63 +213,52 @@ Return a JSON object with:
 }
     `.trim();
 
-    // Execute via builder agent (using cheap tier by default)
     const response = await executeGateway({
       input: prompt,
       mode: "auto",
       userId,
       taskId: task.id,
-    }) as any;
+    }) as { output: unknown; model?: string; estimatedCost?: number; usage?: { prompt_tokens?: number; completion_tokens?: number } };
 
     const executionTime = Date.now() - startTime;
 
-    // Parse response
-    let parsedResult: any;
+    let parsedResult: { status?: string; result?: string };
     try {
       if (typeof response.output === "object") {
-        parsedResult = response.output;
+        parsedResult = response.output as { status?: string };
       } else {
-        parsedResult = JSON.parse(response.output);
+        parsedResult = JSON.parse(response.output as string) as { status?: string };
       }
-    } catch (e) {
-      parsedResult = { status: "completed", result: response.output };
+    } catch {
+      parsedResult = { status: "completed", result: String(response.output) };
     }
 
-    // Determine final status
-    const finalStatus = parsedResult.status === "needs_retry" ? "retry" : "completed";
-
-    // Update task status
+    const finalStatus: Task["status"] = parsedResult.status === "needs_retry" ? "retry" : "completed";
     await updateTaskStatus(task.id, finalStatus);
 
-    // Create execution log
     const log: ExecutionLog = {
       execution_id: executionId,
       task_id: task.id,
-      model_used: response.model || "unknown",
-      cost: response.estimatedCost || 0,
-      tokens_in: response.usage?.prompt_tokens || 0,
-      tokens_out: response.usage?.completion_tokens || 0,
+      model_used: response.model ?? "unknown",
+      cost: response.estimatedCost ?? 0,
+      tokens_in: response.usage?.prompt_tokens ?? 0,
+      tokens_out: response.usage?.completion_tokens ?? 0,
       execution_time: executionTime,
       status: finalStatus === "completed" ? "success" : "retry",
+      guardrail_report: guardrailReport,
       timestamp: new Date().toISOString(),
     };
 
     await logExecution(log);
 
-    console.log(`[queue] ✅ Task executed: ${finalStatus}`);
-    console.log(`[queue] Time: ${executionTime}ms | Cost: $${log.cost.toFixed(4)}`);
-
+    console.log(`[queue] Task ${task.id} → ${finalStatus} | ${executionTime}ms | $${(log.cost).toFixed(4)}`);
     return { success: true, log };
 
-  } catch (error: any) {
-    const executionTime = Date.now() - startTime;
-
-    console.error(`[queue] ❌ Task execution failed:`, error.message);
-
-    // Mark as failed
+  } catch (error: unknown) {
+    const message = (error as Error).message;
+    console.error(`[queue] Task ${task.id} execution failed:`, message);
     await updateTaskStatus(task.id, "failed");
 
-    // Log failure
     const log: ExecutionLog = {
       execution_id: executionId,
       task_id: task.id,
@@ -232,22 +266,18 @@ Return a JSON object with:
       cost: 0,
       tokens_in: 0,
       tokens_out: 0,
-      execution_time: executionTime,
+      execution_time: Date.now() - startTime,
       status: "failed",
-      error_message: error.message,
+      error_message: message,
+      guardrail_report: guardrailReport,
       timestamp: new Date().toISOString(),
     };
-
     await logExecution(log);
-
     return { success: false, log };
   }
 }
 
-/**
- * Process the execution queue
- * Returns number of tasks executed
- */
+// ─── Process queue ─────────────────────────────────────────────────────────────
 export async function processQueue(
   maxTasks: number = 5,
   userId: string = "queue-executor"
@@ -255,6 +285,7 @@ export async function processQueue(
   executed: number;
   succeeded: number;
   failed: number;
+  blocked: number;
   logs: ExecutionLog[];
 }> {
   console.log("[queue] ====== PROCESSING EXECUTION QUEUE ======");
@@ -264,43 +295,36 @@ export async function processQueue(
 
   if (executableTasks.length === 0) {
     console.log("[queue] No executable tasks found");
-    return { executed: 0, succeeded: 0, failed: 0, logs: [] };
+    return { executed: 0, succeeded: 0, failed: 0, blocked: 0, logs: [] };
   }
 
-  // Limit to maxTasks
   const tasksToExecute = executableTasks.slice(0, maxTasks);
-  console.log(`[queue] Executing ${tasksToExecute.length} tasks`);
+  console.log(`[queue] Executing ${tasksToExecute.length} task(s)`);
 
   const logs: ExecutionLog[] = [];
   let succeeded = 0;
   let failed = 0;
+  let blocked = 0;
 
-  // Execute tasks sequentially
   for (const task of tasksToExecute) {
     const result = await executeTask(task, userId);
     logs.push(result.log);
 
-    if (result.success) {
+    if (result.log.status === "blocked") {
+      blocked++;
+    } else if (result.success) {
       succeeded++;
     } else {
       failed++;
     }
   }
 
-  console.log(`[queue] ✅ Queue processing complete`);
-  console.log(`[queue] Executed: ${tasksToExecute.length} | Succeeded: ${succeeded} | Failed: ${failed}`);
+  console.log(`[queue] Complete — executed: ${tasksToExecute.length} | succeeded: ${succeeded} | failed: ${failed} | blocked: ${blocked}`);
 
-  return {
-    executed: tasksToExecute.length,
-    succeeded,
-    failed,
-    logs,
-  };
+  return { executed: tasksToExecute.length, succeeded, failed, blocked, logs };
 }
 
-/**
- * Get execution statistics
- */
+// ─── Queue stats ──────────────────────────────────────────────────────────────
 export async function getQueueStats(): Promise<{
   total: number;
   pending: number;
@@ -310,30 +334,18 @@ export async function getQueueStats(): Promise<{
   retry: number;
 }> {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-  const { data: tasks, error } = await supabase
-    .from("roadmap_tasks")
-    .select("status");
+  const { data: tasks, error } = await supabase.from("roadmap_tasks").select("status");
 
   if (error || !tasks) {
-    return {
-      total: 0,
-      pending: 0,
-      inProgress: 0,
-      completed: 0,
-      failed: 0,
-      retry: 0,
-    };
+    return { total: 0, pending: 0, inProgress: 0, completed: 0, failed: 0, retry: 0 };
   }
 
-  const stats = {
-    total: tasks.length,
-    pending: tasks.filter(t => t.status === "pending").length,
-    inProgress: tasks.filter(t => t.status === "in_progress").length,
-    completed: tasks.filter(t => t.status === "completed").length,
-    failed: tasks.filter(t => t.status === "failed").length,
-    retry: tasks.filter(t => t.status === "retry").length,
+  return {
+    total:      tasks.length,
+    pending:    tasks.filter((t: { status: string }) => t.status === "pending").length,
+    inProgress: tasks.filter((t: { status: string }) => t.status === "in_progress").length,
+    completed:  tasks.filter((t: { status: string }) => t.status === "completed").length,
+    failed:     tasks.filter((t: { status: string }) => t.status === "failed").length,
+    retry:      tasks.filter((t: { status: string }) => t.status === "retry").length,
   };
-
-  return stats;
 }
