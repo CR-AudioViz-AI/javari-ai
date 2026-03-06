@@ -1,3 +1,7 @@
+// lib/execution/gateway.ts
+// Purpose: Execution gateway with tiered cost limits for system vs user execution
+// Date: 2026-03-06
+
 import { enforceRoadmapBudget } from "@/lib/billing/enforcement";
 import { executeWithRouting } from "@/lib/router/executeWithRouting";
 import {
@@ -14,7 +18,43 @@ import { logTelemetry } from "@/lib/telemetry/telemetry";
 
 export type ExecutionMode = "auto" | "multi";
 
-const MAX_REQUEST_COST = 2.00;
+// Tier system: system tier for autonomous roadmap execution, user tiers for human requests
+export type ExecutionTier = "system" | "pro" | "free";
+
+const COST_LIMITS: Record<ExecutionTier, number> = {
+  system: 10.00, // autonomous roadmap execution — elevated limit
+  pro: 5.00,
+  free: 1.00,
+};
+
+/**
+ * Validate whether an estimated cost is within the allowed limit for a tier.
+ * Used by autonomous queue workers before dispatching tasks.
+ */
+export function validateCost(
+  estimatedCost: number,
+  tier: ExecutionTier = "system"
+): { allowed: boolean; reason?: string } {
+  const limit = COST_LIMITS[tier];
+  if (estimatedCost > limit) {
+    return {
+      allowed: false,
+      reason: `Cost limit exceeded ($${estimatedCost.toFixed(4)} > $${limit.toFixed(2)}) for tier "${tier}"`,
+    };
+  }
+  return { allowed: true };
+}
+
+/**
+ * Resolve the execution tier for a request.
+ * userId "system" (autonomous roadmap worker) always gets system tier.
+ */
+function resolveExecutionTier(userId: string, planTier: PlanTier): ExecutionTier {
+  if (userId === "system") return "system";
+  if (planTier === "pro" || planTier === "enterprise") return "pro";
+  return "free";
+}
+
 const MAX_TOTAL_RETRIES = 4; // Global retry ceiling across all roles
 
 export interface ExecutionRequest {
@@ -49,21 +89,24 @@ export interface RoleTaskResponse {
 /**
  * Validate task response follows strict schema
  */
-function validateTaskResponse(obj: any): obj is RoleTaskResponse {
+function validateTaskResponse(obj: unknown): obj is RoleTaskResponse {
   if (!obj || typeof obj !== "object") {
     return false;
   }
-  
-  if (!Array.isArray(obj.tasks) || obj.tasks.length === 0) {
+  const o = obj as Record<string, unknown>;
+  if (!Array.isArray(o.tasks) || o.tasks.length === 0) {
     return false;
   }
-  
-  return obj.tasks.every((t: any) =>
-    typeof t.title === "string" &&
-    typeof t.description === "string" &&
-    t.title.length > 0 &&
-    t.description.length > 0
-  );
+  return (o.tasks as unknown[]).every((t: unknown) => {
+    if (!t || typeof t !== "object") return false;
+    const task = t as Record<string, unknown>;
+    return (
+      typeof task.title === "string" &&
+      typeof task.description === "string" &&
+      task.title.length > 0 &&
+      task.description.length > 0
+    );
+  });
 }
 
 /**
@@ -106,22 +149,30 @@ VALID EXAMPLE:
 export async function executeGateway(req: ExecutionRequest) {
   const executionEnabled = process.env.JAVARI_EXECUTION_ENABLED;
   console.log("[gateway] Kill switch check: JAVARI_EXECUTION_ENABLED =", executionEnabled);
-  
+
   if (executionEnabled !== "true") {
     console.error("[gateway] ❌ EXECUTION BLOCKED: Kill switch is OFF");
     throw new Error("Javari execution is currently disabled.");
   }
-  
+
   console.log("[gateway] ✓ Kill switch: ENABLED");
   console.log("[gateway] ====== REQUEST START ======");
   console.log("[gateway] userId:", req.userId, "| mode:", req.mode);
 
-  let planTier = await getUserPlan(req.userId);
-  console.log("[gateway] Plan tier:", planTier);
+  const planTier = await getUserPlan(req.userId);
+  const executionTier = resolveExecutionTier(req.userId, planTier);
+  const MAX_REQUEST_COST = COST_LIMITS[executionTier];
 
-  enforceModeEntitlement(planTier, req.mode);
-  enforceRoadmapBudget(planTier, req.requestedBudget ?? 0);
-  await enforceMonthlyLimit(req.userId, planTier);
+  console.log("[gateway] Plan tier:", planTier, "| Execution tier:", executionTier, "| Cost limit: $" + MAX_REQUEST_COST.toFixed(2));
+
+  // System-tier autonomous tasks skip user entitlement and monthly limit checks
+  if (executionTier !== "system") {
+    enforceModeEntitlement(planTier, req.mode);
+    enforceRoadmapBudget(planTier, req.requestedBudget ?? 0);
+    await enforceMonthlyLimit(req.userId, planTier);
+  } else {
+    console.log("[gateway] System tier: skipping user entitlement/monthly limit checks");
+  }
 
   if (req.mode === "auto") {
     const capability = classifyCapability(req.input);
@@ -138,13 +189,16 @@ export async function executeGateway(req: ExecutionRequest) {
       const latencyMs = Date.now() - executionStart;
       const estimatedCost = response.estimatedCost ?? 0;
 
-      console.log("[gateway] Cost check: $", estimatedCost.toFixed(4), "/ $", MAX_REQUEST_COST);
-      
-      if (estimatedCost > MAX_REQUEST_COST) {
-        throw new Error(`Request blocked: cost limit exceeded ($${estimatedCost.toFixed(2)} > $${MAX_REQUEST_COST})`);
+      console.log("[gateway] Cost check: $", estimatedCost.toFixed(4), "/ $", MAX_REQUEST_COST.toFixed(2), "(tier:", executionTier + ")");
+
+      const costCheck = validateCost(estimatedCost, executionTier);
+      if (!costCheck.allowed) {
+        throw new Error(`Request blocked: ${costCheck.reason}`);
       }
 
-      enforceRequestCost(planTier, estimatedCost);
+      if (executionTier !== "system") {
+        enforceRequestCost(planTier, estimatedCost);
+      }
       await recordUsage(req.userId, estimatedCost);
 
       try {
@@ -157,12 +211,12 @@ export async function executeGateway(req: ExecutionRequest) {
           cost: estimatedCost,
           success: true,
         });
-      } catch (telemetryError: any) {
-        console.warn("[gateway] Telemetry logging failed:", telemetryError.message);
+      } catch (telemetryError: unknown) {
+        console.warn("[gateway] Telemetry logging failed:", (telemetryError as Error).message);
       }
 
       return response;
-    } catch (error: any) {
+    } catch (error: unknown) {
       const latencyMs = Date.now() - executionStart;
 
       try {
@@ -175,8 +229,8 @@ export async function executeGateway(req: ExecutionRequest) {
           cost: 0,
           success: false,
         });
-      } catch (telemetryError: any) {
-        console.warn("[gateway] Telemetry logging failed:", telemetryError.message);
+      } catch (telemetryError: unknown) {
+        console.warn("[gateway] Telemetry logging failed:", (telemetryError as Error).message);
       }
 
       throw error;
@@ -189,87 +243,80 @@ export async function executeGateway(req: ExecutionRequest) {
     }
 
     const executionOrder = ["architect", "builder", "validator", "documenter"];
-    const activeRoles = executionOrder.filter(role => (req.roles as any)[role]);
-    
+    const activeRoles = executionOrder.filter(role => (req.roles as Record<string, string | undefined>)[role]);
+
     console.log("[gateway] 🚀 MULTI-MODE:", activeRoles.length, "roles:", activeRoles);
 
     let totalCost = 0;
-    let totalRetries = 0; // Track global retry count
+    let totalRetries = 0;
     const roleOutputs: Record<string, RoleTaskResponse> = {};
     const allTasks: TaskSchema[] = [];
 
     for (const role of activeRoles) {
-      const modelId = (req.roles as any)[role];
+      const modelId = (req.roles as Record<string, string>)[role];
       console.log(`[gateway] → ${role.toUpperCase()}: ${modelId}`);
 
-      // Build strict JSON prompt for role
       let prompt = `${req.input}\n\n${STRICT_JSON_SCHEMA}`;
-      
+
       const roleStart = Date.now();
       let attempts = 0;
       let validResponse: RoleTaskResponse | null = null;
 
-      // Try up to 2 times to get valid JSON
       while (attempts < 2 && !validResponse) {
         attempts++;
-        
-        // Check global retry ceiling
+
         if (totalRetries >= MAX_TOTAL_RETRIES) {
           console.error(`[gateway] ❌ RETRY CEILING EXCEEDED: ${totalRetries} total retries`);
           throw new Error(`Execution aborted: retry ceiling exceeded (${totalRetries}/${MAX_TOTAL_RETRIES})`);
         }
-        
+
         if (attempts > 1) {
           totalRetries++;
           console.log(`[gateway] 🔄 Global retry count: ${totalRetries}/${MAX_TOTAL_RETRIES}`);
         }
-        
+
         try {
           const response = await executeWithRouting(prompt, modelId, true);
           const roleLatency = Date.now() - roleStart;
           const roleCost = response.estimatedCost ?? 0;
           totalCost += roleCost;
-          
+
           console.log(`[gateway] ${role} attempt ${attempts} - parsing response...`);
-          
-          // Try to parse the response
-          let parsed: any = null;
-          
+
+          let parsed: unknown = null;
+
           if (typeof response.output === "object") {
             parsed = response.output;
           } else if (typeof response.output === "string") {
-            // Clean up common issues
-            let cleaned = response.output
+            let cleaned = (response.output as string)
               .replace(/```json\s*/g, "")
               .replace(/```\s*/g, "")
               .trim();
-            
-            // Extract JSON if wrapped in text
+
             const jsonMatch = cleaned.match(/\{[\s\S]*"tasks"[\s\S]*\}/);
             if (jsonMatch) {
               cleaned = jsonMatch[0];
             }
-            
+
             try {
               parsed = JSON.parse(cleaned);
             } catch (e) {
               console.error(`[gateway] ${role} JSON parse failed:`, e);
             }
           }
-          
-          // Validate schema
+
           if (validateTaskResponse(parsed)) {
             validResponse = parsed;
             console.log(`[gateway] ✅ ${role} returned valid schema with ${parsed.tasks.length} tasks`);
           } else {
             console.warn(`[gateway] ⚠️ ${role} response failed validation`);
-            
+
             if (attempts < 2) {
               console.log(`[gateway] Retrying ${role} with schema enforcement...`);
               prompt = `Your previous response did not follow the required JSON schema.\n\n${STRICT_JSON_SCHEMA}\n\nReturn ONLY the required JSON. No other text.`;
             }
           }
-          
+
           try {
             await logTelemetry({
               taskId: req.taskId,
@@ -280,31 +327,31 @@ export async function executeGateway(req: ExecutionRequest) {
               cost: roleCost,
               success: validResponse !== null,
             });
-          } catch (telemetryError: any) {
-            console.warn("[gateway] Telemetry logging failed:", telemetryError.message);
+          } catch (telemetryError: unknown) {
+            console.warn("[gateway] Telemetry logging failed:", (telemetryError as Error).message);
           }
-          
-        } catch (error: any) {
-          console.error(`[gateway] ${role} execution failed:`, error.message);
-          
+        } catch (error: unknown) {
+          console.error(`[gateway] ${role} execution failed:`, (error as Error).message);
+
           if (attempts >= 2) {
             throw error;
           }
         }
       }
-      
+
       if (!validResponse) {
         throw new Error(`${role} failed to return valid task schema after ${attempts} attempts`);
       }
-      
+
       roleOutputs[role] = validResponse;
       allTasks.push(...validResponse.tasks);
-      
+
       console.log(`[gateway] ${role} complete | Cost: $${totalCost.toFixed(4)} | Retries: ${totalRetries}/${MAX_TOTAL_RETRIES}`);
-      
-      if (totalCost > MAX_REQUEST_COST) {
+
+      const costCheck = validateCost(totalCost, executionTier);
+      if (!costCheck.allowed) {
         console.error("[gateway] ❌ COST LIMIT EXCEEDED");
-        throw new Error(`Request blocked: cost limit exceeded ($${totalCost.toFixed(2)} > $${MAX_REQUEST_COST})`);
+        throw new Error(`Request blocked: ${costCheck.reason}`);
       }
     }
 
@@ -313,7 +360,9 @@ export async function executeGateway(req: ExecutionRequest) {
     console.log("[gateway] Total cost: $", totalCost.toFixed(4));
     console.log("[gateway] Total retries used:", totalRetries, "/", MAX_TOTAL_RETRIES);
 
-    enforceRequestCost(planTier, totalCost);
+    if (executionTier !== "system") {
+      enforceRequestCost(planTier, totalCost);
+    }
     await recordUsage(req.userId, totalCost);
 
     return {
