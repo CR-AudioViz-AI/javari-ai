@@ -212,7 +212,7 @@ export async function executeGateway(req: ExecutionRequest) {
         attempts++;
         
         try {
-          const response = await executeWithRouting(prompt, modelId);
+          const response = await executeWithRouting(prompt, modelId, true);
           const roleLatency = Date.now() - roleStart;
           const roleCost = response.estimatedCost ?? 0;
           totalCost += roleCost;
