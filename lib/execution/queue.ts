@@ -14,8 +14,8 @@ export interface Task {
   title: string;
   description: string;
   status: "pending" | "in_progress" | "completed" | "retry" | "failed";
-  dependencies: string[];
-  created_at: string;
+  depends_on: string[] | null;
+  created_at?: string;
 }
 
 export interface ExecutionLog {
@@ -41,7 +41,7 @@ async function getExecutableTasks(): Promise<Task[]> {
   const { data: allTasks, error: tasksError } = await supabase
     .from("roadmap_tasks")
     .select("*")
-    .order("created_at", { ascending: true });
+    .order("updated_at", { ascending: true });
 
   if (tasksError) {
     console.error("[queue] Error fetching tasks:", tasksError.message);
@@ -65,7 +65,7 @@ async function getExecutableTasks(): Promise<Task[]> {
     }
 
     // All dependencies must be completed
-    const dependencies = Array.isArray(task.dependencies) ? task.dependencies : [];
+    const dependencies = Array.isArray(task.depends_on) ? task.depends_on : [];
     const allDependenciesMet = dependencies.every(depId => 
       completedTaskIds.has(depId)
     );
@@ -89,7 +89,7 @@ async function updateTaskStatus(
 
   const { error } = await supabase
     .from("roadmap_tasks")
-    .update({ status, updated_at: new Date().toISOString() })
+    .update({ status, updated_at: Math.floor(Date.now() / 1000) })
     .eq("id", taskId);
 
   if (error) {
