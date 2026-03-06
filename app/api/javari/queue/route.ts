@@ -1,5 +1,5 @@
 // app/api/javari/queue/route.ts
-// Purpose: Execution queue API — processes pending roadmap tasks via cron or manual trigger
+// Purpose: Execution queue API — processes pending roadmap tasks via cron (GET) or manual trigger (POST)
 // Date: 2026-03-06
 
 import { NextRequest, NextResponse } from "next/server";
@@ -9,81 +9,69 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * POST /api/javari/queue
- * Process the execution queue.
- *
- * Called by:
- *   - Vercel cron (no body) → defaults to system tier, x-vercel-cron: 1 header present
- *   - Manual trigger        → body may override userId and maxTasks
+ * Shared execution logic — used by both GET (cron) and POST (manual).
  */
-export async function POST(req: NextRequest) {
-  // CRON INSTRUMENTATION — log every invocation so we can confirm
-  // whether Vercel cron is calling this endpoint and at what cadence.
-  // x-vercel-cron: 1 is set by Vercel only on cron-triggered requests.
+async function executeQueue(maxTasks: number, userId: string, isCron: boolean) {
   console.log("CRON INVOCATION", {
     timestamp: new Date().toISOString(),
-    source: "vercel-cron-or-manual",
-    headers: Object.fromEntries(req.headers),
+    method: isCron ? "GET (vercel-cron)" : "POST (manual)",
+    userId,
+    maxTasks,
+    isCron,
   });
-
-  try {
-    // Cron jobs send POST with no body — req.json() throws on empty body.
-    // Safe-parse: fall back to empty object if body is missing or unparseable.
-    let body: Record<string, unknown> = {};
-    try {
-      const text = await req.text();
-      if (text.trim().length > 0) {
-        body = JSON.parse(text);
-      }
-    } catch {
-      // No body or malformed — treat as cron call, use defaults
-    }
-
-    // Default userId to "system" so cron calls get the $10 system tier,
-    // not the $1 free tier which causes silent skips on expensive tasks.
-    const maxTasks = typeof body.maxTasks === "number" ? body.maxTasks : 5;
-    const userId   = typeof body.userId   === "string"  ? body.userId   : "system";
-
-    const isCron = req.headers.get("x-vercel-cron") === "1";
-    console.log(`[queue-api] POST — userId: ${userId}, maxTasks: ${maxTasks}, isCron: ${isCron}`);
-
-    const result = await processQueue(maxTasks, userId);
-
-    return NextResponse.json({
-      ok: true,
-      isCron,
-      ...result,
-    });
-
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("[queue-api] Error:", message);
-    return NextResponse.json(
-      { ok: false, error: message },
-      { status: 500 }
-    );
-  }
+  return processQueue(maxTasks, userId);
 }
 
 /**
  * GET /api/javari/queue
- * Return current queue statistics without executing anything.
+ * Vercel cron calls this path with GET + x-vercel-cron: 1 header.
+ * When called by cron → execute queue (system tier).
+ * When called manually without cron header → return stats only.
  */
-export async function GET(_req: NextRequest) {
+export async function GET(req: NextRequest) {
   try {
-    const stats = await getQueueStats();
+    const isCron = req.headers.get("x-vercel-cron") === "1";
 
-    return NextResponse.json({
-      ok: true,
-      stats,
-    });
+    if (isCron) {
+      // Cron invocation — execute the queue as system
+      const result = await executeQueue(5, "system", true);
+      return NextResponse.json({ ok: true, isCron: true, ...result });
+    }
+
+    // Manual GET — return stats only (no side effects)
+    const stats = await getQueueStats();
+    return NextResponse.json({ ok: true, isCron: false, stats });
 
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error("[queue-api] Error:", message);
-    return NextResponse.json(
-      { ok: false, error: message },
-      { status: 500 }
-    );
+    console.error("[queue-api] GET Error:", message);
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+  }
+}
+
+/**
+ * POST /api/javari/queue
+ * Manual trigger — body may specify userId and maxTasks.
+ */
+export async function POST(req: NextRequest) {
+  try {
+    let body: Record<string, unknown> = {};
+    try {
+      const text = await req.text();
+      if (text.trim().length > 0) body = JSON.parse(text);
+    } catch {
+      // No body or malformed — treat as cron-style call
+    }
+
+    const maxTasks = typeof body.maxTasks === "number" ? body.maxTasks : 5;
+    const userId   = typeof body.userId   === "string"  ? body.userId   : "system";
+
+    const result = await executeQueue(maxTasks, userId, false);
+    return NextResponse.json({ ok: true, isCron: false, ...result });
+
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[queue-api] POST Error:", message);
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }
