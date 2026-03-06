@@ -15,6 +15,7 @@ import { logTelemetry } from "@/lib/telemetry/telemetry";
 export type ExecutionMode = "auto" | "multi";
 
 const MAX_REQUEST_COST = 2.00;
+const MAX_TOTAL_RETRIES = 4; // Global retry ceiling across all roles
 
 export interface ExecutionRequest {
   input: string;
@@ -193,6 +194,7 @@ export async function executeGateway(req: ExecutionRequest) {
     console.log("[gateway] 🚀 MULTI-MODE:", activeRoles.length, "roles:", activeRoles);
 
     let totalCost = 0;
+    let totalRetries = 0; // Track global retry count
     const roleOutputs: Record<string, RoleTaskResponse> = {};
     const allTasks: TaskSchema[] = [];
 
@@ -210,6 +212,17 @@ export async function executeGateway(req: ExecutionRequest) {
       // Try up to 2 times to get valid JSON
       while (attempts < 2 && !validResponse) {
         attempts++;
+        
+        // Check global retry ceiling
+        if (totalRetries >= MAX_TOTAL_RETRIES) {
+          console.error(`[gateway] ❌ RETRY CEILING EXCEEDED: ${totalRetries} total retries`);
+          throw new Error(`Execution aborted: retry ceiling exceeded (${totalRetries}/${MAX_TOTAL_RETRIES})`);
+        }
+        
+        if (attempts > 1) {
+          totalRetries++;
+          console.log(`[gateway] 🔄 Global retry count: ${totalRetries}/${MAX_TOTAL_RETRIES}`);
+        }
         
         try {
           const response = await executeWithRouting(prompt, modelId, true);
@@ -287,7 +300,7 @@ export async function executeGateway(req: ExecutionRequest) {
       roleOutputs[role] = validResponse;
       allTasks.push(...validResponse.tasks);
       
-      console.log(`[gateway] ${role} cost: $${(totalCost - (roleOutputs[role] ? 0 : totalCost)).toFixed(4)} | Total: $${totalCost.toFixed(4)}`);
+      console.log(`[gateway] ${role} complete | Cost: $${totalCost.toFixed(4)} | Retries: ${totalRetries}/${MAX_TOTAL_RETRIES}`);
       
       if (totalCost > MAX_REQUEST_COST) {
         console.error("[gateway] ❌ COST LIMIT EXCEEDED");
@@ -298,6 +311,7 @@ export async function executeGateway(req: ExecutionRequest) {
     console.log("[gateway] ✅ Multi-mode complete");
     console.log("[gateway] Total tasks collected:", allTasks.length);
     console.log("[gateway] Total cost: $", totalCost.toFixed(4));
+    console.log("[gateway] Total retries used:", totalRetries, "/", MAX_TOTAL_RETRIES);
 
     enforceRequestCost(planTier, totalCost);
     await recordUsage(req.userId, totalCost);
