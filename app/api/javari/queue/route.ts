@@ -10,10 +10,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // ─── Recursion guard ──────────────────────────────────────────────────────────
-// Prevents the queue from triggering the cycle endpoint if it is already in
-// the middle of a cycle call. Module-level flag: lives for the lifetime of
-// this serverless function invocation only. Safe for concurrent requests
-// because each serverless invocation is isolated.
+// Prevents the queue from triggering the cycle endpoint if a cycle call is
+// already in flight for this serverless invocation.
 let cycleCallInFlight = false;
 
 // ─── Supabase client ──────────────────────────────────────────────────────────
@@ -22,20 +20,28 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-// ─── Base URL resolution (same pattern used by cycle endpoint) ─────────────────
+// ─── Base URL resolution ──────────────────────────────────────────────────────
+// Priority order:
+// 1. NEXT_PUBLIC_SITE_URL     — explicit override (set in Vercel env if needed)
+// 2. NEXT_PUBLIC_JAVARI_API   — e.g. "https://javariai.com/api" → strip "/api"
+// 3. VERCEL_URL               — auto-set by Vercel (deployment-specific, no https://)
+// 4. localhost fallback
 function getBaseUrl(): string {
-  return (
-    process.env.NEXT_PUBLIC_SITE_URL ??
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000")
-  );
+  if (process.env.NEXT_PUBLIC_SITE_URL) {
+    return process.env.NEXT_PUBLIC_SITE_URL;
+  }
+  if (process.env.NEXT_PUBLIC_JAVARI_API) {
+    // Strip trailing "/api" to get the site root
+    return process.env.NEXT_PUBLIC_JAVARI_API.replace(/\/api$/, "");
+  }
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL}`;
+  }
+  return "http://localhost:3000";
 }
 
 // ─── Shared execution logic ───────────────────────────────────────────────────
-async function executeQueue(
-  maxTasks: number,
-  userId: string,
-  isCron: boolean
-): Promise<ReturnType<typeof processQueue> extends Promise<infer T> ? T : never> {
+async function executeQueue(maxTasks: number, userId: string, isCron: boolean) {
   console.log("CRON INVOCATION", {
     timestamp: new Date().toISOString(),
     method: isCron ? "GET (vercel-cron)" : "POST (manual)",
@@ -47,18 +53,16 @@ async function executeQueue(
 }
 
 // ─── Autonomy trigger ─────────────────────────────────────────────────────────
-// Called after every queue run. If the queue is fully drained (no pending or
-// in-progress tasks), fires the cycle endpoint so Javari plans new work
-// without waiting for the next cron tick. Failures are logged and swallowed —
-// they must never crash the queue worker.
+// Called after every queue run. Fires the cycle endpoint when the queue is
+// fully drained. Failures are logged and swallowed — never crash the caller.
 async function maybeTriggerCycle(): Promise<void> {
   if (cycleCallInFlight) {
-    console.log("[queue-api] Cycle call already in flight — skipping trigger");
+    console.log("[queue-api] Cycle call already in flight — skipping");
     return;
   }
 
   try {
-    // Count tasks that are still active (pending OR in_progress)
+    // Count tasks that are still active
     const { count, error } = await supabase
       .from("roadmap_tasks")
       .select("*", { count: "exact", head: true })
@@ -70,18 +74,15 @@ async function maybeTriggerCycle(): Promise<void> {
     }
 
     const active = count ?? 0;
-
     if (active > 0) {
-      console.log(`[queue-api] Queue has ${active} active task(s) — cycle not triggered`);
+      console.log(`[queue-api] ${active} active task(s) remain — cycle not triggered`);
       return;
     }
 
-    // Queue is fully drained — trigger autonomy cycle
     cycleCallInFlight = true;
-    console.log("[queue-api] Queue drained — triggering autonomy cycle");
-
     const baseUrl = getBaseUrl();
     const cycleUrl = `${baseUrl}/api/javari/autonomy/cycle`;
+    console.log(`[queue-api] Queue drained — triggering cycle at ${cycleUrl}`);
 
     const response = await fetch(cycleUrl, {
       method: "POST",
@@ -94,17 +95,17 @@ async function maybeTriggerCycle(): Promise<void> {
     if (!response.ok) {
       const text = await response.text();
       console.error(
-        `[queue-api] Cycle endpoint returned HTTP ${response.status}: ${text.slice(0, 200)}`
+        `[queue-api] Cycle returned HTTP ${response.status}: ${text.slice(0, 200)}`
       );
     } else {
       const result = await response.json();
-      console.log("[queue-api] Autonomy cycle triggered:", {
-        action: result.action,
+      console.log("[queue-api] ✅ Autonomy cycle triggered:", {
+        action:       result.action,
         tasksCreated: result.tasksCreated ?? 0,
+        baseUrl,
       });
     }
   } catch (err: unknown) {
-    // Never let cycle trigger errors crash the queue response
     const message = err instanceof Error ? err.message : String(err);
     console.error("[queue-api] Cycle trigger failed (non-fatal):", message);
   } finally {
@@ -113,20 +114,17 @@ async function maybeTriggerCycle(): Promise<void> {
 }
 
 // ─── GET — Vercel cron entry point ────────────────────────────────────────────
-// Vercel sends GET + x-vercel-cron: 1. Without the header, returns stats only.
 export async function GET(req: NextRequest) {
   try {
     const isCron = req.headers.get("x-vercel-cron") === "1";
 
     if (isCron) {
       const result = await executeQueue(5, "system", true);
-      // Fire-and-forget: trigger cycle after execution, but do not await
-      // it before responding — keeps cron response time under 10s limit.
+      // Fire-and-forget for cron — must respond before 10s Vercel timeout
       void maybeTriggerCycle();
       return NextResponse.json({ ok: true, isCron: true, ...result });
     }
 
-    // Plain GET — stats only, no side effects
     const stats = await getQueueStats();
     return NextResponse.json({ ok: true, isCron: false, stats });
 
@@ -153,8 +151,7 @@ export async function POST(req: NextRequest) {
 
     const result = await executeQueue(maxTasks, userId, false);
 
-    // For manual POST, await the cycle trigger so callers can see whether
-    // a new planning cycle was kicked off in the same response.
+    // POST awaits the cycle trigger so callers see the full outcome
     await maybeTriggerCycle();
 
     return NextResponse.json({ ok: true, isCron: false, ...result });
