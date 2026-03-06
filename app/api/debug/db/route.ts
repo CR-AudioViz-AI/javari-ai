@@ -8,7 +8,7 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from("roadmap_tasks")
-    .select("id,status");
+    .select("*");
 
   return Response.json({
     supabase_url: url,
