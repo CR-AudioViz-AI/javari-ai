@@ -14,7 +14,6 @@ import { logTelemetry } from "@/lib/telemetry/telemetry";
 
 export type ExecutionMode = "auto" | "multi";
 
-// Cost Guard: Maximum cost per request (in USD)
 const MAX_REQUEST_COST = 0.50;
 
 export interface ExecutionRequest {
@@ -34,17 +33,76 @@ export interface ExecutionRequest {
   taskId?: string;
 }
 
-export interface StructuredMultiAgentResponse {
-  output: string; // Legacy combined text for backwards compatibility
-  roles: Record<string, any>; // Structured role outputs
-  model: string;
-  provider: string;
-  estimatedCost: number;
-  rolesExecuted: string[];
+export interface TaskSchema {
+  title: string;
+  description: string;
+  priority: "high" | "medium" | "low";
+  category: "planning" | "engineering" | "validation" | "documentation";
+  estimatedHours: number;
 }
 
+export interface RoleTaskResponse {
+  tasks: TaskSchema[];
+}
+
+/**
+ * Validate task response follows strict schema
+ */
+function validateTaskResponse(obj: any): obj is RoleTaskResponse {
+  if (!obj || typeof obj !== "object") {
+    return false;
+  }
+  
+  if (!Array.isArray(obj.tasks) || obj.tasks.length === 0) {
+    return false;
+  }
+  
+  return obj.tasks.every((t: any) =>
+    typeof t.title === "string" &&
+    typeof t.description === "string" &&
+    t.title.length > 0 &&
+    t.description.length > 0
+  );
+}
+
+/**
+ * Strict JSON task schema template
+ */
+const STRICT_JSON_SCHEMA = `
+RETURN FORMAT (MANDATORY):
+Return ONLY valid JSON using this exact schema:
+
+{
+  "tasks": [
+    {
+      "title": "Clear task name",
+      "description": "Detailed task description",
+      "priority": "high|medium|low",
+      "category": "planning|engineering|validation|documentation",
+      "estimatedHours": 1
+    }
+  ]
+}
+
+CRITICAL RULES:
+- Return ONLY the JSON object above
+- NO markdown formatting
+- NO code fences (\`\`\`json)
+- NO explanations before or after
+- NO text outside the JSON
+- Must include at least one task
+- Each task must have all required fields
+
+INVALID EXAMPLES:
+❌ Here is the JSON: {...}
+❌ \`\`\`json {...} \`\`\`
+❌ The roadmap includes: {...}
+
+VALID EXAMPLE:
+✅ {"tasks":[{"title":"Market Research","description":"Conduct market analysis","priority":"high","category":"planning","estimatedHours":8}]}
+`.trim();
+
 export async function executeGateway(req: ExecutionRequest) {
-  // GLOBAL KILL SWITCH
   const executionEnabled = process.env.JAVARI_EXECUTION_ENABLED;
   console.log("[gateway] Kill switch check: JAVARI_EXECUTION_ENABLED =", executionEnabled);
   
@@ -135,104 +193,118 @@ export async function executeGateway(req: ExecutionRequest) {
     console.log("[gateway] 🚀 MULTI-MODE:", activeRoles.length, "roles:", activeRoles);
 
     let totalCost = 0;
-    const roleOutputs: Record<string, any> = {};
-    const legacyTextParts: string[] = []; // For backwards compatibility
+    const roleOutputs: Record<string, RoleTaskResponse> = {};
+    const allTasks: TaskSchema[] = [];
 
     for (const role of activeRoles) {
       const modelId = (req.roles as any)[role];
       console.log(`[gateway] → ${role.toUpperCase()}: ${modelId}`);
 
-      // Build context-aware prompt
-      let prompt = "";
+      // Build strict JSON prompt for role
+      let prompt = `${req.input}\n\n${STRICT_JSON_SCHEMA}`;
       
-      if (role === "architect") {
-        prompt = `[ARCHITECT ROLE]\nYou are the system architect. Analyze and create a comprehensive plan.\n\nRequest: ${req.input}`;
-      } else if (role === "builder") {
-        const architectOutput = roleOutputs["architect"];
-        const context = architectOutput ? `\nArchitect's Plan:\n${JSON.stringify(architectOutput, null, 2)}\n` : "";
-        prompt = `[BUILDER ROLE]\nYou are the implementation builder. Create the solution.\n${context}\nRequest: ${req.input}`;
-      } else if (role === "validator") {
-        const builderOutput = roleOutputs["builder"];
-        const context = builderOutput ? `\nImplementation:\n${JSON.stringify(builderOutput, null, 2)}\n` : "";
-        prompt = `[VALIDATOR ROLE]\nYou are the quality validator. Review for correctness and completeness.\n${context}\nRequest: ${req.input}`;
-      } else if (role === "documenter") {
-        const architectOutput = roleOutputs["architect"];
-        const builderOutput = roleOutputs["builder"];
-        const validatorOutput = roleOutputs["validator"];
-        let context = "";
-        if (architectOutput) context += `\nPlan:\n${JSON.stringify(architectOutput, null, 2)}\n`;
-        if (builderOutput) context += `\nImplementation:\n${JSON.stringify(builderOutput, null, 2)}\n`;
-        if (validatorOutput) context += `\nValidation:\n${JSON.stringify(validatorOutput, null, 2)}\n`;
-        prompt = `[DOCUMENTER ROLE]\nYou are the technical documenter. Create clear, comprehensive documentation.\n${context}\nRequest: ${req.input}`;
-      } else {
-        prompt = `[${role.toUpperCase()} ROLE]\n${req.input}`;
-      }
-
       const roleStart = Date.now();
+      let attempts = 0;
+      let validResponse: RoleTaskResponse | null = null;
 
-      try {
-        const response = await executeWithRouting(prompt, modelId);
-        const roleLatency = Date.now() - roleStart;
-        const roleCost = response.estimatedCost ?? 0;
-        totalCost += roleCost;
+      // Try up to 2 times to get valid JSON
+      while (attempts < 2 && !validResponse) {
+        attempts++;
         
-        // Store structured output (router now returns parsed JSON when possible)
-        roleOutputs[role] = response.output;
-        
-        // Also build legacy text format for backwards compatibility
-        legacyTextParts.push(`=== ${role.toUpperCase()} ===\n${typeof response.output === 'string' ? response.output : JSON.stringify(response.output)}`);
-        
-        console.log(`[gateway] ${role} cost: $${roleCost.toFixed(4)} | Total: $${totalCost.toFixed(4)}`);
-        
-        if (totalCost > MAX_REQUEST_COST) {
-          console.error("[gateway] ❌ COST LIMIT EXCEEDED");
-          throw new Error(`Request blocked: cost limit exceeded ($${totalCost.toFixed(2)} > $${MAX_REQUEST_COST})`);
-        }
-
         try {
-          await logTelemetry({
-            taskId: req.taskId,
-            model: modelId,
-            provider: response.provider || "unknown",
-            tokensUsed: response.usage?.total_tokens || 0,
-            latencyMs: roleLatency,
-            cost: roleCost,
-            success: true,
-          });
-        } catch (telemetryError: any) {
-          console.warn("[gateway] Telemetry logging failed:", telemetryError.message);
+          const response = await executeWithRouting(prompt, modelId);
+          const roleLatency = Date.now() - roleStart;
+          const roleCost = response.estimatedCost ?? 0;
+          totalCost += roleCost;
+          
+          console.log(`[gateway] ${role} attempt ${attempts} - parsing response...`);
+          
+          // Try to parse the response
+          let parsed: any = null;
+          
+          if (typeof response.output === "object") {
+            parsed = response.output;
+          } else if (typeof response.output === "string") {
+            // Clean up common issues
+            let cleaned = response.output
+              .replace(/```json\s*/g, "")
+              .replace(/```\s*/g, "")
+              .trim();
+            
+            // Extract JSON if wrapped in text
+            const jsonMatch = cleaned.match(/\{[\s\S]*"tasks"[\s\S]*\}/);
+            if (jsonMatch) {
+              cleaned = jsonMatch[0];
+            }
+            
+            try {
+              parsed = JSON.parse(cleaned);
+            } catch (e) {
+              console.error(`[gateway] ${role} JSON parse failed:`, e);
+            }
+          }
+          
+          // Validate schema
+          if (validateTaskResponse(parsed)) {
+            validResponse = parsed;
+            console.log(`[gateway] ✅ ${role} returned valid schema with ${parsed.tasks.length} tasks`);
+          } else {
+            console.warn(`[gateway] ⚠️ ${role} response failed validation`);
+            
+            if (attempts < 2) {
+              console.log(`[gateway] Retrying ${role} with schema enforcement...`);
+              prompt = `Your previous response did not follow the required JSON schema.\n\n${STRICT_JSON_SCHEMA}\n\nReturn ONLY the required JSON. No other text.`;
+            }
+          }
+          
+          try {
+            await logTelemetry({
+              taskId: req.taskId,
+              model: modelId,
+              provider: response.provider || "unknown",
+              tokensUsed: response.usage?.total_tokens || 0,
+              latencyMs: roleLatency,
+              cost: roleCost,
+              success: validResponse !== null,
+            });
+          } catch (telemetryError: any) {
+            console.warn("[gateway] Telemetry logging failed:", telemetryError.message);
+          }
+          
+        } catch (error: any) {
+          console.error(`[gateway] ${role} execution failed:`, error.message);
+          
+          if (attempts >= 2) {
+            throw error;
+          }
         }
-      } catch (error: any) {
-        const roleLatency = Date.now() - roleStart;
-
-        try {
-          await logTelemetry({
-            taskId: req.taskId,
-            model: modelId,
-            provider: "unknown",
-            tokensUsed: 0,
-            latencyMs: roleLatency,
-            cost: 0,
-            success: false,
-          });
-        } catch (telemetryError: any) {
-          console.warn("[gateway] Telemetry logging failed:", telemetryError.message);
-        }
-
-        throw error;
+      }
+      
+      if (!validResponse) {
+        throw new Error(`${role} failed to return valid task schema after ${attempts} attempts`);
+      }
+      
+      roleOutputs[role] = validResponse;
+      allTasks.push(...validResponse.tasks);
+      
+      console.log(`[gateway] ${role} cost: $${(totalCost - (roleOutputs[role] ? 0 : totalCost)).toFixed(4)} | Total: $${totalCost.toFixed(4)}`);
+      
+      if (totalCost > MAX_REQUEST_COST) {
+        console.error("[gateway] ❌ COST LIMIT EXCEEDED");
+        throw new Error(`Request blocked: cost limit exceeded ($${totalCost.toFixed(2)} > $${MAX_REQUEST_COST})`);
       }
     }
 
     console.log("[gateway] ✅ Multi-mode complete");
+    console.log("[gateway] Total tasks collected:", allTasks.length);
     console.log("[gateway] Total cost: $", totalCost.toFixed(4));
 
     enforceRequestCost(planTier, totalCost);
     await recordUsage(req.userId, totalCost);
 
-    // Return BOTH structured and legacy format
     return {
-      output: legacyTextParts.join("\n\n"), // Legacy: combined text
-      roles: roleOutputs, // NEW: structured role outputs
+      roles: roleOutputs,
+      tasks: allTasks,
       model: "multi",
       provider: "mixed",
       estimatedCost: totalCost,
