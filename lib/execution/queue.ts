@@ -116,7 +116,7 @@ async function logExecution(log: ExecutionLog): Promise<boolean> {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
     const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-    const res = await fetch(`${supabaseUrl}/rest/v1/execution_logs`, {
+    const res = await fetch(`${supabaseUrl}/rest/v1/javari_execution_logs`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
