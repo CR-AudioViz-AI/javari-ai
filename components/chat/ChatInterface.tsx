@@ -88,6 +88,34 @@ export default function ChatInterface({ initialMode = 'single' }: ChatInterfaceP
     console.log('[ChatInterface] Mode state changed to:', mode);
   }, [mode]);
 
+  // ── Command classifier ─────────────────────────────────────────────────
+  // Maps natural language input to structured /api/javari/execute payloads.
+  // Returns null when the message is plain chat (not a command).
+  function classifyCommand(text: string): { mode: 'command'; command: string } | null {
+    const t = text.toLowerCase().trim();
+
+    // Order matters: check most specific phrases first
+    if (t.includes('run next') || t.includes('next task') || t.includes('run task'))
+      return { mode: 'command', command: 'run_next_task' };
+
+    if (t.includes('start roadmap') || t.includes('begin roadmap') || t.includes('execute roadmap'))
+      return { mode: 'command', command: 'start_roadmap' };
+
+    if (t.includes('pause') && (t.includes('execut') || t.includes('roadmap') || t.includes('queue')))
+      return { mode: 'command', command: 'pause_execution' };
+
+    if (t.includes('resume') && (t.includes('execut') || t.includes('roadmap') || t.includes('queue')))
+      return { mode: 'command', command: 'resume_execution' };
+
+    if (t.includes('memory') || t.includes('memoryos') || t.includes('knowledge'))
+      return { mode: 'command', command: 'memory_status' };
+
+    if (t.includes('queue') || t.includes('queue status') || t.includes('task status'))
+      return { mode: 'command', command: 'queue_status' };
+
+    return null; // not a command — route to normal chat
+  }
+
   const handleSendMessage = async (content: string) => {
     if (!content.trim() || isLoading) return;
 
@@ -104,27 +132,61 @@ export default function ChatInterface({ initialMode = 'single' }: ChatInterfaceP
     setMessages(updatedMessages);
 
     try {
-      // SMART ROUTING: Determine endpoint
-      const useAutonomous = needsAutonomous(content);
-      const endpoint = useAutonomous ? '/api/autonomous/execute' : '/api/chat';
+      // ── Step 1: Classify — command or chat? ──────────────────────────
+      const commandPayload = classifyCommand(content);
+      const useAutonomous  = !commandPayload && needsAutonomous(content);
 
-      console.log(`[ChatInterface] Routing to ${endpoint} (autonomous: ${useAutonomous})`);
+      let endpoint: string;
+      let payload: Record<string, unknown>;
 
-      // Build payload matching backend ChatRequest interface
-      const payload = {
-        message: content,                    // backend requires single message string
-        mode: useAutonomous ? 'roadmap' : mode,  // 'single' | 'super' | 'advanced' | 'roadmap'
-        provider,                            // provider selection
-        history: messages.map(m => ({        // message history for context
-          role: m.role,
-          content: m.content
-        }))
-      };
+      if (commandPayload) {
+        // ── Path A: System command via /api/javari/execute ───────────
+        endpoint = '/api/javari/execute';
+        payload  = {
+          ...commandPayload,   // { mode: "command", command: "memory_status" }
+          userId: 'system',
+        };
+        console.log(`[ChatInterface] Command detected → ${commandPayload.command}`);
+
+      } else if (useAutonomous) {
+        // ── Path B: Autonomous execution (unchanged) ──────────────────
+        endpoint = '/api/autonomous/execute';
+        payload  = {
+          message: content,
+          mode   : 'roadmap',
+          provider,
+          history: messages.map(m => ({ role: m.role, content: m.content })),
+        };
+        console.log('[ChatInterface] Autonomous routing');
+
+      } else {
+        // ── Path C: Normal chat — mode-aware ─────────────────────────
+        // "multi" mode sends to /api/javari/execute for multi-AI collaboration;
+        // all other modes use the existing /api/chat endpoint.
+        if (mode === 'single' || mode === 'advanced' || mode === 'super') {
+          endpoint = '/api/chat';
+          payload  = {
+            message: content,
+            mode,
+            provider,
+            history: messages.map(m => ({ role: m.role, content: m.content })),
+          };
+        } else {
+          // roadmap / unknown mode — /api/javari/execute chat mode
+          endpoint = '/api/javari/execute';
+          payload  = {
+            mode   : 'chat',
+            message: content,
+            userId : 'system',
+          };
+        }
+        console.log(`[ChatInterface] Chat routing → ${endpoint} (mode: ${mode})`);
+      }
 
       const res = await fetch(endpoint, {
-        method: 'POST',
+        method : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body   : JSON.stringify(payload),
       });
 
       if (!res.ok) {
@@ -133,57 +195,65 @@ export default function ChatInterface({ initialMode = 'single' }: ChatInterfaceP
 
       const data = await res.json();
 
-      // CRITICAL: Safe array guards to prevent UI crashes
-      const safeSources = Array.isArray(data?.sources) ? data.sources : [];
-      const safeResults = Array.isArray(data?.results) ? data.results : [];
+      // ── Step 2: Normalise response across all three paths ─────────
+      // /api/javari/execute returns { ok, reply, model, cost }
+      // /api/chat returns { response, messages, provider, ... }
+      // /api/autonomous/execute returns { response, files, steps, ... }
+      const safeSources  = Array.isArray(data?.sources) ? data.sources : [];
+      const safeResults  = Array.isArray(data?.results) ? data.results : [];
       const safeMessages = Array.isArray(data?.messages) ? data.messages : [];
-      
-      // CRITICAL: Ensure messages array is never empty
-      if (safeMessages.length === 0 && (data?.response || data?.content || data?.answer)) {
+
+      if (safeMessages.length === 0 && (data?.response || data?.content || data?.answer || data?.reply)) {
         safeMessages.push({
-          role: "assistant",
-          content: data.response || data.content || data.answer || "No response available."
+          role   : 'assistant',
+          content: data.reply || data.response || data.content || data.answer || 'No response available.',
         });
       }
 
-      // Ensure we always have a response string
-      // Priority: data.response > messages[0].content > fallbacks
-      const responseContent = 
-        data.response || 
-        safeMessages[0]?.content || 
-        data.content ||
-        data.answer ||
+      const responseContent =
+        data.reply    ||   // /api/javari/execute
+        data.response ||   // /api/chat
+        safeMessages[0]?.content ||
+        data.content  ||
+        data.answer   ||
         'No response received';
 
-      // Create assistant message
       const assistantMessage: ChatMessage = {
-        id: `msg-${Date.now()}-assistant`,
-        role: 'assistant',
-        content: responseContent,
+        id       : `msg-${Date.now()}-assistant`,
+        role     : 'assistant',
+        content  : responseContent,
         timestamp: Date.now(),
-        provider: useAutonomous ? 'autonomous' : (data.provider || provider),
-        mode: useAutonomous ? 'roadmap' : (data.mode || mode),
-        metadata: {
+        provider : commandPayload
+                   ? 'javari-execute'
+                   : useAutonomous
+                   ? 'autonomous'
+                   : (data.provider || data.model || provider),
+        mode     : (commandPayload ? 'roadmap' : useAutonomous ? 'roadmap' : (data.mode || mode)) as ChatMode,
+        metadata : {
           ...(data.metadata || {}),
           sources: safeSources,
           results: safeResults,
+          ...(commandPayload ? {
+            command    : commandPayload.command,
+            commandData: data.data ?? null,
+          } : {}),
           ...(useAutonomous ? {
-            autonomous: true,
-            files: data.files || [],
-            executionSteps: data.steps || []
-          } : {})
-        }
+            autonomous    : true,
+            files         : data.files  || [],
+            executionSteps: data.steps  || [],
+          } : {}),
+        },
       };
 
       setMessages([...updatedMessages, assistantMessage]);
 
-    } catch (error: any) {
-      console.error('Error sending message:', error);
+    } catch (error: unknown) {
+      console.error('[ChatInterface] Error sending message:', error);
 
       const errorMessage: ChatMessage = {
-        id: `msg-${Date.now()}-error`,
-        role: 'assistant',
-        content: `Error: ${error.message || 'Failed to get response'}`,
+        id       : `msg-${Date.now()}-error`,
+        role     : 'assistant',
+        content  : `Error: ${error instanceof Error ? error.message : 'Failed to get response'}`,
         timestamp: Date.now(),
       };
 
