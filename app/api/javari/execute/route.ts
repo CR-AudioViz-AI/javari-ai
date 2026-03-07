@@ -62,9 +62,13 @@ async function fetchNextPendingTask(): Promise<ExecutableTask | null> {
 }
 
 // ── Mark task status ───────────────────────────────────────────────────────
+// ── Task lifecycle: pending → in_progress → verifying → completed
+//                                              ↘ retry → blocked
+// CRITICAL: status="completed" may only be written by /api/javari/verify-task.
+// This function intentionally does NOT accept "completed" as a status value.
 async function updateTaskStatus(
   taskId : string,
-  status : "running" | "completed" | "failed",
+  status : "in_progress" | "verifying" | "failed" | "retry" | "blocked",
   output?: string,
   error? : string
 ): Promise<void> {
@@ -76,7 +80,7 @@ async function updateTaskStatus(
         status,
         ...(output ? { result: output }       : {}),
         ...(error  ? { error_message: error } : {}),
-        updated_at: new Date().toISOString(),
+        updated_at: Date.now(),   // bigint epoch ms
       })
       .eq("id", taskId);
   } catch { /* non-blocking */ }
@@ -96,31 +100,53 @@ async function handleCommand(command: string, userId: string): Promise<{
   switch (command) {
 
     // ── run_next_task ──────────────────────────────────────────────────
+    // Lifecycle enforced:
+    //   pending → in_progress (before execution)
+    //   in_progress → verifying (after execution, regardless of result)
+    //   verifying → completed | retry | blocked (via /api/javari/verify-task ONLY)
     case "run_next_task": {
       try {
         const task = await fetchNextPendingTask();
         if (!task) return { ok: false, command, result: "No pending tasks in queue." };
 
-        await updateTaskStatus(task.id, "running");
+        // Step 1: mark in_progress
+        await updateTaskStatus(task.id, "in_progress");
+
+        // Step 2: execute — records artifacts internally
         const result = await executeTask(task, userId);
 
-        if (result.ok) {
-          await updateTaskStatus(task.id, "completed", result.output);
-        } else {
-          await updateTaskStatus(task.id, "failed", undefined, result.error);
-        }
+        // Step 3: always move to verifying — NEVER directly to completed
+        // Failed executions also go to verifying so the artifact check
+        // can formally record the failure reason before retry logic runs.
+        await updateTaskStatus(
+          task.id,
+          "verifying",
+          result.output,
+          result.ok ? undefined : result.error
+        );
 
+        // Step 4: call verify-task gate
+        const verifyRes = await fetch(`${base}/api/javari/verify-task`, {
+          method : "POST",
+          headers: { "Content-Type": "application/json" },
+          body   : JSON.stringify({ task_id: task.id }),
+        });
+        const verifyData = await verifyRes.json().catch(() => ({})) as Record<string, unknown>;
+
+        const verdict    = verifyData.verdict as string ?? "unknown";
         const actionsText = result.actions?.length
           ? ` | actions: ${result.actions.map(a => a.action + (a.ok ? "✓" : "✗")).join(", ")}`
           : "";
 
         return {
-          ok    : result.ok,
+          ok    : verdict === "completed",
           command,
-          result: result.ok
-            ? `✅ **${task.title}** [${result.type}]${actionsText} | ${result.durationMs}ms`
-            : `❌ **${task.title}** failed: ${result.error}`,
-          data: result,
+          result: verdict === "completed"
+            ? `✅ **${task.title}** [${result.type}] verified → completed${actionsText} | ${result.durationMs}ms`
+            : verdict === "blocked"
+              ? `🔴 **${task.title}** BLOCKED after max retries. Reason: ${verifyData.failReason}`
+              : `⚠️ **${task.title}** executed → verifying → ${verdict}. Reason: ${verifyData.failReason ?? result.error}`,
+          data: { execution: result, verification: verifyData },
         };
       } catch (err) {
         return { ok: false, command, result: `run_next_task exception: ${String(err)}` };
@@ -366,10 +392,11 @@ export async function GET() {
   return NextResponse.json({
     ok        : true,
     endpoint  : "/api/javari/execute",
-    version   : "1.3.0",
+    version   : "1.4.0",
     modes     : ["chat", "multi", "command"],
     commands  : ["run_next_task", "start_roadmap", "pause_execution", "resume_execution", "queue_status", "memory_status"],
+    lifecycle : "pending → in_progress → verifying → completed | retry → blocked",
     taskTypes : ["build_module", "create_api", "update_schema", "deploy_feature", "ai_task"],
-    connected : ["planner", "queue", "model_router", "memoryos", "guardrails", "devops_executor", "r2_ingest"],
+    connected : ["planner", "queue", "model_router", "memoryos", "guardrails", "devops_executor", "r2_ingest", "verification_gate"],
   });
 }
