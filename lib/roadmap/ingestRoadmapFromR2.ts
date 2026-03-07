@@ -26,13 +26,24 @@ export interface IngestR2Result {
 // ── R2 config ──────────────────────────────────────────────────────────────
 
 const BUCKET  = "cold-storage";
-const PREFIXES = ["owner-docs/", "blueprints/", "technical/", "admin-docs/"];
+// All canonical docs live under the consolidation-docs/ prefix in cold-storage bucket
+const PREFIXES = [
+  "consolidation-docs/owner-docs/",
+  "consolidation-docs/blueprints/",
+  "consolidation-docs/technical/",
+  "consolidation-docs/technical-docs/",
+  "consolidation-docs/admin-docs/",
+  "consolidation-docs/business/",
+  "consolidation-docs/ai-learning/",
+  "consolidation-docs/",   // also catch root-level files like README.md and COMPLETE_INDEX.md
+];
 
 // Roadmap-related filename patterns — these are the docs most likely to contain
 // Phase / Task / Step / Roadmap items
 const ROADMAP_FILE_PATTERNS = [
   /roadmap/i, /platform/i, /scaling/i, /next.steps/i, /master.bible/i,
   /phase/i, /architecture/i, /blueprint/i, /ecosystem/i, /executive/i,
+  /master.summary/i, /complete.guide/i, /complete.index/i, /strategic/i,
 ];
 
 // ── Task type classifier ───────────────────────────────────────────────────
