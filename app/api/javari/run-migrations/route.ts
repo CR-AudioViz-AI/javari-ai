@@ -194,3 +194,42 @@ export async function GET() {
     },
   });
 }
+
+// PATCH: Send NOTIFY pgrst, 'reload schema' to force PostgREST cache refresh
+// Used when tables are created via direct SQL and PostgREST hasn't picked them up yet.
+export async function PATCH() {
+  const connUrl = buildConnectionUrl();
+  if (!connUrl) {
+    return NextResponse.json({
+      ok: false,
+      error: "SUPABASE_PROJECT_REF or SUPABASE_DB_PASSWORD not configured — cannot send NOTIFY",
+    }, { status: 503 });
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { Client } = require("pg") as typeof import("pg");
+  const client = new Client({
+    connectionString: connUrl,
+    ssl: { rejectUnauthorized: false },
+    connectionTimeoutMillis: 10000,
+  });
+
+  try {
+    await client.connect();
+    await client.query("NOTIFY pgrst, 'reload schema'");
+    await client.end();
+    console.log("[run-migrations] PostgREST schema cache reload notified");
+    return NextResponse.json({
+      ok: true,
+      action: "schema_reload",
+      message: "NOTIFY pgrst, 'reload schema' sent — PostgREST will reload within ~1s",
+    });
+  } catch (err: unknown) {
+    try { await client.end(); } catch { /* ignore */ }
+    return NextResponse.json({
+      ok: false,
+      error: `NOTIFY failed: ${(err as Error).message}`,
+    }, { status: 500 });
+  }
+}
+
