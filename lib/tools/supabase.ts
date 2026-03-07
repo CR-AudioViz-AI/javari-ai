@@ -188,7 +188,7 @@ async function listTables(): Promise<ToolCallResult> {
   // Query information_schema via a known working pattern
   // Supabase doesn't expose information_schema via REST, so we probe known tables
   const knownTables = [
-    "roadmap_tasks", "execution_logs", "guardrail_audit_log", "task_checkpoints",
+    "roadmap_tasks", "javari_execution_logs", "guardrail_audit_log", "task_checkpoints",
     "profiles", "credits", "subscriptions", "platform_secrets",
     "user_cost_settings", "telemetry_logs",
   ];
