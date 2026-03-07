@@ -14,6 +14,10 @@
     {
       "path": "/api/javari/autonomy/cycle",
       "schedule": "*/3 * * * *"
+    },
+    {
+      "path": "/api/javari/start-roadmap",
+      "schedule": "*/2 * * * *"
     }
   ]
 }
