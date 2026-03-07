@@ -17,6 +17,16 @@ import {
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
+// Fresh client factory — called per-operation to avoid stale PostgREST schema cache.
+// Module-level supabase-js clients cache schema on init; tables created after startup
+// may be invisible until the process restarts. Per-call clients bypass this.
+function freshClient() {
+  return createClient(supabaseUrl, supabaseServiceKey, {
+    db: { schema: "public" },
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -56,7 +66,7 @@ function enforceRoadmapOnly(task: Task): void {
 
 // ─── Fetch executable tasks ───────────────────────────────────────────────────
 async function getExecutableTasks(): Promise<Task[]> {
-  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+  const supabase = freshClient();
 
   const { data: allTasks, error: tasksError } = await supabase
     .from("roadmap_tasks")
@@ -83,7 +93,7 @@ async function getExecutableTasks(): Promise<Task[]> {
 
 // ─── Status update ────────────────────────────────────────────────────────────
 async function updateTaskStatus(taskId: string, status: Task["status"]): Promise<boolean> {
-  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+  const supabase = freshClient();
   const { error } = await supabase
     .from("roadmap_tasks")
     .update({ status, updated_at: Math.floor(Date.now() / 1000) })
@@ -99,7 +109,7 @@ async function updateTaskStatus(taskId: string, status: Task["status"]): Promise
 
 // ─── Log execution ────────────────────────────────────────────────────────────
 async function logExecution(log: ExecutionLog): Promise<boolean> {
-  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+  const supabase = freshClient();
   const { error } = await supabase
     .from("execution_logs")
     .insert([{
@@ -363,7 +373,7 @@ export async function getQueueStats(): Promise<{
   failed: number;
   retry: number;
 }> {
-  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+  const supabase = freshClient();
   const { data: tasks, error } = await supabase.from("roadmap_tasks").select("status");
 
   if (error || !tasks) {
