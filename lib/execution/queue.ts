@@ -1,11 +1,18 @@
 // lib/execution/queue.ts
 // Purpose: Execution queue — sequential task execution with guardrails, dependency
-//          resolution, audit logging, and roadmap-only enforcement
-// Date: 2026-03-06
+//          resolution, audit logging, roadmap-only enforcement, and persistence
+// Date: 2026-03-07
 
 import { createClient } from "@supabase/supabase-js";
 import { executeGateway } from "./gateway";
 import { runGuardrails, GuardrailReport } from "./guardrails";
+import {
+  acquireTaskLock,
+  releaseTaskLock,
+  writeCheckpoint,
+  startHeartbeat,
+  recoverStalledTasks,
+} from "./persistence";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -127,6 +134,25 @@ async function executeTask(
   console.log(`[queue] Execution ID: ${executionId}`);
   console.log(`[queue] Task: ${task.id} — ${task.title}`);
   console.log(`[queue] Source: ${task.source ?? "unknown"}`);
+
+  // ── Persistence: acquire execution lock (atomic, prevents duplicate runs) ──
+  const lockAcquired = await acquireTaskLock(task.id, executionId);
+  if (!lockAcquired) {
+    const log: ExecutionLog = {
+      execution_id: executionId,
+      task_id: task.id,
+      model_used: "none",
+      cost: 0, tokens_in: 0, tokens_out: 0,
+      execution_time: 0,
+      status: "blocked",
+      error_message: "Task already locked by another executor",
+      timestamp: new Date().toISOString(),
+    };
+    return { success: false, log };
+  }
+
+  // Start heartbeat to keep lock alive during long-running execution
+  const stopHeartbeat = startHeartbeat(task.id);
 
   // ── Guardrail: roadmap-only enforcement ────────────────────────────────────
   try {
