@@ -138,6 +138,8 @@ async function executeTask(
   // ── Persistence: acquire execution lock (atomic, prevents duplicate runs) ──
   const lockAcquired = await acquireTaskLock(task.id, executionId);
   if (!lockAcquired) {
+    // Task was picked up by a concurrent executor — skip gracefully (not a failure)
+    console.log(`[queue] Task ${task.id} already locked by concurrent executor — skipping`);
     const log: ExecutionLog = {
       execution_id: executionId,
       task_id: task.id,
@@ -145,7 +147,7 @@ async function executeTask(
       cost: 0, tokens_in: 0, tokens_out: 0,
       execution_time: 0,
       status: "blocked",
-      error_message: "Task already locked by another executor",
+      error_message: "Task locked by concurrent executor — skipped, not failed",
       timestamp: new Date().toISOString(),
     };
     return { success: false, log };
@@ -153,6 +155,8 @@ async function executeTask(
 
   // Start heartbeat to keep lock alive during long-running execution
   const stopHeartbeat = startHeartbeat(task.id);
+  let heartbeatStopped = false;
+  const safeStopHeartbeat = () => { if (!heartbeatStopped) { heartbeatStopped = true; stopHeartbeat(); } };
 
   // ── Guardrail: roadmap-only enforcement ────────────────────────────────────
   try {
