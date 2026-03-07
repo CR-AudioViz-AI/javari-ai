@@ -93,7 +93,7 @@ export async function checkCostCeiling(
     startOfDay.setUTCHours(0, 0, 0, 0);
 
     const { data, error } = await supabase
-      .from("execution_logs")
+      .from("javari_execution_logs")
       .select("cost")
       .gte("timestamp", startOfDay.toISOString());
 
@@ -173,7 +173,7 @@ export async function checkMigrationSafety(
 
   // Check for prior failures on this exact task
   const { data: priorFails } = await supabase
-    .from("execution_logs")
+    .from("javari_execution_logs")
     .select("execution_id, error_message")
     .eq("task_id", taskId)
     .eq("status", "failed")
@@ -269,7 +269,7 @@ export async function checkRollbackTrigger(): Promise<GuardrailResult> {
 
   try {
     const { data: recent, error } = await supabase
-      .from("execution_logs")
+      .from("javari_execution_logs")
       .select("status")
       .order("timestamp", { ascending: false })
       .limit(WINDOW);
