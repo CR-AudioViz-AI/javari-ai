@@ -184,8 +184,16 @@ export async function executeGateway(req: ExecutionRequest) {
 
     const executionStart = Date.now();
 
+    // 40s timeout: leaves 20s buffer before Vercel's 60s serverless hard limit.
+    // Tasks that exceed this are retried — they won't be killed mid-write by Vercel.
+    const AI_TIMEOUT_MS = 40_000;
+
     try {
-      const response = await executeWithRouting(req.input, model.id);
+      const responsePromise = executeWithRouting(req.input, model.id);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`AI_TIMEOUT: Model did not respond within ${AI_TIMEOUT_MS / 1000}s. Task will retry.`)), AI_TIMEOUT_MS)
+      );
+      const response = await Promise.race([responsePromise, timeoutPromise]);
       const latencyMs = Date.now() - executionStart;
       const estimatedCost = response.estimatedCost ?? 0;
 
