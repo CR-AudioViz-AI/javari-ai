@@ -107,7 +107,7 @@ export async function seedTasksFromRoadmap(
         status     : "pending",
         source     : "r2_ingest",
         phase_id   : item.phase ?? "r2_auto",
-        updated_at : new Date().toISOString(),
+        updated_at : Date.now(),  // bigint epoch ms
       });
 
       // Add to seen set so we don't double-insert within this batch
