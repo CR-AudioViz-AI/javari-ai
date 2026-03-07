@@ -108,28 +108,47 @@ async function updateTaskStatus(taskId: string, status: Task["status"]): Promise
 }
 
 // ─── Log execution ────────────────────────────────────────────────────────────
+// Uses raw fetch() against PostgREST to bypass supabase-js TypeScript type cache.
+// supabase-js generated types may not include execution_logs if it was created
+// after the last `supabase gen types` run. Raw fetch bypasses this limitation.
 async function logExecution(log: ExecutionLog): Promise<boolean> {
-  const supabase = freshClient();
-  const { error } = await supabase
-    .from("execution_logs")
-    .insert([{
-      execution_id: log.execution_id,
-      task_id: log.task_id,
-      model_used: log.model_used,
-      cost: log.cost,
-      tokens_in: log.tokens_in,
-      tokens_out: log.tokens_out,
-      execution_time: log.execution_time,
-      status: log.status,
-      error_message: log.error_message,
-      timestamp: log.timestamp,
-    }]);
+  try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-  if (error) {
-    console.error("[queue] Error logging execution:", error.message);
+    const res = await fetch(`${supabaseUrl}/rest/v1/execution_logs`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": serviceKey,
+        "Authorization": `Bearer ${serviceKey}`,
+        "Prefer": "return=minimal",
+      },
+      body: JSON.stringify({
+        execution_id:   log.execution_id,
+        task_id:        log.task_id,
+        model_used:     log.model_used,
+        cost:           log.cost,
+        tokens_in:      log.tokens_in,
+        tokens_out:     log.tokens_out,
+        execution_time: log.execution_time,
+        status:         log.status,
+        error_message:  log.error_message ?? null,
+        timestamp:      log.timestamp,
+      }),
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      console.error("[queue] execution_logs insert failed:", res.status, err.slice(0, 200));
+      return false;
+    }
+    return true;
+  } catch (err: unknown) {
+    console.error("[queue] execution_logs fetch error:", (err as Error).message);
     return false;
   }
-  return true;
 }
 
 // ─── Execute single task ──────────────────────────────────────────────────────
