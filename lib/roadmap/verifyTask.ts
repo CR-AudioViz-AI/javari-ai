@@ -71,20 +71,19 @@ async function loadTask(taskId: string): Promise<{
   const client = await db();
   const { data } = await client
     .from("roadmap_tasks")
-    .select("id, title, description, metadata")
+    .select("id, title, description, source")
     .eq("id", taskId)
     .single();
   if (!data) return null;
-  const row = data as { id: string; title: string; description: string; metadata: unknown };
-  const meta = row.metadata as Record<string, unknown> | null;
-  // type is stored as [type:X] tag in description OR in metadata
-  const typeTag = row.description?.match(/\[type:([^\]]+)\]/)?.[1];
+  const row = data as { id: string; title: string; description: string; source?: string };
+  // type is embedded as [type:X] tag in description by seedTasksFromRoadmap
+  const typeTag = row.description?.match(/\[type:([^\]]+)\]/)?.[1] ?? "ai_task";
   return {
     id         : row.id,
     title      : row.title,
     description: row.description,
-    type       : (meta?.type as string) ?? typeTag ?? "ai_task",
-    metadata   : meta,
+    type       : typeTag,
+    metadata   : null,
   };
 }
 
