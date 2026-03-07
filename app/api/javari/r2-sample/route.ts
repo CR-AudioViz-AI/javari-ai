@@ -1,31 +1,41 @@
 // app/api/javari/r2-sample/route.ts
-// Temp: fetch content from roadmap-matched R2 docs for pattern analysis
+// Temp: inspect ALL 74 R2 docs — find non-placeholder ones and sample content
 import { NextResponse } from "next/server";
 import { listCanonicalKeys, fetchCanonicalText } from "@/lib/canonical/r2-client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const ROADMAP_PATTERNS = [
-  /roadmap/i, /platform/i, /scaling/i, /next.steps/i, /master/i,
-  /phase/i, /architecture/i, /blueprint/i, /ecosystem/i, /executive/i,
-  /DR_Runbook/i, /deployment/i, /implementation/i, /strategic/i,
-];
+export const maxDuration = 60;
 
 export async function GET() {
   try {
-    const keys = await listCanonicalKeys();
-    const matched = keys.filter(k => {
-      const fn = k.key.split("/").pop() ?? "";
-      return fn.endsWith(".md") && ROADMAP_PATTERNS.some(p => p.test(fn));
-    }).slice(0, 5);
+    const allKeys = await listCanonicalKeys();
+    const mdKeys  = allKeys.filter(k => k.key.endsWith(".md"));
 
-    const samples: Record<string, string[]> = {};
-    for (const obj of matched) {
+    // Classify each doc: is it a placeholder or real content?
+    const results: Array<{key: string; lines: number; isPlaceholder: boolean; firstLines: string[]}> = [];
+
+    // Sample first 20 only to avoid timeout
+    for (const obj of mdKeys.slice(0, 20)) {
       const text = await fetchCanonicalText(obj.key).catch(() => "");
-      samples[obj.key] = text.split("\n").slice(0, 60);
+      const lines = text.split("\n").filter(l => l.trim());
+      const isPlaceholder = text.includes("placeholder") || lines.length <= 4;
+      results.push({
+        key          : obj.key.split("/").pop() ?? obj.key,
+        lines        : lines.length,
+        isPlaceholder,
+        firstLines   : lines.slice(0, 8),
+      });
     }
-    return NextResponse.json({ ok: true, matchedCount: matched.length, totalKeys: keys.length, keys: matched.map(k=>k.key), samples });
+
+    const real = results.filter(r => !r.isPlaceholder);
+    return NextResponse.json({
+      ok         : true,
+      totalMd    : mdKeys.length,
+      sampled    : results.length,
+      realDocs   : real.length,
+      docs       : real,
+    });
   } catch (err) {
     return NextResponse.json({ ok: false, error: String(err) });
   }
