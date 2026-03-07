@@ -58,7 +58,8 @@ function extractJSON(text: string): any | null {
 export async function executeWithFailover(
   prompt: string,
   provider: AIProvider,
-  enforceJSON: boolean = false
+  enforceJSON: boolean = false,
+  modelId?: string        // explicit model ID — overrides provider default
 ): Promise<ExecuteResponse> {
   console.log("[executeWithFailover] Provider:", provider, "| JSON mode:", enforceJSON);
 
@@ -131,8 +132,12 @@ export async function executeWithFailover(
 
       const client = new Anthropic({ apiKey });
 
+      // Use the model ID passed from routing — do not hardcode.
+      // Falls back to claude-sonnet-4-20250514 if not specified.
+      const anthropicModel = modelId ?? "claude-sonnet-4-20250514";
+
       const message = await client.messages.create({
-        model: "claude-sonnet-4-20250514",
+        model: anthropicModel,
         max_tokens: 4000,
         temperature: 0.2,
         messages: [{ role: "user", content: prompt }],
@@ -170,7 +175,9 @@ export async function executeWithFailover(
       }
 
       const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
+      // Use explicit modelId if provided, otherwise default to gemini-2.0-flash-exp
+      const googleModelId = modelId ?? "gemini-2.0-flash-exp";
+      const model = genAI.getGenerativeModel({ model: googleModelId });
 
       const result = await model.generateContent(prompt);
       const response = result.response;
