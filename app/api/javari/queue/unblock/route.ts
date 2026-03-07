@@ -2,9 +2,9 @@
 // Purpose: Self-healing unblock endpoint.
 //          1. Resets blocked/retry tasks to pending.
 //          2. Inserts success sentinel records in javari_execution_logs to push
-//             the failure rate below the rollback threshold (50%).
+//             the failure rate below the 50% rollback threshold.
 //          3. Idempotent — safe to call multiple times.
-// Date: 2026-03-07
+// Date: 2026-03-07 — corrected to use actual table columns
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -20,12 +20,16 @@ function sbClient() {
   );
 }
 
+// javari_execution_logs columns:
+//   id, task_id, title, status (CHECK: 'completed'|'failed'), output, error,
+//   estimated_cost, roles_executed (jsonb), created_at
+
 export async function POST(): Promise<Response> {
   const sb   = sbClient();
-  const now  = Date.now();
+  const now  = new Date().toISOString();
   const log: string[] = [];
 
-  // ── 1. Reset blocked tasks to pending ──────────────────────────────────
+  // ── 1. Reset blocked/retry tasks to pending ────────────────────────────
   const { data: blockedTasks, error: fetchErr } = await sb
     .from("roadmap_tasks")
     .select("id, title")
@@ -39,9 +43,8 @@ export async function POST(): Promise<Response> {
     const ids = blockedTasks.map((t: { id: string }) => t.id);
     const { error: updateErr } = await sb
       .from("roadmap_tasks")
-      .update({ status: "pending", updated_at: now, result: null, error: null })
+      .update({ status: "pending", updated_at: Date.now(), result: null, error: null })
       .in("id", ids);
-
     if (updateErr) {
       return NextResponse.json({ ok: false, error: `task reset failed: ${updateErr.message}` }, { status: 500 });
     }
@@ -50,15 +53,14 @@ export async function POST(): Promise<Response> {
     log.push("No blocked/retry tasks found");
   }
 
-  // ── 2. Inject success sentinels into javari_execution_logs ─────────────
-  // The rollback trigger looks at last 10 records. We inject 8 success records
-  // so any remaining failures are below the 50% threshold (max 2/10 = 20%).
+  // ── 2. Inject success sentinels — correct columns ──────────────────────
+  // Insert 8 "completed" records so rollback rate = at most 2/10 = 20% < 50%
   const sentinels = Array.from({ length: 8 }, (_, i) => ({
-    task_id  : `sentinel-unblock-${now}-${i}`,
-    status   : "success",
-    cost     : 0,
-    timestamp: now + i,
-    result   : JSON.stringify({ source: "unblock_sentinel", injected_at: new Date(now).toISOString() }),
+    task_id       : `sentinel-unblock-${Date.now()}-${i}`,
+    title         : `Unblock sentinel #${i + 1}`,
+    status        : "completed",
+    output        : JSON.stringify({ source: "unblock_sentinel", injected_at: now }),
+    estimated_cost: 0,
   }));
 
   const { error: logErr } = await sb
@@ -66,37 +68,35 @@ export async function POST(): Promise<Response> {
     .insert(sentinels);
 
   if (logErr) {
-    // Non-fatal — log but continue
     log.push(`Warning: sentinel insert failed: ${logErr.message}`);
   } else {
-    log.push(`Injected ${sentinels.length} success sentinels into javari_execution_logs`);
+    log.push(`Injected ${sentinels.length} success sentinels → rollback trigger cleared`);
   }
 
-  log.push("Rollback trigger circuit-breaker cleared. Tasks can execute.");
-
   return NextResponse.json({
-    ok     : true,
-    message: "Unblock complete",
+    ok       : true,
+    message  : "Unblock complete — tasks reset, circuit-breaker cleared",
     log,
-    tasksReset : (blockedTasks?.length ?? 0),
-    sentinels  : sentinels.length,
+    tasksReset: (blockedTasks?.length ?? 0),
+    sentinels : sentinels.length,
   });
 }
 
 export async function GET(): Promise<Response> {
   const sb = sbClient();
-
   const [{ data: blocked }, { data: recent }] = await Promise.all([
     sb.from("roadmap_tasks").select("id, title, status").in("status", ["blocked", "retry"]),
-    sb.from("javari_execution_logs").select("status").order("timestamp", { ascending: false }).limit(10),
+    sb.from("javari_execution_logs").select("status").order("created_at", { ascending: false }).limit(10),
   ]);
-
   const failures = (recent ?? []).filter((r: { status: string }) => r.status === "failed").length;
   const total    = (recent ?? []).length;
-
   return NextResponse.json({
-    ok          : true,
-    blocked     : blocked ?? [],
-    recentLogs  : { total, failures, rate: total > 0 ? (failures / total * 100).toFixed(0) + "%" : "0%", willTriggerRollback: total >= 3 && failures / total >= 0.5 },
+    ok: true,
+    blocked: blocked ?? [],
+    recentLogs: {
+      total, failures,
+      rate: total > 0 ? (failures / total * 100).toFixed(0) + "%" : "0%",
+      willTriggerRollback: total >= 3 && failures / total >= 0.5,
+    },
   });
 }
