@@ -143,27 +143,45 @@ function verifyUpdateSchema(artifacts: TaskArtifact[]): VerificationCheck[] {
   ];
 }
 
-/** deploy_feature — requires deploy artifact with state "READY" or "ready" */
+/** deploy_feature — accepts deploy_proof (health-check verification) OR deploy (triggered deploy).
+ *  deploy_proof: recorded by Path B handler — verifies existing deployment health.
+ *  deploy: recorded by Path A handler — triggered new Vercel deployment.
+ */
 function verifyDeployFeature(artifacts: TaskArtifact[]): VerificationCheck[] {
+  // deploy_proof: health-check artifact — primary path for verification tasks
+  const proofs = artifacts.filter(a => a.artifact_type === "deploy_proof");
+  const healthyProof = proofs.filter(
+    a => !!(a.artifact_data?.healthy as boolean) || /ready/i.test((a.artifact_data?.state as string) ?? "")
+  );
+
+  // deploy: triggered-deploy artifact — fallback for Path A tasks
   const deploys = artifacts.filter(a => a.artifact_type === "deploy");
-  const ready   = deploys.filter(
+  const readyDeploy = deploys.filter(
     a => /ready/i.test((a.artifact_data?.state as string) ?? "")
   );
+
+  // Pass if either proof type shows healthy/ready deployment
+  const anyProof  = proofs.length > 0 || deploys.length > 0;
+  const anyHealthy = healthyProof.length > 0 || readyDeploy.length > 0;
 
   return [
     {
       name  : "deployment_artifact_exists",
-      pass  : deploys.length > 0,
-      detail: deploys.length > 0 ? `deployment: ${deploys[0]?.artifact_location ?? "?"}` : "No deploy artifact",
+      pass  : anyProof,
+      detail: anyProof
+        ? `${proofs.length} deploy_proof + ${deploys.length} deploy artifact(s)`
+        : "No deploy_proof or deploy artifact recorded",
     },
     {
-      name  : "deployment_state_ready",
-      pass  : ready.length > 0,
-      detail: ready.length > 0
-        ? `state=READY (${ready[0]?.artifact_location})`
-        : deploys.length > 0
-          ? `deploy recorded but state=${deploys[0]?.artifact_data?.state ?? "?"} (not READY)`
-          : "No deploy artifact",
+      name  : "deployment_verified",
+      pass  : anyHealthy,
+      detail: anyHealthy
+        ? healthyProof.length > 0
+            ? `deploy_proof: healthy=true url=${healthyProof[0]?.artifact_location} http=${healthyProof[0]?.artifact_data?.http_status ?? "?"}`
+            : `deploy: state=READY url=${readyDeploy[0]?.artifact_location}`
+        : proofs.length > 0
+            ? `deploy_proof recorded but healthy=false (http=${proofs[0]?.artifact_data?.http_status ?? "?"})`
+            : "No verified deployment artifact",
     },
   ];
 }
