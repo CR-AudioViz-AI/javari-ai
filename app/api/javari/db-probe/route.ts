@@ -43,7 +43,7 @@ async function probeExecutionLogs(): Promise<{
 }> {
   try {
     const { data, error, count } = await supabase
-      .from("execution_logs")
+      .from("javari_execution_logs")
       .select("*", { count: "exact" })
       .order("timestamp", { ascending: false })
       .limit(3);
