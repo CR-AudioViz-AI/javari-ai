@@ -148,7 +148,7 @@ export async function recoverStalledTasks(): Promise<{
       // Too many attempts — permanently fail
       await supabase
         .from("roadmap_tasks")
-        .update({ status: "failed", updated_at: new Date().toISOString() })
+        .update({ status: "failed", updated_at: Math.floor(Date.now() / 1000) })
         .eq("id", checkpoint.task_id);
 
       await clearCheckpoint(checkpoint.task_id);
@@ -161,7 +161,7 @@ export async function recoverStalledTasks(): Promise<{
       // Reset to retry with incremented attempt counter
       await supabase
         .from("roadmap_tasks")
-        .update({ status: "retry", updated_at: new Date().toISOString() })
+        .update({ status: "retry", updated_at: Math.floor(Date.now() / 1000) })
         .eq("id", checkpoint.task_id);
 
       await supabase
@@ -198,11 +198,12 @@ export async function acquireTaskLock(
   const expires = new Date(now.getTime() + STALL_THRESHOLD_MS);
 
   // Try to update task to in_progress only if currently pending or retry
+  // NOTE: updated_at is stored as integer epoch seconds in roadmap_tasks
   const { data, error } = await supabase
     .from("roadmap_tasks")
     .update({
       status: "in_progress",
-      updated_at: now.toISOString(),
+      updated_at: Math.floor(now.getTime() / 1000),
     })
     .in("status", ["pending", "retry"])
     .eq("id", taskId)
@@ -244,7 +245,7 @@ export async function releaseTaskLock(
 ): Promise<void> {
   await supabase
     .from("roadmap_tasks")
-    .update({ status: finalStatus, updated_at: new Date().toISOString() })
+    .update({ status: finalStatus, updated_at: Math.floor(Date.now() / 1000) })
     .eq("id", taskId);
 
   await clearCheckpoint(taskId);
