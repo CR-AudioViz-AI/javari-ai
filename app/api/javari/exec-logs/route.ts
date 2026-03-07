@@ -2,7 +2,7 @@
 // Purpose: Direct PostgREST read/write for execution_logs table.
 //          Uses raw fetch() to bypass supabase-js TypeScript generated type cache.
 //          execution_logs was created after supabase gen types last ran, so
-//          supabase-js .from("execution_logs") returns schema cache miss errors.
+//          supabase-js .from("javari_execution_logs") returns schema cache miss errors.
 // Date: 2026-03-07
 
 import { NextRequest, NextResponse } from "next/server";
@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
   const limit  = parseInt(url.searchParams.get("limit") ?? "10", 10);
   const taskId = url.searchParams.get("task_id");
 
-  let endpoint = `/execution_logs?select=*&order=timestamp.desc&limit=${limit}`;
+  let endpoint = `/javari_execution_logs?select=*&order=timestamp.desc&limit=${limit}`;
   if (taskId) endpoint += `&task_id=eq.${encodeURIComponent(taskId)}`;
 
   const res = await fetch(postgrestUrl(endpoint), {
@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
       timestamp:      new Date().toISOString(),
     };
 
-    const res = await fetch(postgrestUrl("/execution_logs"), {
+    const res = await fetch(postgrestUrl("/javari_execution_logs"), {
       method: "POST",
       headers: { ...postgrestHeaders(), "Prefer": "return=representation" },
       body: JSON.stringify(testRow),
