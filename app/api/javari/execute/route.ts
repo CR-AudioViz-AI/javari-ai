@@ -3,10 +3,12 @@
 //          Commands: run_next_task, start_roadmap, pause_execution, resume_execution,
 //                    queue_status, memory_status
 //          Connected: planner, queue, model router, MemoryOS (javari_knowledge)
-// Date: 2026-03-07 — v1.1: hardened memory_status handler, added per-case try/catch
+//          DevOps: run_next_task now routes through taskExecutor which calls devopsExecutor
+// Date: 2026-03-07 — v1.2: wired run_next_task → taskExecutor for type-aware dispatch
 
 import { NextRequest, NextResponse } from "next/server";
 import { executeGateway } from "@/lib/execution/gateway";
+import { executeTask, ExecutableTask } from "@/lib/execution/taskExecutor";
 import { createClient } from "@supabase/supabase-js";
 
 export const runtime  = "nodejs";
@@ -17,16 +19,10 @@ const SERVICE_KEY   = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 const PREVIEW_BASE  = process.env.NEXT_PUBLIC_APP_URL
                     ?? "https://javari-ai-git-main-roy-hendersons-projects-1d3d5e94.vercel.app";
 
-// Supabase client — used by memory_status and loadMemoryContext
 function supabase() {
   return createClient(SUPABASE_URL, SERVICE_KEY, {
     auth: { persistSession: false },
   });
-}
-
-// Raw PostgREST helper for commands that hit other API routes
-function postgrest(table: string, qs = "") {
-  return `${SUPABASE_URL}/rest/v1/${table}${qs ? "?" + qs : ""}`;
 }
 
 function dbHeaders() {
@@ -37,9 +33,63 @@ function dbHeaders() {
   };
 }
 
+// ── Fetch next pending task from roadmap_tasks ─────────────────────────────
+async function fetchNextPendingTask(): Promise<ExecutableTask | null> {
+  try {
+    const db = supabase();
+    const { data, error } = await db
+      .from("roadmap_tasks")
+      .select("id, title, description, type, metadata")
+      .eq("status", "pending")
+      .order("created_at", { ascending: true })
+      .limit(1);
+
+    if (error || !data?.length) return null;
+
+    const row = data[0] as {
+      id         : string;
+      title      : string;
+      description: string;
+      type?      : string;
+      metadata?  : Record<string, unknown>;
+    };
+
+    return {
+      id         : row.id,
+      title      : row.title,
+      description: row.description,
+      type       : row.type,
+      metadata   : row.metadata as ExecutableTask["metadata"],
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ── Mark task status in roadmap_tasks ─────────────────────────────────────
+async function updateTaskStatus(
+  taskId : string,
+  status : "running" | "completed" | "failed",
+  output?: string,
+  error? : string
+): Promise<void> {
+  try {
+    const db = supabase();
+    await db
+      .from("roadmap_tasks")
+      .update({
+        status,
+        ...(output ? { result: output }         : {}),
+        ...(error  ? { error_message: error }   : {}),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", taskId);
+  } catch {
+    // Non-blocking — log but don't throw
+  }
+}
+
 // ── System command dispatcher ──────────────────────────────────────────────
-// Every case has its own try/catch so a failure in one command cannot
-// crash the entire POST handler.
 async function handleCommand(command: string, userId: string): Promise<{
   ok      : boolean;
   command : string;
@@ -52,27 +102,43 @@ async function handleCommand(command: string, userId: string): Promise<{
 
   switch (command) {
 
-    // ── run_next_task ──────────────────────────────────────────────────
+    // ── run_next_task — TYPE-AWARE via taskExecutor ────────────────────
     case "run_next_task": {
       try {
-        const res = await fetch(`${base}/api/javari/queue`, {
-          method : "POST",
-          headers: { "Content-Type": "application/json" },
-          body   : JSON.stringify({ maxTasks: 1, userId }),
-        });
-        const d = await res.json();
-        const log = d.logs?.[0];
-        if (!log) {
-          return { ok: false, command, result: "No executable tasks in queue." };
+        // 1. Pull next pending task from Supabase
+        const task = await fetchNextPendingTask();
+
+        if (!task) {
+          return { ok: false, command, result: "No pending tasks in queue." };
         }
+
+        // 2. Mark running
+        await updateTaskStatus(task.id, "running");
+
+        // 3. Dispatch through type-aware executor
+        const result = await executeTask(task, userId);
+
+        // 4. Persist result
+        if (result.ok) {
+          await updateTaskStatus(task.id, "completed", result.output);
+        } else {
+          await updateTaskStatus(task.id, "failed", undefined, result.error);
+        }
+
+        const actionsText = result.actions?.length
+          ? ` | actions: ${result.actions.map(a => a.action + (a.ok ? "✓" : "✗")).join(", ")}`
+          : "";
+
         return {
-          ok    : true,
+          ok    : result.ok,
           command,
-          result: `✅ Executed: **${log.task_id}** | model: ${log.model_used} | ${log.execution_time}ms | status: ${log.status}`,
-          data  : d,
+          result: result.ok
+            ? `✅ **${task.title}** [${result.type}]${actionsText} | ${result.durationMs}ms`
+            : `❌ **${task.title}** failed: ${result.error}`,
+          data  : result,
         };
       } catch (err) {
-        return { ok: false, command, result: `run_next_task failed: ${String(err)}` };
+        return { ok: false, command, result: `run_next_task exception: ${String(err)}` };
       }
     }
 
@@ -88,7 +154,7 @@ async function handleCommand(command: string, userId: string): Promise<{
         return {
           ok    : d.executed > 0,
           command,
-          result: `🚀 Roadmap execution started. Executed ${d.executed ?? 0} tasks. Succeeded: ${d.succeeded ?? 0}. Failed: ${d.failed ?? 0}.`,
+          result: `🚀 Roadmap started. Executed ${d.executed ?? 0} tasks. Succeeded: ${d.succeeded ?? 0}. Failed: ${d.failed ?? 0}.`,
           data  : d,
         };
       } catch (err) {
@@ -106,10 +172,9 @@ async function handleCommand(command: string, userId: string): Promise<{
         });
         const d = await res.json().catch(() => ({}));
         return {
-          ok    : true,
-          command,
+          ok: true, command,
           result: "⏸️ Execution paused. Kill switch activated. Use **resume_execution** to continue.",
-          data  : d,
+          data: d,
         };
       } catch (err) {
         return { ok: false, command, result: `pause_execution failed: ${String(err)}` };
@@ -126,10 +191,9 @@ async function handleCommand(command: string, userId: string): Promise<{
         });
         const d = await res.json().catch(() => ({}));
         return {
-          ok    : true,
-          command,
+          ok: true, command,
           result: "▶️ Execution resumed. Kill switch deactivated. Queue will process on next cycle.",
-          data  : d,
+          data: d,
         };
       } catch (err) {
         return { ok: false, command, result: `resume_execution failed: ${String(err)}` };
@@ -139,16 +203,23 @@ async function handleCommand(command: string, userId: string): Promise<{
     // ── queue_status ───────────────────────────────────────────────────
     case "queue_status": {
       try {
-        const res = await fetch(`${base}/api/javari/queue`, {
-          headers: { "Content-Type": "application/json" },
-        });
-        const d = await res.json();
-        const s = d.stats ?? {};
+        const db = supabase();
+        const { data: rows } = await db
+          .from("roadmap_tasks")
+          .select("status");
+
+        const counts = { pending: 0, running: 0, completed: 0, failed: 0, total: 0 };
+        for (const r of (rows ?? []) as { status: string }[]) {
+          counts.total++;
+          const s = r.status as keyof typeof counts;
+          if (s in counts) counts[s]++;
+        }
+
         return {
           ok    : true,
           command,
-          result: `📊 Queue: completed=${s.completed ?? 0} pending=${s.pending ?? 0} failed=${s.failed ?? 0} total=${s.total ?? 0}`,
-          data  : s,
+          result: `📊 Queue: completed=${counts.completed} pending=${counts.pending} running=${counts.running} failed=${counts.failed} total=${counts.total}`,
+          data  : counts,
         };
       } catch (err) {
         return { ok: false, command, result: `queue_status failed: ${String(err)}` };
@@ -156,66 +227,49 @@ async function handleCommand(command: string, userId: string): Promise<{
     }
 
     // ── memory_status ──────────────────────────────────────────────────
-    // Uses supabase-js directly — no raw fetch, no column filter assumptions.
-    // Counts all rows then fetches 5 most recent for preview.
     case "memory_status": {
       try {
         const db = supabase();
 
-        // Count total rows — head:true returns only the count header
         const { count, error: countErr } = await db
           .from("javari_knowledge")
           .select("*", { count: "exact", head: true });
 
         if (countErr) {
-          return {
-            ok     : false,
-            command,
-            records: 0,
-            table  : "javari_knowledge",
-            result : `MemoryOS query failed: ${countErr.message}`,
-          };
+          return { ok: false, command, records: 0, table: "javari_knowledge",
+                   result: `MemoryOS query failed: ${countErr.message}` };
         }
 
         const total = count ?? 0;
 
-        // Fetch 5 most recent titles for the summary preview
-        const { data: rows, error: rowErr } = await db
+        const { data: rows } = await db
           .from("javari_knowledge")
           .select("title, category, created_at")
           .order("created_at", { ascending: false })
           .limit(5);
 
-        const preview = rowErr || !rows?.length
+        const preview = !rows?.length
           ? "none"
-          : rows.map((r: { title: string; category: string }) =>
-              `${r.title} [${r.category}]`
-            ).join(", ");
+          : (rows as { title: string; category: string }[])
+              .map(r => `${r.title} [${r.category}]`)
+              .join(", ");
 
         return {
-          ok     : true,
-          command,
+          ok: true, command,
           records: total,
           table  : "javari_knowledge",
           result : `🧠 MemoryOS online. ${total} records in javari_knowledge. Recent: ${preview}`,
           data   : rows ?? [],
         };
       } catch (err) {
-        return {
-          ok     : false,
-          command,
-          records: 0,
-          table  : "javari_knowledge",
-          result : `memory_status exception: ${String(err)}`,
-        };
+        return { ok: false, command, records: 0, table: "javari_knowledge",
+                 result: `memory_status exception: ${String(err)}` };
       }
     }
 
-    // ── default ────────────────────────────────────────────────────────
     default:
       return {
-        ok    : false,
-        command,
+        ok: false, command,
         result: `Unknown command: ${command}. Available: run_next_task, start_roadmap, pause_execution, resume_execution, queue_status, memory_status`,
       };
   }
@@ -232,9 +286,9 @@ async function loadMemoryContext(_query: string): Promise<string> {
       .limit(3);
 
     if (!rows?.length) return "";
-    const snippets = rows.map((r: { title: string; content: string }) =>
-      `• ${r.title}: ${r.content?.slice(0, 120) ?? ""}`
-    ).join("\n");
+    const snippets = (rows as { title: string; content: string }[])
+      .map(r => `• ${r.title}: ${r.content?.slice(0, 120) ?? ""}`)
+      .join("\n");
     return `\n\n[MemoryOS context]\n${snippets}`;
   } catch {
     return "";
@@ -252,7 +306,7 @@ export async function POST(req: NextRequest) {
       userId    = "anonymous",
     } = body;
 
-    // ── Command mode ─────────────────────────────────────────────────────
+    // ── Command mode ──────────────────────────────────────────────────────
     if (command || mode === "command") {
       const cmd = (command || message.trim().toLowerCase().replace(/\s+/g, "_")).trim();
 
@@ -270,7 +324,6 @@ export async function POST(req: NextRequest) {
         mode   : "command",
         command: result.command,
         reply  : result.result,
-        // Include structured fields when present so UI can use them
         ...(result.records !== undefined ? { records: result.records } : {}),
         ...(result.table   !== undefined ? { table  : result.table   } : {}),
         data   : result.data ?? null,
@@ -284,10 +337,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ── MemoryOS context injection ────────────────────────────────────────
     const memCtx = await loadMemoryContext(message);
 
-    // ── Chat mode ─────────────────────────────────────────────────────────
+    // ── Chat mode ──────────────────────────────────────────────────────────
     if (mode === "chat") {
       const result = await executeGateway({
         input          : message + memCtx,
@@ -306,7 +358,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // ── Multi mode ────────────────────────────────────────────────────────
+    // ── Multi mode ─────────────────────────────────────────────────────────
     if (mode === "multi") {
       const result = await executeGateway({
         input  : message + memCtx,
@@ -345,15 +397,16 @@ export async function POST(req: NextRequest) {
 // ── GET: health + capability manifest ─────────────────────────────────────
 export async function GET() {
   return NextResponse.json({
-    ok       : true,
-    endpoint : "/api/javari/execute",
-    version  : "1.1.0",
-    modes    : ["chat", "multi", "command"],
-    commands : [
+    ok        : true,
+    endpoint  : "/api/javari/execute",
+    version   : "1.2.0",
+    modes     : ["chat", "multi", "command"],
+    commands  : [
       "run_next_task", "start_roadmap",
       "pause_execution", "resume_execution",
       "queue_status", "memory_status",
     ],
-    connected: ["planner", "queue", "model_router", "memoryos", "guardrails"],
+    taskTypes : ["build_module", "create_api", "update_schema", "deploy_feature", "ai_task"],
+    connected : ["planner", "queue", "model_router", "memoryos", "guardrails", "devops_executor"],
   });
 }
