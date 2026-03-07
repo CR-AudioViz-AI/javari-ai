@@ -13,6 +13,7 @@ import {
   startHeartbeat,
   recoverStalledTasks,
 } from "./persistence";
+import { runRoadmapWorker } from "./roadmapWorker";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -292,8 +293,53 @@ Return a JSON object with:
       parsedResult = { status: "completed", result: String(response.output) };
     }
 
-    const finalStatus: Task["status"] = parsedResult.status === "needs_retry" ? "retry" : "completed";
-    await updateTaskStatus(task.id, finalStatus);
+    // ── Verification gate: never write completed directly ────────────────
+    // Move to verifying first, then call verify-task which owns the
+    // completed transition. This enforces the artifact proof requirement.
+    const aiDeclaredRetry = parsedResult.status === "needs_retry";
+
+    // Step A: mark verifying
+    await updateTaskStatus(task.id, "in_progress");  // ensure in_progress before verifying
+    const supabaseDirect = freshClient();
+    await supabaseDirect
+      .from("roadmap_tasks")
+      .update({ status: "verifying", updated_at: Math.floor(Date.now() / 1000) })
+      .eq("id", task.id);
+
+    // Step B: call verification gate
+    const baseUrl =
+      process.env.NEXT_PUBLIC_APP_URL ??
+      process.env.NEXT_PUBLIC_SITE_URL ??
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
+
+    let finalStatus: Task["status"] = "retry";
+    let verifyVerdict = "retry";
+
+    if (!aiDeclaredRetry) {
+      try {
+        const vRes = await fetch(`${baseUrl}/api/javari/verify-task`, {
+          method : "POST",
+          headers: { "Content-Type": "application/json" },
+          body   : JSON.stringify({ task_id: task.id }),
+          signal : AbortSignal.timeout(30000),
+        });
+        const vData = await vRes.json().catch(() => ({})) as Record<string, unknown>;
+        verifyVerdict = (vData.verdict as string) ?? "retry";
+        finalStatus   = verifyVerdict === "completed" ? "completed"
+                      : verifyVerdict === "blocked"   ? "retry"
+                      : "retry";
+        console.log(`[queue] Verify gate for ${task.id} → ${verifyVerdict}`);
+      } catch (vErr) {
+        console.warn(`[queue] verify-task call failed for ${task.id}:`, (vErr as Error).message);
+        finalStatus = "retry";
+      }
+    }
+
+    // If AI declared retry or verify failed, revert to retry
+    if (aiDeclaredRetry || finalStatus !== "completed") {
+      await updateTaskStatus(task.id, "retry");
+    }
+    // If verified completed, verify-task already wrote the status — nothing to do here
 
     const log: ExecutionLog = {
       execution_id: executionId,
@@ -311,7 +357,7 @@ Return a JSON object with:
     await logExecution(log);
 
     console.log(`[queue] Task ${task.id} → ${finalStatus} | ${executionTime}ms | $${(log.cost).toFixed(4)}`);
-    return { success: true, log };
+    return { success: finalStatus === "completed", log };
 
   } catch (error: unknown) {
     const message = (error as Error).message;
@@ -337,6 +383,9 @@ Return a JSON object with:
 }
 
 // ─── Process queue ─────────────────────────────────────────────────────────────
+// Routes through runRoadmapWorker when available, ensuring the full verified
+// lifecycle: pending → in_progress → verifying → completed | retry | blocked.
+// Falls back to the legacy per-task path if the worker fails.
 export async function processQueue(
   maxTasks: number = 5,
   userId: string = "queue-executor"
@@ -347,40 +396,48 @@ export async function processQueue(
   blocked: number;
   logs: ExecutionLog[];
 }> {
-  console.log("[queue] ====== PROCESSING EXECUTION QUEUE ======");
-  console.log("[queue] Max tasks:", maxTasks);
+  console.log("[queue] ====== PROCESSING EXECUTION QUEUE (verified path) ======");
+  console.log("[queue] Max tasks:", maxTasks, "| userId:", userId);
 
-  const executableTasks = await getExecutableTasks();
+  try {
+    const result = await runRoadmapWorker(userId, maxTasks);
+    console.log(
+      `[queue] Worker cycle done | executed=${result.tasksExecuted} ` +
+      `completed=${result.tasksCompleted} retried=${result.tasksRetried} ` +
+      `blocked=${result.tasksBlocked} | ${result.durationMs}ms`
+    );
+    return {
+      executed : result.tasksExecuted,
+      succeeded: result.tasksCompleted,
+      failed   : result.tasksRetried,
+      blocked  : result.tasksBlocked,
+      logs     : [],  // telemetry written to javari_execution_logs by worker
+    };
+  } catch (err: unknown) {
+    // Worker init failed — fall back to legacy per-task execution
+    console.error("[queue] Worker failed, using legacy path:", (err as Error).message);
 
-  if (executableTasks.length === 0) {
-    console.log("[queue] No executable tasks found");
-    return { executed: 0, succeeded: 0, failed: 0, blocked: 0, logs: [] };
-  }
-
-  const tasksToExecute = executableTasks.slice(0, maxTasks);
-  console.log(`[queue] Executing ${tasksToExecute.length} task(s)`);
-
-  const logs: ExecutionLog[] = [];
-  let succeeded = 0;
-  let failed = 0;
-  let blocked = 0;
-
-  for (const task of tasksToExecute) {
-    const result = await executeTask(task, userId);
-    logs.push(result.log);
-
-    if (result.log.status === "blocked") {
-      blocked++;
-    } else if (result.success) {
-      succeeded++;
-    } else {
-      failed++;
+    const executableTasks = await getExecutableTasks();
+    if (executableTasks.length === 0) {
+      console.log("[queue] No executable tasks found");
+      return { executed: 0, succeeded: 0, failed: 0, blocked: 0, logs: [] };
     }
+
+    const tasksToExecute = executableTasks.slice(0, maxTasks);
+    const logs: ExecutionLog[] = [];
+    let succeeded = 0, failed = 0, blocked = 0;
+
+    for (const task of tasksToExecute) {
+      const result = await executeTask(task, userId);
+      logs.push(result.log);
+      if (result.log.status === "blocked") blocked++;
+      else if (result.success) succeeded++;
+      else failed++;
+    }
+
+    console.log(`[queue] Legacy complete | executed=${tasksToExecute.length} succeeded=${succeeded} failed=${failed}`);
+    return { executed: tasksToExecute.length, succeeded, failed, blocked, logs };
   }
-
-  console.log(`[queue] Complete — executed: ${tasksToExecute.length} | succeeded: ${succeeded} | failed: ${failed} | blocked: ${blocked}`);
-
-  return { executed: tasksToExecute.length, succeeded, failed, blocked, logs };
 }
 
 // ─── Queue stats ──────────────────────────────────────────────────────────────
