@@ -18,6 +18,10 @@
     {
       "path": "/api/javari/start-roadmap",
       "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/javari/auto-migrate",
+      "schedule": "0 5 * * *"
     }
   ]
 }
