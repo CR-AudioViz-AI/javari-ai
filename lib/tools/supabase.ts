@@ -5,10 +5,16 @@
 import { createClient } from "@supabase/supabase-js";
 import { ToolCallResult, ToolRequest, RollbackRecord, ToolCapability } from "./types";
 
+// Fresh client per call — avoids supabase-js module-level schema cache misses
+// when tables are created after the process started.
 function getClient() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    {
+      db: { schema: "public" },
+      auth: { persistSession: false, autoRefreshToken: false },
+    }
   );
 }
 
