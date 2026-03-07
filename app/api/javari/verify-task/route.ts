@@ -37,28 +37,26 @@ async function setCompleted(taskId: string, detail: string): Promise<void> {
 }
 
 async function setRetry(taskId: string, reason: string): Promise<void> {
-  // Increment retry_count (if column exists) or read and compare
-  const client = await db();
+  // roadmap_tasks has no metadata column — encode retry count in result field as [retry:N]
+  const client = db();
 
-  // Read current retry count from metadata or a dedicated field
   const { data } = await client
     .from("roadmap_tasks")
-    .select("metadata")
+    .select("result")
     .eq("id", taskId)
     .single();
 
-  const meta       = ((data as { metadata?: Record<string, unknown> })?.metadata ?? {}) as Record<string, unknown>;
-  const retryCount = ((meta.retry_count as number) ?? 0) + 1;
-
-  const newStatus  = retryCount >= MAX_RETRIES ? "blocked" : "retry";
-  const newMeta    = { ...meta, retry_count: retryCount, last_fail_reason: reason };
+  const prevResult  = (data as { result?: string })?.result ?? "";
+  const prevMatch   = prevResult.match(/^\[retry:(\d+)\]/);
+  const retryCount  = (prevMatch ? parseInt(prevMatch[1]) : 0) + 1;
+  const newStatus   = retryCount >= MAX_RETRIES ? "blocked" : "retry";
 
   await client
     .from("roadmap_tasks")
     .update({
       status    : newStatus,
-      metadata  : newMeta,
-      result    : reason,
+      result    : `[retry:${retryCount}] ${reason}`,
+      error     : reason,
       updated_at: Date.now(),
     })
     .eq("id", taskId);
@@ -99,15 +97,16 @@ export async function POST(req: NextRequest) {
       const reason = result.failReason ?? "unknown_failure";
       await setRetry(taskId, reason);
 
-      const client = await db();
+      const client = db();
       const { data: updated } = await client
         .from("roadmap_tasks")
-        .select("metadata")
+        .select("result")
         .eq("id", taskId)
         .single();
 
-      const meta        = ((updated as { metadata?: Record<string, unknown> })?.metadata ?? {}) as Record<string, unknown>;
-      const retryCount  = (meta.retry_count as number) ?? 1;
+      const resultText  = (updated as { result?: string })?.result ?? "[retry:1]";
+      const retryMatch  = resultText.match(/^\[retry:(\d+)\]/);
+      const retryCount  = retryMatch ? parseInt(retryMatch[1]) : 1;
       const finalStatus = retryCount >= MAX_RETRIES ? "blocked" : "retry";
 
       return NextResponse.json({
