@@ -5,10 +5,14 @@
 
 import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+// Per-call fresh client — avoids stale supabase-js schema cache on long-running processes
+function getSupabase() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { db: { schema: "public" }, auth: { persistSession: false, autoRefreshToken: false } }
+  );
+}
 
 export const PERSISTENCE_VERSION = "1.0.0";
 
@@ -47,7 +51,7 @@ export async function writeCheckpoint(
   const now = new Date();
   const expires = new Date(now.getTime() + STALL_THRESHOLD_MS);
 
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from("task_checkpoints")
     .upsert({
       task_id: taskId,
@@ -72,7 +76,7 @@ export async function heartbeat(taskId: string): Promise<void> {
   const now = new Date();
   const expires = new Date(now.getTime() + STALL_THRESHOLD_MS);
 
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from("task_checkpoints")
     .update({
       last_heartbeat: now.toISOString(),
@@ -88,7 +92,7 @@ export async function heartbeat(taskId: string): Promise<void> {
 
 // ─── Clear checkpoint ─────────────────────────────────────────────────────────
 export async function clearCheckpoint(taskId: string): Promise<void> {
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from("task_checkpoints")
     .delete()
     .eq("task_id", taskId);
@@ -100,7 +104,7 @@ export async function clearCheckpoint(taskId: string): Promise<void> {
 
 // ─── Read checkpoint ──────────────────────────────────────────────────────────
 export async function readCheckpoint(taskId: string): Promise<TaskCheckpoint | null> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from("task_checkpoints")
     .select("*")
     .eq("task_id", taskId)
@@ -128,7 +132,7 @@ export async function recoverStalledTasks(): Promise<{
   const now = new Date().toISOString();
 
   // Find checkpoints whose lock has expired
-  const { data: stalled, error: stallErr } = await supabase
+  const { data: stalled, error: stallErr } = await getSupabase()
     .from("task_checkpoints")
     .select("*")
     .lt("lock_expires_at", now);
@@ -146,7 +150,7 @@ export async function recoverStalledTasks(): Promise<{
 
     if (nextAttempt > MAX_RETRY_ATTEMPTS) {
       // Too many attempts — permanently fail
-      await supabase
+      await getSupabase()
         .from("roadmap_tasks")
         .update({ status: "failed", updated_at: Math.floor(Date.now() / 1000) })
         .eq("id", checkpoint.task_id);
@@ -159,12 +163,12 @@ export async function recoverStalledTasks(): Promise<{
       );
     } else {
       // Reset to retry with incremented attempt counter
-      await supabase
+      await getSupabase()
         .from("roadmap_tasks")
         .update({ status: "retry", updated_at: Math.floor(Date.now() / 1000) })
         .eq("id", checkpoint.task_id);
 
-      await supabase
+      await getSupabase()
         .from("task_checkpoints")
         .update({ attempt: nextAttempt, updated_at: new Date().toISOString() })
         .eq("task_id", checkpoint.task_id);
@@ -199,7 +203,7 @@ export async function acquireTaskLock(
 
   // Try to update task to in_progress only if currently pending or retry
   // NOTE: updated_at is stored as integer epoch seconds in roadmap_tasks
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from("roadmap_tasks")
     .update({
       status: "in_progress",
@@ -215,7 +219,7 @@ export async function acquireTaskLock(
   }
 
   // Write initial checkpoint
-  const { error: cpErr } = await supabase
+  const { error: cpErr } = await getSupabase()
     .from("task_checkpoints")
     .upsert({
       task_id: taskId,
@@ -243,7 +247,7 @@ export async function releaseTaskLock(
   taskId: string,
   finalStatus: "completed" | "failed"
 ): Promise<void> {
-  await supabase
+  await getSupabase()
     .from("roadmap_tasks")
     .update({ status: finalStatus, updated_at: Math.floor(Date.now() / 1000) })
     .eq("id", taskId);
@@ -269,7 +273,7 @@ export async function getPersistenceStats(): Promise<{
 }> {
   const now = new Date().toISOString();
 
-  const { data: all, error } = await supabase
+  const { data: all, error } = await getSupabase()
     .from("task_checkpoints")
     .select("lock_expires_at, locked_at");
 
