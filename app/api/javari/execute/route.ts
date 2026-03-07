@@ -30,7 +30,7 @@ async function fetchNextPendingTask(): Promise<ExecutableTask | null> {
     const db = supabase();
     const { data, error } = await db
       .from("roadmap_tasks")
-      .select("id, title, description, metadata")
+      .select("id, title, description, source")
       .eq("status", "pending")
       .order("updated_at", { ascending: true })
       .limit(1);
@@ -41,20 +41,17 @@ async function fetchNextPendingTask(): Promise<ExecutableTask | null> {
       id         : string;
       title      : string;
       description: string;
-      metadata?  : Record<string, unknown>;
+      source?    : string;
     };
+
+    // task type is embedded in description as [type:X] tag by seedTasksFromRoadmap
+    const typeTag = row.description?.match(/\[type:([^\]]+)\]/)?.[1] ?? "ai_task";
 
     return {
       id         : row.id,
       title      : row.title,
       description: row.description,
-      type       : (row.metadata?.type as string) ?? "ai_task",
-      metadata   : {
-        project    : (row.metadata?.project as string)     ?? undefined,
-        filePath   : (row.metadata?.filePath as string)    ?? undefined,
-        fileContent: (row.metadata?.fileContent as string) ?? undefined,
-        sql        : (row.metadata?.sql as string)         ?? undefined,
-      },
+      type       : typeTag,
     };
   } catch {
     return null;
@@ -78,8 +75,8 @@ async function updateTaskStatus(
       .from("roadmap_tasks")
       .update({
         status,
-        ...(output ? { result: output }       : {}),
-        ...(error  ? { error_message: error } : {}),
+        ...(output ? { result: output } : {}),
+        ...(error  ? { error: error }   : {}),
         updated_at: Date.now(),   // bigint epoch ms
       })
       .eq("id", taskId);
