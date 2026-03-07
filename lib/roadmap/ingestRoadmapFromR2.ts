@@ -1,13 +1,12 @@
 // lib/roadmap/ingestRoadmapFromR2.ts
 // Purpose: Connect to Cloudflare R2, find roadmap-related markdown/json docs,
 //          download them, and extract structured roadmap items for seeding.
-//          Uses the existing lib/canonical/r2-client.ts (SigV4, production-grade).
-//          Env vars: R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY,
-//                    R2_CANONICAL_BUCKET (default: craudiovizai-canonical),
-//                    R2_CANONICAL_PREFIX (default: roadmap/)
+//          Uses lib/canonical/r2-client.ts — credentials from Platform Secret Authority vault.
+//          Vault keys: R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, R2_CANONICAL_PREFIX
+//          Defaults: bucket=cold-storage, prefix=consolidation-docs/
 // Date: 2026-03-07
 
-import { listCanonicalKeys, fetchCanonicalText, checkR2Connectivity } from "@/lib/canonical/r2-client";
+import { listCanonicalKeys, fetchCanonicalText } from "@/lib/canonical/r2-client";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -29,11 +28,10 @@ export interface IngestR2Result {
 }
 
 // ── Roadmap-relevant file patterns ─────────────────────────────────────────
-// Applied to the filename portion of each R2 key
 const ROADMAP_FILE_PATTERNS = [
   /roadmap/i, /platform/i, /scaling/i, /next.steps/i, /master.bible/i,
   /phase/i,   /architecture/i, /blueprint/i, /ecosystem/i, /executive/i,
-  /master.summary/i, /complete.guide/i, /strategic/i, /next.steps/i,
+  /master.summary/i, /complete.guide/i, /strategic/i,
 ];
 
 // ── Task type classifier ───────────────────────────────────────────────────
@@ -134,42 +132,28 @@ function extractItemsFromJSON(parsed: unknown, sourceDoc: string): RoadmapItem[]
 /**
  * ingestRoadmapFromR2
  *
- * Uses the existing lib/canonical/r2-client.ts to list and fetch R2 objects.
- * That client uses SigV4 signed requests — no @aws-sdk dependency.
- * Env vars required: R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
- * Optional:          R2_CANONICAL_BUCKET (default: craudiovizai-canonical)
- *                    R2_CANONICAL_PREFIX (default: roadmap/)
+ * Lists R2 objects via lib/canonical/r2-client.ts (SigV4, vault-backed credentials).
+ * Filters to roadmap-relevant files, downloads and extracts structured items.
+ *
+ * Credentials sourced from Platform Secret Authority vault:
+ *   R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
+ *   R2_BUCKET (default: cold-storage)
+ *   R2_CANONICAL_PREFIX (default: consolidation-docs/)
  */
 export async function ingestRoadmapFromR2(): Promise<IngestR2Result> {
   try {
-    // Step 0: connectivity check — fast-fail with clear error if creds missing
-    const connectivity = await checkR2Connectivity();
-    if (!connectivity.ok) {
+    // Step 1: list all objects — r2-client uses vault credentials + configured bucket/prefix
+    let allObjects = await listCanonicalKeys();
+
+    if (!allObjects.length) {
       return {
         ok: false, items: [], filesScanned: 0, filesUsed: 0,
-        error: `R2 connectivity check failed: ${connectivity.message}`,
+        error: "R2 bucket returned 0 objects. Vault credentials loaded but bucket may be empty.",
       };
     }
 
-    // Step 1: list all keys under the canonical prefix
-    // listCanonicalKeys uses R2_CANONICAL_PREFIX (default "roadmap/")
-    // Pass empty string to get everything in the bucket for broader scanning
-    const allObjects = await listCanonicalKeys("").catch(() => []);
-
-    if (!allObjects.length) {
-      // Try the default prefix explicitly
-      const withPrefix = await listCanonicalKeys().catch(() => []);
-      if (!withPrefix.length) {
-        return {
-          ok: false, items: [], filesScanned: 0, filesUsed: 0,
-          error: "R2 bucket listed successfully but returned 0 objects. Bucket may be empty.",
-        };
-      }
-      allObjects.push(...withPrefix);
-    }
-
     // Step 2: filter to roadmap-relevant markdown/json files
-    const roadmapKeys = allObjects.filter(obj => {
+    const roadmapObjects = allObjects.filter(obj => {
       const filename = obj.key.split("/").pop() ?? "";
       return (
         (filename.endsWith(".md") || filename.endsWith(".json")) &&
@@ -177,7 +161,7 @@ export async function ingestRoadmapFromR2(): Promise<IngestR2Result> {
       );
     });
 
-    if (!roadmapKeys.length) {
+    if (!roadmapObjects.length) {
       return {
         ok: false, items: [], filesScanned: allObjects.length, filesUsed: 0,
         error: `Listed ${allObjects.length} R2 objects but none matched roadmap file patterns.`,
@@ -188,7 +172,7 @@ export async function ingestRoadmapFromR2(): Promise<IngestR2Result> {
     const allItems: RoadmapItem[] = [];
     let filesUsed = 0;
 
-    for (const obj of roadmapKeys.slice(0, 20)) {
+    for (const obj of roadmapObjects.slice(0, 20)) {
       try {
         const content = await fetchCanonicalText(obj.key);
         if (!content.trim()) continue;
@@ -207,7 +191,7 @@ export async function ingestRoadmapFromR2(): Promise<IngestR2Result> {
           allItems.push(...extracted);
           filesUsed++;
         }
-      } catch { /* individual file failure — skip, don't abort */ }
+      } catch { /* per-file failure is non-fatal */ }
     }
 
     // Step 4: deduplicate by title
