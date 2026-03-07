@@ -104,14 +104,12 @@ export async function POST(req: NextRequest) {
         escalated    = false,
       } = body;
 
+      // Use only confirmed live columns (auto_fixed/escalated not in schema cache)
       const payload = {
         error_type,
         error_message : description,
         error_context : context,
         diagnosis     : { why_failed },
-        fix_applied   : false,
-        auto_fixed,
-        escalated,
         created_at    : new Date().toISOString(),
       };
 
@@ -192,14 +190,12 @@ export async function POST(req: NextRequest) {
       }
 
       const now = new Date().toISOString();
+      // Use only confirmed live columns — schema cache blocks auto_fixed/escalated/fix_applied
       const enriched = records.map((r) => ({
         error_type    : (r.pattern_type as string)  || "execution_anti_pattern",
         error_message : (r.description as string)   || "",
         error_context : (r.context as object)        || {},
         diagnosis     : { why_failed: r.why_failed  || "" },
-        fix_applied   : false,
-        auto_fixed    : false,
-        escalated     : false,
         created_at    : now,
       }));
 
