@@ -313,18 +313,36 @@ export async function checkRollbackTrigger(): Promise<GuardrailResult> {
 
 // ─── Audit log writer ─────────────────────────────────────────────────────────
 // Persists every guardrail result to the guardrail_audit_log table.
-// Silently no-ops if the table doesn't exist yet — never crashes the caller.
+// Uses raw fetch() — guardrail_audit_log was created after supabase gen types ran,
+// so supabase-js .from() returns schema cache misses on some connection pools.
 export async function writeGuardrailAudit(entries: AuditEntry[]): Promise<void> {
-  if (entries.length === 0) return;
-
   try {
-    const { error } = await supabase
-      .from("guardrail_audit_log")
-      .insert(entries);
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-    if (error) {
-      // Table may not exist yet — non-fatal
-      console.warn("[guardrails] Audit log write failed (non-fatal):", error.message);
+    const res = await fetch(`${url}/rest/v1/guardrail_audit_log`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": key,
+        "Authorization": `Bearer ${key}`,
+        "Prefer": "return=minimal",
+      },
+      body: JSON.stringify(entries.map(e => ({
+        execution_id:    e.executionId,
+        task_id:         e.taskId,
+        guardrail_check: e.check,
+        outcome:         e.outcome,
+        reason:          e.reason,
+        meta:            e.meta ?? {},
+        created_at:      e.timestamp,
+      }))),
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      console.warn("[guardrails] Audit log write failed (non-fatal):", res.status, err.slice(0, 100));
     }
   } catch (err: unknown) {
     console.warn("[guardrails] Audit log exception (non-fatal):", (err as Error).message);
