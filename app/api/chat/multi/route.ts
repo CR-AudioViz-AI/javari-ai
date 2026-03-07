@@ -1,7 +1,7 @@
 // app/api/chat/multi/route.ts
 // Purpose: Multi-AI Chat endpoint — streaming + non-streaming, guardrail-protected
 // Connects lib/chat/router.ts to the HTTP layer
-// Date: 2026-03-07
+// Date: 2026-03-07 | Build: unified
 
 import { NextRequest, NextResponse } from "next/server";
 import { route, streamRouter, detectAvailableProviders, ROUTER_VERSION } from "@/lib/chat/router";
