@@ -59,7 +59,25 @@ export const MODEL_REGISTRY: ModelDefinition[] = [
     reliabilityScore: 10,
     latencyScore: 7,
   },
+  // ── Builder-tier model: cheapest capable model for roadmap task execution ──
+  // gemini-2.0-flash: $0.075/1k tokens — ~40x cheaper than Sonnet 4
+  // Capable of structured JSON output, fast, reliable for planning tasks
+  {
+    id: "gemini-2.0-flash-exp",
+    provider: "google",
+    capability: "standard",
+    costPer1k: 0.075,
+    reasoningScore: 7,
+    reliabilityScore: 8,
+    latencyScore: 9,
+  },
 ];
+
+// ── Role-based model constants (Henderson Standard routing) ───────────────────
+// builder_model: cheapest capable model — used for roadmap task execution
+// validator_model: highest reasoning model — used for validation passes
+export const BUILDER_MODEL_ID = "gemini-2.0-flash-exp";
+export const VALIDATOR_MODEL_ID = "claude-sonnet-4-20250514";
 
 export interface RoutingPreferences {
   allowedModels?: string[];
