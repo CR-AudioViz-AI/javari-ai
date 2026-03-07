@@ -271,7 +271,7 @@ export async function checkRollbackTrigger(): Promise<GuardrailResult> {
     const { data: recent, error } = await supabase
       .from("javari_execution_logs")
       .select("status")
-      .order("timestamp", { ascending: false })
+      .order("created_at", { ascending: false })
       .limit(WINDOW);
 
     if (error || !recent || recent.length < 3) {
