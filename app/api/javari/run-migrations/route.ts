@@ -137,7 +137,7 @@ export async function POST() {
   );
 
   const checks: Record<string, unknown> = {};
-  for (const table of ["execution_logs", "guardrail_audit_log"]) {
+  for (const table of ["javari_execution_logs", "guardrail_audit_log"]) {
     const { count, error } = await supabase
       .from(table)
       .select("*", { count: "exact", head: true });
@@ -175,7 +175,7 @@ export async function GET() {
   );
 
   const checks: Record<string, { accessible: boolean; count?: number; error?: string }> = {};
-  for (const table of ["execution_logs", "guardrail_audit_log"]) {
+  for (const table of ["javari_execution_logs", "guardrail_audit_log"]) {
     const { count, error } = await supabase
       .from(table)
       .select("*", { count: "exact", head: true });
