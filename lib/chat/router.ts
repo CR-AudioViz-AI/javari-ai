@@ -1,7 +1,7 @@
 // lib/chat/router.ts
 // Purpose: Multi-AI Chat Router — single-model fast path + multi-AI collaboration mode
 //          with model routing, tool hooks, streaming, cost estimation, guardrail checks
-// Date: 2026-03-07
+// Date: 2026-03-07 | Build: unified
 
 import { ChatMessage, RouterConfig, ProviderResponse, MultiAIResult, StreamChunk } from "./types";
 import { callAnthropic, streamAnthropic, ANTHROPIC_MODELS } from "./providers/anthropic";
