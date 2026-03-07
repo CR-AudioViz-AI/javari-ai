@@ -96,20 +96,17 @@ export async function seedTasksFromRoadmap(
 
       const id = makeTaskId(item.title, i);
 
+      // roadmap_tasks has no metadata column — embed type as structured tag in description
+      const descWithType = `[type:${item.type}][priority:${item.priority}] ${item.description}`;
+
       toInsert.push({
         id,
         title      : item.title,
-        description: item.description,
-        // type and priority stored in metadata — roadmap_tasks schema uses description/depends_on
+        description: descWithType,
         depends_on : [],
         status     : "pending",
         source     : "r2_ingest",
         phase_id   : item.phase ?? "r2_auto",
-        metadata   : {
-          type      : item.type,
-          priority  : item.priority,
-          source_doc: item.source_doc,
-        },
         updated_at : new Date().toISOString(),
       });
 
