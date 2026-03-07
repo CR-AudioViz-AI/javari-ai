@@ -1,6 +1,6 @@
 // app/api/javari/queue/reset/route.ts
-// Purpose: Self-healing reset endpoint — moves failed roadmap tasks back to pending for retry
-// Date: 2026-03-06
+// Purpose: Reset failed OR blocked roadmap tasks back to pending for retry.
+// Date: 2026-03-07 — updated: also resets blocked tasks
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -15,78 +15,44 @@ export const dynamic = "force-dynamic";
 
 export async function POST() {
   try {
-    // Fetch failed task IDs first so we can return them in the response
-    const { data: failedTasks, error: fetchError } = await supabase
+    const { data: tasks, error: fetchError } = await supabase
       .from("roadmap_tasks")
-      .select("id, title")
-      .eq("status", "failed");
+      .select("id, title, status")
+      .in("status", ["failed", "blocked", "retry"]);
 
-    if (fetchError) {
-      throw fetchError;
+    if (fetchError) throw fetchError;
+    if (!tasks || tasks.length === 0) {
+      return NextResponse.json({ success: true, resetCount: 0, message: "No failed/blocked/retry tasks found", tasks: [] });
     }
 
-    if (!failedTasks || failedTasks.length === 0) {
-      return NextResponse.json({
-        success: true,
-        resetCount: 0,
-        message: "No failed tasks found — nothing to reset",
-        tasks: [],
-      });
-    }
-
-    // Reset all failed tasks to pending
+    const ids = tasks.map((t: { id: string }) => t.id);
     const { error: updateError } = await supabase
       .from("roadmap_tasks")
-      .update({
-        status: "pending",
-        updated_at: Math.floor(Date.now() / 1000),
-      })
-      .eq("status", "failed");
+      .update({ status: "pending", updated_at: Math.floor(Date.now() / 1000) })
+      .in("id", ids);
 
-    if (updateError) {
-      throw updateError;
-    }
-
-    console.log(`[queue/reset] ✅ Reset ${failedTasks.length} failed tasks to pending`);
-    failedTasks.forEach(t => console.log(`[queue/reset]  → ${t.id}: ${t.title}`));
+    if (updateError) throw updateError;
 
     return NextResponse.json({
       success: true,
-      resetCount: failedTasks.length,
-      message: `Reset ${failedTasks.length} failed task(s) to pending`,
-      tasks: failedTasks.map(t => ({ id: t.id, title: t.title })),
+      resetCount: tasks.length,
+      message: `Reset ${tasks.length} task(s) to pending`,
+      tasks: tasks.map((t: { id: string; title: string; status: string }) => ({ id: t.id, title: t.title, was: t.status })),
     });
-
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("[queue/reset] ❌ Error:", message);
-
-    return NextResponse.json(
-      {
-        success: false,
-        error: message,
-      },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
 
-// GET — status check, shows current failed task count without modifying anything
 export async function GET() {
   try {
     const { data, error } = await supabase
       .from("roadmap_tasks")
       .select("id, title, status")
-      .eq("status", "failed");
-
+      .in("status", ["failed", "blocked", "retry"]);
     if (error) throw error;
-
-    return NextResponse.json({
-      success: true,
-      failedCount: data?.length || 0,
-      tasks: data || [],
-    });
-
+    return NextResponse.json({ success: true, count: data?.length || 0, tasks: data || [] });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ success: false, error: message }, { status: 500 });
