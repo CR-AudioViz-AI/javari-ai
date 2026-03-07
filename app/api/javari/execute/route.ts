@@ -32,7 +32,7 @@ async function fetchNextPendingTask(): Promise<ExecutableTask | null> {
       .from("roadmap_tasks")
       .select("id, title, description, metadata")
       .eq("status", "pending")
-      .order("created_at", { ascending: true })
+      .order("updated_at", { ascending: true })
       .limit(1);
 
     if (error || !data?.length) return null;
@@ -240,7 +240,10 @@ async function handleCommand(command: string, userId: string): Promise<{
       try {
         const db = supabase();
         const { data: rows } = await db.from("roadmap_tasks").select("status");
-        const counts = { pending: 0, running: 0, completed: 0, failed: 0, total: 0 };
+        const counts = {
+          pending: 0, in_progress: 0, verifying: 0,
+          completed: 0, retry: 0, blocked: 0, failed: 0, total: 0
+        };
         for (const r of (rows ?? []) as { status: string }[]) {
           counts.total++;
           const s = r.status as keyof typeof counts;
@@ -248,7 +251,7 @@ async function handleCommand(command: string, userId: string): Promise<{
         }
         return {
           ok: true, command,
-          result: `📊 Queue: completed=${counts.completed} pending=${counts.pending} running=${counts.running} failed=${counts.failed} total=${counts.total}`,
+          result: `📊 Queue: completed=${counts.completed} pending=${counts.pending} in_progress=${counts.in_progress} verifying=${counts.verifying} retry=${counts.retry} blocked=${counts.blocked} failed=${counts.failed} total=${counts.total}`,
           data: counts,
         };
       } catch (err) {
