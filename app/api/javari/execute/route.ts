@@ -1,18 +1,17 @@
 // app/api/javari/execute/route.ts
 // Purpose: Unified command console endpoint — chat, multi-AI, and system commands.
-//          Commands: run_next_task, start_roadmap, pause_execution, resume_execution,
-//                    queue_status, memory_status
-//          Connected: planner, queue, model router, MemoryOS (javari_knowledge)
-//          DevOps: run_next_task now routes through taskExecutor which calls devopsExecutor
-// Date: 2026-03-07 — v1.2: wired run_next_task → taskExecutor for type-aware dispatch
+// Date: 2026-03-07 — v1.3: start_roadmap loads from R2 via ingestRoadmapFromR2 + seedTasksFromRoadmap
 
 import { NextRequest, NextResponse } from "next/server";
 import { executeGateway } from "@/lib/execution/gateway";
 import { executeTask, ExecutableTask } from "@/lib/execution/taskExecutor";
+import { ingestRoadmapFromR2 } from "@/lib/roadmap/ingestRoadmapFromR2";
+import { seedTasksFromRoadmap } from "@/lib/roadmap/seedTasksFromRoadmap";
 import { createClient } from "@supabase/supabase-js";
 
-export const runtime  = "nodejs";
-export const dynamic  = "force-dynamic";
+export const runtime    = "nodejs";
+export const dynamic    = "force-dynamic";
+export const maxDuration = 300; // R2 ingest can take time on large docs
 
 const SUPABASE_URL  = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const SERVICE_KEY   = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -25,21 +24,13 @@ function supabase() {
   });
 }
 
-function dbHeaders() {
-  return {
-    "apikey"       : SERVICE_KEY,
-    "Authorization": `Bearer ${SERVICE_KEY}`,
-    "Content-Type" : "application/json",
-  };
-}
-
 // ── Fetch next pending task from roadmap_tasks ─────────────────────────────
 async function fetchNextPendingTask(): Promise<ExecutableTask | null> {
   try {
     const db = supabase();
     const { data, error } = await db
       .from("roadmap_tasks")
-      .select("id, title, description, type, metadata")
+      .select("id, title, description, metadata")
       .eq("status", "pending")
       .order("created_at", { ascending: true })
       .limit(1);
@@ -50,7 +41,6 @@ async function fetchNextPendingTask(): Promise<ExecutableTask | null> {
       id         : string;
       title      : string;
       description: string;
-      type?      : string;
       metadata?  : Record<string, unknown>;
     };
 
@@ -58,15 +48,20 @@ async function fetchNextPendingTask(): Promise<ExecutableTask | null> {
       id         : row.id,
       title      : row.title,
       description: row.description,
-      type       : row.type,
-      metadata   : row.metadata as ExecutableTask["metadata"],
+      type       : (row.metadata?.type as string) ?? "ai_task",
+      metadata   : {
+        project    : (row.metadata?.project as string)     ?? undefined,
+        filePath   : (row.metadata?.filePath as string)    ?? undefined,
+        fileContent: (row.metadata?.fileContent as string) ?? undefined,
+        sql        : (row.metadata?.sql as string)         ?? undefined,
+      },
     };
   } catch {
     return null;
   }
 }
 
-// ── Mark task status in roadmap_tasks ─────────────────────────────────────
+// ── Mark task status ───────────────────────────────────────────────────────
 async function updateTaskStatus(
   taskId : string,
   status : "running" | "completed" | "failed",
@@ -79,17 +74,15 @@ async function updateTaskStatus(
       .from("roadmap_tasks")
       .update({
         status,
-        ...(output ? { result: output }         : {}),
-        ...(error  ? { error_message: error }   : {}),
+        ...(output ? { result: output }       : {}),
+        ...(error  ? { error_message: error } : {}),
         updated_at: new Date().toISOString(),
       })
       .eq("id", taskId);
-  } catch {
-    // Non-blocking — log but don't throw
-  }
+  } catch { /* non-blocking */ }
 }
 
-// ── System command dispatcher ──────────────────────────────────────────────
+// ── Command dispatcher ─────────────────────────────────────────────────────
 async function handleCommand(command: string, userId: string): Promise<{
   ok      : boolean;
   command : string;
@@ -102,23 +95,15 @@ async function handleCommand(command: string, userId: string): Promise<{
 
   switch (command) {
 
-    // ── run_next_task — TYPE-AWARE via taskExecutor ────────────────────
+    // ── run_next_task ──────────────────────────────────────────────────
     case "run_next_task": {
       try {
-        // 1. Pull next pending task from Supabase
         const task = await fetchNextPendingTask();
+        if (!task) return { ok: false, command, result: "No pending tasks in queue." };
 
-        if (!task) {
-          return { ok: false, command, result: "No pending tasks in queue." };
-        }
-
-        // 2. Mark running
         await updateTaskStatus(task.id, "running");
-
-        // 3. Dispatch through type-aware executor
         const result = await executeTask(task, userId);
 
-        // 4. Persist result
         if (result.ok) {
           await updateTaskStatus(task.id, "completed", result.output);
         } else {
@@ -135,27 +120,51 @@ async function handleCommand(command: string, userId: string): Promise<{
           result: result.ok
             ? `✅ **${task.title}** [${result.type}]${actionsText} | ${result.durationMs}ms`
             : `❌ **${task.title}** failed: ${result.error}`,
-          data  : result,
+          data: result,
         };
       } catch (err) {
         return { ok: false, command, result: `run_next_task exception: ${String(err)}` };
       }
     }
 
-    // ── start_roadmap ──────────────────────────────────────────────────
+    // ── start_roadmap — loads from R2 → seeds Supabase ────────────────
     case "start_roadmap": {
       try {
-        const res = await fetch(`${base}/api/javari/queue`, {
-          method : "POST",
-          headers: { "Content-Type": "application/json" },
-          body   : JSON.stringify({ maxTasks: 10, userId }),
-        });
-        const d = await res.json();
+        // Step 1: Pull roadmap items from R2 canonical docs
+        const ingestResult = await ingestRoadmapFromR2();
+
+        if (!ingestResult.ok || !ingestResult.items.length) {
+          // R2 ingest failed or returned nothing — fall back to queue execution
+          const res = await fetch(`${base}/api/javari/queue`, {
+            method : "POST",
+            headers: { "Content-Type": "application/json" },
+            body   : JSON.stringify({ maxTasks: 10, userId }),
+          });
+          const d = await res.json().catch(() => ({})) as Record<string, unknown>;
+          return {
+            ok    : true,
+            command,
+            result: `⚠️ R2 ingest returned no items (${ingestResult.error ?? "no roadmap files matched"}). Fell back to queue: ${d.executed ?? 0} tasks executed.`,
+            data  : { ingestResult, queueResult: d },
+          };
+        }
+
+        // Step 2: Seed extracted items into roadmap_tasks
+        const seedResult = await seedTasksFromRoadmap(ingestResult.items);
+
+        const summary = [
+          `🚀 Roadmap loaded from R2.`,
+          `Scanned ${ingestResult.filesScanned} files, used ${ingestResult.filesUsed}.`,
+          `Extracted ${ingestResult.items.length} items.`,
+          `Inserted ${seedResult.inserted} tasks, skipped ${seedResult.skipped} duplicates.`,
+          seedResult.failed > 0 ? `⚠️ ${seedResult.failed} failed to insert.` : "",
+        ].filter(Boolean).join(" ");
+
         return {
-          ok    : d.executed > 0,
+          ok    : seedResult.ok,
           command,
-          result: `🚀 Roadmap started. Executed ${d.executed ?? 0} tasks. Succeeded: ${d.succeeded ?? 0}. Failed: ${d.failed ?? 0}.`,
-          data  : d,
+          result: summary,
+          data  : { ingestResult, seedResult },
         };
       } catch (err) {
         return { ok: false, command, result: `start_roadmap failed: ${String(err)}` };
@@ -204,22 +213,17 @@ async function handleCommand(command: string, userId: string): Promise<{
     case "queue_status": {
       try {
         const db = supabase();
-        const { data: rows } = await db
-          .from("roadmap_tasks")
-          .select("status");
-
+        const { data: rows } = await db.from("roadmap_tasks").select("status");
         const counts = { pending: 0, running: 0, completed: 0, failed: 0, total: 0 };
         for (const r of (rows ?? []) as { status: string }[]) {
           counts.total++;
           const s = r.status as keyof typeof counts;
           if (s in counts) counts[s]++;
         }
-
         return {
-          ok    : true,
-          command,
+          ok: true, command,
           result: `📊 Queue: completed=${counts.completed} pending=${counts.pending} running=${counts.running} failed=${counts.failed} total=${counts.total}`,
-          data  : counts,
+          data: counts,
         };
       } catch (err) {
         return { ok: false, command, result: `queue_status failed: ${String(err)}` };
@@ -230,7 +234,6 @@ async function handleCommand(command: string, userId: string): Promise<{
     case "memory_status": {
       try {
         const db = supabase();
-
         const { count, error: countErr } = await db
           .from("javari_knowledge")
           .select("*", { count: "exact", head: true });
@@ -241,7 +244,6 @@ async function handleCommand(command: string, userId: string): Promise<{
         }
 
         const total = count ?? 0;
-
         const { data: rows } = await db
           .from("javari_knowledge")
           .select("title, category, created_at")
@@ -251,15 +253,12 @@ async function handleCommand(command: string, userId: string): Promise<{
         const preview = !rows?.length
           ? "none"
           : (rows as { title: string; category: string }[])
-              .map(r => `${r.title} [${r.category}]`)
-              .join(", ");
+              .map(r => `${r.title} [${r.category}]`).join(", ");
 
         return {
-          ok: true, command,
-          records: total,
-          table  : "javari_knowledge",
-          result : `🧠 MemoryOS online. ${total} records in javari_knowledge. Recent: ${preview}`,
-          data   : rows ?? [],
+          ok: true, command, records: total, table: "javari_knowledge",
+          result: `🧠 MemoryOS online. ${total} records in javari_knowledge. Recent: ${preview}`,
+          data: rows ?? [],
         };
       } catch (err) {
         return { ok: false, command, records: 0, table: "javari_knowledge",
@@ -275,7 +274,7 @@ async function handleCommand(command: string, userId: string): Promise<{
   }
 }
 
-// ── Load MemoryOS context for chat prompts ─────────────────────────────────
+// ── Load MemoryOS context for chat ─────────────────────────────────────────
 async function loadMemoryContext(_query: string): Promise<string> {
   try {
     const db = supabase();
@@ -287,8 +286,7 @@ async function loadMemoryContext(_query: string): Promise<string> {
 
     if (!rows?.length) return "";
     const snippets = (rows as { title: string; content: string }[])
-      .map(r => `• ${r.title}: ${r.content?.slice(0, 120) ?? ""}`)
-      .join("\n");
+      .map(r => `• ${r.title}: ${r.content?.slice(0, 120) ?? ""}`).join("\n");
     return `\n\n[MemoryOS context]\n${snippets}`;
   } catch {
     return "";
@@ -299,26 +297,14 @@ async function loadMemoryContext(_query: string): Promise<string> {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const {
-      message   = "",
-      mode      = "chat",
-      command   = "",
-      userId    = "anonymous",
-    } = body;
+    const { message = "", mode = "chat", command = "", userId = "anonymous" } = body;
 
-    // ── Command mode ──────────────────────────────────────────────────────
     if (command || mode === "command") {
       const cmd = (command || message.trim().toLowerCase().replace(/\s+/g, "_")).trim();
-
       if (!cmd) {
-        return NextResponse.json(
-          { ok: false, error: "command or message required in command mode" },
-          { status: 400 }
-        );
+        return NextResponse.json({ ok: false, error: "command required" }, { status: 400 });
       }
-
       const result = await handleCommand(cmd, userId);
-
       return NextResponse.json({
         ok     : result.ok,
         mode   : "command",
@@ -331,40 +317,26 @@ export async function POST(req: NextRequest) {
     }
 
     if (!message.trim()) {
-      return NextResponse.json(
-        { ok: false, error: "message is required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: "message is required" }, { status: 400 });
     }
 
     const memCtx = await loadMemoryContext(message);
 
-    // ── Chat mode ──────────────────────────────────────────────────────────
     if (mode === "chat") {
       const result = await executeGateway({
-        input          : message + memCtx,
-        mode           : "auto",
-        userId,
-        routingPriority: "quality",
+        input: message + memCtx, mode: "auto", userId, routingPriority: "quality",
       });
       return NextResponse.json({
-        ok   : true,
-        mode : "chat",
-        reply: typeof result.output === "string"
-                 ? result.output
-                 : JSON.stringify(result.output),
-        model: result.model,
-        cost : result.estimatedCost,
+        ok: true, mode: "chat",
+        reply: typeof result.output === "string" ? result.output : JSON.stringify(result.output),
+        model: result.model, cost: result.estimatedCost,
       });
     }
 
-    // ── Multi mode ─────────────────────────────────────────────────────────
     if (mode === "multi") {
       const result = await executeGateway({
-        input  : message + memCtx,
-        mode   : "multi",
-        userId,
-        roles  : [
+        input: message + memCtx, mode: "multi", userId,
+        roles: [
           { role: "architect", model: "claude-sonnet-4-20250514" },
           { role: "builder",   model: "gemini-2.0-flash-exp"     },
           { role: "validator", model: "claude-sonnet-4-20250514" },
@@ -372,20 +344,15 @@ export async function POST(req: NextRequest) {
         routingPriority: "quality",
       });
       return NextResponse.json({
-        ok    : true,
-        mode  : "multi",
-        reply : typeof result.output === "string"
-                  ? result.output
-                  : JSON.stringify(result.output),
-        models: result.model,
-        cost  : result.estimatedCost,
+        ok: true, mode: "multi",
+        reply: typeof result.output === "string" ? result.output : JSON.stringify(result.output),
+        models: result.model, cost: result.estimatedCost,
         phases: (result as Record<string, unknown>).phases ?? null,
       });
     }
 
     return NextResponse.json(
-      { ok: false, error: `Unknown mode: ${mode}. Use chat, multi, or command.` },
-      { status: 400 }
+      { ok: false, error: `Unknown mode: ${mode}` }, { status: 400 }
     );
 
   } catch (err: unknown) {
@@ -394,19 +361,15 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// ── GET: health + capability manifest ─────────────────────────────────────
+// ── GET: capability manifest ───────────────────────────────────────────────
 export async function GET() {
   return NextResponse.json({
     ok        : true,
     endpoint  : "/api/javari/execute",
-    version   : "1.2.0",
+    version   : "1.3.0",
     modes     : ["chat", "multi", "command"],
-    commands  : [
-      "run_next_task", "start_roadmap",
-      "pause_execution", "resume_execution",
-      "queue_status", "memory_status",
-    ],
+    commands  : ["run_next_task", "start_roadmap", "pause_execution", "resume_execution", "queue_status", "memory_status"],
     taskTypes : ["build_module", "create_api", "update_schema", "deploy_feature", "ai_task"],
-    connected : ["planner", "queue", "model_router", "memoryos", "guardrails", "devops_executor"],
+    connected : ["planner", "queue", "model_router", "memoryos", "guardrails", "devops_executor", "r2_ingest"],
   });
 }
