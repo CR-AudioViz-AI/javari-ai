@@ -33,17 +33,21 @@ interface R2Config {
  * Vault keys: R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, R2_CANONICAL_PREFIX
  */
 async function getConfig(): Promise<R2Config> {
-  const [endpoint, accessKey, secretKey, bucket, prefix] = await Promise.all([
+  const [endpoint, accessKey, secretKey, canonicalBucket, prefix] = await Promise.all([
     getSecret("R2_ENDPOINT"),
     getSecret("R2_ACCESS_KEY_ID"),
     getSecret("R2_SECRET_ACCESS_KEY"),
-    getSecret("R2_BUCKET"),
+    // R2_CANONICAL_BUCKET is the docs/canonical bucket — separate from R2_BUCKET (assets).
+    // Vault currently has R2_BUCKET = "crav-assets-prod".
+    // R2_CANONICAL_BUCKET is not yet seeded, so this falls back to "cold-storage" (correct).
+    getSecret("R2_CANONICAL_BUCKET"),
     getSecret("R2_CANONICAL_PREFIX"),
   ]);
 
-  // Apply defaults for optional config keys
-  const resolvedBucket = bucket  || "cold-storage";
-  const resolvedPrefix = prefix  || "consolidation-docs/";
+  // "cold-storage" is the confirmed bucket for canonical docs.
+  // "crav-assets-prod" is the asset bucket — do NOT use it here.
+  const resolvedBucket = canonicalBucket?.trim() || "cold-storage";
+  const resolvedPrefix = prefix?.trim()          || "consolidation-docs/";
 
   if (!endpoint)  throw new Error("[r2-client] R2_ENDPOINT not found in vault or env");
   if (!accessKey) throw new Error("[r2-client] R2_ACCESS_KEY_ID not found in vault or env");
