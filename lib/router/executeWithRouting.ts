@@ -63,7 +63,7 @@ export async function executeWithRouting(
   });
   
   try {
-    const result = await executeWithFailover(prompt, selectedModel.provider, enforceJSON);
+    const result = await executeWithFailover(prompt, selectedModel.provider, enforceJSON, selectedModel.id);
     
     const rawOutput =
       typeof result === "string"
