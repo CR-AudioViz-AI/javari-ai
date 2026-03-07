@@ -1,48 +1,51 @@
 // app/api/javari/memoryos/route.ts
-// Purpose: MemoryOS learning cycle endpoint — writes learning records directly to
-//          javari_self_answers and javari_anti_patterns via raw PostgREST fetch,
-//          bypassing supabase-js schema cache misses on recently-created tables.
+// Purpose: MemoryOS learning cycle endpoint — writes learning records to
+//          javari_knowledge (confirmed live table) via raw PostgREST fetch.
+//          Also writes anti-patterns to javari_healing_history.
+//          Bypasses supabase-js schema cache for tables not in generated types.
 // Date: 2026-03-07
 
 import { NextRequest, NextResponse } from "next/server";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const runtime  = "nodejs";
+export const dynamic  = "force-dynamic";
 
-const SUPABASE_URL  = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SERVICE_KEY   = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-function postgrest(table: string) {
-  return `${SUPABASE_URL}/rest/v1/${table}`;
+function postgrest(table: string, query = "") {
+  return `${SUPABASE_URL}/rest/v1/${table}${query ? "?" + query : ""}`;
 }
 
-function headers(extra: Record<string, string> = {}) {
+function headers() {
   return {
     "apikey"       : SERVICE_KEY,
     "Authorization": `Bearer ${SERVICE_KEY}`,
     "Content-Type" : "application/json",
     "Prefer"       : "return=representation",
-    ...extra,
   };
 }
 
 // ── POST /api/javari/memoryos ─────────────────────────────────────────────
-// Body: { action: "write_learning" | "write_anti_pattern" | "list" | "session_summary", ...payload }
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { action } = body;
+    const body   = await req.json();
+    const action = body.action as string;
 
-    // ── write_learning: insert one record into javari_self_answers ─────────
+    // ── write_learning ─────────────────────────────────────────────────────
     if (action === "write_learning") {
       const {
         question_pattern,
         answer,
         confidence_score = 0.8,
-        usage_count      = 0,
-        success_rate     = 1.0,
         source           = "admin_dashboard",
-        metadata         = {},
+        phase_id         = "",
+        task_id          = "",
+        model_used       = "",
+        execution_ms     = null,
+        speed_class      = "",
+        cost_class       = "",
+        exec_status      = "",
       } = body;
 
       if (!question_pattern || !answer) {
@@ -52,18 +55,22 @@ export async function POST(req: NextRequest) {
         );
       }
 
+      // Map to javari_knowledge schema
       const payload = {
-        question_pattern,
-        answer,
+        category         : "roadmap_execution",
+        subcategory      : phase_id || "general",
+        title            : question_pattern.slice(0, 200),
+        content          : answer,
+        keywords         : [phase_id, task_id, model_used, exec_status].filter(Boolean),
+        source_type      : source,
+        source_url       : `task://${task_id}`,
         confidence_score,
-        usage_count,
-        success_rate,
-        source,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        times_referenced : 0,
+        created_at       : new Date().toISOString(),
+        updated_at       : new Date().toISOString(),
       };
 
-      const resp = await fetch(postgrest("javari_self_answers"), {
+      const resp = await fetch(postgrest("javari_knowledge"), {
         method : "POST",
         headers: headers(),
         body   : JSON.stringify(payload),
@@ -72,7 +79,7 @@ export async function POST(req: NextRequest) {
       if (!resp.ok) {
         const err = await resp.text();
         return NextResponse.json(
-          { ok: false, error: `PostgREST insert failed: ${err}` },
+          { ok: false, error: `PostgREST write failed: ${err}` },
           { status: 500 }
         );
       }
@@ -82,35 +89,33 @@ export async function POST(req: NextRequest) {
         ok     : true,
         action : "write_learning",
         id     : Array.isArray(inserted) ? inserted[0]?.id : inserted?.id,
-        record : payload,
+        table  : "javari_knowledge",
       });
     }
 
-    // ── write_anti_pattern: insert into javari_anti_patterns ──────────────
+    // ── write_anti_pattern ─────────────────────────────────────────────────
     if (action === "write_anti_pattern") {
       const {
-        pattern_type,
-        description,
-        why_failed,
-        context = {},
+        error_type   = "routing_anti_pattern",
+        description  = "",
+        why_failed   = "",
+        context      = {},
+        auto_fixed   = false,
+        escalated    = false,
       } = body;
 
-      if (!pattern_type || !description || !why_failed) {
-        return NextResponse.json(
-          { ok: false, error: "pattern_type, description, and why_failed are required" },
-          { status: 400 }
-        );
-      }
-
       const payload = {
-        pattern_type,
-        description,
-        why_failed,
-        context,
-        created_at: new Date().toISOString(),
+        error_type,
+        error_message : description,
+        error_context : context,
+        diagnosis     : { why_failed },
+        fix_applied   : false,
+        auto_fixed,
+        escalated,
+        created_at    : new Date().toISOString(),
       };
 
-      const resp = await fetch(postgrest("javari_anti_patterns"), {
+      const resp = await fetch(postgrest("javari_healing_history"), {
         method : "POST",
         headers: headers(),
         body   : JSON.stringify(payload),
@@ -119,118 +124,124 @@ export async function POST(req: NextRequest) {
       if (!resp.ok) {
         const err = await resp.text();
         return NextResponse.json(
-          { ok: false, error: `PostgREST insert failed: ${err}` },
+          { ok: false, error: `Anti-pattern write failed: ${err}` },
           { status: 500 }
         );
       }
 
       const inserted = await resp.json().catch(() => [{}]);
       return NextResponse.json({
-        ok     : true,
-        action : "write_anti_pattern",
-        id     : Array.isArray(inserted) ? inserted[0]?.id : inserted?.id,
-        record : payload,
+        ok    : true,
+        action: "write_anti_pattern",
+        id    : Array.isArray(inserted) ? inserted[0]?.id : inserted?.id,
+        table : "javari_healing_history",
       });
     }
 
-    // ── list: read recent learning records ─────────────────────────────────
-    if (action === "list") {
-      const limit  = body.limit  ?? 20;
-      const source = body.source ?? null;
-
-      let url = `${postgrest("javari_self_answers")}?order=created_at.desc&limit=${limit}`;
-      if (source) url += `&source=eq.${source}`;
-
-      const resp = await fetch(url, { headers: headers() });
-      if (!resp.ok) {
-        const err = await resp.text();
-        return NextResponse.json({ ok: false, error: err }, { status: 500 });
+    // ── bulk_write ─────────────────────────────────────────────────────────
+    if (action === "bulk_write") {
+      const { records } = body as { records: Record<string, unknown>[] };
+      if (!Array.isArray(records) || records.length === 0) {
+        return NextResponse.json({ ok: false, error: "records array required" }, { status: 400 });
       }
 
+      const now = new Date().toISOString();
+      const enriched = records.map((r) => ({
+        category         : "roadmap_execution",
+        subcategory      : (r.phase_id as string) || "general",
+        title            : ((r.question_pattern as string) || "").slice(0, 200),
+        content          : (r.answer as string) || "",
+        keywords         : [r.phase_id, r.task_id, r.model_used, r.exec_status].filter(Boolean),
+        source_type      : (r.source as string) || "admin_dashboard",
+        source_url       : `task://${r.task_id || "unknown"}`,
+        confidence_score : (r.confidence_score as number) ?? 0.8,
+        times_referenced : 0,
+        created_at       : now,
+        updated_at       : now,
+      }));
+
+      const resp = await fetch(postgrest("javari_knowledge"), {
+        method : "POST",
+        headers: headers(),
+        body   : JSON.stringify(enriched),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.text();
+        return NextResponse.json(
+          { ok: false, error: `Bulk write failed: ${err}` },
+          { status: 500 }
+        );
+      }
+
+      const inserted = await resp.json().catch(() => []);
+      return NextResponse.json({
+        ok     : true,
+        action : "bulk_write",
+        written: Array.isArray(inserted) ? inserted.length : 0,
+        table  : "javari_knowledge",
+        ids    : Array.isArray(inserted) ? inserted.map((r: { id: string }) => r.id) : [],
+      });
+    }
+
+    // ── bulk_anti_patterns ─────────────────────────────────────────────────
+    if (action === "bulk_anti_patterns") {
+      const { records } = body as { records: Record<string, unknown>[] };
+      if (!Array.isArray(records) || records.length === 0) {
+        return NextResponse.json({ ok: false, error: "records array required" }, { status: 400 });
+      }
+
+      const now = new Date().toISOString();
+      const enriched = records.map((r) => ({
+        error_type    : (r.pattern_type as string)  || "execution_anti_pattern",
+        error_message : (r.description as string)   || "",
+        error_context : (r.context as object)        || {},
+        diagnosis     : { why_failed: r.why_failed  || "" },
+        fix_applied   : false,
+        auto_fixed    : false,
+        escalated     : false,
+        created_at    : now,
+      }));
+
+      const resp = await fetch(postgrest("javari_healing_history"), {
+        method : "POST",
+        headers: headers(),
+        body   : JSON.stringify(enriched),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.text();
+        return NextResponse.json(
+          { ok: false, error: `Bulk anti-pattern write failed: ${err}` },
+          { status: 500 }
+        );
+      }
+
+      const inserted = await resp.json().catch(() => []);
+      return NextResponse.json({
+        ok     : true,
+        action : "bulk_anti_patterns",
+        written: Array.isArray(inserted) ? inserted.length : 0,
+        table  : "javari_healing_history",
+      });
+    }
+
+    // ── list ───────────────────────────────────────────────────────────────
+    if (action === "list") {
+      const limit = (body.limit as number) ?? 20;
+      const resp  = await fetch(
+        postgrest("javari_knowledge", `category=eq.roadmap_execution&order=created_at.desc&limit=${limit}`),
+        { headers: headers() }
+      );
+      if (!resp.ok) {
+        return NextResponse.json({ ok: false, error: await resp.text() }, { status: 500 });
+      }
       const rows = await resp.json();
       return NextResponse.json({ ok: true, action: "list", count: rows.length, rows });
     }
 
-    // ── bulk_write: insert array of learning records ───────────────────────
-    if (action === "bulk_write") {
-      const { records } = body;
-      if (!Array.isArray(records) || records.length === 0) {
-        return NextResponse.json(
-          { ok: false, error: "records array required" },
-          { status: 400 }
-        );
-      }
-
-      const now = new Date().toISOString();
-      const enriched = records.map((r: Record<string, unknown>) => ({
-        ...r,
-        created_at: now,
-        updated_at: now,
-      }));
-
-      const resp = await fetch(postgrest("javari_self_answers"), {
-        method : "POST",
-        headers: headers(),
-        body   : JSON.stringify(enriched),
-      });
-
-      if (!resp.ok) {
-        const err = await resp.text();
-        return NextResponse.json(
-          { ok: false, error: `Bulk insert failed: ${err}` },
-          { status: 500 }
-        );
-      }
-
-      const inserted = await resp.json().catch(() => []);
-      return NextResponse.json({
-        ok      : true,
-        action  : "bulk_write",
-        written : Array.isArray(inserted) ? inserted.length : 1,
-        ids     : Array.isArray(inserted) ? inserted.map((r: Record<string, string>) => r.id) : [],
-      });
-    }
-
-    // ── bulk_anti_patterns: insert array of anti-patterns ─────────────────
-    if (action === "bulk_anti_patterns") {
-      const { records } = body;
-      if (!Array.isArray(records) || records.length === 0) {
-        return NextResponse.json(
-          { ok: false, error: "records array required" },
-          { status: 400 }
-        );
-      }
-
-      const now = new Date().toISOString();
-      const enriched = records.map((r: Record<string, unknown>) => ({
-        ...r,
-        created_at: now,
-      }));
-
-      const resp = await fetch(postgrest("javari_anti_patterns"), {
-        method : "POST",
-        headers: headers(),
-        body   : JSON.stringify(enriched),
-      });
-
-      if (!resp.ok) {
-        const err = await resp.text();
-        return NextResponse.json(
-          { ok: false, error: `Bulk anti-pattern insert failed: ${err}` },
-          { status: 500 }
-        );
-      }
-
-      const inserted = await resp.json().catch(() => []);
-      return NextResponse.json({
-        ok      : true,
-        action  : "bulk_anti_patterns",
-        written : Array.isArray(inserted) ? inserted.length : 1,
-      });
-    }
-
     return NextResponse.json(
-      { ok: false, error: `Unknown action: ${action}. Available: write_learning, write_anti_pattern, list, bulk_write, bulk_anti_patterns` },
+      { ok: false, error: `Unknown action: ${action}` },
       { status: 400 }
     );
 
@@ -240,23 +251,20 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// ── GET /api/javari/memoryos ──────────────────────────────────────────────
+// ── GET: recent roadmap_execution records ─────────────────────────────────
 export async function GET() {
   const resp = await fetch(
-    `${postgrest("javari_self_answers")}?order=created_at.desc&limit=10`,
+    postgrest("javari_knowledge", "category=eq.roadmap_execution&order=created_at.desc&limit=10"),
     { headers: headers() }
   );
-
   if (!resp.ok) {
     return NextResponse.json({ ok: false, error: await resp.text() }, { status: 500 });
   }
-
   const rows = await resp.json();
   return NextResponse.json({
-    ok: true,
-    endpoint: "/api/javari/memoryos",
-    table: "javari_self_answers",
-    recent_count: rows.length,
+    ok    : true,
+    table : "javari_knowledge",
+    count : rows.length,
     rows,
   });
 }
