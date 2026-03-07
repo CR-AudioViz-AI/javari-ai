@@ -7,6 +7,8 @@ import { executeWithRouting } from "@/lib/router/executeWithRouting";
 import {
   selectBestModel,
   RoutingPreferences,
+  BUILDER_MODEL_ID,
+  VALIDATOR_MODEL_ID,
 } from "@/lib/router/model-registry";
 import { classifyCapability } from "@/lib/router/capability-classifier";
 import { enforceRequestCost } from "@/lib/billing/profit-guard";
@@ -175,11 +177,24 @@ export async function executeGateway(req: ExecutionRequest) {
   }
 
   if (req.mode === "auto") {
-    const capability = classifyCapability(req.input);
+    // Henderson Standard routing:
+    // System-tier autonomous tasks → builder model (cheapest capable)
+    // User requests with explicit quality requirement → validator model
+    // Default user requests → auto-classify
+    let builderModelId: string;
+    if (req.userId === "system") {
+      // Autonomous roadmap execution — cost-optimize with builder model
+      builderModelId = BUILDER_MODEL_ID;
+    } else {
+      // Human-initiated request — auto-classify for quality
+      builderModelId = VALIDATOR_MODEL_ID;
+    }
+
+    const capability = classifyCapability(req.input, "builder");
     const model = selectBestModel(capability, {
-      allowedModels: req.allowedModels,
+      allowedModels: req.allowedModels ?? [builderModelId],
       excludedModels: req.excludedModels,
-      routingPriority: req.routingPriority,
+      routingPriority: req.routingPriority ?? "cost",
     } as RoutingPreferences);
 
     const executionStart = Date.now();
