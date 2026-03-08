@@ -192,7 +192,7 @@ async function processTarget(
       if (options.injectRepairs !== false && !options.dryRun && analysisResult.issues.length > 0) {
         const seedResult = await seedRepairTasks(
           analysisResult.issues, target, cycleId,
-          { minSeverity: "high", maxTasksPerCycle: 10 }
+          { minSeverity: "medium", maxTasksPerCycle: 10 }
         );
         result.repairTasksSeeded = seedResult.tasksCreated;
         console.log(`[engineeringLoop] Seeded ${seedResult.tasksCreated} repair tasks`);
