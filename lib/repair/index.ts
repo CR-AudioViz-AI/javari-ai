@@ -9,6 +9,8 @@ import { generatePatch }                 from "./patchGenerator";
 import { createRepairPR }                from "./pullRequestCreator";
 import { runVerification }               from "./verificationRunner";
 import { recordArtifact }                from "@/lib/roadmap/artifactRecorder";
+import { buildRepairContext }             from "@/lib/memory/memorySearch";
+import { ingestRepair }                   from "@/lib/memory/knowledgeNodeBuilder";
 import type { CodeIssue }                from "@/lib/intelligence/codeAnalyzer";
 
 export type { RepairPlan }               from "./repairPlanner";
