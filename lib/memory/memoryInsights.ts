@@ -58,15 +58,16 @@ export async function generateMemoryInsights(): Promise<MemoryInsightReport> {
     .eq("record_type","node").eq("node_type","fix")
     .order("occurrences",{ascending:false}).limit(10);
 
-  // Top patterns
-  const patterns = await detectPatterns();
+  // Top patterns (skipped in fast insights — use maintenance mode for full pattern scan)
+  const patterns: import("./relationshipMapper").PatternResult[] = [];
 
   // Technology profile: count issues + fixes per technology
   const { data: allNodes } = await client
     .from("javari_memory_graph")
     .select("technology,node_type,domain")
     .eq("record_type","node")
-    .not("node_type","eq","technology");
+    .not("node_type","eq","technology")
+    .limit(500);  // cap for perf — 500 nodes covers insights adequately
 
   const techMap = new Map<string, { totalNodes:number; issueCount:number; fixCount:number }>();
   for (const n of (allNodes ?? [])) {
