@@ -92,7 +92,7 @@ function cycleHealthDimension(data: RawOperationsData): HealthDimension {
 function taskThroughputDimension(data: RawOperationsData): HealthDimension {
   const tasks     = data.roadmapTasks;
   const total     = tasks.length;
-  const completed = tasks.filter(t => t.status === "complete").length;
+  const completed = tasks.filter(t => t.status === "completed").length;
   const failed    = tasks.filter(t => t.status === "failed").length;
   const pending   = tasks.filter(t => t.status === "pending").length;
   const blocked   = tasks.filter(t => t.status === "blocked").length;
@@ -210,7 +210,7 @@ export function analyzeSystemHealth(data: RawOperationsData): SystemHealthReport
   const dayAgo         = Date.now() - 24 * 60 * 60 * 1000;
   const todayTasks     = tasks.filter(t => t.updated_at > dayAgo);
   const issuesToday    = todayTasks.filter(t => t.status === "pending").length;
-  const completedToday = todayTasks.filter(t => t.status === "complete").length;
+  const completedToday = todayTasks.filter(t => t.status === "completed").length;
   const verifyFails    = data.guardrailAudits.filter(g => g.result === "ROLLBACK_REQUIRED").length;
 
   const cycles       = data.engineeringCycles;
