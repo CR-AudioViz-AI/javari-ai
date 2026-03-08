@@ -54,7 +54,7 @@ const COST_CEILINGS: Record<string, number> = {
   free:    1.00,
 };
 
-const CUMULATIVE_DAILY_CEILING = 150.00; // raised temporarily to complete roadmap — Roy approved 2026-03-07
+const CUMULATIVE_DAILY_CEILING = 50.00;  // restored to standard daily cap — roadmap complete 2026-03-09
 
 // ─── Check 1: Kill switch ─────────────────────────────────────────────────────
 // JAVARI_EXECUTION_ENABLED must be "true" or all execution is blocked.
