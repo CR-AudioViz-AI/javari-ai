@@ -93,3 +93,5 @@ Tasks are seeded by phase priority: `core_platform → autonomy_engine → multi
 <!-- ecosystem-governance-layer: 2026-03-07 -->
 
 <!-- operations-center: 2026-03-07 -->
+
+<!-- learning-intelligence-system: 2026-03-07 -->
