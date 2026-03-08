@@ -165,7 +165,7 @@ async function fetchPage(
       html       : text,
       status     : res.status,
       contentType,
-      sizeBytes  : Buffer.byteLength(text, "utf8"),
+      sizeBytes  : new TextEncoder().encode(text).length,
       ms         : Date.now() - t0,
     };
   } catch {
