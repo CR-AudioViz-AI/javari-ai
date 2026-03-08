@@ -119,8 +119,7 @@ export async function benchmarkModel(
   const benchmarkId = `bench-${Date.now()}`;
   const t0          = Date.now();
   const timestamp   = new Date().toISOString();
-  const apiKey      = apiKeys[model.provider]
-    ?? process.env[`${model.provider.toUpperCase()}_API_KEY`] ?? "";
+  const apiKey      = apiKeys[model.provider] ?? "";
 
   if (!apiKey && model.cost_per_1k_tokens > 0) {
     return { model_id:model.id, provider:model.provider, benchmark_id:benchmarkId,

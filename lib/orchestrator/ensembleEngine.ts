@@ -51,8 +51,9 @@ async function callModel(
   timeout  : number
 ): Promise<ModelResponse> {
   const t0     = Date.now();
-  const apiKey = apiKeys[model.provider]
-    ?? process.env[`${model.provider.toUpperCase()}_API_KEY`] ?? "";
+  // API keys are pre-resolved by orchestrator via vault-first resolveApiKeys().
+  // Never fall back to process.env here — that would bypass Secret Authority.
+  const apiKey = apiKeys[model.provider] ?? "";
 
   if (!apiKey && model.cost_per_1k_tokens > 0) {
     return { model_id:model.id, provider:model.provider, content:"", latency_ms:0,

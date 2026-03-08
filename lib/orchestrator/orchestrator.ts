@@ -56,10 +56,12 @@ export interface OrchestratorResponse {
   error?           : string;
 }
 
-// ── API key resolver: caller-provided → process.env → vault ───────────────
+// ── API key resolver: caller-provided → vault (getSecret) → process.env ───
+// Mandate: credentials come from Platform Secret Authority, NOT Vercel env vars.
+// process.env is last-resort bootstrap fallback only.
 
 async function resolveApiKeys(callerKeys?: Record<string, string>): Promise<Record<string, string>> {
-  const ENV_MAP: Record<string, string> = {
+  const SECRET_MAP: Record<string, string> = {
     anthropic  : "ANTHROPIC_API_KEY",
     openai     : "OPENAI_API_KEY",
     google     : "GOOGLE_API_KEY",
@@ -76,24 +78,25 @@ async function resolveApiKeys(callerKeys?: Record<string, string>): Promise<Reco
     huggingface: "HUGGINGFACE_API_KEY",
   };
 
+  const { getSecret } = await import("@/lib/platform-secrets/getSecret");
   const keys: Record<string, string> = {};
-  for (const [p, env] of Object.entries(ENV_MAP)) {
-    keys[p] = callerKeys?.[p] ?? process.env[env] ?? "";
-  }
 
-  // Supplement with vault for missing keys
-  const missing = Object.entries(keys).filter(([,v]) => !v).map(([k]) => k);
-  if (missing.length) {
-    try {
-      const { vault } = await import("@/lib/javari/secrets/vault");
-      for (const p of missing) {
-        try {
-          const k = await (vault as { get: (n: string) => Promise<string | null> }).get(p);
-          if (k) keys[p] = k;
-        } catch { /* key not in vault */ }
+  await Promise.all(
+    Object.entries(SECRET_MAP).map(async ([provider, secretName]) => {
+      if (callerKeys?.[provider]) {
+        keys[provider] = callerKeys[provider];
+        return;
       }
-    } catch { /* vault unavailable */ }
-  }
+      try {
+        const val = await getSecret(secretName);
+        keys[provider] = val ?? "";
+      } catch {
+        // getSecret already logs; mark empty so provider is skipped
+        keys[provider] = "";
+      }
+    })
+  );
+
   return keys;
 }
 
