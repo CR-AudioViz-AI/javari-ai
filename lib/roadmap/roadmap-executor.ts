@@ -6,6 +6,7 @@
 import { executeGateway } from "@/lib/execution/gateway";
 import { storeExecutionResult } from "./execution-memory";
 import { analyzeAndRepair, shouldRetry, getRetryDelay } from "./self-repair";
+import { logExecution } from "@/lib/autonomy/executionLogger";
 
 export interface RoadmapTask {
   id: string;
@@ -80,28 +81,43 @@ Please analyze, implement, validate, and document this task comprehensively.
     console.log("[roadmap-executor] Execution complete");
     console.log("[roadmap-executor] Cost: $", (gatewayResponse.estimatedCost ?? 0).toFixed(4));
 
+    const gw = gatewayResponse as any;
+
     task.status = "completed";
-    task.output = gatewayResponse.output;
-    task.estimatedCost = gatewayResponse.estimatedCost;
-    task.rolesExecuted = (gatewayResponse as any).rolesExecuted || ["architect", "builder", "validator", "documenter"];
+    task.output = gw.output;
+    task.estimatedCost = gw.estimatedCost;
+    task.rolesExecuted = gw.rolesExecuted || ["architect", "builder", "validator", "documenter"];
     task.completedAt = new Date();
 
     // Store in execution memory
     console.log("[roadmap-executor] Storing result in execution memory...");
     await storeExecutionResult(task.id, task.title, {
       success: true,
-      output: gatewayResponse.output,
-      estimatedCost: gatewayResponse.estimatedCost,
+      output: gw.output,
+      estimatedCost: gw.estimatedCost,
       rolesExecuted: task.rolesExecuted,
     }, currentRetryCount);
 
     console.log("[roadmap-executor] ✅ Task completed successfully");
 
+    // Log execution to autonomy_execution_log
+    void logExecution({
+      task_id       : task.id,
+      model_used    : gw.model ?? "unknown",
+      cost_estimate : gw.estimatedCost ?? 0,
+      execution_time: task.completedAt && task.executedAt
+        ? task.completedAt.getTime() - task.executedAt.getTime()
+        : 0,
+      status        : "success",
+      provider      : gw.provider ?? undefined,
+      task_type     : "roadmap_task",
+    });
+
     return {
       success: true,
       task,
-      output: gatewayResponse.output,
-      estimatedCost: gatewayResponse.estimatedCost,
+      output: gw.output,
+      estimatedCost: gw.estimatedCost,
       rolesExecuted: task.rolesExecuted,
     };
   } catch (error: any) {
@@ -156,6 +172,17 @@ Please analyze, implement, validate, and document this task comprehensively.
       error: error.message,
     }, currentRetryCount);
 
+    // Log failure to autonomy_execution_log
+    void logExecution({
+      task_id       : task.id,
+      model_used    : "unknown",
+      cost_estimate : 0,
+      execution_time: task.executedAt ? Date.now() - task.executedAt.getTime() : 0,
+      status        : "failed",
+      error_message : error.message,
+      task_type     : "roadmap_task",
+    });
+
     return {
       success: false,
       task,
@@ -166,22 +193,41 @@ Please analyze, implement, validate, and document this task comprehensively.
 }
 
 /**
- * Execute multiple roadmap tasks sequentially
+ * Execute multiple roadmap tasks in batches to prevent runaway costs.
+ * maxTasksPerBatch = 5, delayBetweenBatches = 10 seconds.
  */
 export async function executeRoadmapTasks(
   tasks: RoadmapTask[],
   userId: string = "system"
 ): Promise<RoadmapExecutionResult[]> {
-  console.log("[roadmap-executor] Executing", tasks.length, "tasks sequentially");
+  const MAX_TASKS_PER_BATCH   = 5;
+  const DELAY_BETWEEN_BATCHES = 10_000; // 10 seconds
+
+  console.log("[roadmap-executor] Executing", tasks.length, "tasks in batches of", MAX_TASKS_PER_BATCH);
 
   const results: RoadmapExecutionResult[] = [];
 
-  for (const task of tasks) {
-    const result = await executeRoadmapTask(task, userId);
-    results.push(result);
+  // Slice tasks into batches
+  for (let batchIndex = 0; batchIndex < tasks.length; batchIndex += MAX_TASKS_PER_BATCH) {
+    const batch     = tasks.slice(batchIndex, batchIndex + MAX_TASKS_PER_BATCH);
+    const batchNum  = Math.floor(batchIndex / MAX_TASKS_PER_BATCH) + 1;
+    const totalBatches = Math.ceil(tasks.length / MAX_TASKS_PER_BATCH);
 
-    if (!result.success) {
-      console.warn("[roadmap-executor] Task failed, continuing with remaining tasks");
+    console.log(`[roadmap-executor] ▶ Batch ${batchNum}/${totalBatches} — ${batch.length} tasks`);
+
+    for (const task of batch) {
+      const result = await executeRoadmapTask(task, userId);
+      results.push(result);
+
+      if (!result.success) {
+        console.warn("[roadmap-executor] Task failed, continuing with remaining tasks");
+      }
+    }
+
+    // Delay between batches (not after the last batch)
+    if (batchIndex + MAX_TASKS_PER_BATCH < tasks.length) {
+      console.log(`[roadmap-executor] ⏱ Batch ${batchNum} complete — waiting ${DELAY_BETWEEN_BATCHES / 1000}s before next batch`);
+      await new Promise<void>((resolve) => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
     }
   }
 

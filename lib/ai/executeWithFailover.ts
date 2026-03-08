@@ -9,6 +9,9 @@ import Anthropic          from "@anthropic-ai/sdk";
 import OpenAI             from "openai";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { getSecret }      from "@/lib/platform-secrets/getSecret";
+import { classifyCapability } from "@/lib/router/capability-classifier";
+import { selectBestModel }    from "@/lib/router/model-registry";
+import { logExecution }       from "@/lib/autonomy/executionLogger";
 
 export type AIProvider = "anthropic" | "openai" | "google" | "openrouter";
 
@@ -66,8 +69,11 @@ export async function executeWithFailover(
   prompt     : string,
   provider   : AIProvider,
   enforceJSON: boolean = false,
-  modelId?   : string
+  modelId?   : string,
+  taskId?    : string,
+  taskType?  : string,
 ): Promise<ExecuteResponse> {
+  const _t0 = Date.now();
   console.log(`[failover] ▶ provider=${provider} model=${modelId ?? "default"} json=${enforceJSON}`);
 
   // ── OpenAI / OpenRouter ────────────────────────────────────────────────
@@ -97,6 +103,17 @@ export async function executeWithFailover(
       if (extracted) output = extracted;
     }
     console.log(`[failover] ✅ OpenAI ok | tokens=${completion.usage?.total_tokens ?? 0}`);
+    void logExecution({
+      task_id       : taskId ?? `failover-${_t0}`,
+      model_used    : model,
+      cost_estimate : 0,
+      execution_time: Date.now() - _t0,
+      status        : "success",
+      tokens_in     : completion.usage?.prompt_tokens    ?? 0,
+      tokens_out    : completion.usage?.completion_tokens ?? 0,
+      provider      : provider,
+      task_type     : taskType,
+    });
     return {
       output  : typeof output === "string" ? output : JSON.stringify(output),
       model,
@@ -114,8 +131,18 @@ export async function executeWithFailover(
     const apiKey = await resolveKey("ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY");
     if (!apiKey) throw new Error("ANTHROPIC_API_KEY not found in vault or env");
 
-    const client        = new Anthropic({ apiKey });
-    const anthropicModel = modelId ?? "claude-sonnet-4-20250514";
+    const client = new Anthropic({ apiKey });
+
+    // Router-selected model: use cheapest capable model unless caller specified one
+    let anthropicModel = modelId;
+    if (!anthropicModel) {
+      const capability  = classifyCapability(prompt);
+      const best        = selectBestModel(capability);
+      // Only use router selection if it resolved to an Anthropic model
+      anthropicModel = best.provider === "anthropic"
+        ? best.id
+        : "claude-haiku-4-5-20251001";  // cheapest capable Anthropic model as default
+    }
 
     console.log(`[failover] → Anthropic model=${anthropicModel}`);
     const message = await client.messages.create({
@@ -132,6 +159,17 @@ export async function executeWithFailover(
     }
     const totalTokens = message.usage.input_tokens + message.usage.output_tokens;
     console.log(`[failover] ✅ Anthropic ok | tokens=${totalTokens}`);
+    void logExecution({
+      task_id       : taskId ?? `failover-${_t0}`,
+      model_used    : anthropicModel,
+      cost_estimate : 0,
+      execution_time: Date.now() - _t0,
+      status        : "success",
+      tokens_in     : message.usage.input_tokens,
+      tokens_out    : message.usage.output_tokens,
+      provider      : "anthropic",
+      task_type     : taskType,
+    });
     return {
       output  : typeof output === "string" ? output : JSON.stringify(output),
       model   : anthropicModel,
@@ -145,29 +183,62 @@ export async function executeWithFailover(
   }
 
   // ── Google Gemini ──────────────────────────────────────────────────────
+  // NOTE: Direct Google API is non-functional (org policy 403 on all keys).
+  // All Google/Gemini requests are routed through OpenRouter.
+  // See: fbd41fb — google: provider set inactive, openrouter equivalents active.
   if (provider === "google") {
-    const apiKey = await resolveKey("GOOGLE_API_KEY", "GOOGLE_API_KEY");
-    if (!apiKey) throw new Error("GOOGLE_API_KEY not found in vault or env");
+    const apiKey  = await resolveKey("OPENROUTER_API_KEY", "OPENROUTER_API_KEY");
+    if (!apiKey) throw new Error("OPENROUTER_API_KEY not found in vault or env — required for Google/Gemini routing");
 
-    const genAI         = new GoogleGenerativeAI(apiKey);
-    const googleModel   = modelId ?? "gemini-2.0-flash-exp";
-    const model         = genAI.getGenerativeModel({ model: googleModel });
+    const client    = new OpenAI({ apiKey, baseURL: "https://openrouter.ai/api/v1" });
+    // Map legacy gemini model IDs to OpenRouter model strings
+    const modelMap: Record<string, string> = {
+      "gemini-2.0-flash-exp"        : "google/gemini-2.0-flash-001",
+      "gemini-1.5-flash"            : "google/gemini-flash-1.5",
+      "gemini-1.5-pro"              : "google/gemini-1.5-pro",
+      "gemini-2.5-pro"              : "google/gemini-2.5-pro",
+      "gemini-2.0-flash-thinking-exp": "google/gemini-2.0-flash-001",
+    };
+    const googleModel = modelId ?? "gemini-2.0-flash-exp";
+    const orModel     = modelMap[googleModel] ?? "google/gemini-2.0-flash-001";
 
-    console.log(`[failover] → Google model=${googleModel}`);
-    const result  = await model.generateContent(prompt);
-    let output: unknown = result.response.text();
-    const totalTokens = result.response.usageMetadata?.totalTokenCount ?? 0;
+    console.log(`[failover] → Google via OpenRouter model=${orModel} (was ${googleModel})`);
+    const reqOpts: Record<string, unknown> = {
+      model   : orModel,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.2,
+    };
+    if (enforceJSON) reqOpts.response_format = { type: "json_object" };
 
+    const completion = await client.chat.completions.create(reqOpts as Parameters<typeof client.chat.completions.create>[0]);
+    const content    = completion.choices[0]?.message?.content ?? "";
+    let output: unknown = content;
     if (enforceJSON) {
-      const extracted = extractJSON(output as string);
+      const extracted = extractJSON(content);
       if (extracted) output = extracted;
     }
-    console.log(`[failover] ✅ Google ok | tokens=${totalTokens}`);
+    const totalTokens = completion.usage?.total_tokens ?? 0;
+    console.log(`[failover] ✅ Google/OR ok | tokens=${totalTokens}`);
+    void logExecution({
+      task_id       : taskId ?? `failover-${_t0}`,
+      model_used    : orModel,
+      cost_estimate : 0,
+      execution_time: Date.now() - _t0,
+      status        : "success",
+      tokens_in     : completion.usage?.prompt_tokens    ?? 0,
+      tokens_out    : completion.usage?.completion_tokens ?? 0,
+      provider      : "openrouter",
+      task_type     : taskType,
+    });
     return {
       output  : typeof output === "string" ? output : JSON.stringify(output),
-      model   : googleModel,
+      model   : orModel,
       provider: "google",
-      usage   : { total_tokens: totalTokens },
+      usage   : {
+        prompt_tokens    : completion.usage?.prompt_tokens,
+        completion_tokens: completion.usage?.completion_tokens,
+        total_tokens     : totalTokens,
+      },
     };
   }
 

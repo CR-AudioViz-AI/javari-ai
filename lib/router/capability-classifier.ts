@@ -31,7 +31,7 @@ export function classifyCapability(
   // Tasks must have genuine complexity signals to warrant Sonnet 4.
   const hasComplexSignal = complexSignals.some((s) => lower.includes(s));
   if (hasComplexSignal) return "high";
-  if (length > 800) return "standard";  // raised from 500 — avoids auto-escalation
-  if (length > 200) return "standard";
+  if (prompt.length > 800) return "high";        // was: return "standard"
+  if (prompt.length > 300) return "standard";    // was: length > 200
   return "light";
 }

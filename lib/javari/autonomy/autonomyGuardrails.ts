@@ -39,7 +39,8 @@ export interface GuardrailContext {
 
 export const GUARDRAIL_CONFIG = {
   maxCostPerCycleUsd  : 2.00,
-  maxCostPerDayUsd    : 50.00,
+  maxCostPerDayUsd    : 250.00,   // raised from 50 — allows sustained autonomous execution
+  maxSingleTaskCostUsd: 10.00,    // new: hard cap per individual task
   maxOpsPerMinute     : 20,
   maxOpsPerHour       : 200,
   maxOpsPerDay        : 1000,
@@ -122,6 +123,14 @@ function checkCost(ctx: GuardrailContext): GuardrailCheck {
       category : "cost",
       reason   : `Daily cost limit ($${GUARDRAIL_CONFIG.maxCostPerDayUsd}) would be exceeded. Current: $${_costToday.toFixed(4)}`,
       riskLevel: "critical",
+    };
+  }
+  if (ctx.estimatedCostUsd > GUARDRAIL_CONFIG.maxSingleTaskCostUsd) {
+    return {
+      allowed  : false,
+      category : "cost",
+      reason   : `Single task cost $${ctx.estimatedCostUsd} exceeds per-task cap $${GUARDRAIL_CONFIG.maxSingleTaskCostUsd}`,
+      riskLevel: "high",
     };
   }
   if (ctx.estimatedCostUsd > GUARDRAIL_CONFIG.maxCostPerCycleUsd) {
