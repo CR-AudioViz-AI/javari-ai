@@ -15,7 +15,7 @@ function db() {
 export interface ArtifactInsert {
   task_id          : string;
   artifact_type    : "commit" | "deploy" | "sql_migration" | "ai_output" | "http_check"
-                   | "deploy_proof" | "repair_patch" | "repair_commit" | "verification_report";
+                   | "deploy_proof" | "repair_patch" | "repair_commit" | "verification_report" | "ecosystem_report" | "brand_fix" | "dedupe_plan" | "ux_analysis";
   artifact_location: string;                    // commit SHA, deploy URL, table name, etc.
   artifact_data?   : Record<string, unknown>;   // structured proof data
 }
