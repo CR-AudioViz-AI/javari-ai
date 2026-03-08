@@ -77,3 +77,5 @@ Tasks are seeded by phase priority: `core_platform → autonomy_engine → multi
 <!-- intelligence-engine-build-trigger: 2026-03-07 -->
 
 <!-- repair-engine-build-trigger: 2026-03-07 -->
+
+<!-- autonomy-loop-build-trigger: 2026-03-07 -->
