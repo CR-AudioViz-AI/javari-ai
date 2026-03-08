@@ -71,8 +71,9 @@ function extractFunctions(content: string, file: string): FunctionDef[] {
     return content.slice(0, index).split("\n").length;
   }
 
-  for (const { re, kind } of DEF_PATTERNS) {
-    re.lastIndex = 0;
+  for (const { re: reSource, kind } of DEF_PATTERNS) {
+    // Create fresh RegExp each call to avoid shared lastIndex state in serverless
+    const re = new RegExp(reSource.source, reSource.flags);
     let m: RegExpExecArray | null;
     while ((m = re.exec(content)) !== null) {
       const fullMatch = m[0];
@@ -111,11 +112,11 @@ function extractCallSites(content: string, file: string, knownNames: Set<string>
   const calls: CallSite[] = [];
 
   // Match: functionName( or functionName<Type>(  — but not definitions
+  // Use matchAll to avoid shared lastIndex state across module-level regex reuse
   const CALL_RE = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:<[^>]*>)?\s*\(/g;
   const lines = content.split("\n");
 
   let m: RegExpExecArray | null;
-  CALL_RE.lastIndex = 0;
   while ((m = CALL_RE.exec(content)) !== null) {
     const name = m[1];
     if (!knownNames.has(name)) continue;
@@ -151,8 +152,11 @@ export function buildCallGraph(files: Record<string, string>): CallGraphResult {
   // Build call count map
   const callCounts: Record<string, Set<string>> = {};
   for (const call of allCalls) {
-    if (!callCounts[call.callee]) callCounts[call.callee] = new Set();
-    callCounts[call.callee].add(call.caller);
+    const existing = callCounts[call.callee];
+    if (!existing || !(existing instanceof Set)) {
+      callCounts[call.callee] = new Set<string>();
+    }
+    (callCounts[call.callee] as Set<string>).add(call.caller);
   }
 
   // Uncalled: exported functions with zero call sites in other files
