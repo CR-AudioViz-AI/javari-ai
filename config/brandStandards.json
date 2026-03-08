@@ -1,0 +1,29 @@
+{
+  "_comment": "Canonical brand terms for CR AudioViz AI ecosystem. Key = correct form. Values = variants to replace.",
+  "terms": {
+    "Javari AI": ["JavariAI", "Javari-AI", "javari ai", "JAVARI AI", "javari_ai", "Javari Ai"],
+    "CR AudioViz AI": ["CRAudioVizAI", "CR-AudioViz-AI", "CR Audioviz AI", "CrAudioVizAI", "CR AudioViz Ai", "CR audioviz ai"],
+    "CRAIverse": ["CRAI-verse", "CRAI verse", "CraiVerse", "Crai-Verse", "cRAIverse"],
+    "Command Center": ["Control Center", "Admin Panel", "Admin Console", "Management Console", "admin panel", "control center"],
+    "Javari Spirits": ["CravBarrels", "Crav Barrels", "cravbarrels", "crav-barrels"],
+    "Javari Cards": ["CravCards", "Crav Cards", "cravCards", "crav-cards"],
+    "Javari Key": ["CravKey", "Crav Key", "cravKey", "crav-key"],
+    "Your Story. Our Design.": ["Your Story, Our Design", "Your Story Our Design"],
+    "craudiovizai.com": ["crav-audioviz.com", "craudioviz.com"],
+    "javariai.com": ["javari-ai.com", "javari.ai.com"]
+  },
+  "uiTerms": {
+    "Sign In": ["Log In", "Login", "log in"],
+    "Sign Up": ["Register", "Create Account", "Create account"],
+    "Dashboard": ["Home", "Overview", "My Dashboard"],
+    "Settings": ["Preferences", "Configuration", "Config"],
+    "Workspace": ["Project", "Environment"],
+    "Credits": ["Tokens", "Points", "Balance"]
+  },
+  "forbiddenTerms": [
+    "Crav", "CravBarrels", "CravCards", "CravKey", "CravBrew",
+    "Control Center", "Admin Panel", "Admin Console"
+  ],
+  "version": "2.0",
+  "lastUpdated": "2026-03-07"
+}
