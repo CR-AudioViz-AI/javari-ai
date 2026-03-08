@@ -76,7 +76,7 @@ export async function buildDashboardData(
     retry    : byStatus("retry"),
     total    : tasks.length,
     recentComplete: tasks
-      .filter(t => t.status === "complete")
+      .filter(t => t.status === "completed")
       .sort((a, b) => b.updated_at - a.updated_at)
       .slice(0, 5)
       .map(t => ({ id: t.id, title: t.title, updated_at: t.updated_at })),
