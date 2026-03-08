@@ -128,12 +128,17 @@ export async function ensureTargetsTable(): Promise<{ ok: boolean; message: stri
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY  ?? "";
 
   // Try via rpc/exec_sql — same pattern as auto-migrate
-  for (const rpcPath of ["/rest/v1/rpc/exec_sql", "/rest/v1/rpc/query"]) {
+  // exec_sql uses { sql } key; query rpc uses { query } key
+  const attempts = [
+    { path: "/rest/v1/rpc/exec_sql", body: { sql: MIGRATION_SQL } },
+    { path: "/rest/v1/rpc/query",    body: { query: MIGRATION_SQL } },
+  ];
+  for (const { path: rpcPath, body } of attempts) {
     try {
       const res = await fetch(`${url}${rpcPath}`, {
         method : "POST",
         headers: { "Content-Type": "application/json", apikey: key, Authorization: `Bearer ${key}` },
-        body   : JSON.stringify({ query: MIGRATION_SQL }),
+        body   : JSON.stringify(body),
         signal : AbortSignal.timeout(15_000),
       });
       if (res.ok) return { ok: true, message: `Migration applied via ${rpcPath}` };
