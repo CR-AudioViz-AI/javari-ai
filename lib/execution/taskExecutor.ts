@@ -18,6 +18,7 @@ import {
 } from "./devopsExecutor";
 import { executeGateway } from "./gateway";
 import { recordArtifact } from "@/lib/roadmap/artifactRecorder";
+import { runRepairEngine } from "@/lib/repair/index";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -27,6 +28,7 @@ export type TaskType =
   | "update_schema"
   | "deploy_feature"
   | "ai_task"
+  | "repair_code"
   | string;
 
 export interface ExecutableTask {
@@ -383,6 +385,78 @@ export async function executeTask(
     case "create_api"    : return handleCreateAPI(task, userId);
     case "update_schema" : return handleUpdateSchema(task, userId);
     case "deploy_feature": return handleDeployFeature(task, userId);
+
+    case "repair_code": {
+      const rcStart = Date.now();
+      const rcArtifactIds: string[] = [];
+      try {
+        // Parse issues from task description (JSON block) or fall back to AI analysis
+        let issues: import("@/lib/intelligence/codeAnalyzer").CodeIssue[] = [];
+        const jsonMatch = task.description.match(/```json\s*([\s\S]*?)```/);
+        if (jsonMatch) {
+          try { issues = JSON.parse(jsonMatch[1]); } catch { /* fallback below */ }
+        }
+
+        // If no embedded issues, run AI fallback to get repair output
+        if (issues.length === 0) {
+          const fallbackOutput = await runAIFallback(task, userId);
+          const ar = await recordArtifact({
+            task_id: task.id, artifact_type: "ai_output",
+            artifact_location: `ai:${task.id}:${Date.now()}`,
+            artifact_data: { output_preview: fallbackOutput.slice(0, 500), model: "gateway" },
+          });
+          if (ar.id) rcArtifactIds.push(ar.id);
+          return {
+            ok: true, taskId: task.id, type: "repair_code",
+            output: fallbackOutput,
+            actions: [{ action: "ai_fallback_repair", ok: true }],
+            artifactIds: rcArtifactIds,
+            durationMs: Date.now() - rcStart,
+          };
+        }
+
+        // Run full repair engine
+        const repairResult = await runRepairEngine({
+          issues,
+          taskId  : task.id,
+          repo    : task.metadata?.repo ?? DEFAULT_REPO,
+          branch  : "main",
+          userId,
+          maxRepairs: 3,
+        });
+
+        rcArtifactIds.push(...repairResult.artifactIds);
+
+        // Record summary ai_output artifact
+        const summaryAr = await recordArtifact({
+          task_id: task.id, artifact_type: "ai_output",
+          artifact_location: `repair:${task.id}:${Date.now()}`,
+          artifact_data: {
+            repairsAttempted: repairResult.repairsAttempted,
+            repairsSucceeded: repairResult.repairsSucceeded,
+            prsCreated      : repairResult.prsCreated,
+            directCommits   : repairResult.directCommits,
+            durationMs      : repairResult.durationMs,
+          },
+        });
+        if (summaryAr.id) rcArtifactIds.push(summaryAr.id);
+
+        const output = `Repair complete: ${repairResult.repairsSucceeded}/${repairResult.repairsAttempted} fixed | ${repairResult.prsCreated} PRs | ${repairResult.directCommits} direct commits`;
+        return {
+          ok: repairResult.ok, taskId: task.id, type: "repair_code",
+          output,
+          actions: repairResult.results.map(r => ({
+            action: `repair:${r.strategy}:${r.file}`,
+            ok    : r.patchOk && r.verificationOk,
+            detail: r.prUrl ?? r.commitSha ?? r.error ?? "skipped",
+          })),
+          artifactIds: rcArtifactIds,
+          durationMs : Date.now() - rcStart,
+        };
+      } catch (err) {
+        return { ok: false, taskId: task.id, type: "repair_code", error: String(err), artifactIds: rcArtifactIds, durationMs: Date.now() - rcStart };
+      }
+    }
 
     default: {
       const start = Date.now();
