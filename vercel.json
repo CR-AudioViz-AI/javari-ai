@@ -30,6 +30,10 @@
     {
       "path": "/api/javari/ecosystem/analyze",
       "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/javari/operations/status",
+      "schedule": "*/10 * * * *"
     }
   ]
 }
