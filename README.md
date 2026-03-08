@@ -95,3 +95,5 @@ Tasks are seeded by phase priority: `core_platform → autonomy_engine → multi
 <!-- operations-center: 2026-03-07 -->
 
 <!-- learning-intelligence-system: 2026-03-07 -->
+
+<!-- repair-pipeline-fix: 2026-03-07 -->
