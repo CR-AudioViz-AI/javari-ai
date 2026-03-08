@@ -257,63 +257,72 @@ output "project_url"   { value = vercel_project_domain.production.domain }
 
 // ── CI/CD workflow generators ──────────────────────────────────────────────
 
-function generateCICDWorkflows(plan: CompanyPlan): CICDConfig {
-  return {
-    deployWorkflow: `name: Deploy to Production
-on:
-  push:
-    branches: [main]
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: amondnet/vercel-action@v25
-        with:
-          vercel-token: \${{ secrets.VERCEL_TOKEN }}
-          vercel-org-id: \${{ secrets.VERCEL_ORG_ID }}
-          vercel-project-id: \${{ secrets.VERCEL_PROJECT_ID }}
-          vercel-args: '--prod'
-`,
-    previewWorkflow: `name: Preview Deployment
-on:
-  pull_request:
-    branches: [main]
-jobs:
-  preview:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: amondnet/vercel-action@v25
-        id: vercel-deploy
-        with:
-          vercel-token: \${{ secrets.VERCEL_TOKEN }}
-          vercel-org-id: \${{ secrets.VERCEL_ORG_ID }}
-          vercel-project-id: \${{ secrets.VERCEL_PROJECT_ID }}
-      - uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: '🚀 Preview: ${{ steps.vercel-deploy.outputs.preview-url }}'
-            })
-`,
-    releaseWorkflow: `name: Release
-on:
-  push:
-    tags: ['v*']
-jobs:
-  release:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-`,
-  };
+function generateCICDWorkflows(_plan: CompanyPlan): CICDConfig {
+  // Note: GitHub Actions expressions (${{ }}) are stored as plain strings
+  // to avoid Turbopack template literal parsing conflicts.
+  const gha = (s: string) => s; // identity — kept for clarity
+
+  const deployWorkflow = [
+    "name: Deploy to Production",
+    "on:",
+    "  push:",
+    "    branches: [main]",
+    "jobs:",
+    "  deploy:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - uses: actions/checkout@v4",
+    "      - uses: amondnet/vercel-action@v25",
+    "        with:",
+    "          vercel-token: ${{ secrets.VERCEL_TOKEN }}",
+    "          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}",
+    "          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}",
+    "          vercel-args: '--prod'",
+  ].join("\n");
+
+  const previewWorkflow = [
+    "name: Preview Deployment",
+    "on:",
+    "  pull_request:",
+    "    branches: [main]",
+    "jobs:",
+    "  preview:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - uses: actions/checkout@v4",
+    "      - uses: amondnet/vercel-action@v25",
+    "        id: vercel-deploy",
+    "        with:",
+    "          vercel-token: ${{ secrets.VERCEL_TOKEN }}",
+    "          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}",
+    "          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}",
+    "      - uses: actions/github-script@v7",
+    "        with:",
+    "          script: |",
+    "            github.rest.issues.createComment({",
+    "              issue_number: context.issue.number,",
+    "              owner: context.repo.owner,",
+    "              repo: context.repo.repo,",
+    "              body: '\\uD83D\\uDE80 Preview: ${{ steps.vercel-deploy.outputs.preview-url }}'",
+    "            })",
+  ].join("\n");
+
+  const releaseWorkflow = [
+    "name: Release",
+    "on:",
+    "  push:",
+    "    tags: ['v*']",
+    "jobs:",
+    "  release:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - uses: actions/checkout@v4",
+    "      - uses: softprops/action-gh-release@v2",
+    "        with:",
+    "          generate_release_notes: true",
+  ].join("\n");
+
+  return { deployWorkflow: gha(deployWorkflow), previewWorkflow: gha(previewWorkflow), releaseWorkflow: gha(releaseWorkflow) };
 }
 
 // ── Main generator ─────────────────────────────────────────────────────────
