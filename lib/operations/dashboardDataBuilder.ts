@@ -1,8 +1,7 @@
 // lib/operations/dashboardDataBuilder.ts
 // Purpose: Aggregates all operations data into a single structured payload
-//          for the Operations Center dashboard. Single call returns everything
-//          the UI needs.
-// Date: 2026-03-07
+//          for the Operations Center dashboard.
+// Date: 2026-03-08 — fixed "complete" → "completed" status bug, health score realism
 
 import { collectOperationsData, ensureOperationsTables } from "./operationsCollector";
 import { analyzeSystemHealth }                           from "./systemHealthAnalyzer";
@@ -37,13 +36,14 @@ export interface OperationsDashboardData {
     location    : string;
   }>;
   taskQueue       : {
-    pending  : number;
-    running  : number;
-    complete : number;
-    failed   : number;
-    blocked  : number;
-    retry    : number;
-    total    : number;
+    pending       : number;
+    running       : number;
+    complete      : number;     // alias for completed — kept for UI compat
+    completed     : number;     // canonical field
+    failed        : number;
+    blocked       : number;
+    retry         : number;
+    total         : number;
     recentComplete: Array<{ id: string; title: string; updated_at: number }>;
     recentFailed  : Array<{ id: string; title: string; error?: string }>;
   };
@@ -64,26 +64,35 @@ export async function buildDashboardData(
   const repairs      = aggregateRepairMetrics(raw);
   const customers    = aggregateCustomerAudits(raw);
 
-  // Task queue breakdown
-  const tasks     = raw.roadmapTasks;
-  const byStatus  = (s: string) => tasks.filter(t => t.status === s).length;
+  // Task queue breakdown — use correct status values from roadmap_tasks
+  const tasks    = raw.roadmapTasks;
+  const byStatus = (s: string) => tasks.filter((t: { status: string }) => t.status === s).length;
+
+  // Count completed tasks (status = "completed") + also count "complete" for backwards compat
+  const completedCount = byStatus("completed") + byStatus("complete");
+
   const taskQueue = {
     pending  : byStatus("pending"),
-    running  : byStatus("running"),
-    complete : byStatus("complete"),
+    running  : byStatus("running") + byStatus("in_progress"),
+    complete : completedCount,   // UI compat alias
+    completed: completedCount,   // canonical
     failed   : byStatus("failed"),
     blocked  : byStatus("blocked"),
     retry    : byStatus("retry"),
     total    : tasks.length,
     recentComplete: tasks
-      .filter(t => t.status === "completed")
-      .sort((a, b) => b.updated_at - a.updated_at)
+      .filter((t: { status: string }) => t.status === "completed" || t.status === "complete")
+      .sort((a: { updated_at: number }, b: { updated_at: number }) => b.updated_at - a.updated_at)
       .slice(0, 5)
-      .map(t => ({ id: t.id, title: t.title, updated_at: t.updated_at })),
+      .map((t: { id: string; title: string; updated_at: number }) => ({
+        id: t.id, title: t.title, updated_at: t.updated_at,
+      })),
     recentFailed: tasks
-      .filter(t => t.status === "failed")
+      .filter((t: { status: string }) => t.status === "failed")
       .slice(0, 5)
-      .map(t => ({ id: t.id, title: t.title, error: t.error })),
+      .map((t: { id: string; title: string; error?: string }) => ({
+        id: t.id, title: t.title, error: t.error,
+      })),
   };
 
   const recentCycles = raw.engineeringCycles.slice(0, 10).map(c => ({
@@ -118,7 +127,7 @@ export async function buildDashboardData(
         score        : systemHealth.overallScore,
         grade        : systemHealth.grade,
         activeTargets: activeTargets.length,
-        taskQueue    : { pending: taskQueue.pending, failed: taskQueue.failed },
+        taskQueue    : { pending: taskQueue.pending, completed: taskQueue.completed, failed: taskQueue.failed },
         durationMs,
       },
     });
