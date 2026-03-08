@@ -167,6 +167,9 @@ export default function OperationsCenter() {
   const [error, setError]       = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<string>("");
   const [tick, setTick]         = useState(10);
+  const [backlogRunning, setBacklogRunning] = useState(false);
+  const [backlogResult, setBacklogResult] = useState<string | null>(null);
+
 
   const fetchData = useCallback(async () => {
     try {
@@ -460,6 +463,45 @@ export default function OperationsCenter() {
               ))}
             </div>
 
+          </div>
+
+
+          {/* Backlog control */}
+          <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 12, justifyContent: "center" }}>
+            <button
+              onClick={async () => {
+                setBacklogRunning(true);
+                setBacklogResult(null);
+                try {
+                  const res = await fetch("/api/javari/queue/run-backlog", { method: "POST" });
+                  const json = await res.json() as { ok?: boolean; totalExecuted?: number; totalSucceeded?: number; finalPending?: number; durationMs?: number; stoppedReason?: string };
+                  setBacklogResult(`✅ ${json.totalExecuted} executed, ${json.totalSucceeded} succeeded, ${json.finalPending} remaining (${json.stoppedReason}) — ${json.durationMs}ms`);
+                } catch (e) {
+                  setBacklogResult(`❌ ${String(e)}`);
+                } finally {
+                  setBacklogRunning(false);
+                  fetchData();
+                }
+              }}
+              disabled={backlogRunning}
+              style={{
+                padding: "10px 28px", fontSize: 11, fontWeight: 700,
+                letterSpacing: "0.14em", textTransform: "uppercase",
+                background: backlogRunning ? "rgba(0,180,255,0.05)" : "rgba(0,180,255,0.08)",
+                border: `1px solid ${backlogRunning ? "rgba(0,180,255,0.2)" : "rgba(0,180,255,0.4)"}`,
+                color: backlogRunning ? "#555" : "#00b4ff",
+                borderRadius: 4, cursor: backlogRunning ? "not-allowed" : "pointer",
+                fontFamily: "'JetBrains Mono', monospace",
+                transition: "all 0.2s ease",
+              }}
+            >
+              {backlogRunning ? "⟳  RUNNING BACKLOG..." : "▶  RUN FULL BACKLOG"}
+            </button>
+            {backlogResult && (
+              <div style={{ fontSize: 10, color: backlogResult.startsWith("✅") ? "#00ff9d" : "#ff2d55", maxWidth: 500 }}>
+                {backlogResult}
+              </div>
+            )}
           </div>
 
           {/* Footer */}
