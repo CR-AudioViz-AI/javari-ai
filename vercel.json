@@ -26,6 +26,10 @@
     {
       "path": "/api/javari/autonomy/start",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/javari/ecosystem/analyze",
+      "schedule": "0 */6 * * *"
     }
   ]
 }
