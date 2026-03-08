@@ -59,10 +59,10 @@ const TASK_CAPABILITY_MAP: Record<TaskType, ModelCapabilityTag[]> = {
 const QUALITY_PRIMARY: Partial<Record<TaskType, string[]>> = {
   security_audit         : ["anthropic:claude-sonnet-4-20250514","openai:gpt-4o","deepseek:deepseek-coder"],
   code_repair            : ["anthropic:claude-sonnet-4-20250514","deepseek:deepseek-coder","openai:gpt-4o"],
-  architecture_design    : ["openai:gpt-4o","anthropic:claude-sonnet-4-20250514","google:gemini-1.5-pro"],
-  documentation_generation: ["anthropic:claude-sonnet-4-20250514","openai:gpt-4o","google:gemini-2.0-flash-exp"],
-  performance_optimization: ["anthropic:claude-sonnet-4-20250514","openai:gpt-4o","google:gemini-2.0-flash-exp"],
-  performance_audit      : ["anthropic:claude-sonnet-4-20250514","openai:gpt-4o","google:gemini-2.0-flash-exp"],
+  architecture_design    : ["openai:gpt-4o","anthropic:claude-sonnet-4-20250514","openrouter:gemini-2.5-pro-or"],
+  documentation_generation: ["anthropic:claude-sonnet-4-20250514","openai:gpt-4o","openrouter:gemini-2.0-flash-or"],
+  performance_optimization: ["anthropic:claude-sonnet-4-20250514","openai:gpt-4o","openrouter:gemini-2.0-flash-or"],
+  performance_audit      : ["anthropic:claude-sonnet-4-20250514","openai:gpt-4o","openrouter:gemini-2.0-flash-or"],
   frontend_coding        : ["anthropic:claude-sonnet-4-20250514","openai:gpt-4o","groq:llama-3.3-70b-versatile"],
   backend_coding         : ["deepseek:deepseek-coder","anthropic:claude-sonnet-4-20250514","mistral:codestral-latest"],
   database_design        : ["anthropic:claude-sonnet-4-20250514","openai:gpt-4o","deepseek:deepseek-coder"],
@@ -70,22 +70,22 @@ const QUALITY_PRIMARY: Partial<Record<TaskType, string[]>> = {
 };
 
 const COST_PRIMARY: Partial<Record<TaskType, string[]>> = {
-  security_audit         : ["groq:llama-3.3-70b-versatile","deepseek:deepseek-coder","google:gemini-2.0-flash-exp"],
+  security_audit         : ["groq:llama-3.3-70b-versatile","deepseek:deepseek-coder","openrouter:gemini-2.0-flash-or"],
   code_repair            : ["groq:qwen-2.5-coder-32b-instruct","deepseek:deepseek-coder","openrouter:deepseek/deepseek-chat"],
-  architecture_design    : ["groq:llama-3.3-70b-versatile","openrouter:meta-llama/llama-3.1-405b","google:gemini-2.0-flash-exp"],
-  documentation_generation: ["groq:llama-3.3-70b-versatile","google:gemini-2.0-flash-exp","openai:gpt-4o-mini"],
-  performance_optimization: ["groq:llama-3.3-70b-versatile","google:gemini-2.0-flash-exp","deepseek:deepseek-coder"],
-  general_analysis       : ["groq:llama-3.1-70b-versatile","openrouter:qwen/qwen-2.5-72b","google:gemini-2.0-flash-exp"],
-  summarization          : ["groq:llama-3.1-8b-instant","google:gemini-1.5-flash","openai:gpt-4o-mini"],
-  classification         : ["groq:gemma2-9b-it","openai:gpt-4o-mini","google:gemini-1.5-flash"],
-  fast_qa                : ["groq:llama-3.1-8b-instant","groq:gemma2-9b-it","google:gemini-1.5-flash"],
+  architecture_design    : ["groq:llama-3.3-70b-versatile","openrouter:meta-llama/llama-3.1-405b","openrouter:gemini-2.0-flash-or"],
+  documentation_generation: ["groq:llama-3.3-70b-versatile","openrouter:gemini-2.0-flash-or","openai:gpt-4o-mini"],
+  performance_optimization: ["groq:llama-3.3-70b-versatile","openrouter:gemini-2.0-flash-or","deepseek:deepseek-coder"],
+  general_analysis       : ["groq:llama-3.1-70b-versatile","openrouter:qwen/qwen-2.5-72b","openrouter:gemini-2.0-flash-or"],
+  summarization          : ["groq:llama-3.1-8b-instant","openrouter:gemini-1.5-flash-or","openai:gpt-4o-mini"],
+  classification         : ["groq:gemma2-9b-it","openai:gpt-4o-mini","openrouter:gemini-1.5-flash-or"],
+  fast_qa                : ["groq:llama-3.1-8b-instant","groq:gemma2-9b-it","openrouter:gemini-1.5-flash-or"],
 };
 
 const SPEED_PRIMARY: Partial<Record<TaskType, string[]>> = {
   security_audit         : ["groq:llama-3.3-70b-versatile","groq:llama-3.1-70b-versatile"],
   code_repair            : ["groq:qwen-2.5-coder-32b-instruct","groq:llama-3.3-70b-versatile"],
   documentation_generation: ["groq:llama-3.3-70b-versatile","groq:llama-3.1-70b-versatile"],
-  performance_optimization: ["groq:llama-3.3-70b-versatile","google:gemini-2.0-flash-exp"],
+  performance_optimization: ["groq:llama-3.3-70b-versatile","openrouter:gemini-2.0-flash-or"],
   general_analysis       : ["groq:llama-3.1-70b-versatile","groq:llama-3.3-70b-versatile"],
   summarization          : ["groq:llama-3.1-8b-instant","groq:gemma2-9b-it"],
   fast_qa                : ["groq:llama-3.1-8b-instant","groq:gemma2-9b-it"],
