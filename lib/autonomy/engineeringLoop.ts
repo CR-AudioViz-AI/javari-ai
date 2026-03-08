@@ -97,12 +97,16 @@ async function ensureCyclesTable(): Promise<void> {
     GRANT ALL ON TABLE javari_engineering_cycles TO service_role, authenticated, anon;
   `.trim();
 
-  for (const rpc of ["/rest/v1/rpc/exec_sql", "/rest/v1/rpc/query"]) {
+  const cycleAttempts = [
+    { rpc: "/rest/v1/rpc/exec_sql", body: { sql } },
+    { rpc: "/rest/v1/rpc/query",    body: { query: sql } },
+  ];
+  for (const { rpc, body } of cycleAttempts) {
     try {
       const r = await fetch(`${url}${rpc}`, {
         method : "POST",
         headers: { "Content-Type": "application/json", apikey: key, Authorization: `Bearer ${key}` },
-        body   : JSON.stringify({ query: sql }),
+        body   : JSON.stringify(body),
         signal : AbortSignal.timeout(10_000),
       });
       if (r.ok) return;
