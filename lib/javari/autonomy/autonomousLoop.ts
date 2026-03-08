@@ -28,6 +28,10 @@ import { analyzeSystemHealth }      from "@/lib/operations/systemHealthAnalyzer"
 import { recordLearningEvent,
          ingestFromPlatformData }   from "@/lib/learning/learningCollector";
 import type { LearningEvent }       from "@/lib/learning/learningCollector";
+import { canRun,
+         markCycleStart,
+         markCycleEnd }             from "@/lib/javari/autonomy/autonomousScheduler";
+import { runGuardrailCheck }        from "@/lib/javari/autonomy/autonomyGuardrails";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -231,6 +235,21 @@ export async function runAutonomousLoop(
 
   console.info(`[autonomous-loop] ▶ Cycle ${cycleId} starting`);
 
+  // ── Scheduler gate ────────────────────────────────────────────────────────
+  const gate = await canRun(cycleId);
+  if (!gate.allowed) {
+    console.warn(`[autonomous-loop] Scheduler blocked: ${gate.reason}`);
+    return {
+      cycleId, startedAt, completedAt: new Date().toISOString(),
+      durationMs: Date.now() - t0, healthScore: 0,
+      tasksConsidered: 0, tasksExecuted: 0, tasksSkipped: 0, tasksFailed: 0,
+      totalCostUsd: 0, memoryNodesAdded: 0, learningEvents: 0,
+      errors: [`Scheduler blocked: ${gate.reason}`],
+      dryRun: cfg.dryRun ?? false,
+    };
+  }
+  markCycleStart(cycleId);
+
   // ── Circuit breaker check ────────────────────────────────────────────────
   if (_consecutiveFailures >= CIRCUIT_BREAKER_THRESHOLD) {
     console.warn(`[autonomous-loop] Circuit breaker OPEN — ${_consecutiveFailures} consecutive failures. Resetting counter.`);
@@ -273,6 +292,19 @@ export async function runAutonomousLoop(
       if (totalCostUsd >= cfg.maxCostUsdPerCycle) {
         tasksSkipped++;
         console.info(`[autonomous-loop] Cost ceiling $${cfg.maxCostUsdPerCycle} reached — skipping task ${task.id}`);
+        continue;
+      }
+
+      // Guardrails check per-task
+      const guardrail = runGuardrailCheck({
+        operationType   : task.type,
+        estimatedCostUsd: 0.05, // conservative per-task estimate
+        isDestructive   : false,
+        cycleId,
+      });
+      if (!guardrail.allowed) {
+        tasksSkipped++;
+        errors.push(`Task ${task.id} blocked by guardrail: ${guardrail.reason}`);
         continue;
       }
 
@@ -335,6 +367,9 @@ export async function runAutonomousLoop(
     const msg = `Cycle ${cycleId} unhandled error: ${err instanceof Error ? err.message : String(err)}`;
     errors.push(msg);
     console.error(`[autonomous-loop] ${msg}`);
+  } finally {
+    // Always release scheduler lock and update state
+    await markCycleEnd(cycleId, errors.length === 0).catch(() => {});
   }
 
   const completedAt = new Date().toISOString();

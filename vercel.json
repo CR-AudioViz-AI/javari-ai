@@ -20,6 +20,10 @@
       "schedule": "*/10 * * * *"
     },
     {
+      "path": "/api/javari/autonomy/metrics",
+      "schedule": "*/30 * * * *"
+    },
+    {
       "path": "/api/javari/start-roadmap",
       "schedule": "*/2 * * * *"
     },

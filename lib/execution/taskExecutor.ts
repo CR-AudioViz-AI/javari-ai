@@ -38,6 +38,11 @@ export type TaskType =
   | "deploy_feature"
   | "ai_task"
   | "repair_code"
+  | "audit_security"
+  | "optimize_performance"
+  | "generate_docs"
+  | "analyze_system"
+  | "crawl_target"
   | string;
 
 export interface ExecutableTask {
@@ -51,6 +56,10 @@ export interface ExecutableTask {
     fileContent?: string;
     sql?        : string;
     project?    : string;
+    targetUrl?  : string;    // for crawl_target tasks
+    auditType?  : string;    // for audit_security tasks
+    docFormat?  : string;    // for generate_docs tasks
+    [key: string]: unknown;  // allow arbitrary metadata from roadmap tasks
   };
 }
 
@@ -152,7 +161,9 @@ async function runAIFallback(task: ExecutableTask, userId: string): Promise<stri
     userId,
     routingPriority: "quality",
   });
-  return typeof result.output === "string" ? result.output : JSON.stringify(result.output);
+  // executeGateway returns a union — handle both shapes safely
+  const rawOutput = (result as Record<string, unknown>).output;
+  return typeof rawOutput === "string" ? rawOutput : JSON.stringify(rawOutput ?? result);
 }
 
 // ── build_module ───────────────────────────────────────────────────────────
@@ -266,7 +277,9 @@ async function handleUpdateSchema(task: ExecutableTask, userId: string): Promise
         input: `You are a database architect generating a Supabase PostgreSQL migration for the CR AudioViz AI platform.\n\nTask: ${task.title}\nDescription: ${task.description}\n\nGenerate a complete, safe SQL migration file. Include a header comment, any CREATE TABLE IF NOT EXISTS / CREATE INDEX / ALTER TABLE statements needed. If no schema changes are needed, generate a comment-only file. Return ONLY the SQL content, no markdown.`,
         mode: "auto", userId, routingPriority: "quality",
       });
-      sql = typeof aiResult.output === "string" ? aiResult.output : "";
+      sql = typeof (aiResult as Record<string, unknown>).output === "string"
+        ? (aiResult as Record<string, unknown>).output as string
+        : "";
     }
     if (!sql.trim()) {
       sql = `-- Migration: ${task.title}\n-- Task: ${task.id}\n-- Generated: ${new Date().toISOString()}\n-- No schema changes required.\nSELECT 1; -- no-op\n`;
@@ -360,6 +373,213 @@ async function handleDeployFeature(task: ExecutableTask, userId: string): Promis
   }
 }
 
+// ── audit_security ─────────────────────────────────────────────────────────
+
+async function handleAuditSecurity(
+  task  : ExecutableTask,
+  userId: string
+): Promise<TaskExecutionResult> {
+  const start = Date.now();
+  const artifactIds: string[] = [];
+  const actions: TaskExecutionResult["actions"] = [];
+  try {
+    const output = await runAIFallback({
+      ...task,
+      description: `Security audit task: ${task.title}. ${task.description}\n\nProvide: threat assessment, OWASP Top 10 checklist, recommended fixes, risk severity.`,
+    }, userId);
+
+    const ar = await recordArtifact({
+      task_id          : task.id,
+      artifact_type    : "analysis_report",
+      artifact_location: `security_audit:${task.id}:${Date.now()}`,
+      artifact_data    : { output_preview: output.slice(0, 500), audit_type: "security" },
+    });
+    if (ar.id) artifactIds.push(ar.id);
+    actions.push({ action: "security_audit", ok: true });
+
+    const ms = Date.now() - start;
+    await writeExecutionLog({ task_id: task.id, model_used: "gateway", cost: 0.002, tokens_in: 300, tokens_out: 600, execution_time: ms, status: "success" });
+    return { ok: true, taskId: task.id, type: "audit_security", output, actions, artifactIds, durationMs: ms };
+  } catch (err) {
+    const ms = Date.now() - start;
+    await writeExecutionLog({ task_id: task.id, model_used: "gateway", cost: 0, tokens_in: 0, tokens_out: 0, execution_time: ms, status: "failed", error_message: String(err) });
+    return { ok: false, taskId: task.id, type: "audit_security", error: String(err), actions, artifactIds, durationMs: ms };
+  }
+}
+
+// ── optimize_performance ───────────────────────────────────────────────────
+
+async function handleOptimizePerformance(
+  task  : ExecutableTask,
+  userId: string
+): Promise<TaskExecutionResult> {
+  const start = Date.now();
+  const artifactIds: string[] = [];
+  const actions: TaskExecutionResult["actions"] = [];
+  try {
+    const output = await runAIFallback({
+      ...task,
+      description: `Performance optimization task: ${task.title}. ${task.description}\n\nAnalyze and provide: bottleneck identification, optimization strategies, estimated improvement, implementation plan.`,
+    }, userId);
+
+    const ar = await recordArtifact({
+      task_id          : task.id,
+      artifact_type    : "analysis_report",
+      artifact_location: `performance:${task.id}:${Date.now()}`,
+      artifact_data    : { output_preview: output.slice(0, 500), audit_type: "performance" },
+    });
+    if (ar.id) artifactIds.push(ar.id);
+    actions.push({ action: "performance_analysis", ok: true });
+
+    const ms = Date.now() - start;
+    await writeExecutionLog({ task_id: task.id, model_used: "gateway", cost: 0.002, tokens_in: 300, tokens_out: 600, execution_time: ms, status: "success" });
+    return { ok: true, taskId: task.id, type: "optimize_performance", output, actions, artifactIds, durationMs: ms };
+  } catch (err) {
+    const ms = Date.now() - start;
+    await writeExecutionLog({ task_id: task.id, model_used: "gateway", cost: 0, tokens_in: 0, tokens_out: 0, execution_time: ms, status: "failed", error_message: String(err) });
+    return { ok: false, taskId: task.id, type: "optimize_performance", error: String(err), actions, artifactIds, durationMs: ms };
+  }
+}
+
+// ── generate_docs ──────────────────────────────────────────────────────────
+
+async function handleGenerateDocs(
+  task  : ExecutableTask,
+  userId: string
+): Promise<TaskExecutionResult> {
+  const start = Date.now();
+  const artifactIds: string[] = [];
+  const actions: TaskExecutionResult["actions"] = [];
+  try {
+    const output = await runAIFallback({
+      ...task,
+      description: `Documentation generation task: ${task.title}. ${task.description}\n\nGenerate: comprehensive documentation in Markdown format, including overview, usage, API reference, and examples.`,
+    }, userId);
+
+    // If there's a target path, commit the generated docs
+    let commitSha: string | undefined;
+    if (task.metadata?.filePath && task.metadata?.repo) {
+      const commitResult = await commitFileChange(
+        task.metadata.repo,
+        task.metadata.filePath,
+        output,
+        `[javari] generate_docs: ${task.title} (task ${task.id})`
+      );
+      if (commitResult.ok) {
+        commitSha = commitResult.sha;
+        actions.push({ action: "docs_committed", ok: true, detail: commitSha });
+      }
+    }
+
+    const ar = await recordArtifact({
+      task_id          : task.id,
+      artifact_type    : "ai_output",
+      artifact_location: commitSha ? `commit:${commitSha}` : `docs:${task.id}:${Date.now()}`,
+      artifact_data    : { output_preview: output.slice(0, 500), doc_type: "generated" },
+    });
+    if (ar.id) artifactIds.push(ar.id);
+    if (!commitSha) actions.push({ action: "docs_generated", ok: true });
+
+    const ms = Date.now() - start;
+    await writeExecutionLog({ task_id: task.id, model_used: "gateway", cost: 0.002, tokens_in: 200, tokens_out: 800, execution_time: ms, status: "success" });
+    return { ok: true, taskId: task.id, type: "generate_docs", output, actions, artifactIds, durationMs: ms };
+  } catch (err) {
+    const ms = Date.now() - start;
+    await writeExecutionLog({ task_id: task.id, model_used: "gateway", cost: 0, tokens_in: 0, tokens_out: 0, execution_time: ms, status: "failed", error_message: String(err) });
+    return { ok: false, taskId: task.id, type: "generate_docs", error: String(err), actions, artifactIds, durationMs: ms };
+  }
+}
+
+// ── analyze_system ─────────────────────────────────────────────────────────
+
+async function handleAnalyzeSystem(
+  task  : ExecutableTask,
+  userId: string
+): Promise<TaskExecutionResult> {
+  const start = Date.now();
+  const artifactIds: string[] = [];
+  const actions: TaskExecutionResult["actions"] = [];
+  try {
+    const output = await runAIFallback({
+      ...task,
+      description: `System analysis task: ${task.title}. ${task.description}\n\nAnalyze and provide: architecture assessment, dependency graph, integration points, risk areas, improvement recommendations.`,
+    }, userId);
+
+    const ar = await recordArtifact({
+      task_id          : task.id,
+      artifact_type    : "analysis_report",
+      artifact_location: `system_analysis:${task.id}:${Date.now()}`,
+      artifact_data    : { output_preview: output.slice(0, 500), analysis_type: "system" },
+    });
+    if (ar.id) artifactIds.push(ar.id);
+    actions.push({ action: "system_analyzed", ok: true });
+
+    const ms = Date.now() - start;
+    await writeExecutionLog({ task_id: task.id, model_used: "gateway", cost: 0.003, tokens_in: 400, tokens_out: 800, execution_time: ms, status: "success" });
+    return { ok: true, taskId: task.id, type: "analyze_system", output, actions, artifactIds, durationMs: ms };
+  } catch (err) {
+    const ms = Date.now() - start;
+    await writeExecutionLog({ task_id: task.id, model_used: "gateway", cost: 0, tokens_in: 0, tokens_out: 0, execution_time: ms, status: "failed", error_message: String(err) });
+    return { ok: false, taskId: task.id, type: "analyze_system", error: String(err), actions, artifactIds, durationMs: ms };
+  }
+}
+
+// ── crawl_target ───────────────────────────────────────────────────────────
+
+async function handleCrawlTarget(
+  task  : ExecutableTask,
+  _userId: string
+): Promise<TaskExecutionResult> {
+  const start = Date.now();
+  const artifactIds: string[] = [];
+  const actions: TaskExecutionResult["actions"] = [];
+  try {
+    const targetUrl  = task.metadata?.targetUrl as string | undefined;
+    const targetRepo = task.metadata?.repo       as string | undefined;
+
+    if (!targetUrl && !targetRepo) {
+      throw new Error("crawl_target requires metadata.targetUrl or metadata.repo");
+    }
+
+    // Delegate to existing crawler via HTTP (avoids import coupling)
+    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL
+      ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
+
+    const crawlRes = await fetch(`${baseUrl}/api/javari/crawl`, {
+      method : "POST",
+      headers: { "Content-Type": "application/json" },
+      body   : JSON.stringify({
+        target     : targetUrl ?? `https://github.com/${targetRepo}`,
+        targetType : targetUrl ? "website" : "github",
+        depth      : 2,
+        task_id    : task.id,
+      }),
+      signal: AbortSignal.timeout(90_000),
+    });
+
+    if (!crawlRes.ok) throw new Error(`Crawler HTTP ${crawlRes.status}`);
+    const crawlData = await crawlRes.json() as { ok?: boolean; report?: unknown; error?: string };
+    if (!crawlData.ok) throw new Error(crawlData.error ?? "Crawler returned ok:false");
+
+    const ar = await recordArtifact({
+      task_id          : task.id,
+      artifact_type    : "ecosystem_report",
+      artifact_location: `crawl:${task.id}:${Date.now()}`,
+      artifact_data    : { target: targetUrl ?? targetRepo, report_summary: JSON.stringify(crawlData.report ?? {}).slice(0, 500) },
+    });
+    if (ar.id) artifactIds.push(ar.id);
+    actions.push({ action: "crawl_completed", ok: true, detail: targetUrl ?? targetRepo });
+
+    const ms = Date.now() - start;
+    await writeExecutionLog({ task_id: task.id, model_used: "crawler", cost: 0.001, tokens_in: 0, tokens_out: 0, execution_time: ms, status: "success" });
+    return { ok: true, taskId: task.id, type: "crawl_target", output: `Crawl complete: ${targetUrl ?? targetRepo}`, actions, artifactIds, durationMs: ms };
+  } catch (err) {
+    const ms = Date.now() - start;
+    await writeExecutionLog({ task_id: task.id, model_used: "crawler", cost: 0, tokens_in: 0, tokens_out: 0, execution_time: ms, status: "failed", error_message: String(err) });
+    return { ok: false, taskId: task.id, type: "crawl_target", error: String(err), actions, artifactIds, durationMs: ms };
+  }
+}
+
 // ── Main dispatcher ────────────────────────────────────────────────────────
 
 export async function executeTask(
@@ -376,10 +596,15 @@ export async function executeTask(
   let result: TaskExecutionResult;
 
   switch (type) {
-    case "build_module"  : result = await handleBuildModule(task, userId);   break;
-    case "create_api"    : result = await handleCreateAPI(task, userId);     break;
-    case "update_schema" : result = await handleUpdateSchema(task, userId);  break;
-    case "deploy_feature": result = await handleDeployFeature(task, userId); break;
+    case "build_module"         : result = await handleBuildModule(task, userId);         break;
+    case "create_api"           : result = await handleCreateAPI(task, userId);           break;
+    case "update_schema"        : result = await handleUpdateSchema(task, userId);        break;
+    case "deploy_feature"       : result = await handleDeployFeature(task, userId);       break;
+    case "audit_security"       : result = await handleAuditSecurity(task, userId);       break;
+    case "optimize_performance" : result = await handleOptimizePerformance(task, userId); break;
+    case "generate_docs"        : result = await handleGenerateDocs(task, userId);        break;
+    case "analyze_system"       : result = await handleAnalyzeSystem(task, userId);       break;
+    case "crawl_target"         : result = await handleCrawlTarget(task, userId);         break;
 
     case "repair_code": {
       const rcStart = Date.now();
