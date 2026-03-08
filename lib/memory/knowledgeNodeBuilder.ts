@@ -360,3 +360,37 @@ export async function detectAndIngestPatterns(
 
   return patternNodeIds;
 }
+
+
+// ─── Route-compatible aliases ────────────────────────────────────────────────
+// route.ts imports these names; they delegate to the canonical functions above.
+
+export const ingestRepair = ingestRepairEvent;
+export const ingestScanFinding = ingestScanEvent;
+export const ingestCrawlFinding = ingestCrawlEvent;
+
+/**
+ * Bulk-ingest an array of LearningEvent objects into the memory graph.
+ * Processes in batches to avoid overwhelming the DB.
+ */
+export async function bulkIngestLearningEvents(
+  events: LearningEvent[],
+  batchSize = 10,
+): Promise<{ ingested: number; failed: number }> {
+  let ingested = 0;
+  let failed   = 0;
+  for (let i = 0; i < events.length; i += batchSize) {
+    const batch = events.slice(i, i + batchSize);
+    await Promise.all(
+      batch.map(async (event) => {
+        try {
+          await ingestLearningEvent(event);
+          ingested++;
+        } catch {
+          failed++;
+        }
+      }),
+    );
+  }
+  return { ingested, failed };
+}
