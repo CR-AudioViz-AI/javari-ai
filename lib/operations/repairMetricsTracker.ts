@@ -36,7 +36,7 @@ export function aggregateRepairMetrics(data: RawOperationsData): RepairMetricsSu
       t.source === "web_audit"  || t.source === "brand_engine" ||
       t.source === "ux_analyzer"
     );
-    const completed = repairTasks.filter(t => t.status === "complete").length;
+    const completed = repairTasks.filter(t => t.status === "completed").length;
     const failed    = repairTasks.filter(t => t.status === "failed").length;
     const total     = repairTasks.length;
     const rate      = total > 0 ? Math.round(completed / total * 100) : 0;
@@ -44,7 +44,7 @@ export function aggregateRepairMetrics(data: RawOperationsData): RepairMetricsSu
     const now     = Date.now();
     const dayAgo  = now - 24 * 60 * 60 * 1000;
     const recent  = repairTasks.filter(t => t.updated_at > dayAgo);
-    const recentSuccess = recent.filter(t => t.status === "complete").length;
+    const recentSuccess = recent.filter(t => t.status === "completed").length;
 
     return {
       totalRepairs    : total,
