@@ -24,7 +24,7 @@
       "schedule": "*/30 * * * *"
     },
     {
-      "path": "/api/javari/start-roadmap",
+      "path": "/api/javari/orchestrator/run",
       "schedule": "*/2 * * * *"
     },
     {
