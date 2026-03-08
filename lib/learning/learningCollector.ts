@@ -166,7 +166,7 @@ export async function ingestFromPlatformData(): Promise<{ eventsCreated: number 
       : "General";
 
     const eventType: LearningEventType =
-      (task.status as string) === "complete" ? "issue_repaired"
+      (task.status as string) === "completed" ? "issue_repaired"
       : (task.status as string) === "failed" ? "failure_observed"
       : "issue_detected";
 
