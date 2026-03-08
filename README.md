@@ -81,3 +81,5 @@ Tasks are seeded by phase priority: `core_platform → autonomy_engine → multi
 <!-- autonomy-loop-build-trigger: 2026-03-07 -->
 
 <!-- autonomy-seeder-fix: 2026-03-07 -->
+
+<!-- crawler-build-trigger: 2026-03-07 -->
