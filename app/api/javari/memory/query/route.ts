@@ -130,11 +130,44 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             return NextResponse.json({ ok:true, mode:"ingest", ingest_type:"technology", nodeId: node.id });
           }
           case "learning_events": {
-            const events = body.events as Parameters<typeof bulkIngestLearningEvents>[0];
-            if (!Array.isArray(events)) {
-              return NextResponse.json({ ok:false, error:"events array required" }, { status:400 });
+            const passedEvents = body.events as Parameters<typeof bulkIngestLearningEvents>[0] | undefined;
+            // Auto-pull from javari_learning_events if no events array provided
+            if (!passedEvents || !Array.isArray(passedEvents)) {
+              try {
+                const batchSize = Number(body.batch_size ?? 200);
+                const offset    = Number(body.offset ?? 0);
+                const { createClient } = await import("@supabase/supabase-js");
+                const dbClient = createClient(
+                  process.env.NEXT_PUBLIC_SUPABASE_URL  ?? "",
+                  process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+                  { auth: { persistSession: false } }
+                );
+                const { data: rows, error: fetchErr } = await dbClient
+                  .from("javari_learning_events")
+                  .select("id, event_type, domain, technology, severity, source, details, created_at")
+                  .range(offset, offset + batchSize - 1)
+                  .order("created_at", { ascending: true });
+                if (fetchErr) return NextResponse.json({ ok:false, error: fetchErr.message }, { status:500 });
+                type RawRow = { id: unknown; event_type: unknown; domain: unknown; technology: unknown;
+                               severity: unknown; source: unknown; details: unknown; created_at: unknown };
+                const autoEvents = (rows ?? []).map((r: RawRow) => ({
+                  id        : String(r.id),
+                  timestamp : String(r.created_at ?? new Date().toISOString()),
+                  event_type: r.event_type as import("@/lib/learning/learningCollector").LearningEventType,
+                  domain    : r.domain     as import("@/lib/learning/learningCollector").KnowledgeDomain,
+                  technology: String(r.technology ?? "unknown"),
+                  severity  : (r.severity ?? "low") as "low"|"medium"|"high"|"critical",
+                  source    : String(r.source ?? "auto"),
+                  details   : (r.details ?? {}) as Record<string, unknown>,
+                }));
+                const result = await bulkIngestLearningEvents(autoEvents, 10);
+                return NextResponse.json({ ok:true, mode:"ingest", ingest_type:"learning_events",
+                  auto_pulled: autoEvents.length, offset, batch_size: batchSize, ...result });
+              } catch (autoErr) {
+                return NextResponse.json({ ok:false, error: String(autoErr) }, { status:500 });
+              }
             }
-            const result = await bulkIngestLearningEvents(events, 5);
+            const result = await bulkIngestLearningEvents(passedEvents, 10);
             return NextResponse.json({ ok:true, mode:"ingest", ingest_type:"learning_events", ...result });
           }
           default:
