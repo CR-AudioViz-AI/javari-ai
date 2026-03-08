@@ -11,7 +11,7 @@ import { scanForPerformance, PerfIssue }    from "./performanceScanner";
 import { detectDeadCode, DeadCodeIssue }    from "./deadCodeDetector";
 import { detectTestGaps, TestGapIssue }     from "./testCoverageDetector";
 import { buildCallGraph, CallGraphResult }  from "./callGraphBuilder";
-import { createClient, SupabaseClient }     from "@supabase/supabase-js";
+// [javari-repair] removed unused import: import { createClient, SupabaseClient }     from "@supabase/supabase-js";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
