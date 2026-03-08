@@ -256,26 +256,33 @@ export async function ingestLearningEvent(event: LearningEvent): Promise<string 
 
   // Map learning event types to node types
   const nodeTypeMap: Record<string, NodeType> = {
-    issue_detected : "issue",
-    issue_repaired : "fix",
-    scan_completed : "scan_result",
-    audit_completed: "audit_finding",
-    tech_encountered: "technology",
-    pattern_learned: "pattern",
+    issue_detected    : "issue",
+    issue_repaired    : "fix",
+    scan_completed    : "scan_result",
+    audit_completed   : "audit_finding",
+    tech_encountered  : "technology",
+    pattern_learned   : "pattern",
     capability_improved: "pattern",
   };
 
   const nodeType = nodeTypeMap[event.event_type] ?? "pattern";
 
-  // Extract description/outcome from details (LearningEvent stores payload in details, not top-level fields)
-  const descFromDetails = (event.details?.description ?? event.details?.message ?? event.details?.summary) as string | undefined;
-  const outcomeFromDetails = (event.details?.outcome ?? event.details?.result ?? event.details?.status) as string | undefined;
+  // LearningEvent stores payload in details, not at top-level
+  const descFromDetails    = String(event.details?.description ?? event.details?.message ?? event.details?.summary ?? "");
+  const outcomeFromDetails = String(event.details?.outcome     ?? event.details?.result  ?? event.details?.status  ?? "");
 
-  const node: MemoryNode = {
-    id         : `learn-${event.event_type}-${ts}-${Math.random().toString(36).slice(2,5)}`,
-    type       : nodeType,
-    label      : (descFromDetails?.slice(0, 80)) ?? `${event.event_type}: ${event.technology}`,
-    description: descFromDetails ?? `Learning event: ${event.event_type} on ${event.technology} (${event.domain})`,
+  const label       = descFromDetails.slice(0, 80) || `${event.event_type}: ${event.technology}`;
+  const description = descFromDetails || `Learning event: ${event.event_type} on ${event.technology} (${event.domain})`;
+
+  const node = await upsertNode({
+    node_type  : nodeType,
+    label,
+    description,
+    technology : event.technology ?? "unknown",
+    domain     : event.domain     ?? "general",
+    severity   : (event.severity  ?? "none") as "low" | "medium" | "high" | "critical" | "none",
+    confidence : 75,
+    occurrences: 1,
     metadata   : {
       event_type  : event.event_type,
       technology  : event.technology,
@@ -283,37 +290,29 @@ export async function ingestLearningEvent(event: LearningEvent): Promise<string 
       severity    : event.severity,
       outcome     : outcomeFromDetails,
       learning_id : event.id,
+      source      : event.source,
       details     : event.details,
     },
-    confidence : 0.75,
     source     : "learning_system",
-    created_at : ts,
-    updated_at : ts,
-  };
-  await upsertNode(node);
+  });
 
-  // If this is a repair event, create edges to technology node
-  if (event.technology && (event.event_type === "issue_detected" || event.event_type === "issue_repaired")) {
-    const techId = `tech-${event.technology.toLowerCase().replace(/[^a-z0-9]/g, "-")}`;
-    const techNode: MemoryNode = {
-      id: techId, type: "technology", label: event.technology,
-      description: `Technology: ${event.technology}`,
-      metadata: { technology: event.technology },
-      confidence: 0.8, source: "learning_system", created_at: ts, updated_at: ts,
-    };
-    await upsertNode(techNode);
-    await upsertEdge({
-      id: `${node.id}-related_to-${techId}`,
-      from_id: node.id, to_id: techId, relationship: "related_to",
-      weight: 0.7, metadata: { domain: event.domain },
-    });
+  // If this is a repair event, create edges linking issue → fix
+  if (event.event_type === "issue_repaired" && event.details?.issue_id) {
+    try {
+      await upsertEdge({
+        source_id  : String(event.details.issue_id),
+        target_id  : node.id,
+        edge_type  : "resolved_by",
+        weight     : 1.0,
+        metadata   : { automated: true, source: "learning_system" },
+        created_at : ts,
+      });
+    } catch { /* non-fatal if issue node doesn't exist */ }
   }
 
   return node.id;
 }
 
-// ── Pattern detection ──────────────────────────────────────────────────────
-// Call after bulk ingestion to detect recurring issues/fixes automatically.
 
 export async function detectAndIngestPatterns(
   recentIssues: Array<{ description: string; technology: string; strategy: string }>
