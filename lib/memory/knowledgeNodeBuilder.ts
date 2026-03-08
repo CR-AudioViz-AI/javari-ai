@@ -1,8 +1,8 @@
 // lib/memory/knowledgeNodeBuilder.ts
-// Purpose: Constructs MemoryNode objects from the raw data emitted by each
-//          Javari subsystem: repairs, scans, crawls, audits, tech discoveries.
-//          This is the "ingestion adapter" — maps every event type to graph nodes.
-// Date: 2026-03-07
+// Purpose: Ingestion adapter — maps every Javari event type to memory graph nodes/edges.
+//          Sources: repairs, scans, crawls, audits, tech discoveries, learning events.
+//          Pattern detection: automatically identifies recurring issues/fixes.
+// Date: 2026-03-08
 
 import { upsertNode, upsertEdge, MemoryNode, NodeType } from "./memoryGraph";
 import type { LearningEvent } from "@/lib/learning/learningCollector";
@@ -12,309 +12,351 @@ import type { LearningEvent } from "@/lib/learning/learningCollector";
 export interface RepairRecord {
   issue_description : string;
   fix_description   : string;
+  file_path         : string;
   technology        : string;
-  domain            : string;
   severity          : "low" | "medium" | "high" | "critical";
-  file_path?        : string;
-  commit_sha?       : string;
-  source            : string;
+  strategy          : string;
+  success           : boolean;
+  task_id?          : string;
 }
 
-export interface ScanFinding {
-  title       : string;
-  description : string;
-  technology  : string;
-  domain      : string;
-  severity    : "low" | "medium" | "high" | "critical";
-  file_path?  : string;
-  source      : string;
+export interface ScanRecord {
+  scan_id    : string;
+  target_id  : string;
+  target_name: string;
+  issues     : Array<{ type: string; severity: string; description: string; file?: string }>;
+  summary    : string;
+  scanned_at : string;
 }
 
-export interface CrawlFinding {
+export interface CrawlRecord {
   url         : string;
-  title       : string;
-  description : string;
-  technology  : string;
-  severity    : "low" | "medium" | "high" | "critical" | "none";
-  source      : string;
+  domain      : string;
+  pages_found : number;
+  api_endpoints: string[];
+  technologies : string[];
+  security_findings: string[];
+  performance_issues: string[];
+  crawled_at  : string;
 }
 
 export interface TechDiscovery {
   technology  : string;
   version?    : string;
-  domain      : string;
   context     : string;
-  source      : string;
+  file_path?  : string;
+  confidence  : number;
+  discovered_at: string;
 }
 
-// ── Builders ────────────────────────────────────────────────────────────────
+// ── Repair event ingestion ─────────────────────────────────────────────────
 
-/**
- * Ingest a completed repair into the memory graph.
- * Creates two nodes (issue + fix) and a resolved_by edge between them.
- * Also creates a technology node and links both to it.
- */
-export async function ingestRepair(repair: RepairRecord): Promise<{
-  issueNode: MemoryNode;
-  fixNode  : MemoryNode;
+export async function ingestRepairEvent(repair: RepairRecord): Promise<{
+  issueNodeId: string;
+  fixNodeId  : string;
+  techNodeId : string;
 }> {
-  const issueNode = await upsertNode({
-    node_type  : "issue",
-    label      : repair.issue_description.slice(0, 120),
+  const ts = Date.now();
+
+  // Issue node
+  const issueNode: MemoryNode = {
+    id         : `issue-${repair.task_id ?? ts}-${Math.random().toString(36).slice(2,6)}`,
+    type       : "issue",
+    label      : repair.issue_description.slice(0, 80),
     description: repair.issue_description,
-    technology : repair.technology,
-    domain     : repair.domain,
-    severity   : repair.severity,
-    confidence : 90,
-    occurrences: 1,
-    metadata   : { file_path: repair.file_path ?? null, source: repair.source },
-    source     : "repair",
-  });
+    metadata   : {
+      severity: repair.severity,
+      file_path: repair.file_path,
+      strategy : repair.strategy,
+      task_id  : repair.task_id,
+    },
+    confidence : 0.9,
+    source     : "repair_engine",
+    created_at : ts,
+    updated_at : ts,
+  };
+  await upsertNode(issueNode);
 
-  const fixNode = await upsertNode({
-    node_type  : "fix",
-    label      : repair.fix_description.slice(0, 120),
+  // Fix node
+  const fixNode: MemoryNode = {
+    id         : `fix-${repair.task_id ?? ts}-${Math.random().toString(36).slice(2,6)}`,
+    type       : "fix",
+    label      : repair.fix_description.slice(0, 80),
     description: repair.fix_description,
-    technology : repair.technology,
-    domain     : repair.domain,
-    severity   : "none",
-    confidence : 90,
-    occurrences: 1,
-    metadata   : { commit_sha: repair.commit_sha ?? null, file_path: repair.file_path ?? null },
-    source     : "repair",
+    metadata   : { strategy: repair.strategy, success: repair.success, task_id: repair.task_id },
+    confidence : repair.success ? 0.95 : 0.6,
+    source     : "repair_engine",
+    created_at : ts,
+    updated_at : ts,
+  };
+  await upsertNode(fixNode);
+
+  // Technology node
+  const techNode: MemoryNode = {
+    id         : `tech-${repair.technology.toLowerCase().replace(/\s+/g, "-")}`,
+    type       : "technology",
+    label      : repair.technology,
+    description: `Technology: ${repair.technology}`,
+    metadata   : { technology: repair.technology, first_seen: new Date().toISOString() },
+    confidence : 1.0,
+    source     : "repair_engine",
+    created_at : ts,
+    updated_at : ts,
+  };
+  await upsertNode(techNode);
+
+  // Edges: issue → resolved_by → fix, issue → affects → technology
+  await upsertEdge({
+    id: `${issueNode.id}-resolved_by-${fixNode.id}`,
+    from_id: issueNode.id, to_id: fixNode.id, relationship: "resolved_by",
+    weight: repair.success ? 0.9 : 0.5,
+    metadata: { strategy: repair.strategy, success: repair.success },
+  });
+  await upsertEdge({
+    id: `${issueNode.id}-affects-${techNode.id}`,
+    from_id: issueNode.id, to_id: techNode.id, relationship: "affects",
+    weight: 0.8, metadata: { file_path: repair.file_path },
+  });
+  await upsertEdge({
+    id: `${fixNode.id}-applies_to-${techNode.id}`,
+    from_id: fixNode.id, to_id: techNode.id, relationship: "applies_to",
+    weight: 0.85, metadata: { strategy: repair.strategy },
   });
 
-  // issue --resolved_by--> fix
-  await upsertEdge(issueNode.id, "resolved_by", fixNode.id, 90, { source: repair.source });
-
-  // Both nodes --discovered_in--> technology node
-  const techNode = await ingestTechDiscovery({
-    technology: repair.technology,
-    domain    : repair.domain,
-    context   : `Repair: ${repair.issue_description.slice(0, 60)}`,
-    source    : "repair",
-  });
-  await upsertEdge(issueNode.id, "discovered_in", techNode.id, 70, {});
-  await upsertEdge(fixNode.id, "discovered_in", techNode.id, 70, {});
-
-  return { issueNode, fixNode };
+  return { issueNodeId: issueNode.id, fixNodeId: fixNode.id, techNodeId: techNode.id };
 }
 
-/**
- * Ingest a code scan finding.
- * Creates an issue node and links to a scan_result node and technology node.
- */
-export async function ingestScanFinding(finding: ScanFinding): Promise<MemoryNode> {
-  const issueNode = await upsertNode({
-    node_type  : "issue",
-    label      : finding.title.slice(0, 120),
-    description: finding.description,
-    technology : finding.technology,
-    domain     : finding.domain,
-    severity   : finding.severity,
-    confidence : 85,
-    occurrences: 1,
-    metadata   : { file_path: finding.file_path ?? null },
-    source     : "scan",
-  });
+// ── Scan event ingestion ───────────────────────────────────────────────────
 
-  const scanNode = await upsertNode({
-    node_type  : "scan_result",
-    label      : `Scan: ${finding.technology} ${finding.domain}`,
-    description: `Code intelligence scan in ${finding.technology}`,
-    technology : finding.technology,
-    domain     : finding.domain,
-    severity   : "none",
-    confidence : 80,
-    occurrences: 1,
-    metadata   : { source: finding.source },
-    source     : "scan",
-  });
+export async function ingestScanEvent(scan: ScanRecord): Promise<{ scanNodeId: string; issueNodeIds: string[] }> {
+  const ts = Date.now();
 
-  await upsertEdge(scanNode.id, "produces", issueNode.id, 80, {});
+  const scanNode: MemoryNode = {
+    id         : `scan-${scan.scan_id}`,
+    type       : "scan_result",
+    label      : `Scan: ${scan.target_name}`,
+    description: scan.summary,
+    metadata   : {
+      target_id: scan.target_id,
+      target_name: scan.target_name,
+      issue_count: scan.issues.length,
+      scanned_at: scan.scanned_at,
+    },
+    confidence : 0.95,
+    source     : "scan_engine",
+    created_at : ts,
+    updated_at : ts,
+  };
+  await upsertNode(scanNode);
 
-  const techNode = await ingestTechDiscovery({
-    technology: finding.technology, domain: finding.domain,
-    context: `Scan finding: ${finding.title.slice(0, 60)}`, source: "scan",
-  });
-  await upsertEdge(issueNode.id, "discovered_in", techNode.id, 60, {});
+  const issueNodeIds: string[] = [];
+  for (const issue of scan.issues.slice(0, 10)) {
+    const issueNode: MemoryNode = {
+      id         : `issue-scan-${scan.scan_id}-${Math.random().toString(36).slice(2,6)}`,
+      type       : "issue",
+      label      : issue.description.slice(0, 80),
+      description: issue.description,
+      metadata   : { type: issue.type, severity: issue.severity, file: issue.file, source: "scan" },
+      confidence : 0.85,
+      source     : "scan_engine",
+      created_at : ts,
+      updated_at : ts,
+    };
+    await upsertNode(issueNode);
+    issueNodeIds.push(issueNode.id);
+    await upsertEdge({
+      id: `${scanNode.id}-discovered-${issueNode.id}`,
+      from_id: scanNode.id, to_id: issueNode.id, relationship: "discovered_in",
+      weight: 0.8, metadata: { severity: issue.severity },
+    });
+  }
 
-  return issueNode;
+  return { scanNodeId: scanNode.id, issueNodeIds };
 }
 
-/**
- * Ingest a crawl/audit finding.
- * Creates an audit_finding node linked to the URL and technology.
- */
-export async function ingestCrawlFinding(finding: CrawlFinding): Promise<MemoryNode> {
-  const auditNode = await upsertNode({
-    node_type  : "audit_finding",
-    label      : finding.title.slice(0, 120),
-    description: finding.description,
-    technology : finding.technology,
-    domain     : "architecture",
-    severity   : finding.severity === "none" ? "low" : finding.severity,
-    confidence : 75,
-    occurrences: 1,
-    metadata   : { url: finding.url },
-    source     : "crawl",
-  });
-  return auditNode;
+// ── Crawl event ingestion ──────────────────────────────────────────────────
+
+export async function ingestCrawlEvent(crawl: CrawlRecord): Promise<{ crawlNodeId: string; techNodeIds: string[] }> {
+  const ts = Date.now();
+
+  const crawlNode: MemoryNode = {
+    id         : `crawl-${crawl.domain}-${ts}`,
+    type       : "audit_finding",
+    label      : `Crawl: ${crawl.domain}`,
+    description: `Web crawl of ${crawl.url}: ${crawl.pages_found} pages, ${crawl.api_endpoints.length} endpoints`,
+    metadata   : {
+      domain: crawl.domain,
+      pages_found: crawl.pages_found,
+      api_endpoints: crawl.api_endpoints.length,
+      security_findings: crawl.security_findings.length,
+      performance_issues: crawl.performance_issues.length,
+      crawled_at: crawl.crawled_at,
+    },
+    confidence : 0.9,
+    source     : "crawler",
+    created_at : ts,
+    updated_at : ts,
+  };
+  await upsertNode(crawlNode);
+
+  const techNodeIds: string[] = [];
+  for (const tech of crawl.technologies.slice(0, 10)) {
+    const techNode: MemoryNode = {
+      id         : `tech-${tech.toLowerCase().replace(/\s+/g, "-")}`,
+      type       : "technology",
+      label      : tech,
+      description: `Technology detected: ${tech}`,
+      metadata   : { technology: tech, detected_by: "crawler", domain: crawl.domain },
+      confidence : 0.8,
+      source     : "crawler",
+      created_at : ts,
+      updated_at : ts,
+    };
+    await upsertNode(techNode);
+    techNodeIds.push(techNode.id);
+    await upsertEdge({
+      id: `${crawlNode.id}-found-${techNode.id}`,
+      from_id: crawlNode.id, to_id: techNode.id, relationship: "discovered_in",
+      weight: 0.7, metadata: { domain: crawl.domain },
+    });
+  }
+
+  return { crawlNodeId: crawlNode.id, techNodeIds };
 }
 
-/**
- * Ingest a technology discovery.
- * Creates or updates a technology node. Safe to call frequently — upsertNode
- * deduplicates by label + technology + node_type.
- */
-export async function ingestTechDiscovery(discovery: TechDiscovery): Promise<MemoryNode> {
-  const node = await upsertNode({
-    node_type  : "technology",
+// ── Technology discovery ingestion ─────────────────────────────────────────
+
+export async function ingestTechDiscovery(discovery: TechDiscovery): Promise<string> {
+  const ts = Date.now();
+  const techNode: MemoryNode = {
+    id         : `tech-${discovery.technology.toLowerCase().replace(/[^a-z0-9]/g, "-")}`,
+    type       : "technology",
     label      : discovery.technology,
-    description: discovery.context,
-    technology : discovery.technology,
-    domain     : discovery.domain,
-    severity   : "none",
-    confidence : 80,
-    occurrences: 1,
-    metadata   : { version: discovery.version ?? null },
-    source     : discovery.source,
-  });
-  return node;
+    description: `${discovery.technology}${discovery.version ? " v" + discovery.version : ""}: ${discovery.context}`,
+    metadata   : {
+      technology : discovery.technology,
+      version    : discovery.version,
+      file_path  : discovery.file_path,
+      confidence : discovery.confidence,
+      discovered_at: discovery.discovered_at,
+    },
+    confidence : discovery.confidence,
+    source     : "tech_discovery",
+    created_at : ts,
+    updated_at : ts,
+  };
+  await upsertNode(techNode);
+  return techNode.id;
 }
 
-/**
- * Ingest a LearningEvent (from learningCollector).
- * Maps event types to the appropriate graph nodes and edges.
- */
-export async function ingestLearningEvent(event: LearningEvent): Promise<void> {
-  try {
-    switch (event.event_type) {
-      case "issue_detected": {
-        await upsertNode({
-          node_type  : "issue",
-          label      : (event.details.title as string | undefined) ?? `${event.domain} issue`,
-          description: (event.details.description as string | undefined) ?? "",
-          technology : event.technology,
-          domain     : event.domain,
-          severity   : event.severity,
-          confidence : 80,
-          occurrences: 1,
-          metadata   : event.details,
-          source     : event.source,
-        });
-        break;
-      }
-      case "issue_repaired": {
-        await ingestRepair({
-          issue_description: (event.details.issue as string | undefined) ?? `${event.domain} issue`,
-          fix_description  : (event.details.fix as string | undefined) ?? `${event.domain} fix applied`,
-          technology       : event.technology,
-          domain           : event.domain,
-          severity         : event.severity,
-          commit_sha       : event.details.commit_sha as string | undefined,
-          source           : event.source,
-        });
-        break;
-      }
-      case "tech_encountered": {
-        await ingestTechDiscovery({
-          technology: event.technology,
-          domain    : event.domain,
-          context   : (event.details.context as string | undefined) ?? "",
-          source    : event.source,
-        });
-        break;
-      }
-      case "scan_completed": {
-        await upsertNode({
-          node_type  : "scan_result",
-          label      : `${event.technology} scan`,
-          description: JSON.stringify(event.details).slice(0, 200),
-          technology : event.technology,
-          domain     : event.domain,
-          severity   : "none",
-          confidence : 75,
-          occurrences: 1,
-          metadata   : event.details,
-          source     : event.source,
-        });
-        break;
-      }
-      case "audit_completed": {
-        await upsertNode({
-          node_type  : "audit_finding",
-          label      : `${event.technology} audit`,
-          description: JSON.stringify(event.details).slice(0, 200),
-          technology : event.technology,
-          domain     : event.domain,
-          severity   : event.severity,
-          confidence : 75,
-          occurrences: 1,
-          metadata   : event.details,
-          source     : event.source,
-        });
-        break;
-      }
-      case "pattern_learned": {
-        const patternNode = await upsertNode({
-          node_type  : "pattern",
-          label      : (event.details.pattern as string | undefined) ?? `${event.domain} pattern`,
-          description: (event.details.description as string | undefined) ?? "",
-          technology : event.technology,
-          domain     : event.domain,
-          severity   : "none",
-          confidence : 85,
-          occurrences: 1,
-          metadata   : event.details,
-          source     : event.source,
-        });
-        // Link pattern to domain node
-        const domainNode = await upsertNode({
-          node_type: "domain", label: event.domain,
-          description: `Knowledge domain: ${event.domain}`,
-          technology: "platform", domain: event.domain,
-          severity: "none", confidence: 100, occurrences: 1,
-          metadata: {}, source: "system",
-        });
-        await upsertEdge(patternNode.id, "related_to", domainNode.id, 60, {});
-        break;
-      }
-      default: {
-        // For other event types, create a generic node
-        await upsertNode({
-          node_type  : "scan_result",
-          label      : `${event.event_type}: ${event.technology}`,
-          description: JSON.stringify(event.details).slice(0, 200),
-          technology : event.technology,
-          domain     : event.domain,
-          severity   : event.severity,
-          confidence : 70,
-          occurrences: 1,
-          metadata   : event.details,
-          source     : event.source,
-        });
-      }
-    }
-  } catch (err) {
-    console.warn(`[knowledgeNodeBuilder] ingestLearningEvent: ${err}`);
+// ── Learning event ingestion ───────────────────────────────────────────────
+
+export async function ingestLearningEvent(event: LearningEvent): Promise<string | null> {
+  const ts = Date.now();
+
+  // Map learning event types to node types
+  const nodeTypeMap: Record<string, NodeType> = {
+    issue_detected : "issue",
+    issue_repaired : "fix",
+    scan_completed : "scan_result",
+    audit_completed: "audit_finding",
+    tech_encountered: "technology",
+    pattern_learned: "pattern",
+    capability_improved: "pattern",
+  };
+
+  const nodeType = nodeTypeMap[event.event_type] ?? "pattern";
+
+  const node: MemoryNode = {
+    id         : `learn-${event.event_type}-${ts}-${Math.random().toString(36).slice(2,5)}`,
+    type       : nodeType,
+    label      : event.description?.slice(0, 80) ?? event.event_type,
+    description: event.description ?? `Learning event: ${event.event_type}`,
+    metadata   : {
+      event_type  : event.event_type,
+      technology  : event.technology,
+      domain      : event.domain,
+      severity    : event.severity,
+      outcome     : event.outcome,
+      learning_id : event.id,
+    },
+    confidence : 0.75,
+    source     : "learning_system",
+    created_at : ts,
+    updated_at : ts,
+  };
+  await upsertNode(node);
+
+  // If this is a repair event, create edges to technology node
+  if (event.technology && (event.event_type === "issue_detected" || event.event_type === "issue_repaired")) {
+    const techId = `tech-${event.technology.toLowerCase().replace(/[^a-z0-9]/g, "-")}`;
+    const techNode: MemoryNode = {
+      id: techId, type: "technology", label: event.technology,
+      description: `Technology: ${event.technology}`,
+      metadata: { technology: event.technology },
+      confidence: 0.8, source: "learning_system", created_at: ts, updated_at: ts,
+    };
+    await upsertNode(techNode);
+    await upsertEdge({
+      id: `${node.id}-related_to-${techId}`,
+      from_id: node.id, to_id: techId, relationship: "related_to",
+      weight: 0.7, metadata: { domain: event.domain },
+    });
   }
+
+  return node.id;
 }
 
-// ── Bulk ingestion from learning events ───────────────────────────────────
+// ── Pattern detection ──────────────────────────────────────────────────────
+// Call after bulk ingestion to detect recurring issues/fixes automatically.
 
-export async function bulkIngestLearningEvents(
-  events  : LearningEvent[],
-  parallel: number = 5
-): Promise<{ ingested: number; errors: number }> {
-  let ingested = 0, errors = 0;
-  for (let i = 0; i < events.length; i += parallel) {
-    const batch = events.slice(i, i + parallel);
-    const results = await Promise.allSettled(batch.map(e => ingestLearningEvent(e)));
-    for (const r of results) {
-      if (r.status === "fulfilled") ingested++;
-      else { errors++; console.warn(`[bulkIngest] ${r.reason}`); }
+export async function detectAndIngestPatterns(
+  recentIssues: Array<{ description: string; technology: string; strategy: string }>
+): Promise<string[]> {
+  const ts = Date.now();
+  const patternNodeIds: string[] = [];
+
+  // Group by strategy to detect recurring patterns
+  const byStrategy = new Map<string, typeof recentIssues>();
+  for (const issue of recentIssues) {
+    const existing = byStrategy.get(issue.strategy) ?? [];
+    existing.push(issue);
+    byStrategy.set(issue.strategy, existing);
+  }
+
+  for (const [strategy, issues] of byStrategy.entries()) {
+    if (issues.length < 2) continue; // Need at least 2 occurrences to be a pattern
+
+    const techSet = [...new Set(issues.map(i => i.technology))];
+    const patternNode: MemoryNode = {
+      id         : `pattern-${strategy.replace(/\s+/g, "-")}-${ts}`,
+      type       : "pattern",
+      label      : `Pattern: ${strategy} (${issues.length}x)`,
+      description: `Recurring pattern: ${strategy} applied ${issues.length} times across ${techSet.join(", ")}`,
+      metadata   : {
+        strategy,
+        occurrences: issues.length,
+        technologies: techSet,
+        detected_at: new Date().toISOString(),
+      },
+      confidence : Math.min(0.95, 0.6 + issues.length * 0.05),
+      source     : "pattern_detector",
+      created_at : ts,
+      updated_at : ts,
+    };
+    await upsertNode(patternNode);
+    patternNodeIds.push(patternNode.id);
+
+    // Link pattern to each affected technology
+    for (const tech of techSet) {
+      const techId = `tech-${tech.toLowerCase().replace(/[^a-z0-9]/g, "-")}`;
+      await upsertEdge({
+        id: `${patternNode.id}-applies_to-${techId}`,
+        from_id: patternNode.id, to_id: techId, relationship: "applies_to",
+        weight: 0.8, metadata: { strategy, occurrences: issues.length },
+      });
     }
   }
-  return { ingested, errors };
+
+  return patternNodeIds;
 }
