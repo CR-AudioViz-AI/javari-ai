@@ -99,3 +99,5 @@ Tasks are seeded by phase priority: `core_platform → autonomy_engine → multi
 <!-- repair-pipeline-fix: 2026-03-07 -->
 
 <!-- orchestration-engine-complete: 2026-03-07 -->
+
+<!-- javari-memory-graph: 2026-03-07 -->
