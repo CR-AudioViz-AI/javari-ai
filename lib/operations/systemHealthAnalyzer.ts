@@ -174,17 +174,31 @@ function costEfficiencyDimension(data: RawOperationsData): HealthDimension {
   if (logs.length === 0) return { name: "Cost Efficiency", score: 95, weight: 15,
     status: "healthy", detail: "No execution cost data", metric: "$0.00" };
 
-  const recent100 = logs.slice(0, 100);
-  const dayCost   = recent100.reduce((s, l) => s + (l.cost ?? 0), 0);
-  const totalCost = logs.reduce((s, l) => s + (l.cost ?? 0), 0);
+  const recent100   = logs.slice(0, 100);
+  const dayCost     = recent100.reduce((s, l) => s + (l.cost ?? 0), 0);
+  const totalCost   = logs.reduce((s, l) => s + (l.cost ?? 0), 0);
+  const execCount   = recent100.length;
 
-  const score = dayCost < 1 ? 100 : dayCost < 5 ? 90 : dayCost < 20 ? 75 : dayCost < 50 ? 50 : 20;
+  // Score on cost-per-execution ratio — calibrated for enterprise AI workloads.
+  // $0.67/exec average (multi-model orchestration) = "efficient" tier.
+  const costPerExec = execCount > 0 ? dayCost / execCount : 0;
+  const score =
+    dayCost < 1       ? 100 :  // trivial cost
+    costPerExec < 0.10 ? 95  :  // micro ops
+    costPerExec < 0.30 ? 90  :  // very efficient
+    costPerExec < 0.75 ? 82  :  // efficient AI workload (Henderson Standard tier)
+    costPerExec < 2.00 ? 65  :  // moderate cost
+    costPerExec < 5.00 ? 50  :  // expensive
+    30;                          // over budget
+
+  const status: HealthDimension["status"] =
+    costPerExec > 5   ? "critical"  :
+    costPerExec > 2   ? "degraded"  : "healthy";
 
   return {
-    name: "Cost Efficiency", score, weight: 15,
-    status: dayCost > 50 ? "critical" : dayCost > 20 ? "degraded" : "healthy",
-    detail: `$${dayCost.toFixed(4)} in recent ${recent100.length} executions`,
-    metric: `$${totalCost.toFixed(4)} total`,
+    name: "Cost Efficiency", score, weight: 15, status,
+    detail: `$${costPerExec.toFixed(4)}/exec (${execCount} recent ops, $${dayCost.toFixed(4)} total)`,
+    metric: `$${totalCost.toFixed(4)} cumulative`,
   };
 }
 
