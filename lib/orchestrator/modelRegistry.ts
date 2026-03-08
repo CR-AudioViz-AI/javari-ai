@@ -3,7 +3,7 @@
 //          Combines the existing model-registry-universe (200+ free-tier models)
 //          with paid provider models into a single normalized catalog of 300+
 //          entries with capability tags, cost metadata, and routing weights.
-// Date: 2026-03-07
+// Date: 2026-03-09 — fixed decommissioned qwen-2.5-coder-32b → qwen-2.5-coder-32b-instruct
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -102,7 +102,7 @@ export const ORCHESTRATOR_REGISTRY: OrchestratorModel[] = [
   { id:"groq:llama-3.2-11b-vision",      provider:"groq", model_id:"llama-3.2-11b-vision-preview", display_name:"Llama 3.2 11B Vision", capabilities:["ultra_fast","vision","free"], cost_per_1k_tokens:0, latency_ms_p50:200, context_window:128000, max_output_tokens:8000, reasoning_score:6, coding_score:5, reliability_score:7, tier:"free", active:true },
   { id:"groq:deepseek-r1-distill-llama-70b", provider:"groq", model_id:"deepseek-r1-distill-llama-70b", display_name:"DeepSeek R1 Distill 70B (Groq)", capabilities:["reasoning","math","coding","ultra_fast","free"], cost_per_1k_tokens:0, latency_ms_p50:300, context_window:128000, max_output_tokens:16000, reasoning_score:9, coding_score:8, reliability_score:8, tier:"free", active:true },
   { id:"groq:qwen-2.5-72b",              provider:"groq", model_id:"qwen-2.5-72b",              display_name:"Qwen 2.5 72B Groq",  capabilities:["coding","analysis","reasoning","ultra_fast","free"], cost_per_1k_tokens:0, latency_ms_p50:280, context_window:128000, max_output_tokens:16000, reasoning_score:8, coding_score:8, reliability_score:8, tier:"free", active:true },
-  { id:"groq:qwen-2.5-coder-32b",        provider:"groq", model_id:"qwen-2.5-coder-32b",        display_name:"Qwen 2.5 Coder 32B", capabilities:["coding","code_repair","ultra_fast","free"], cost_per_1k_tokens:0, latency_ms_p50:250, context_window:128000, max_output_tokens:16000, reasoning_score:7, coding_score:9, reliability_score:8, tier:"free", active:true },
+  { id:"groq:qwen-2.5-coder-32b-instruct", provider:"groq", model_id:"qwen-2.5-coder-32b-instruct",        display_name:"Qwen 2.5 Coder 32B", capabilities:["coding","code_repair","ultra_fast","free"], cost_per_1k_tokens:0, latency_ms_p50:250, context_window:128000, max_output_tokens:16000, reasoning_score:7, coding_score:9, reliability_score:8, tier:"free", active:true },
 
   // ═══════════════════════════════════════════════════════════════
   // TOGETHER AI — Open source (paid, very low cost)
