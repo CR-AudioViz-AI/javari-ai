@@ -73,3 +73,5 @@ Tasks are seeded by phase priority: `core_platform → autonomy_engine → multi
 ---
 
 *CR AudioViz AI, LLC — EIN 39-3646201*
+
+<!-- intelligence-engine-build-trigger: 2026-03-07 -->
