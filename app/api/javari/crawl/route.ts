@@ -74,7 +74,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const htmlMap    = new Map<string, string>();
     const htmlSamples: string[] = [];
     // Re-fetch a sample of pages for DOM analysis (first 5)
-    for (const page of crawlResult.pages.slice(0, 5)) {
+    for (const page of crawlResult.pages.slice(0, 3)) {
       try {
         const r = await fetch(page.url, { signal: AbortSignal.timeout(8_000) });
         if (r.ok) {
@@ -88,7 +88,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Fetch JS for analysis
     const jsContents   = new Map<string, string>();
     const jsSamples    : string[] = [];
-    for (const jsUrl of crawlResult.scripts.slice(0, 5)) {
+    for (const jsUrl of crawlResult.scripts.slice(0, 3)) {
       try {
         const r = await fetch(jsUrl, { signal: AbortSignal.timeout(8_000) });
         if (r.ok) {
