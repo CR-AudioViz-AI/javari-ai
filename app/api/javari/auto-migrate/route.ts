@@ -27,6 +27,44 @@ const MIGRATIONS = [
   `GRANT ALL ON TABLE roadmap_task_artifacts TO service_role`,
   `GRANT ALL ON TABLE roadmap_task_artifacts TO authenticated`,
   `GRANT ALL ON TABLE roadmap_task_artifacts TO anon`,
+  // ── javari_targets table ──────────────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS javari_targets (
+    id            text        PRIMARY KEY,
+    name          text        NOT NULL,
+    type          text        NOT NULL,
+    location      text        NOT NULL,
+    branch        text        DEFAULT 'main',
+    last_scan     timestamptz,
+    status        text        NOT NULL DEFAULT 'active',
+    scan_interval integer     NOT NULL DEFAULT 720,
+    metadata      jsonb,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    updated_at    timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_javari_targets_status ON javari_targets (status)`,
+  `ALTER TABLE javari_targets DISABLE ROW LEVEL SECURITY`,
+  `GRANT ALL ON TABLE javari_targets TO service_role`,
+  `GRANT ALL ON TABLE javari_targets TO authenticated`,
+  `GRANT ALL ON TABLE javari_targets TO anon`,
+  // ── javari_engineering_cycles table ──────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS javari_engineering_cycles (
+    cycle_id           text        PRIMARY KEY,
+    started_at         timestamptz NOT NULL,
+    completed_at       timestamptz,
+    targets_processed  integer     DEFAULT 0,
+    total_issues       integer     DEFAULT 0,
+    total_repair_tasks integer     DEFAULT 0,
+    gate_results       integer     DEFAULT 0,
+    errors             jsonb       DEFAULT '[]',
+    target_results     jsonb       DEFAULT '[]',
+    duration_ms        integer,
+    created_at         timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_jec_started_at ON javari_engineering_cycles (started_at DESC)`,
+  `ALTER TABLE javari_engineering_cycles DISABLE ROW LEVEL SECURITY`,
+  `GRANT ALL ON TABLE javari_engineering_cycles TO service_role`,
+  `GRANT ALL ON TABLE javari_engineering_cycles TO authenticated`,
+  `GRANT ALL ON TABLE javari_engineering_cycles TO anon`,
   // Disable RLS so service_role has full access
   `ALTER TABLE roadmap_task_artifacts DISABLE ROW LEVEL SECURITY`,
 ];
