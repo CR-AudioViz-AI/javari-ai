@@ -267,18 +267,23 @@ export async function ingestLearningEvent(event: LearningEvent): Promise<string 
 
   const nodeType = nodeTypeMap[event.event_type] ?? "pattern";
 
+  // Extract description/outcome from details (LearningEvent stores payload in details, not top-level fields)
+  const descFromDetails = (event.details?.description ?? event.details?.message ?? event.details?.summary) as string | undefined;
+  const outcomeFromDetails = (event.details?.outcome ?? event.details?.result ?? event.details?.status) as string | undefined;
+
   const node: MemoryNode = {
     id         : `learn-${event.event_type}-${ts}-${Math.random().toString(36).slice(2,5)}`,
     type       : nodeType,
-    label      : event.description?.slice(0, 80) ?? event.event_type,
-    description: event.description ?? `Learning event: ${event.event_type}`,
+    label      : (descFromDetails?.slice(0, 80)) ?? `${event.event_type}: ${event.technology}`,
+    description: descFromDetails ?? `Learning event: ${event.event_type} on ${event.technology} (${event.domain})`,
     metadata   : {
       event_type  : event.event_type,
       technology  : event.technology,
       domain      : event.domain,
       severity    : event.severity,
-      outcome     : event.outcome,
+      outcome     : outcomeFromDetails,
       learning_id : event.id,
+      details     : event.details,
     },
     confidence : 0.75,
     source     : "learning_system",
