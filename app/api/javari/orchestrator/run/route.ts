@@ -1,9 +1,9 @@
 // app/api/javari/orchestrator/run/route.ts
 // Purpose: Multi-Model Orchestration Engine REST API.
-//          POST  { prompt, task_type?, priority?, ... } → OrchestratorResponse
-//          POST  { run_benchmark: true } → benchmark suite results
-//          GET   → registry stats + schema
-// Date: 2026-03-07
+//          GET  → registry stats with totalModels/activeModels/freeModels/providers at top level
+//          POST { prompt, task_type?, priority?, ... } → OrchestratorResponse
+//          POST { run_benchmark: true } → benchmark suite results
+// Date: 2026-03-08
 
 import { NextRequest, NextResponse }         from "next/server";
 import { runOrchestrator, getRegistryStats } from "@/lib/orchestrator/orchestrator";
@@ -17,7 +17,6 @@ export const maxDuration = 120;
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const body = await req.json() as {
-      // Orchestration mode
       task_type?         : string;
       prompt?            : string;
       priority?          : string;
@@ -25,100 +24,87 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       max_models?        : number;
       quality_threshold? : number;
       task_id?           : string;
-      // Benchmark mode
       run_benchmark?     : boolean;
+      build_portfolio?   : boolean;
       benchmark_providers?: string[];
       benchmark_tasks?   : string[];
-      // Portfolio mode
-      build_portfolio?   : boolean;
       portfolio_tasks?   : string[];
     };
 
-    // ── Benchmark mode ────────────────────────────────────────────────────
+    // ── Benchmark mode ─────────────────────────────────────────────────
     if (body.run_benchmark) {
-      const { results, summary } = await runBenchmarkSuite({
-        providers : body.benchmark_providers ?? ["groq", "openrouter", "google"],
-        taskTypes : body.benchmark_tasks     ?? ["fast_qa", "coding", "analysis"],
-        maxModels : 15,
-        parallel  : 5,
+      const results = await runBenchmarkSuite({
+        providers   : body.benchmark_providers,
+        taskTypes   : body.benchmark_tasks,
+        parallelism : 3,
       });
-      return NextResponse.json({
-        ok           : true,
-        mode         : "benchmark",
-        modelsRan    : results.length,
-        successful   : results.filter(r => r.success).length,
-        failed       : results.filter(r => !r.success).length,
-        avgScore     : Math.round(summary.reduce((s,m) => s + m.avg_score, 0) / Math.max(1, summary.length)),
-        avgLatencyMs : Math.round(summary.reduce((s,m) => s + m.avg_latency_ms, 0) / Math.max(1, summary.length)),
-        summary      : summary.slice(0, 25),
-        timestamp    : new Date().toISOString(),
-      });
+      return NextResponse.json({ ok: true, mode: "benchmark", ...results });
     }
 
-    // ── Portfolio mode ────────────────────────────────────────────────────
+    // ── Portfolio mode ─────────────────────────────────────────────────
     if (body.build_portfolio) {
-      const taskTypes = body.portfolio_tasks ?? [
-        "security_audit","code_repair","architecture_design","general_analysis","fast_qa",
-        "backend_coding","frontend_coding","math_reasoning","summarization",
-      ];
-      const portfolio = buildCostOptimizedPortfolio(taskTypes, 50);
-      return NextResponse.json({
-        ok        : true,
-        mode      : "portfolio",
-        taskCount : taskTypes.length,
-        portfolio : Object.fromEntries(
-          Object.entries(portfolio).map(([t, s]) => [t, s ? {
-            model: s.model.display_name, provider: s.model.provider,
-            tier: s.tier, costPer1k: s.costPer1k,
-            expectedScore: s.expectedScore, savingsVsPremium: s.savingsVsPremium,
-          } : null])
-        ),
-        timestamp : new Date().toISOString(),
-      });
+      const portfolio = await buildCostOptimizedPortfolio(body.portfolio_tasks);
+      return NextResponse.json({ ok: true, mode: "portfolio", ...portfolio });
     }
 
-    // ── Orchestration mode ────────────────────────────────────────────────
-    if (!body.prompt?.trim()) {
-      return NextResponse.json({ ok:false, error:"prompt is required" }, { status:400 });
+    // ── Orchestration mode ─────────────────────────────────────────────
+    const { prompt, task_type, priority, aggregation, max_models, quality_threshold, task_id } = body;
+    if (!prompt) {
+      return NextResponse.json({ ok: false, error: "prompt is required" }, { status: 400 });
     }
 
     const result = await runOrchestrator({
-      task_type        : body.task_type,
-      prompt           : body.prompt,
-      priority         : (body.priority as never) ?? "balanced",
-      aggregation      : (body.aggregation as never) ?? "confidence",
-      max_models       : Math.min(Math.max(body.max_models ?? 3, 1), 5),
-      quality_threshold: body.quality_threshold ?? 50,
-      task_id          : body.task_id,
+      prompt,
+      task_type         : task_type,
+      priority          : (priority as "quality" | "cost" | "speed" | "balanced") ?? "balanced",
+      aggregation       : (aggregation as "confidence" | "majority_vote" | "weighted_ranking" | "fastest") ?? "confidence",
+      max_models        : max_models        ?? 3,
+      quality_threshold : quality_threshold ?? 50,
+      task_id,
     });
 
-    return NextResponse.json(result);
-
+    return NextResponse.json({ ok: result.ok, ...result });
   } catch (err) {
     console.error("[orchestrator/run] Error:", err);
-    return NextResponse.json({ ok:false, error:String(err) }, { status:500 });
+    return NextResponse.json({ ok: false, error: String(err) }, { status: 500 });
   }
 }
 
 export async function GET(): Promise<NextResponse> {
-  const stats = getRegistryStats();
-  return NextResponse.json({
-    ok      : true,
-    endpoint: "POST /api/javari/orchestrator/run",
-    version : "1.0.0",
-    registry: stats,
-    modes   : {
-      orchestration: "{ prompt, task_type?, priority?, aggregation?, max_models?, quality_threshold? }",
-      benchmark    : "{ run_benchmark: true, benchmark_providers?, benchmark_tasks? }",
-      portfolio    : "{ build_portfolio: true, portfolio_tasks? }",
-    },
-    task_types: [
-      "security_audit","code_repair","architecture_design","frontend_coding","backend_coding",
-      "database_design","devops_analysis","ai_integration","performance_audit",
-      "brand_analysis","ux_analysis","general_analysis","summarization","classification",
-      "math_reasoning","creative_writing","translation","fast_qa",
-    ],
-    priority_options  : ["quality","cost","speed","balanced"],
-    aggregation_options: ["confidence","majority_vote","weighted_ranking","fastest"],
-  });
+  try {
+    const stats = getRegistryStats();
+    return NextResponse.json({
+      ok           : true,
+      // ── Top-level fields (Phase 4) ──
+      totalModels  : stats.total,
+      activeModels : stats.active,
+      freeModels   : stats.free,
+      paidModels   : stats.paid,
+      providers    : stats.providers,
+      // ── Schema ──
+      version      : "2.0.0",
+      description  : "Javari Multi-Model Orchestration Engine — " + stats.total + " models across " + stats.providers + " providers",
+      schema: {
+        prompt            : "string (required)",
+        task_type         : "code_repair | security_audit | architecture_design | documentation_generation | performance_optimization | general | string",
+        priority          : "quality | cost | speed | balanced",
+        aggregation       : "confidence | majority_vote | weighted_ranking | fastest",
+        max_models        : "1-5 (default 3)",
+        quality_threshold : "0-100 (default 50)",
+        task_id           : "string — for artifact recording",
+        run_benchmark     : "true — run model benchmark suite",
+        build_portfolio   : "true — build cost-optimized portfolio",
+      },
+      registryStats: stats,
+      capabilities: [
+        "79+ models across 14 providers",
+        "Ensemble voting: confidence/majority_vote/weighted_ranking/fastest",
+        "Cost optimization: cheapest model meeting quality threshold",
+        "Benchmark-driven routing: learns best models per task type",
+        "Artifact recording: model_usage, model_consensus, benchmark_result",
+      ],
+    });
+  } catch (err) {
+    return NextResponse.json({ ok: false, error: String(err) }, { status: 500 });
+  }
 }
