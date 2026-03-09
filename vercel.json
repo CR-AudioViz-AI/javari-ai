@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "github": {
     "enabled": true,
-    "autoAlias": true,
+    "autoAlias": false,
     "silent": false,
     "autoJobCancelation": true
   },
