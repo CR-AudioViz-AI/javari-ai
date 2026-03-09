@@ -61,7 +61,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // entry point Javari uses to kick off autonomous task execution.
     if (body.mode === "roadmap_execution" || (!body.prompt && !body.run_benchmark && !body.build_portfolio)) {
       const userId   = body.userId   ?? "orchestrator";
-      const maxTasks = Math.min(body.maxTasks ?? 10, 10);  // cap at 5 per batch
+      const maxTasks = Math.min(body.maxTasks ?? 20, 20);  // cap at 20 per batch
 
       const before  = await queueSnapshot();
       const result  = await runRoadmapWorker(userId, maxTasks);
