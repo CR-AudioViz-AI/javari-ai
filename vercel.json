@@ -25,7 +25,7 @@
     },
     {
       "path": "/api/javari/orchestrator/run",
-      "schedule": "*/2 * * * *"
+      "schedule": "* * * * *"
     },
     {
       "path": "/api/javari/auto-migrate",
