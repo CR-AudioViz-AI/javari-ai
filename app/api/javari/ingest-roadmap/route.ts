@@ -260,23 +260,25 @@ export async function POST(req: NextRequest) {
       : allRows.filter((r) => !existingTitles.has(r.title));
 
     let inserted = 0, skipped = allRows.length - toInsert.length, failed = 0;
+    let firstError: string | null = null;
     const BATCH = 20;
     for (let i = 0; i < toInsert.length; i += BATCH) {
       const batch = toInsert.slice(i, i + BATCH);
       const { error } = await supabase.from("roadmap_tasks").upsert(batch, { onConflict: "id" });
-      if (error) { failed += batch.length; }
+      if (error) { failed += batch.length; if (!firstError) firstError = error.message; }
       else { inserted += batch.length; }
     }
 
     return NextResponse.json({
-      ok: true,
+      ok: failed === 0,
       version: "v4.0",
       phases: ROADMAP.length,
       totalDefined: allRows.length,
       inserted,
       skipped,
       failed,
-      phases_list: ROADMAP.map(p => ({ phase: p.phase, tasks: p.tasks.length, priority: p.priority })),
+      firstError,
+      phases_list: ROADMAP.map(p => ({ phase: p.phase, tasks: p.tasks.length })),
     });
   } catch (err) {
     return NextResponse.json({ ok: false, error: String(err) }, { status: 500 });
