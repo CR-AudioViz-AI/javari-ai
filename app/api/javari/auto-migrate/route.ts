@@ -67,6 +67,62 @@ const MIGRATIONS = [
   `GRANT ALL ON TABLE javari_engineering_cycles TO anon`,
   // Disable RLS so service_role has full access
   `ALTER TABLE roadmap_task_artifacts DISABLE ROW LEVEL SECURITY`,
+
+  // ── autonomy_execution_log ─────────────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS autonomy_execution_log (
+    id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    cycle_id    text        NOT NULL,
+    event_type  text        NOT NULL,
+    payload     jsonb       DEFAULT '{}',
+    logged_at   timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_ael_cycle_id  ON autonomy_execution_log (cycle_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_ael_logged_at ON autonomy_execution_log (logged_at DESC)`,
+  `ALTER TABLE autonomy_execution_log DISABLE ROW LEVEL SECURITY`,
+  `GRANT ALL ON TABLE autonomy_execution_log TO service_role`,
+  `GRANT ALL ON TABLE autonomy_execution_log TO authenticated`,
+
+  // ── javari_scheduler_lock ──────────────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS javari_scheduler_lock (
+    lock_key    TEXT PRIMARY KEY,
+    cycle_id    TEXT NOT NULL,
+    acquired_at TIMESTAMPTZ NOT NULL,
+    expires_at  TIMESTAMPTZ NOT NULL,
+    holder      TEXT NOT NULL DEFAULT 'unknown'
+  )`,
+  `ALTER TABLE javari_scheduler_lock DISABLE ROW LEVEL SECURITY`,
+  `GRANT ALL ON TABLE javari_scheduler_lock TO service_role`,
+  `GRANT ALL ON TABLE javari_scheduler_lock TO authenticated`,
+
+  // ── javari_security_events ─────────────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS javari_security_events (
+    id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_type  text        NOT NULL,
+    severity    text        NOT NULL DEFAULT 'info',
+    payload     jsonb       DEFAULT '{}',
+    logged_at   timestamptz NOT NULL DEFAULT now()
+  )`,
+  `ALTER TABLE javari_security_events DISABLE ROW LEVEL SECURITY`,
+  `GRANT ALL ON TABLE javari_security_events TO service_role`,
+  `GRANT ALL ON TABLE javari_security_events TO authenticated`,
+
+  // ── javari_model_usage_metrics ─────────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS javari_model_usage_metrics (
+    id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    model_id      text        NOT NULL,
+    provider      text        NOT NULL,
+    input_tokens  integer     DEFAULT 0,
+    output_tokens integer     DEFAULT 0,
+    cost_usd      numeric(10,6) DEFAULT 0,
+    recorded_at   timestamptz NOT NULL DEFAULT now()
+  )`,
+  `ALTER TABLE javari_model_usage_metrics DISABLE ROW LEVEL SECURITY`,
+  `GRANT ALL ON TABLE javari_model_usage_metrics TO service_role`,
+  `GRANT ALL ON TABLE javari_model_usage_metrics TO authenticated`,
+
+  // ── Clear any stuck scheduler lock (expired or orphaned) ──────────────
+  // Safe: only deletes rows where expires_at is in the past
+  `DELETE FROM javari_scheduler_lock WHERE expires_at < NOW()`,
 ];
 
 type MigrationResult = { sql: string; ok: boolean; error?: string };
