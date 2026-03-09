@@ -452,7 +452,7 @@ export async function POST(req: NextRequest) {
   const allRows: Array<{
     id: string; phase_id: string; title: string; description: string;
     depends_on: string[]; status: "pending"; source: string;
-    priority: number; updated_at: number;
+    updated_at: number;
   }> = [];
 
   const sorted = [...ROADMAP].sort((a, b) => a.priority - b.priority);
@@ -466,7 +466,6 @@ export async function POST(req: NextRequest) {
         depends_on: [] as string[],
         status: "pending" as const,
         source: "master_roadmap_v4",
-        priority: phase.priority,
         updated_at: Date.now(),
       });
     }
