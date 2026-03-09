@@ -32,6 +32,7 @@ import { canRun,
          markCycleStart,
          markCycleEnd }             from "@/lib/javari/autonomy/autonomousScheduler";
 import { runGuardrailCheck }        from "@/lib/javari/autonomy/autonomyGuardrails";
+import { executeTask as runTaskExecutor } from "@/lib/execution/taskExecutor";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -45,6 +46,7 @@ export interface LoopConfig {
 export interface CycleTask {
   id          : string;
   title       : string;
+  description?: string;
   type        : string;
   priority    : number;
   source      : "roadmap" | "repair" | "crawler" | "health";
@@ -118,11 +120,12 @@ async function fetchPrioritizedTasks(max: number): Promise<CycleTask[]> {
     else if (desc.includes("[type:ai_task]")) { priority = 5; type = "ai_task"; }
 
     return {
-      id      : t.id as string,
-      title   : t.title as string,
+      id         : t.id as string,
+      title      : t.title as string,
+      description: t.description ?? "",
       type,
       priority,
-      source  : "roadmap" as const,
+      source     : "roadmap" as const,
     };
   });
 
@@ -141,48 +144,31 @@ async function executeTask(
     return { ok: true, cost: 0 };
   }
 
-  const supabase = db();
-
-  // Mark running
-  await supabase
-    .from("roadmap_tasks")
-    .update({ status: "running", updated_at: Date.now() })
-    .eq("id", task.id);
-
   try {
-    // Delegate to the unified execute endpoint (same process, in-memory call)
-    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL
-      ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
+    // Extract task type from [type:X] tag in description, fall back to CycleTask.type
+    const typeTag = task.description?.match(/\[type:([^\]]+)\]/)?.[1] ?? task.type ?? "ai_task";
 
-    const res = await fetch(`${baseUrl}/api/javari/execute`, {
-      method : "POST",
-      headers: { "Content-Type": "application/json" },
-      body   : JSON.stringify({ task_id: task.id }),
-      signal : AbortSignal.timeout(120_000), // 2 min per task
-    });
+    const result = await runTaskExecutor(
+      {
+        id         : task.id,
+        title      : task.title,
+        description: task.description ?? `Execute roadmap task: ${task.title}`,
+        type       : typeTag,
+      },
+      "system"
+    );
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => `HTTP ${res.status}`);
-      throw new Error(`execute returned ${res.status}: ${errText.slice(0, 200)}`);
-    }
-
-    const result = await res.json() as { ok?: boolean; cost_usd?: number; error?: string };
-    if (!result.ok) throw new Error(result.error ?? "execute returned ok:false");
-
-    // Mark completed
-    await supabase
-      .from("roadmap_tasks")
-      .update({ status: "completed", updated_at: Date.now() })
-      .eq("id", task.id);
-
-    return { ok: true, cost: result.cost_usd ?? 0 };
+    return { ok: result.ok, cost: 0.005, error: result.error };
 
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await supabase
-      .from("roadmap_tasks")
-      .update({ status: "failed", error: message, updated_at: Date.now() })
-      .eq("id", task.id);
+    // Mark failed via direct DB write as safety net
+    try {
+      await db()
+        .from("roadmap_tasks")
+        .update({ status: "failed", error: message, updated_at: Date.now() })
+        .eq("id", task.id);
+    } catch { /* non-fatal */ }
     return { ok: false, cost: 0, error: message };
   }
 }
