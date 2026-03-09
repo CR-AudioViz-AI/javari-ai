@@ -233,7 +233,7 @@ export async function POST(req: NextRequest) {
     let idx = 0;
     const allRows: {
       id: string; phase_id: string; title: string; description: string;
-      depends_on: string[]; status: string; source: string; priority: number; updated_at: number;
+      depends_on: string[]; status: string; source: string; updated_at: number;
     }[] = [];
     
     for (const phaseDef of ROADMAP) {
@@ -246,7 +246,6 @@ export async function POST(req: NextRequest) {
           depends_on: [],
           status: "pending",
           source: "roadmap_v4",
-          priority: phaseDef.priority,
           updated_at: Date.now(),
         });
       }
