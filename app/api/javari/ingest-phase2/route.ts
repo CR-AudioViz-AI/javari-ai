@@ -14,7 +14,7 @@ export const maxDuration = 60;
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface RoadmapRow {
   id:          string;
-  roadmap_id:  string;
+  roadmap_id:  string | null;
   phase_id:    string;
   title:       string;
   description: string;
@@ -146,15 +146,12 @@ export async function POST(): Promise<NextResponse> {
   emit("════ CRAV_PHASE_2 Ingestion ════");
   const now = Math.floor(Date.now() / 1000);
 
-  // 1. Upsert roadmap parent row
-  const { error: roadmapErr } = await db
-    .from("roadmaps")
-    .upsert({ id: ROADMAP_ID, title: ROADMAP_TITLE, created_at: now, updated_at: now }, { onConflict: "id" });
-
-  if (roadmapErr) {
-    return NextResponse.json({ ok: false, error: `roadmap upsert: ${roadmapErr.message}`, log }, { status: 500 });
-  }
-  emit(`✅ Roadmap record: ${ROADMAP_ID}`);
+  // 1. Roadmap parent row
+  // roadmap_id is nullable on roadmap_tasks — tasks can be inserted without it.
+  // The roadmaps table requires a separate GRANT in Supabase before FK writes work.
+  // Tasks are tagged source="roadmap" and phase_id for full orchestrator compatibility.
+  // Run supabase/migrations/20260310_grant_roadmaps_table.sql to enable FK binding later.
+  emit(`⏭ Skipping roadmaps FK upsert — roadmap_id nullable, inserting tasks directly`);
 
   // 2. Build rows
   const allRows: RoadmapRow[] = [];
@@ -165,7 +162,7 @@ export async function POST(): Promise<NextResponse> {
       for (const t of def.tasks) {
         allRows.push({
           id:          taskId(phaseSlug, t.title, taskIndex++),
-          roadmap_id:  ROADMAP_ID,
+          roadmap_id:  null,   // FK skipped until migration grants roadmaps table
           phase_id:    phaseSlug,
           title:       t.title,
           description: t.description,
