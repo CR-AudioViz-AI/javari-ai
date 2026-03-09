@@ -1,0 +1,42 @@
+{
+  "_meta": {
+    "schema":  "1.0.0",
+    "updated": "2026-03-10",
+    "owner":   "CR AudioViz AI, LLC",
+    "source":  "canonical/branding/crav-brand-tokens.json"
+  },
+  "colors": {
+    "primary":        "#E30B17",
+    "primary_hover":  "#FF1E2A",
+    "primary_dim":    "rgba(227,11,23,0.15)",
+    "primary_glow":   "rgba(227,11,23,0.35)",
+    "bg":             "#0E0E12",
+    "panel_dark":     "#141419",
+    "panel_deeper":   "#0F0F14",
+    "panel_mid":      "#1C1C24",
+    "border":         "#2A2A33",
+    "border_light":   "#3A3A45",
+    "text_primary":   "#EAEAF0",
+    "text_secondary": "#A5A5B0",
+    "text_dim":       "#4A4A55",
+    "text_muted":     "#2A2A33",
+    "green":          "#00D97E",
+    "green_dim":      "rgba(0,217,126,0.12)",
+    "blue":           "#4A8AFF",
+    "blue_dim":       "rgba(74,138,255,0.12)",
+    "orange":         "#FF8C00",
+    "red_error":      "#FF4455",
+    "btn_primary":    "#E30B17",
+    "btn_secondary":  "#1C1C24"
+  },
+  "typography": {
+    "font_display": "Syne",
+    "font_mono":    "JetBrains Mono",
+    "font_body":    "JetBrains Mono"
+  },
+  "brand": {
+    "name":    "CR AudioViz AI",
+    "tagline": "Your Story. Our Design.",
+    "javari":  "Javari AI"
+  }
+}
