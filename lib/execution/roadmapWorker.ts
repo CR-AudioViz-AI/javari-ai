@@ -54,7 +54,7 @@ export interface WorkerCycleResult {
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-const MAX_TASKS      = 5;
+const MAX_TASKS      = 10;
 const MAX_CONSEC     = 3;
 const PREVIEW_BASE   =
   process.env.NEXT_PUBLIC_APP_URL ??
