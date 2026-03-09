@@ -141,7 +141,7 @@ export default async function PricingPage() {
 
                   {/* CTA */}
                   <Link
-                    href={isFree ? "/auth/signup" : `/auth/signup?plan=${tier.tier}`}
+                    href={isFree ? "/signup" : `/signup?plan=${tier.tier}`}
                     className={`w-full text-center font-semibold rounded-xl px-6 py-3 transition-all text-sm ${
                       popular
                         ? "bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white shadow-lg shadow-blue-900/40"
@@ -236,7 +236,7 @@ export default async function PricingPage() {
           <h2 className="text-2xl sm:text-3xl font-bold mb-4">Ready to get started?</h2>
           <p className="text-slate-400 mb-8">{BRAND_IDENTITY.tagline}</p>
           <Link
-            href="/auth/signup"
+            href="/signup"
             className="inline-flex items-center gap-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-semibold rounded-xl px-8 py-4 transition-all shadow-lg shadow-blue-900/30"
           >
             <Sparkles className="w-5 h-5" />
