@@ -1,12 +1,13 @@
 // app/javari/page.tsx
 // Javari AI — Primary OS Interface (Customer-Facing)
-// Updated: 2026-03-10 — improved contrast, official logo/avatar, refined palette
-// Brand: CR AudioViz AI — #E30B17 red, #0E0E12 bg, #141419 panel
+// Updated: 2026-03-10 — brand tokens loaded from R2 canonical docs
+// Tokens: cold-storage/canonical/branding/crav-brand-tokens.json
 
 "use client"
 
 import { useState, useRef, useEffect, useCallback } from "react"
 import Image from "next/image"
+import { getStaticBrandTokens } from "@/lib/branding/loadBrandTokens"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -37,26 +38,32 @@ interface RoadmapItem {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
+// Load brand tokens from R2 canonical docs (client-safe sync accessor)
+// R2 path: cold-storage/canonical/branding/crav-brand-tokens.json
+// Falls back to hardcoded defaults if R2 is unreachable.
+const _brand = getStaticBrandTokens()
+const _c     = _brand.colors
+
 const C = {
-  bg:           "#0E0E12",
-  panel:        "#141419",
-  panelDeep:    "#0F0F14",
-  border:       "#2A2A33",
-  borderLight:  "#3A3A45",
-  red:          "#E30B17",
-  redDim:       "rgba(227,11,23,0.15)",
-  redGlow:      "rgba(227,11,23,0.35)",
-  green:        "#00D97E",
-  greenDim:     "rgba(0,217,126,0.12)",
-  blue:         "#4A8AFF",
-  blueDim:      "rgba(74,138,255,0.12)",
-  orange:       "#FF8C00",
-  textPrimary:  "#EAEAF0",
-  textSecond:   "#A5A5B0",
-  textDim:      "#4A4A55",
-  textMuted:    "#2A2A33",
-  btnPrimary:   "#E30B17",
-  btnSecond:    "#1C1C24",
+  bg:          _c.bg,
+  panel:       _c.panel_dark,
+  panelDeep:   _c.panel_deeper,
+  border:      _c.border,
+  borderLight: _c.border_light,
+  red:         _c.primary,
+  redDim:      _c.primary_dim,
+  redGlow:     _c.primary_glow,
+  green:       _c.green,
+  greenDim:    _c.green_dim,
+  blue:        _c.blue,
+  blueDim:     _c.blue_dim,
+  orange:      _c.orange,
+  textPrimary: _c.text_primary,
+  textSecond:  _c.text_secondary,
+  textDim:     _c.text_dim,
+  textMuted:   _c.text_muted,
+  btnPrimary:  _c.btn_primary,
+  btnSecond:   _c.btn_secondary,
 }
 
 const MODELS: Record<ModelId, { label: string; provider: string; cost: string }> = {
