@@ -32,6 +32,7 @@ import { canRun,
          markCycleStart,
          markCycleEnd }             from "@/lib/javari/autonomy/autonomousScheduler";
 import { runGuardrailCheck }        from "@/lib/javari/autonomy/autonomyGuardrails";
+import { flushTelemetryAsync }        from "@/lib/javari/telemetry/flushTelemetry";
 import { executeTask as runTaskExecutor } from "@/lib/execution/taskExecutor";
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -379,7 +380,11 @@ export async function runAutonomousLoop(
   // Persist record fire-and-forget
   persistCycleRecord(record).catch(() => {});
 
+  // Flush in-memory telemetry to Supabase javari_execution_logs
+  flushTelemetryAsync();
+
   return record;
 }
+
 
 
