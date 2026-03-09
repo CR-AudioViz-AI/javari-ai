@@ -89,13 +89,12 @@ function routingHint(type: string): "quality" | "cost" {
 async function fetchNext(): Promise<ExecutableTask | null> {
   const client = db();
 
-  // Pull up to 10 candidates (pending or retry) ordered by age
+  // Pull up to 3 pending tasks — no ordering to avoid updated_at sort bug
   const { data, error } = await client
     .from("roadmap_tasks")
     .select("id, title, description, source, depends_on")
-    .in("status", ["pending", "retry"])
-    .order("updated_at", { ascending: true })
-    .limit(10);
+    .eq("status", "pending")
+    .limit(3);
 
   if (error || !data?.length) return null;
 
