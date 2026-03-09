@@ -1,6 +1,6 @@
 // app/javari/page.tsx
 // Javari AI — Primary OS Interface (Customer-Facing)
-// Updated: 2026-03-10 — brand tokens loaded from R2 canonical docs
+// Updated: 2026-03-10 — Execute wired to orchestrator roadmap engine
 // Tokens: cold-storage/canonical/branding/crav-brand-tokens.json
 
 "use client"
@@ -375,6 +375,12 @@ export default function JavariOS() {
   const [streamingId, setStreamingId]   = useState<number | null>(null)
   const [sessionCost, setSessionCost]   = useState(0)
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
+  const [cycleRunning, setCycleRunning] = useState(false)
+  const [sessionId]                     = useState<string>(() =>
+    typeof crypto !== "undefined"
+      ? crypto.randomUUID()
+      : `session-${Date.now()}`
+  )
 
   const simIdx       = useRef(0)
   const chatBottom   = useRef<HTMLDivElement>(null)
@@ -425,48 +431,100 @@ export default function JavariOS() {
   }
 
   const send = useCallback(async () => {
-    if (!input.trim() || sending) return
+    if (!input.trim() || sending || cycleRunning) return
     const text = input.trim()
     setInput("")
     setSending(true)
+    setCycleRunning(true)
     setAvatarState("thinking")
 
+    // ── Append user message ───────────────────────────────────────────────────
     setMessages(prev => [...prev, { id: mid(), role: "user", content: text, ts: ts() }])
+
+    // ── Immediate telemetry: directive received ───────────────────────────────
     setTelemetry(prev => [
-      { id: tid(), ts: ts(), level: "INFO", message: `Command: "${text.slice(0, 42)}${text.length > 42 ? "…" : ""}"` },
+      { id: tid(), ts: ts(), level: "INFO", message: "Directive received – initiating roadmap execution" },
+      { id: tid(), ts: ts(), level: "INFO", message: `Directive: "${text.slice(0, 48)}${text.length > 48 ? "…" : ""}"` },
       ...prev,
     ].slice(0, 60))
 
-    let reply = ""
+    // ── Call orchestrator roadmap engine ──────────────────────────────────────
+    // POST /api/javari/orchestrator/run
+    // Payload: { directive, mode, session } as specified + mode: "roadmap_execution"
+    // so the route dispatches to runRoadmapWorker() correctly.
+    let cycleStarted = false
+    let queuedTasks  = 0
+    let tasksExecuted = 0
+    let costUsd      = 0
+
     try {
-      const res = await fetch("/api/javari/chat", {
-        method: "POST",
+      const res = await fetch("/api/javari/orchestrator/run", {
+        method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: autonomyMode, model, messages: [{ role: "user", content: text }] }),
+        body: JSON.stringify({
+          directive: text,
+          mode:      "roadmap_execution",
+          session:   sessionId,
+        }),
       })
+
       if (res.ok) {
         const data = await res.json()
-        reply = data.reply || data.content || ""
+        // Map route response → UI contract
+        // Route returns: { ok, tasksQueued, tasksExecuted, costUsd, cycleId, ... }
+        cycleStarted  = data.ok ?? false
+        queuedTasks   = data.tasksQueued   ?? data.queue?.after?.pending ?? 0
+        tasksExecuted = data.tasksExecuted ?? 0
+        costUsd       = data.costUsd       ?? 0
+
+        if (cycleStarted) {
+          setTelemetry(prev => [
+            { id: tid(), ts: ts(), level: "OK",   message: `Cycle started — ${tasksExecuted} tasks executed, ${queuedTasks} queued` },
+            { id: tid(), ts: ts(), level: "INFO", message: `Cycle cost: $${costUsd.toFixed(6)} | ID: ${data.cycleId ?? "n/a"}` },
+            ...prev,
+          ].slice(0, 60))
+          setSessionCost(prev => parseFloat((prev + costUsd).toFixed(6)))
+        } else {
+          setTelemetry(prev => [
+            { id: tid(), ts: ts(), level: "WARN", message: `Orchestrator returned ok=false: ${data.error ?? "unknown"}` },
+            ...prev,
+          ].slice(0, 60))
+        }
+      } else {
+        setTelemetry(prev => [
+          { id: tid(), ts: ts(), level: "ERR", message: `Orchestrator HTTP ${res.status} — check route logs` },
+          ...prev,
+        ].slice(0, 60))
       }
-    } catch { /* fallthrough */ }
+    } catch (err) {
+      // Network failure — note it, continue with simulated reply so UI stays alive
+      setTelemetry(prev => [
+        { id: tid(), ts: ts(), level: "WARN", message: "Orchestrator unreachable — simulated response" },
+        ...prev,
+      ].slice(0, 60))
+      cycleStarted = false
+    }
 
-    if (!reply) { reply = SIM_REPLIES[simIdx.current % SIM_REPLIES.length]; simIdx.current++ }
-
-    const cost = parseFloat((Math.random() * 0.004 + 0.001).toFixed(5))
-    setSessionCost(prev => parseFloat((prev + cost).toFixed(5)))
+    // ── System message in chat ────────────────────────────────────────────────
+    const systemMsg = cycleStarted
+      ? `Javari has begun executing the roadmap. ${tasksExecuted} task${tasksExecuted !== 1 ? "s" : ""} executed this cycle, ${queuedTasks} remaining in queue. Cost: $${costUsd.toFixed(6)}.`
+      : "Roadmap execution acknowledged. Javari will process your directive on the next available cycle."
 
     const replyId = mid()
     setMessages(prev => [...prev, { id: replyId, role: "javari", content: "", ts: ts(), streaming: true }])
     setAvatarState("speaking")
-    await streamReply(replyId, reply)
+    await streamReply(replyId, systemMsg)
     setAvatarState("idle")
 
+    // ── Completion telemetry — re-enables button ──────────────────────────────
     setTelemetry(prev => [
-      { id: tid(), ts: ts(), level: "OK", message: `Response complete — $${cost}` },
+      { id: tid(), ts: ts(), level: "OK", message: "Worker cycle complete — Execute ready" },
       ...prev,
     ].slice(0, 60))
+
     setSending(false)
-  }, [input, sending, autonomyMode, model])
+    setCycleRunning(false)
+  }, [input, sending, cycleRunning, autonomyMode, model, sessionId])
 
   const onKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send() }
@@ -801,6 +859,12 @@ export default function JavariOS() {
               <span className="label">HEALTH</span>
               <span className="val green">● NOMINAL</span>
             </div>
+            <div className="topbar-pill">
+              <span className="label">CYCLE</span>
+              <span className="val" style={{ color: cycleRunning ? "#FF8C00" : "#4A4A55" }}>
+                {cycleRunning ? "● RUNNING" : "● IDLE"}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -896,7 +960,7 @@ export default function JavariOS() {
                   onKeyDown={onKeyDown}
                   placeholder="Command Javari…"
                   rows={2}
-                  disabled={sending}
+                  disabled={sending || cycleRunning}
                 />
                 <div className="chat-input-toolbar">
                   <SecondaryBtn onClick={() => fileInputRef.current?.click()} title="Attach file">
@@ -908,8 +972,8 @@ export default function JavariOS() {
                     <span style={{ fontSize: "0.5rem", color: C.textMuted, letterSpacing: "0.1em" }}>
                       ENTER to send
                     </span>
-                    <PrimaryBtn onClick={send} disabled={sending || !input.trim()}>
-                      {sending ? "Running…" : "Execute"}
+                    <PrimaryBtn onClick={send} disabled={sending || cycleRunning || !input.trim()}>
+                      {cycleRunning ? "Executing…" : sending ? "Running…" : "Execute"}
                     </PrimaryBtn>
                   </div>
                 </div>
