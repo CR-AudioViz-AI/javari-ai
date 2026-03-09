@@ -1,14 +1,14 @@
 // app/api/javari/ingest-roadmap/route.ts
-// MASTER ROADMAP v4.0 — Complete CR AudioViz AI Ecosystem
-// 135 tasks × 13 phases — the full dream in executable form
-// Date: 2026-03-09
+// Javari AI — Master Ecosystem Roadmap Ingest
+// Purpose: Seeds ALL 102 ecosystem tasks across 10 phases into roadmap_tasks.
+// Safe to re-run — skips existing tasks by title dedup.
+// Date: 2026-03-09 — Henderson Standard Full Ecosystem Delivery
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -16,271 +16,242 @@ const supabase = createClient(
 );
 
 function slugify(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9\s-]/g, "").trim()
-    .replace(/\s+/g, "-").replace(/-+/g, "-").slice(0, 48);
+  return text.toLowerCase().replace(/[^a-z0-9\s-]/g,"").trim()
+    .replace(/\s+/g,"-").replace(/-+/g,"-").slice(0,48);
 }
-function taskId(phase: string, title: string, index: number): string {
-  return `v4-${phase.slice(0,8)}-${slugify(title).slice(0,32)}-${String(index).padStart(3,"0")}`;
+
+function taskId(phase: string, title: string, idx: number): string {
+  return `rm-${phase}-${slugify(title)}-${String(idx).padStart(2,"0")}`;
 }
 
 const ROADMAP = [
   {
-    phase: "platform_foundation", priority: 1,
+    phase: "revenue_foundation", priority: 1,
     tasks: [
-      { title: "Onboarding Flow — First 60 Seconds to Value", description: "Build the complete new-user onboarding: welcome screen with Javari greeting, single goal selection (creator/business/social impact/personal), avatar selection, first tool recommendation, and guided first-use modal. User reaches their first result within 60 seconds of signup." },
-      { title: "CreditsOS — Global Billing Currency", description: "Complete CreditsOS: dollar-to-credit mapping ($1=100 credits), purchase flow via Stripe and PayPal, per-action deduction engine, low-balance alerts at 10% remaining, admin credit grant endpoint, credit history ledger, and never-expire policy on paid plans." },
-      { title: "Subscription Tier Management — Free Creator Pro Enterprise", description: "Four tiers fully wired: Free (100 credits/mo), Creator ($19, 2000 credits), Pro ($49, 10000 credits), Enterprise ($199, unlimited). Stripe webhooks for lifecycle events, upgrade/downgrade prorations, plan enforcement middleware on every API route, and billing portal." },
-      { title: "Stripe Checkout — Live Payment Flow", description: "Wire Stripe Checkout for all subscription tiers: checkout session creation, success/cancel redirects, webhook handlers for payment_intent.succeeded + subscription.created + subscription.updated + customer.subscription.deleted, receipt emails, and Supabase user_subscriptions sync." },
-      { title: "PayPal Checkout — Alternative Payment Flow", description: "Wire PayPal as full checkout alternative: order creation API, capture webhook, subscription plan sync with PayPal Billing API, and Supabase sync matching Stripe schema exactly. Both payment paths result in identical user state." },
-      { title: "User Dashboard — Real Data Real Time", description: "Replace placeholder dashboard with live data: credits remaining widget, recent tool usage, active subscription badge, savings vs pay-per-use calculator, quick-access to 5 most-used tools, and Javari AI assistant prompt panel." },
-      { title: "Admin Control Tower — Full Business Visibility", description: "Complete admin dashboard: live MRR/ARR counters, new signups today/week/month, active subscriptions by tier, credit consumption graph, top tools by usage, failed payment queue, user search and impersonation (read-only), and export to CSV." },
-      { title: "Email Delivery — Transactional via Resend", description: "Wire all transactional emails via Resend: welcome email, email confirmation, password reset, subscription confirmation, payment receipt, credit low-balance warning, weekly usage summary, and re-engagement at 14 days inactive. All emails branded Javari AI." },
-      { title: "Error Boundaries and Auto-Refund Engine", description: "Build the customer-first error refund system: detect failed AI generation, log to error_events table, automatically refund credits within 5 seconds, notify user via toast, and create audit trail. Zero user should ever lose credits to a system failure." },
-      { title: "Session Management and Token Refresh", description: "Implement bulletproof session handling: Supabase JWT auto-refresh via SSR middleware, session persistence across tab close, graceful re-auth prompt when token expires mid-session, and remember-me functionality." },
+      { title: "Stripe Checkout + Subscription Flow end-to-end", description: "Wire Stripe checkout for all 4 tiers (Free/Creator/Pro/Enterprise). Webhooks for subscription.created, updated, deleted, invoice.paid, invoice.payment_failed. Proration logic. Supabase user_subscriptions table sync. Test in Stripe test mode then promote to live." },
+      { title: "PayPal Subscription Billing complete integration", description: "PayPal subscription plans for all 4 tiers mirroring Stripe. Webhook handlers. Vault tokenization for recurring billing. Reconciliation logic with Stripe for duplicate prevention. Admin dashboard showing PayPal vs Stripe revenue split." },
+      { title: "CreditsOS full implementation", description: "Universal credit currency: $1=100 credits. Purchase flows for 500/1000/5000/10000 credit packs via Stripe+PayPal. Per-action deduction table. Low-balance alerts at 10% remaining. Admin grant/revoke endpoint. Credits never expire on paid plans. Free plan: 50 credits/month reset." },
+      { title: "Pricing page javariai.com with live checkout", description: "Beautiful pricing page at javariai.com/pricing. 4 tiers with feature comparison matrix. Toggle monthly/annual (annual saves 20%). Trust signals: 1000+ creators, 4.9 stars, SOC2 badge. CTA goes directly to Stripe checkout. Mobile-first. A/B test headline copy." },
+      { title: "Subscription management portal for users", description: "Account settings page: current plan display, usage meters, upgrade/downgrade flow, billing history with invoice PDFs, cancel subscription with retention flow (offer 1 month free before cancel), payment method management." },
+      { title: "Free trial 14-day for Creator and Pro tiers", description: "14-day free trial: no credit card required for first 7 days, card required for days 8-14. Trial banner in UI. Email sequence: day 1 welcome, day 7 reminder, day 13 last chance, day 14 convert or downgrade. Conversion tracking." },
+      { title: "Enterprise sales flow and contact form", description: "Enterprise tier contact form: company size, use case, timeline, budget range. Auto-routes to Cindy's email. CRM entry creation. Follow-up sequence. Custom quote generator. White-label inquiry handling." },
+      { title: "Affiliate program full implementation", description: "Affiliate portal: unique referral links per user, 20% recurring commission for 12 months. Stripe Connect payouts. Dashboard: clicks, conversions, earnings, payout history. Tier bonuses: 25% at $1k/mo referred, 30% at $5k/mo." },
+      { title: "Marketplace commission engine", description: "Creator marketplace: 15% platform commission on all sales. Stripe Connect Express for creator payouts. Minimum payout threshold $25. Monthly auto-payout. Tax form collection (W9/W8). Sales analytics per creator." },
+      { title: "Revenue analytics dashboard admin", description: "Real-time revenue dashboard: MRR, ARR, churn rate, LTV, CAC, cohort analysis, revenue by tier, credit purchase revenue, affiliate commissions paid, marketplace commissions. Export to CSV. Projections to $1M ARR milestone tracker." },
     ]
   },
   {
     phase: "javari_ai_core", priority: 1,
     tasks: [
-      { title: "Javari Chat UI — Production Grade Interface", description: "Production Javari chat interface: streaming responses via SSE, markdown rendering with code highlighting, file attachment support (PDF, images, documents), conversation history sidebar with search, conversation export, and mobile-responsive at all breakpoints." },
-      { title: "AvatarOS — Javari Avatar Face and Voice", description: "Build AvatarOS: AI-generated avatar faces with 50+ style presets, voice synthesis with 20 voice profiles, avatar memory (remembers user preferences), talking avatar video loop generator, and branding package export (PNG, SVG, WebM). Javari has a default avatar. Users create their own." },
-      { title: "MemoryOS — Persistent Long-Term Reasoning", description: "Implement Javari long-term memory: vector embeddings of user conversations, topic-tagged memory nodes, retrieval-augmented context injection, memory summary on session start, cross-session learning, and memory export/import. Javari remembers everything." },
-      { title: "Multi-Agent Router — Architect Builder Reviewer Documenter", description: "Build the 4-agent internal team: Architect (plans), Builder (executes), Reviewer (verifies), Documenter (writes). Task router assigns work to appropriate agent, agents communicate via message channel, results aggregate back to primary stream. Users see real-time agent activity." },
-      { title: "Javari Autonomous Loop — Self-Directed Execution", description: "Complete autonomous execution loop: Javari proactively suggests next platform improvements, queues them for approval, executes on cron, self-verifies output, and reports results. Daily digest email to Roy with what Javari built overnight." },
-      { title: "Tool Orchestration Engine — Unified Interface", description: "Build the unified tool orchestration layer: single API that routes to any tool, natural language tool selection, chained tool execution (output of tool A feeds tool B), progress streaming, and result caching for identical requests." },
-      { title: "Code Generation and Execution Sandbox", description: "Build safe code execution: Python and JavaScript sandboxes via isolated containers, file output collection, error capture and display, iterative fix loop where Javari auto-corrects errors up to 3 attempts, and result download." },
-      { title: "Document Intelligence — Read Analyze Any File", description: "Build document intelligence: PDF text extraction, image OCR, Excel/CSV data parsing, DOCX reading, PowerPoint slide extraction, and intelligent Q&A over any uploaded document. Users can ask Javari anything about a file they upload." },
-      { title: "Web Research Agent — Real-Time Intelligence", description: "Javari web research agent: multi-source parallel search, result synthesis into structured reports, citation tracking, bias detection across sources, trend identification, and research export to PDF/DOCX." },
-      { title: "Notification OS — SMS Email Push In-App", description: "Complete NotificationOS: in-app toasts, email via Resend, SMS via Twilio, browser push via Web Push API, and mobile push prep. Notification preferences per user, quiet hours, and digest bundling for non-critical alerts." },
+      { title: "Javari onboarding first-run experience", description: "First session after signup: animated welcome from Javari avatar, ask 3 questions (what do you create? what is your goal? who do you serve?), build personalized workspace, show first suggested action. Completion unlocks 100 bonus credits." },
+      { title: "Javari conversational UI complete polish", description: "Chat interface: streaming responses, message history with search, code block rendering with copy button, markdown support, file upload and analysis, image generation inline, export conversation as PDF/markdown, pin important messages." },
+      { title: "Javari tool invocation from chat", description: "Natural language tool triggering: say write me a logo and Logo Generator launches inline. Say build my resume and Resume Builder opens with data pre-filled from profile. Tool results appear inline in chat. Seamless transitions." },
+      { title: "AvatarOS Javari avatar face and voice system", description: "Avatar creation: AI face generation with 50+ style options, skin tones, hair, expressions. Voice selection: 12 preset voices. Voice cloning from 30-second sample. Avatar appears in video introductions and voice messages. Brand package export SVG PNG video." },
+      { title: "Javari memory and context persistence", description: "Cross-session memory: remember user projects, preferences, past work, goals. Structured memory tags: project, preference, goal, style. Memory viewer where users can see and edit what Javari remembers. Forget specific memories. Memory privacy settings." },
+      { title: "Multi-agent workflow builder visual", description: "Visual workflow builder: drag-and-drop agents (Researcher, Writer, Designer, Coder, Reviewer, Publisher). Connect with arrows. Set inputs/outputs per node. Schedule runs. Templates: Blog Post Pipeline, Social Campaign, Code Review Flow, Market Research Report." },
+      { title: "Javari voice mode push to talk", description: "Voice interface: hold spacebar or tap microphone to speak. Whisper transcription. Javari responds with avatar lip-sync and selected voice. Works on mobile. Toggle between voice and text mode. Voice commands for navigation." },
+      { title: "Javari proactive suggestions engine", description: "Javari notices inactivity, low credits, stalled projects and proactively offers help. Morning briefing: 3 personalized action items. All proactive messages dismissable with preference learning. Never annoying, always useful." },
+      { title: "Javari autonomous task queue user-facing", description: "Users can assign long-running tasks: research competitors and write a report, generate 30 social posts for this month. Javari works in background, notifies when done. Queue visible in dashboard with progress and estimated time." },
+      { title: "Javari feedback and rating system", description: "After every response: thumbs up/down, optional comment. Negative feedback triggers immediate improvement attempt and routes to improvement log. Positive feedback trains preferred patterns. User satisfaction score tracked monthly." },
     ]
   },
   {
-    phase: "creator_tools", priority: 2,
+    phase: "creator_tools_suite", priority: 2,
     tasks: [
-      { title: "AI Copywriter — 50 Content Formats", description: "Complete AI Copywriter: blog posts, email campaigns, social captions, ad copy, product descriptions, landing pages, video scripts, podcast intros, press releases, and sales letters. Tone controls, brand voice training, SEO keyword injection, and bulk generation mode." },
-      { title: "Logo Generator — Brand Identity System", description: "AI logo generator: text-to-logo with 100+ style presets, color palette generation, typography pairing, icon library, brand kit export (PNG, SVG, PDF), animated logo variants, and white-label licensing for agencies." },
-      { title: "Image Generation Studio — Multi-Model", description: "Image generation hub: DALL-E 3, Stable Diffusion, and Midjourney-style via API. Style controls, aspect ratio presets, batch generation, background removal, image upscaling 4x, face enhancement, and commercial license on all outputs." },
-      { title: "Video Creator — AI Script to Screen", description: "AI video production: script generation, scene planning, AI voiceover with avatar presenter, stock footage matching, auto-captions with burn-in, intro/outro templates, and export in 1080p MP4. Targets social media, training, and marketing use cases." },
-      { title: "Podcast Studio — Record Edit Distribute", description: "Complete podcast platform: AI script writer, recording interface with noise removal, automatic transcript, episode chaptering, RSS feed generator, and one-click distribution to Spotify/Apple/Amazon. Monetization via sponsorship marketplace." },
-      { title: "Resume Builder Pro — ATS Optimized", description: "Resume builder: ATS score analyzer, job description parser with keyword matching, 50+ professional templates, LinkedIn import, cover letter generator, and apply-ready PDF export." },
-      { title: "Presentation Maker — Pitch Deck to Board Deck", description: "AI presentation builder: natural language to slide deck, 200+ templates, smart layout engine, chart and data visualization auto-generation, brand theme application, speaker notes writer, and export to PPTX/PDF/Google Slides." },
-      { title: "Social Media Manager — Schedule Analyze Grow", description: "Full social media platform: post composer with AI caption, scheduling calendar for 10+ platforms, analytics dashboard, hashtag optimizer, best-time-to-post AI, competitor tracking, and team collaboration." },
-      { title: "Email Marketing Platform — Campaign to Conversion", description: "Email marketing suite: drag-drop builder, list segmentation, A/B testing, automation sequences, deliverability optimizer, spam score checker, unsubscribe management, and revenue attribution." },
-      { title: "PDF Tools Suite — 20 PDF Operations", description: "Complete PDF toolkit: merge, split, compress, convert to/from Word/Excel/PPT, OCR scan-to-text, e-signature, watermark, password protection, page reorder, and annotation. All operations client-side for privacy." },
-      { title: "Background Remover — Batch Processing", description: "Production background remover: single image, batch up to 50 images, hair/fur detail preservation, custom background replacement, product photo optimization, transparent PNG output, and commercial license. B2B target: e-commerce sellers." },
-      { title: "Brand Color Palette Generator", description: "Brand color system: extract palette from logo/image upload, generate complementary palettes, WCAG contrast checker, CSS variables export, Tailwind config export, Figma palette export, and color psychology explanations." },
-      { title: "Voice Transcriber — 50 Languages", description: "AI transcription: upload audio/video, real-time transcription via Whisper, 50 language support, speaker diarization, timestamp export, SRT/VTT subtitle generation, and meeting summary with action items." },
-      { title: "Subtitle Generator — Auto Caption Any Video", description: "Subtitle generator: upload video, auto-generate captions, manual timing editor, style customization, burn-in rendering, SRT/VTT/ASS export, and translation to 30+ languages." },
-      { title: "Business Plan Generator — Investor Ready", description: "Business plan builder: executive summary AI, market analysis with TAM/SAM/SOM, competitive landscape, financial projections (3-year P&L, cash flow, break-even), team section, and investor deck export." },
-      { title: "Invoice Generator — Professional Billing", description: "Invoice platform: professional invoices in 60 seconds, client management, payment tracking, overdue reminders, Stripe payment links embedded in invoice, recurring automation, and accounting export." },
-      { title: "QR Code Generator — Dynamic Trackable", description: "QR code suite: URL, vCard, WiFi, text, email, phone. Dynamic QR (editable after print), scan analytics, branded QR with logo overlay, bulk generation, and high-res PNG/SVG export." },
-      { title: "AI Legal Document Templates", description: "Legal document templates: NDA, freelance contract, privacy policy, terms of service, LLC operating agreement, partnership agreement, and employment offer letter. Jurisdiction selector, AI customization, and PDF export. Template tool, not legal advice." },
-      { title: "Image Caption and Alt Text Generator", description: "AI image captioning: upload images, generate SEO-optimized alt text, social media captions, product descriptions from photos, bulk processing up to 100 images, and WordPress/Shopify export format." },
-      { title: "Color Palette from Image — Brand Extraction", description: "Extract brand colors from any image: dominant colors, accent colors, neutral palette, hex/RGB/HSL values, CSS gradient generator, and export to design tools." },
+      { title: "Logo Generator complete with AI and export", description: "Logo Generator: text prompt plus style options (minimalist/bold/vintage/tech/organic) plus color palette picker plus industry selector. Generates 6 variations. Edit colors, fonts, layout in browser. Export: SVG, PNG transparent and white BG, ICO, WebP. Save to project." },
+      { title: "Social Media Post Creator all platforms", description: "Social posts tool: input topic/product/event, AI generates platform-optimized copy for Instagram, LinkedIn, Twitter/X, Facebook, TikTok, Pinterest. Tone selector. Hashtag suggestions. Character counters. Batch generate 30 days of content in one click." },
+      { title: "Resume Builder AI-powered complete", description: "Resume builder: import LinkedIn URL or paste existing resume, AI rewrites for target role, ATS optimization scoring, 15 beautiful templates, cover letter generation, LinkedIn summary generator. Export PDF. Track applications. Before/after view." },
+      { title: "Cover Letter Generator with job matching", description: "Paste job description plus select or paste resume, AI writes tailored cover letter matching keywords, quantifies achievements, adapts tone to company culture. 5 style options. One-click customize. Export PDF and DOCX." },
+      { title: "Invoice and Proposal Generator business docs", description: "Invoice: logo, itemized services, tax calculation, payment terms, PDF export. Proposal: executive summary, scope, timeline, pricing tiers, signature line. Templates by industry. Client portal to view and sign. Payment link embedded." },
+      { title: "Presentation Maker AI slides complete", description: "Presentation builder: topic plus audience plus goal generates full slide deck in 60 seconds. 20 themes. Edit in browser: slides, text, AI images, charts, icons. Speaker notes generated. Export PPTX, PDF, Google Slides. Record narration with avatar." },
+      { title: "PDF Tools suite 12 operations complete", description: "PDF toolkit: merge, split, compress, convert Word and Excel and PPT to and from PDF, add watermark, password protect, extract text, OCR scanned PDFs, sign, form fill, page rotate. Batch processing. No file size limit on Pro plus." },
+      { title: "Video Analysis and Summary tool", description: "Upload video or paste YouTube URL. AI transcribes, summarizes, extracts key moments, generates chapter markers, creates show notes, pulls quotes, identifies speakers. Export: summary PDF, transcription TXT, chapters CSV. Works on any language." },
+      { title: "Email Template Builder drag and drop", description: "Email builder: drag-drop blocks (header, text, image, button, divider, social). AI writes copy from brief. 50 starter templates by use case. Export HTML. ESP integrations: Mailchimp, ConvertKit, Klaviyo, Resend. Preview in multiple clients." },
+      { title: "AI Copywriter full content package generator", description: "Input product/service/audience/goal/tone and get complete copy package: headline 10 variations, subheadline, body copy, bullet points, CTA, meta description, social snippets, email subject lines. One-click save to project. Plagiarism check." },
+      { title: "Brand Color Palette Generator", description: "Input brand name plus industry plus mood words. Generates 5 palette options with primary/secondary/accent/neutral colors. Hex codes plus RGB plus CSS variables. WCAG accessibility checker. Download swatch file. Preview on sample landing page." },
+      { title: "Image Caption Generator social AI", description: "Upload image. AI generates captions for Instagram (3 length options), Twitter/X, LinkedIn, Pinterest. Alt text for accessibility. Hashtag set. Tone options: casual/professional/funny/inspirational. Bulk upload mode: 50 images at once." },
+      { title: "Background Remover instant AI tool", description: "Upload image. Instant background removal using AI. Preview on transparent/white/custom color/custom image background. Download PNG transparent or any format. Bulk mode: 100 images. Batch add same background to product photos." },
+      { title: "Subtitle and Transcript Generator multi-language", description: "Upload video/audio. Generates accurate transcript with speaker labels and timestamps. Edit in-browser with sync highlighting. Export: SRT, VTT, TXT, PDF. Translate to 50 languages. Burn subtitles into video. Auto-caption for social media." },
+      { title: "Voice Transcriber real-time and upload", description: "Real-time transcription: speak and see text appear instantly. Upload audio: MP3, WAV, M4A, OGG. Speaker diarization. Punctuation and formatting AI. Edit transcript. Export TXT, DOCX, PDF. Meeting notes mode: auto-extracts action items." },
     ]
   },
   {
-    phase: "marketplace_os", priority: 2,
+    phase: "marketplace_and_ecosystem", priority: 2,
     tasks: [
-      { title: "MarketplaceOS — Full Listings Engine", description: "Complete marketplace: product/service/digital listings, seller onboarding with Stripe Connect, commission engine (platform takes 15%), buyer checkout, order management, dispute resolution, and seller analytics." },
-      { title: "Avatar Marketplace — Buy Sell Custom Avatars", description: "Avatar marketplace: creators list custom AI avatars, buyers purchase with credits or cash, licensing tiers, avatar preview before purchase, and revenue split (70% creator / 30% platform)." },
-      { title: "Prompt Marketplace — Sell AI Prompts", description: "Prompt marketplace: sellers list curated prompts with before/after examples, category taxonomy, one-click purchase and instant use in Javari, ratings and reviews, and top-seller leaderboard." },
-      { title: "Template Marketplace — Sell Designs and Frameworks", description: "Template store: resume templates, presentation decks, email sequences, social media kits, brand packages, and business frameworks. Instant download after purchase and curated featured collections." },
-      { title: "Agent Marketplace — Pre-Built AI Agents", description: "Sell specialized AI agents: sales email writer, grant proposal writer, legal document drafter, financial analyst, and more. Users purchase agent access, agents run on Javari infrastructure, creators earn recurring royalties." },
-      { title: "Affiliate Program — Invite and Earn", description: "Complete affiliate system: unique referral links per user, 30% recurring commission for 12 months, real-time earnings dashboard, $50 minimum payout, PayPal/Stripe payout, and top-affiliate leaderboard with bonuses." },
-      { title: "White-Label Enterprise — Sell the Platform", description: "White-label offering: custom domain, logo/color replacement, feature flag control per tenant, dedicated Supabase schema, custom pricing page, admin portal for tenant management, and $199-999/mo pricing tier." },
-      { title: "Creator Monetization Dashboard", description: "Creator earnings center: total earnings, per-product revenue, credit earnings vs cash earnings, payout schedule, tax document generation (1099 for US creators), and performance benchmarking." },
+      { title: "MarketplaceOS full seller and buyer experience", description: "Marketplace: seller onboarding (verify identity, Stripe Connect, set payout), create listing (digital products, templates, prompts, avatars, AI agents), buyer browse/search/filter, checkout, instant delivery, review system, dispute resolution, seller analytics dashboard." },
+      { title: "Javari Spirits alcohol recommendation platform full", description: "Spirits platform: searchable database of 50k+ spirits, AI taste profile builder from quiz, personalized recommendations, food pairing, cocktail recipes. Affiliate links to purchase (Drizly, Total Wine, ReserveBar). Age verification gate. Awin affiliate integration." },
+      { title: "Javari Cards tarot and vision system full build", description: "Cards platform: 78-card tarot deck with AI interpretations, 30 oracle decks, life mapping tool, daily card pull with personalized message from Javari avatar, compatibility readings, career spread, annual forecast. Premium: save readings, journal entries." },
+      { title: "Javari Music AI composition and discovery full", description: "Music platform: AI music generation from mood/genre/tempo/instruments prompt. Royalty-free library. Podcast intro generator. Social media clip generator (15s, 30s, 60s). License manager. Affiliate: Spotify, Apple Music, instrument sales." },
+      { title: "Javari Games Hub integration and platform full", description: "Games hub: embed framework for HTML5 games, leaderboards, achievements, daily challenges, tournament mode, social sharing. Subscription: unlimited play on Pro plus. F2P with credit rewards for ad views." },
+      { title: "Javari Travel AI trip planner and booking", description: "Travel platform: destination research (AI itinerary builder), hotel/flight search via Skyscanner/Booking.com affiliate, AI packing list, visa requirements checker, local experiences guide, budget calculator, travel insurance quote affiliate." },
+      { title: "Javari Health AI wellness platform full", description: "Health platform: symptom checker (informational only), mental wellness check-ins, meditation audio library, fitness plan generator, nutrition guide, sleep tracker, mood journal. Telehealth referral affiliate. HIPAA disclaimer prominent throughout." },
+      { title: "Javari Legal document automation full", description: "Legal tools: NDA generator, freelance contract, LLC operating agreement, privacy policy, terms of service, employment offer letter, lease agreement, bill of sale. Plain-English explanations. State-specific variants. E-signature affiliate." },
+      { title: "Javari Real Estate property intelligence full", description: "Realty platform: neighborhood research, property value estimator, mortgage calculator, rent vs buy analysis, investment property ROI, market trend reports, agent finder referral fee, mortgage pre-qualification affiliate." },
+      { title: "Javari Education AI learning platform full", description: "Education hub: AI tutor for K-12 subjects, college essay writer, study guide generator, flashcard creator, practice test builder, career path planner, scholarship finder. Affiliate: Coursera, Udemy, LinkedIn Learning, Chegg." },
+      { title: "Javari Fitness AI personal trainer full", description: "Fitness platform: personalized workout plans (home/gym/outdoor), video exercise library 500+, form checker via camera, calorie/macro tracker, meal plan generator, progress photo analyzer. Affiliate: supplements, equipment." },
+      { title: "Javari Entertainment streaming guide full", description: "Entertainment platform: AI movie/show recommender, streaming service comparison, watchlist manager, review aggregator, watch party coordinator. Affiliate: streaming subscriptions, movie tickets, merchandise." },
+      { title: "Javari Shopping AI deal finder full", description: "Shopping platform: product research assistant, price comparison across Amazon/Walmart/Target/eBay, deal alerts, cashback tracker, gift idea generator, product review summarizer. Amazon affiliate links integrated. Wishlists. Budget tracker." },
+      { title: "Javari Dating profile optimizer full", description: "Dating platform: profile analyzer (upload current profile, AI scores and rewrites bio, selects best photos), conversation starter generator, date idea suggestions by city, relationship goal clarity quiz, compatibility assessment. Affiliate: Bumble/Hinge/Match.com." },
+      { title: "Javari Arena AI model comparison platform full", description: "Arena: side-by-side comparison of AI models (Claude, GPT-4, Gemini, Llama, Mistral) on user prompts. Blind voting. Community leaderboard. Performance by category. Speed/cost comparison. API cost calculator. Prompt library with community voting." },
     ]
   },
   {
-    phase: "social_impact", priority: 1,
+    phase: "mission_social_impact", priority: 1,
     tasks: [
-      { title: "Veterans Connect — Transition Career Community", description: "Complete javari-veterans-connect: DD-214 upload parser, MOS-to-civilian career mapper with 400+ translations, VA benefits eligibility checker, veteran-owned business directory, peer mentorship matching, job board filtered for veteran-friendly employers, and housing resource locator." },
-      { title: "First Responders Hub — Tools for Those Who Serve", description: "Complete javari-first-responders: critical incident debrief tool, peer support network, mental health resource finder (PTSD/crisis), shift scheduling optimizer, incident report generator, department communication board, and family support resources." },
-      { title: "Faith Communities Platform — Congregation Management", description: "Complete javari-faith-communities: sermon notes and outline generator, bulletin/newsletter creator, event management and RSVP, giving tracker with Stripe integration, member directory (privacy-first), volunteer coordinator, and prayer request board." },
-      { title: "Animal Rescue Network — Save More Lives", description: "Complete javari-animal-rescue: animal intake form generator, adoption application processor, foster family matching, medical record tracker, fundraising page builder with donation flow, lost/found pet alert network, and shelter capacity dashboard." },
-      { title: "Education Platform — Lifelong Learning for All", description: "Complete javari-education: AI tutoring in any subject, homework helper, lesson plan generator for teachers, quiz builder with auto-grading, flashcard system with spaced repetition, scholarship finder, and college essay writer." },
-      { title: "Nonprofit Suite — Amplify Every Mission", description: "Complete javari-nonprofits: grant proposal writer with funder database, volunteer management system, impact reporting generator, donor management CRM, annual report builder, board meeting minute taker, and IRS Form 990 assistant." },
-      { title: "Senior Living Platform — Dignity and Connection", description: "Complete javari-senior-living: simplified large-text interface, medication reminder system, family connection portal, local service finder, telehealth appointment scheduler, memoir and life story writer, and digital estate planning guide." },
-      { title: "Disability Access Tools — Everyone Belongs", description: "Complete javari-disability-access: WCAG 2.2 AA compliance audit tool, alt-text generator, plain-language document rewriter, voice navigation interface, accommodation letter generator, and disability rights resource directory." },
-      { title: "LGBTQ+ Community Platform — Safe Space to Thrive", description: "Complete javari-lgbtq: affirming mental health resource finder, chosen family connection network, legal name change guide by state, LGBTQ-friendly business directory, coming out support resources, and community event board." },
-      { title: "Family Hub — Strengthen Every Family", description: "Complete javari-family: family goal planner, chore and responsibility tracker, family newsletter creator, memory book with AI captions, budget planner for families, shared calendar, and parenting resource library by age." },
-      { title: "Health and Wellness OS — Personal Wellbeing", description: "Complete javari-health: symptom journal (NOT medical advice), wellness goal tracker, mental health check-in with AI reflection, sleep and nutrition logger, medication reminder, mindfulness library, and telehealth provider finder." },
-      { title: "Grant Application Engine — 600M Dollar Pipeline", description: "Build the grant intelligence system: federal grants database (SAM.gov integration), foundation grants database (10,000+ funders), eligibility matcher for CR AudioViz AI social impact modules, AI grant proposal writer, deadline tracker, and submission checklist." },
+      { title: "Javari Veterans Connect complete platform full", description: "Veterans platform: benefits navigator (VA claims, GI Bill, healthcare enrollment), job board with veteran-friendly employers, resume translator military to civilian, PTSD/mental health resources, peer community, legal aid directory, housing assistance. 100% free always." },
+      { title: "Javari First Responders platform full build", description: "First responders hub: stress management tools (EMS/Police/Fire specific), peer support network, PTSD resources, disability claims help, scholarships, equipment reviews, job board, retirement planning, family resources. Partner with IAFF, FOP." },
+      { title: "Javari Faith Communities platform full build", description: "Faith platform: sermon prep AI assistant, bulletin creator, event poster maker, volunteer coordinator, donation tracking, Bible/Quran/Torah study tools, prayer request board, congregation newsletter. Multi-faith, multi-denomination. Free for all congregations." },
+      { title: "Javari Animal Rescue network full build", description: "Animal rescue platform: adoptable pet listings (integrates with Petfinder API), foster application system, volunteer coordinator, medical expense crowdfunding, lost pet finder, spay/neuter clinic locator, rescue organization directory. Free for all registered rescues." },
+      { title: "Javari Nonprofits grant writing suite full", description: "Nonprofit tools: AI grant proposal writer (matches org mission to grant requirements), grant database with 50k+ opportunities, 990 form analyzer, impact report generator, donor management, volunteer hour tracker, board meeting minutes generator." },
+      { title: "Javari Family life management platform full", description: "Family platform: chore chart builder, family calendar sync, allowance tracker, age-appropriate homework helper, recipe planner plus grocery list, family meeting agenda builder, digital family vault for important documents, memory book creator." },
+      { title: "Grant application pipeline automated full", description: "Javari prepares and tracks grant applications: federal (NEA, IMLS, SBA, USDA), state arts councils, private foundations (Ford, Gates, Knight, Kresge). Auto-fills applications from org profile. Deadline tracker. Reporting templates. Track $600M+ opportunity pipeline." },
+      { title: "Social impact metrics and reporting dashboard", description: "Impact dashboard: users served per mission category (veterans, first responders, faith, rescue, nonprofits, families), services delivered, estimated economic value of assistance, stories collected, testimonials. Annual impact report generator. Press release builder." },
     ]
   },
   {
-    phase: "vertical_apps", priority: 2,
+    phase: "platform_infrastructure", priority: 2,
     tasks: [
-      { title: "Javari Spirits — Premium Beverage Intelligence", description: "Complete javari-spirits: 10,000+ spirit database with tasting notes, AI cocktail recipe generator, virtual tasting room with flavor map, producer stories, food pairing engine, collection tracker with value estimates, and affiliate purchase links." },
-      { title: "Javari Cards — Collectible Card Ecosystem", description: "Complete javari-cards: TCG card database (Pokemon, MTG, Yu-Gi-Oh), AI grading assistant with photo upload, collection tracker with real-time market values, wishlist and trade matching, sealed product price tracker, and flip opportunity alerts." },
-      { title: "Javari Realty — Property Intelligence Platform", description: "Complete javari-realty: AI property valuation from address, neighborhood analysis, mortgage calculator with rate feed, investment property ROI calculator, rental comp analyzer, first-time buyer checklist, and agent finder." },
-      { title: "Javari Music — Artist and Fan Platform", description: "Complete javari-music: AI lyric writer by genre/mood, chord progression generator, beat description to production notes, song structure analyzer, music rights explainer, royalty calculator, playlist mood matcher, and artist discovery feed." },
-      { title: "Javari Travel — AI Travel Planner", description: "Complete javari-travel: natural language trip planner (full itinerary in 60 seconds), flight price tracker, hotel recommendations with AI review summary, local experience finder, visa requirement checker, budget tracker, and offline trip guide export." },
-      { title: "Javari Fitness — Personalized Wellness Coach", description: "Complete javari-fitness: AI workout planner (home/gym/bodyweight), form check via video upload, nutrition calculator with macro tracking, supplement guide, progress photo comparison, rest day optimizer, and community challenge board." },
-      { title: "Javari Legal Docs — 200 Template Library", description: "Complete javari-legal: 200+ legal document templates, AI fill-from-description, jurisdiction-aware customization, e-signature integration, document storage with version control, and legal FAQ chatbot (not legal advice)." },
-      { title: "Javari HR Workforce — Small Business People Ops", description: "Complete javari-hr-workforce: job description writer, applicant tracking system lite, onboarding checklist generator, performance review template builder, PTO tracker, employee handbook generator, and HR policy library." },
-      { title: "Javari Intel — Competitive Business Intelligence", description: "Complete javari-intel: competitor website analyzer, pricing tracker, product launch detector, social sentiment monitor, market share estimator, SWOT analysis generator, and weekly intelligence briefing email." },
-      { title: "Javari Insurance — Coverage Comparison Tool", description: "Complete javari-insurance: plain-language policy explainer (upload any insurance doc), coverage gap analyzer, premium comparison tool, claim preparation assistant, and insurance glossary. Partners with carriers for affiliate revenue." },
-      { title: "Javari Home Services — Find and Manage Contractors", description: "Complete javari-home-services: project scope builder, contractor comparison tool, bid request generator, project timeline tracker, payment milestone manager, review aggregator, and home maintenance calendar." },
-      { title: "Javari Manufacturing — Production Intelligence", description: "Complete javari-manufacturing: BOM builder, supplier comparison tool, production cost calculator, quality control checklist generator, ISO documentation assistant, and lean manufacturing template library." },
-      { title: "Javari Supply Chain — Logistics Optimizer", description: "Complete javari-supply-chain: supplier onboarding checklist, lead time tracker, demand forecasting calculator, inventory optimization tool, shipping cost comparator, and risk assessment for single-source dependencies." },
-      { title: "Javari Merch — Print-on-Demand Store Builder", description: "Complete javari-merch: AI design generator for merchandise, Printful/Printify integration, store builder with custom domain support, order management, profit calculator, and design trend analyzer." },
-      { title: "Javari Scrapbook — Digital Memory Keeper", description: "Complete javari-scrapbook: photo upload with AI captions, timeline view, tag-based organization, family sharing, printed book order integration, video memory maker, and birthday/anniversary reminders." },
-      { title: "Javari Dating — Authentic Connections", description: "Complete javari-dating: AI-powered profile builder, compatibility scoring, conversation starter generator, date idea planner, relationship goal alignment tool, and safety guide for first meetings. Privacy-first, no data selling." },
-      { title: "Javari Social Posts — Viral Content Engine", description: "Complete javari-social-posts: trend analyzer, AI post generator by platform (Instagram, TikTok, X, LinkedIn, Facebook), hashtag researcher, posting schedule optimizer, engagement rate predictor, and content repurposing from long-form to short." },
-      { title: "Javari Vinyl Vault — Record Collector Platform", description: "Complete javari-vinyl-vault: Discogs API integration for valuations, collection manager with condition grades, wishlist tracker, local record store finder, pressing identifier, and listening log with notes." },
-      { title: "Javari Watch Works — Timepiece Intelligence", description: "Complete javari-watch-works: watch database (50,000+ references), AI valuation from photos, service interval tracker, authentication guide, market price history charts, and dealer finder by brand." },
-      { title: "Javari Card Vault — Sports and Non-Sports Cards", description: "Complete javari-card-vault: PSA/BGS population report integration, raw card value estimator, collection insurance valuation, set completion tracker, flip opportunity ranker, and consignment sale assistant." },
-      { title: "Javari Outdoors — Adventure Planning Platform", description: "Complete javari-outdoors: trail finder with difficulty ratings, gear checklist generator, weather-to-activity matcher, campsite booker (Recreation.gov API), hunt/fish regulations by state, and emergency contact protocol builder." },
-      { title: "Javari MTG Manager — Magic The Gathering Platform", description: "Complete javari-mtg-manager: deck builder with legality checker, card price tracker, collection manager, draft simulator, meta tier list, and trade binder with value calculator." },
-      { title: "Javari Militaria Vault — Military Collectibles", description: "Complete javari-militaria-vault: era and conflict identifier, authentication guide, market value database, provenance documentation builder, care and storage guide, and reputable dealer directory." },
-      { title: "Javari Pets — Complete Pet Care Platform", description: "Complete javari-pets: pet profile, vet appointment scheduler, medication reminder, nutrition guide by breed, training program builder, lost pet alert network, pet-friendly place finder, and pet insurance comparator." },
-      { title: "Javari Property Hub — Investment Property Manager", description: "Complete javari-property-hub: multi-property dashboard, rent roll tracker, expense categorizer, CAP rate calculator, tenant screening checklist, lease generator, and tax preparation export for Schedule E." },
-      { title: "Javari Shopping — AI Product Discovery", description: "Complete javari-shopping: natural language product search across Amazon/Walmart/Target, price drop tracker, deal alert system, product review summarizer, comparison tool, and browser extension for price checking." },
-      { title: "Javari Cover Letter — Job Application Accelerator", description: "Complete javari-cover-letter: job description to tailored cover letter in 30 seconds, company culture analyzer, follow-up email templates, salary negotiation script, LinkedIn message templates, and interview prep questions generator." },
-      { title: "Javari Business Formation — Start Your Business", description: "Complete javari-business-formation: LLC vs S-Corp vs C-Corp explainer, state-by-state formation guide, operating agreement template, EIN application walkthrough, registered agent finder, initial compliance checklist, and bank account opening guide." },
+      { title: "Universal notification system email SMS push", description: "Full NotificationOS: transactional email via Resend (welcome, password reset, subscription confirmation, invoice, task complete), SMS via Twilio (2FA, low credit alert, task done), browser push notifications. Preference center per user." },
+      { title: "Admin super dashboard complete all controls", description: "Super admin: user management (search, impersonate, ban, refund, grant credits), revenue overview real-time MRR/ARR, system health monitors, AI cost breakdown by model/task, error logs with stack traces, deployment status all repos, security event log." },
+      { title: "User analytics and behavior tracking GDPR", description: "Analytics: page views, feature usage heatmap, tool completion rates, conversion funnel signup to paid, cohort retention analysis, NPS survey automation, churn prediction score per user. All GDPR-compliant. Consent management." },
+      { title: "CRAIverse virtual world foundation MVP", description: "CRAIverse MVP: user avatar creation (select from AvatarOS), personal space/room customization, social feed, avatar-to-avatar messaging, virtual marketplace stalls, community events calendar, geographic targeting (Fort Myers hub first), XP and achievement system." },
+      { title: "Mobile app React Native foundation iOS Android", description: "Mobile app (iOS plus Android): login/signup, Javari chat, tool launcher, notification center, credit balance, quick create (social post, image caption, voice transcribe). Push notifications. Biometric auth. App Store and Play Store submission." },
+      { title: "API public developer platform with docs", description: "Public API: RESTful plus GraphQL endpoints for core Javari functions. API key management portal. Rate limiting tiers. Interactive API docs (Swagger/Redoc). SDKs: JavaScript, Python, PHP. Webhook subscriptions. Usage dashboard for developers." },
+      { title: "White label enterprise solution package", description: "White-label package: custom domain, custom branding (logo, colors, fonts), custom AI persona name and voice, custom tool selection, user management, SSO integration, custom pricing, dedicated support channel. Pricing: $499/mo base plus $5/seat." },
+      { title: "SEO and content marketing engine complete", description: "SEO infrastructure: sitemap generation, schema markup, meta tag optimization per page, blog platform with AI-assisted content, keyword tracking, Google Search Console integration, page speed optimization, Core Web Vitals monitoring, automated SEO reports." },
+      { title: "CRAIverse location-based community modules", description: "Geographic targeting: users opt-in location, see nearby creators and businesses, local event listings, local business directory with Javari AI integration offers, neighborhood groups, local marketplace, geofenced notifications for Fort Myers and Cape Coral pilot." },
+      { title: "Javari Academy training and certification ecosystem", description: "Javari Academy: 60+ certification courses on using the platform (Creator Certification, AI Marketing Pro, Business Automation Specialist, Nonprofit AI Navigator). AI-delivered by Amara avatar. Quizzes, badges, LinkedIn-shareable certificates. Revenue: $97-$997 per cert." },
     ]
   },
   {
-    phase: "entertainment_gaming", priority: 2,
+    phase: "branding_and_ux", priority: 2,
     tasks: [
-      { title: "Games Hub — Library of 1200 Titles", description: "Launch javari-games-hub: full game library browser, category filtering (arcade, puzzle, strategy, sports, word, trivia), search, favorites, recent plays, leaderboards, and credit-free play on free tier with premium games for paid tiers." },
-      { title: "Game Studio — Create and Publish Games", description: "Complete javari-game-studio: AI-assisted game design tool, simple game builder (choose mechanics, generate code, test, publish), monetization options for game creators, and featured game spotlight." },
-      { title: "Javari Arena — Competitive Gaming Platform", description: "Complete javari-arena: tournament bracket builder, multiplayer game rooms, live leaderboards, achievement badges, prize pool management in credits, spectator mode, and weekly challenge events." },
-      { title: "Disney Vault — Entertainment Intelligence", description: "Complete javari-disney-vault: Disney film and show database, franchise timeline explorer, collectible value tracker, trivia engine, watchlist manager, and theme park planning assistant." },
-      { title: "Movie Intelligence Platform", description: "Complete javari-movie: AI-powered movie recommender from mood/genre/actors, streaming availability checker across all platforms, box office tracker, review aggregator, watchlist with friends, and upcoming release calendar." },
-      { title: "News Intelligence — Bias-Free Multi-Source", description: "Complete javari-news: multi-source news aggregator, AI bias meter, topic deep-dive with 5+ sources, fact-check integration, trending topics, personalized feed, and daily briefing email." },
-      { title: "Javari TV — Streaming Guide and Discovery", description: "Complete javari-tv: universal streaming guide, AI show recommender, binge-watch planner, episode tracker, cast and crew explorer, and hidden gems surfacer from all platforms." },
-      { title: "Javari Entertainment — Events and Experiences", description: "Complete javari-entertainment: local event finder, ticket price tracker, group planning coordinator, event recap generator, and social sharing with AI-written event summaries." },
+      { title: "Unified design system across all repos", description: "Create and enforce consistent design system: color tokens (Javari Blue #3B82F6, slate-950 BG, slate-900 cards), typography (Inter font), spacing scale, component library in javari-components repo. Apply across all 100 repos. Visual consistency throughout." },
+      { title: "Homepage javariai.com complete redesign hero", description: "Homepage: hero with animated Javari avatar plus dynamic text rotation (Your AI Creative Partner, Your Story Our Design, Build Anything Automate Everything), feature grid, social proof strip, pricing preview, mission statement section, full footer." },
+      { title: "Onboarding email sequence 10 email complete", description: "Onboarding sequence: Day 0 Welcome, Day 1 Try first tool, Day 3 Meet Javari avatar video, Day 5 First week recap, Day 7 Upgrade prompt if free, Day 14 Success story and community invite, Day 21 Power user tips, Day 30 Review request and referral ask." },
+      { title: "In-app tooltips and feature discovery system", description: "Tooltip system: first-time user popovers for every major feature, skippable tours, What is this hover tooltips on every icon, contextual help panel, video walkthroughs accessible from question mark icon, feature announcements for new releases, changelog accessible from footer." },
+      { title: "Error pages and empty states all branded Javari", description: "Branded experiences: 404 page with Javari avatar saying Oops I looked everywhere, 500 page with I am working on it plus status page link, empty state for every data table with helpful CTA, loading skeletons matching content shape, optimistic UI for all mutations." },
+      { title: "Social media presence brand kit and templates", description: "Social media kit: Javari brand voice guide (Helpful Warm Direct Never corporate), 30 days of social posts for launch, post templates for every tool announcement, testimonial graphic templates, animated story templates for Instagram/TikTok." },
+      { title: "Partner and press kit complete professional", description: "Press kit at javariai.com/press: company overview, founder bios (Roy plus Cindy), product screenshots high-res, logo files all formats, mission statement, key stats, contact for press inquiries. Partner kit: integration documentation, co-marketing templates, revenue share overview." },
+      { title: "Accessibility audit WCAG 2.2 AA full platform", description: "Accessibility pass: keyboard navigation all interactive elements, ARIA labels all icons, color contrast check all text (4.5:1 minimum), alt text all images, focus indicators visible, screen reader testing VoiceOver plus NVDA, skip navigation link, accessible error messages." },
     ]
   },
   {
-    phase: "craiversse_virtual_world", priority: 3,
+    phase: "collector_apps", priority: 3,
     tasks: [
-      { title: "CRAIverse — Virtual World Foundation", description: "Build the CRAIverse foundation: 3D web environment via Three.js/Babylon.js, avatar movement and interaction, virtual meeting rooms, community zones (Veterans District, Faith Quarter, Creator Hub, Business Center, Social Impact Plaza), and world map UI." },
-      { title: "CRAIverse Avatar Creator — Full Customization", description: "Complete avatar creator: face shape, skin tone, hair, eyes, clothing, accessories, body type. AI-suggested looks based on personality quiz. Avatar metadata generation. Multiple avatar slots per account." },
-      { title: "CRAIverse Real Estate — Virtual Properties", description: "Virtual real estate system: plot map of CRAIverse, plot purchase with credits, building tools for plot owners, storefront builder, event venue rental, and leaderboard of most-visited properties." },
-      { title: "CRAIverse Community Modules — 20 Social Zones", description: "Build all 20 CRAIverse community zones: Veterans Plaza, First Responder Station, Faith Garden, Animal Rescue Shelter, Creator Studio, Business District, Education Campus, Health Clinic, Family Park, Elder Village, LGBTQ+ Commons, Nonprofit Row, Fitness Center, Music Stage, Game Arcade, Travel Agency, Sports Arena, Marketplace Square, News Room, and Town Hall." },
-      { title: "CRAIverse Events — Live Virtual Experiences", description: "CRAIverse events platform: event creation in any zone, RSVP system, live streaming integration, virtual stage with AI MC, attendance rewards in credits, and post-event recap generation." },
-      { title: "CRAIverse Economy — Credit Ecosystem in World", description: "In-world economy: earn credits by attending events, helping others, creating content, and completing challenges. Spend credits on virtual goods, services, and platform subscriptions. Full credit ledger integration." },
+      { title: "Javari Vinyl Vault record collector platform full", description: "Vinyl platform: Discogs API integration for catalog search, personal collection tracker, want list, condition grader with AI photo analysis, value estimator, trade board, nearest record stores map, new release alerts, artist discography explorer, affiliate links." },
+      { title: "Javari Watch Works horology platform full", description: "Watch platform: personal collection tracker with value tracking, service history log, authentication guide, market price monitor (Chrono24 data), brand encyclopedia, movement identifier from photo, strap guide, insurance valuation export, affiliate links." },
+      { title: "Javari Card Vault trading cards platform full", description: "Card vault: multi-category (Pokemon, Magic, Sports, YuGiOh), photo scanning with AI card identification, PSA/BGS grading lookup, market price (TCGPlayer, eBay sold), portfolio value tracker, want/trade lists, bulk import from CSV, insurance export." },
+      { title: "Javari MTG Manager Magic the Gathering full", description: "MTG Manager: deck builder with legality checker, card search with Scryfall API, collection tracker, draft simulator, price tracker with alerts, tournament record keeper, meta analysis dashboard, trade calculator, proxy printer for casual play." },
+      { title: "Javari Militaria Vault collector platform full", description: "Militaria platform: item catalog by era/country/type, authentication guides, valuation reference, preservation guides, museum donation options, research tools, auction house directory, fellow collector network, educational history context for each item type." },
+      { title: "Javari Outdoors adventure platform full", description: "Outdoors hub: trail finder (AllTrails integration), gear checklist builder, campsite locator, weather integration, trip journal, photo map, group trip planner, LNT education, permit system links. Affiliate: REI, Backcountry, gear reviews by AI." },
+      { title: "Javari Movie AI film platform full", description: "Movie platform: personalized recommendations (quiz-based taste profile), watch history tracker, movie night picker for groups via link, film analysis AI (themes, cinematography, director style), watchlist cross all streaming services, friends activity feed." },
+      { title: "Javari Pets care and adoption platform full", description: "Pets platform: pet profile manager (health records, vet appointments, medications, weight), breed guide AI, symptom checker non-medical, local vet finder, pet-friendly places map, lost pet alert network, breed matcher quiz. Affiliate: Chewy, PetSmart, pet insurance." },
     ]
   },
   {
-    phase: "developer_ecosystem", priority: 3,
+    phase: "business_verticals", priority: 3,
     tasks: [
-      { title: "Public API — Javari AI for Developers", description: "Launch the Javari public API: REST endpoints for all core tools, API key management dashboard, rate limiting by tier, usage analytics, webhook delivery, OpenAPI 3.0 spec, interactive API explorer, and code examples in 6 languages." },
-      { title: "MCP Server — Javari as Claude Extension", description: "Build official Javari MCP server: expose all tools as MCP endpoints, OAuth2 authentication, rate limiting, and publish to Claude.ai connector directory. Instant distribution to millions of Claude users." },
-      { title: "Zapier and Make Integration", description: "Build Zapier app and Make module: triggers for new content generated, new user signup, credit low-balance, and new marketplace sale. Actions for run any tool, send notification, create user, and grant credits." },
-      { title: "Chrome Extension — Javari Everywhere", description: "Build Javari Chrome extension: right-click to run any tool on selected text, floating chat bubble on any page, auto-fill with AI on forms, LinkedIn profile enhancer, and one-click save to Javari scrapbook." },
-      { title: "WordPress Plugin — AI for Every Website", description: "WordPress plugin: Javari AI chat widget embed, content generation from within WP editor, image generation, SEO meta writer, and plugin settings panel. Listed on WordPress.org — free with paid tier upgrades." },
-      { title: "Shopify App — AI for E-Commerce", description: "Shopify app: AI product description writer, background removal for product photos, SEO meta optimizer, customer review summarizer, and inventory description bulk generator. Listed on Shopify App Store." },
-      { title: "SDK — JavaScript and Python Libraries", description: "Official Javari SDK: javari-js and javari-python packages on npm and PyPI. Full type definitions, streaming support, error handling, retry logic, and comprehensive documentation with examples for every tool." },
+      { title: "Javari Construction project management platform", description: "Construction platform: project timeline builder, material estimator with current pricing, subcontractor directory, permit checklist by state, change order generator, lien waiver templates, invoice system, photo documentation with AI progress notes, client portal." },
+      { title: "Javari Manufacturing operations platform full", description: "Manufacturing platform: production planning tools, BOM bill of materials builder, supplier management, quality control checklist system, ISO documentation templates, equipment maintenance tracker, inventory management, shift scheduling, compliance documentation." },
+      { title: "Javari Supply Chain intelligence platform full", description: "Supply chain platform: supplier risk assessment, lead time tracker, inventory optimization calculator, demand forecasting AI, disruption alert system, alternative supplier finder, trade compliance checker, logistics cost calculator, ESG supplier scoring." },
+      { title: "Javari HR and Workforce platform full", description: "HR platform: job description AI writer, interview question generator by role, offer letter templates, onboarding checklist builder, performance review generator, PIP documentation, org chart builder, employee handbook generator, exit interview form." },
+      { title: "Javari Business Formation full stack", description: "Business formation: entity type selector quiz, state-by-state filing guide, registered agent finder, EIN application walkthrough, operating agreement generator, first-year compliance calendar, business bank account comparison, bookkeeper finder." },
+      { title: "Javari Insurance comparison and guidance full", description: "Insurance platform: coverage needs calculator (business, health, life, auto, home), comparison engine pulling live quotes, policy plain-English explainer, claim documentation guide, renewal reminder system. Affiliate: Next Insurance, Hiscox, Lemonade, Policygenius." },
+      { title: "Javari Property Hub real estate management full", description: "Property management: rental income tracker, expense categorization, maintenance request system, lease generator, tenant screening checklist, rent increase calculator, depreciation schedule, Schedule E preparation guide, cap rate calculator, local property manager finder." },
+      { title: "Javari Home Services contractor platform full", description: "Home services: project cost estimator by type and zip code, licensed contractor finder, project scope document generator, payment milestone schedule, lien waiver templates, warranty tracker, home maintenance calendar, emergency contact list builder." },
+      { title: "Javari Business Admin operations suite full", description: "Business admin tools: meeting agenda builder, decision log tracker, OKR framework builder, team communication templates, vendor management tracker, expense report generator, board meeting minutes AI writer, company overview one-pager generator." },
+      { title: "Javari Intel competitive intelligence platform full", description: "Market intelligence: competitor monitoring (website changes, job postings, press releases), keyword rank tracker, social mention monitoring, pricing change alerts, patent filing tracker, funding announcement alerts, industry news digest, opportunity scoring dashboard." },
     ]
   },
   {
-    phase: "training_certification", priority: 2,
+    phase: "launch_and_scale", priority: 1,
     tasks: [
-      { title: "Amara AI — Training Delivery Officer", description: "Build Amara AI: personalized learning assistant, course recommender based on goals, progress tracker, quiz generator, certificate issuer, and study schedule builder. Amara is the face of the Javari Academy." },
-      { title: "Javari Academy — 60 Certification Programs", description: "Build the full course platform: video lesson player, transcript and notes, downloadable resources, progress checkpoints, final exam with AI grading, digital certificate with blockchain verification, and LinkedIn badge integration." },
-      { title: "AI Mastery Certification Track", description: "Build 12-module AI Mastery course: prompt engineering, multi-model routing, agent design, RAG systems, fine-tuning basics, ethics and safety, business applications, and capstone project. $497 individual, $2,000 corporate bundle." },
-      { title: "Creator Economy Certification Track", description: "Build 8-module Creator Economy course: brand building, content strategy, monetization models, audience growth, product creation, marketplace success, partnership outreach, and scaling systems. $297 individual." },
-      { title: "Business Formation and Operations Track", description: "Build 6-module business course: entity formation, bookkeeping basics, marketing fundamentals, hiring first employee, sales systems, and financial planning. $197 individual. Targets new entrepreneurs." },
-      { title: "Social Impact Leadership Track", description: "Build 8-module nonprofit and social impact course: grant writing, volunteer management, impact measurement, donor cultivation, board development, program evaluation, storytelling for impact, and sustainability planning. $497 for nonprofits, free for qualifying organizations." },
-      { title: "Corporate Training Portal — Enterprise Revenue", description: "Enterprise training portal: bulk seat purchases, custom learning paths, progress reporting for managers, completion certificates, LMS integration (SCORM export), and white-label option. $5,000-50,000/year contracts." },
+      { title: "All app URL structure and cross-linking complete", description: "Navigation architecture: every app has consistent header with Javari logo, back to dashboard link, account menu. Apps cross-link to related tools. Tool suggestions sidebar in all apps. Breadcrumb navigation. URL structure: /tools/[tool-name], /apps/[app-name]." },
+      { title: "Universal search across entire platform", description: "Universal search: one search bar in header searches across tools, apps, marketplace listings, help docs, projects, and conversation history. Keyboard shortcut Cmd+K. Recent searches. Popular searches. AI-suggested search refinements." },
+      { title: "Help center and documentation 200 articles", description: "Help center: searchable knowledge base with 200+ articles (how-to guides, video walkthroughs, troubleshooting), AI chat assistant trained on all docs, community forum, feature request board, bug report form, status page uptime monitoring, changelog with email subscription." },
+      { title: "Performance optimization all critical paths Lighthouse 90", description: "Performance pass: critical CSS inlined, images lazy-loaded with blur placeholder, API routes under 200ms p95, homepage LCP under 2.5s, Lighthouse score 90+ all pages. Vercel Edge Runtime for auth and middleware. Redis caching for expensive queries." },
+      { title: "Security hardening OWASP full audit complete", description: "Security audit: rate limiting on all API routes, CSRF protection, input sanitization, file upload virus scanning, API key rotation procedure, penetration test checklist, CSP headers, HSTS, security.txt. SOC2 readiness assessment." },
+      { title: "Multi-language support foundation Spanish Portuguese", description: "i18n foundation: extract all UI strings to locale files, implement next-intl, detect browser language, language switcher in settings. Initial languages: English, Spanish (large US Hispanic market), Portuguese (Brazil opportunity). AI translation review pipeline." },
+      { title: "Sitemap and SEO infrastructure all apps", description: "SEO infrastructure: sitemap.xml generated from all public routes, robots.txt configured, OpenGraph tags all pages, Twitter cards, structured data (Organization, SoftwareApplication, Offer schemas), canonical URLs, hreflang for multilingual." },
+      { title: "Product Hunt and launch campaign full execution", description: "Launch execution: Product Hunt launch (Roy as maker, full description, gallery, 50 upvotes seeded from network), Hacker News Show HN post, TechCrunch/VentureBeat press pitch (Cindy leads), Twitter/X launch thread, LinkedIn announcement, email blast to waitlist." },
     ]
-  },
-  {
-    phase: "mobile_apps", priority: 3,
-    tasks: [
-      { title: "Javari Mobile — React Native Foundation", description: "Build React Native foundation: shared component library, Supabase auth integration, push notification setup, offline capability via SQLite cache, deep linking for all major routes, and App Store / Google Play submission pipeline." },
-      { title: "Mobile Javari AI Chat — On-the-Go Intelligence", description: "Native chat interface: voice input via device microphone, camera capture for image analysis, swipe navigation, notification-driven conversation resume, and widget for quick prompt from home screen." },
-      { title: "Mobile Creator Tools — Create Anywhere", description: "Mobile-optimized creator tools: quick caption generator, photo background remover using device camera, voice-to-blog-post, quick invoice creator, and QR code generator. All running in under 3 seconds on 4G." },
-      { title: "Mobile CRAIverse App — Virtual World on Mobile", description: "CRAIverse mobile client: avatar navigation, community zone browsing, event attendance, credit wallet, push notifications for zone events, and social feed from all zones." },
-    ]
-  },
-  {
-    phase: "branding_marketing", priority: 1,
-    tasks: [
-      { title: "Brand Identity System — Every App Cohesive", description: "Build the master brand system: Javari AI brand guide (colors, typography, voice, tone), sub-brand identity for every vertical app, icon family (100+ custom icons), illustration library, and Figma component kit. Every app looks like it belongs to the same world." },
-      { title: "craudiovizai.com — Marketing Site Rebuild", description: "Complete marketing site rebuild: above-the-fold with animated Javari avatar, social proof counters, video demo embed, pricing section, trust badges, testimonials, and live chat widget." },
-      { title: "javariai.com — Product Marketing Page", description: "Javari AI dedicated marketing page: hero with demo GIF, feature breakdown, use case stories, pricing, FAQ, and comparison table vs ChatGPT/Claude/Gemini." },
-      { title: "SEO Foundation — 1000 Indexed Pages", description: "SEO system: dynamic sitemap generation for all tools and modules, meta tag automation from content, schema markup, canonical URLs, 301 redirect manager, and page speed optimization to 95+ Lighthouse score." },
-      { title: "Blog and Content Engine — Thought Leadership", description: "Launch Javari blog: AI-assisted article writer, topic cluster strategy (AI tools, social impact, creator economy, business automation), 50 seed articles at launch, newsletter signup, RSS feed, and social auto-share on publish." },
-      { title: "Testimonials and Social Proof Engine", description: "Build social proof system: in-app testimonial collector, video testimonial request flow, star rating widgets, G2/Trustpilot integration, live counter widgets, and case study template." },
-      { title: "Landing Pages — Vertical-Specific Acquisition", description: "Build 20 targeted landing pages: one per major vertical. Each with: problem-solution-proof-CTA structure, Javari AI demo, and tracked conversion funnel." },
-      { title: "Referral and Viral Growth Engine", description: "Build viral loops: referral link generator, shareable achievement badges, tool output share cards, and beta tester community with early access perks." },
-    ]
-  },
-  {
-    phase: "infrastructure_security", priority: 1,
-    tasks: [
-      { title: "BackupOS — Daily Restore Points", description: "Automated daily backups: pg_dump via Supabase edge function, AES-256 encrypted to R2, 30-day retention with integrity hash verification, one-click restore procedure, and weekly restore drill automation." },
-      { title: "ObservabilityOS — Full Platform Monitoring", description: "Complete observability: Sentry error tracking on all repos, Vercel log drain, custom metrics dashboard (latency P50/P95/P99, error rate, credit consumption), uptime monitoring with alerting, and weekly health report." },
-      { title: "Rate Limiting and DDoS Protection", description: "Platform protection: per-IP rate limiting on all API routes, per-user credit burn rate limiting, Cloudflare WAF rules, bot detection, and automatic IP blocking with manual override in admin panel." },
-      { title: "GDPR and CCPA Compliance Engine", description: "Privacy compliance: data export endpoint, account deletion with 30-day grace period, cookie consent management, privacy policy version control, data processing agreement (DPA) for enterprise, and consent audit trail." },
-      { title: "SOC 2 Type II Readiness", description: "Build SOC 2 readiness: access control documentation, change management log, incident response playbook, security training tracking, penetration test scheduling, and vendor security assessment program." },
-      { title: "Multi-Region Deployment — US and EU", description: "Geographic expansion: EU deployment on Vercel (Frankfurt), EU Supabase project for GDPR compliance, latency-based routing, data residency controls, and EU-specific privacy disclosures." },
-      { title: "Performance Optimization — Sub-100ms Global", description: "Performance engineering: edge caching for all static tools, API response caching, image CDN via Cloudflare, bundle size reduction (target sub-200kb first load), and Core Web Vitals green across all pages." },
-    ]
-  },
+  }
 ];
 
 export async function POST(req: NextRequest) {
-  try {
-    const { force = false } = await req.json().catch(() => ({}));
-    
-    let idx = 0;
-    const allRows: {
-      id: string; phase_id: string; title: string; description: string;
-      depends_on: string[]; status: string; source: string; updated_at: number;
-    }[] = [];
-    
-    for (const phaseDef of ROADMAP) {
-      for (const t of phaseDef.tasks) {
-        allRows.push({
-          id: taskId(phaseDef.phase, t.title, idx++),
-          phase_id: phaseDef.phase,
-          title: t.title,
-          description: t.description,
-          depends_on: [],
-          status: "pending",
-          source: "roadmap_v4",
-          updated_at: Date.now(),
-        });
-      }
-    }
-
-    const { data: existing } = await supabase
-      .from("roadmap_tasks").select("title");
-    const existingTitles = new Set((existing ?? []).map((r: { title: string }) => r.title));
-
-    const toInsert = force
-      ? allRows
-      : allRows.filter((r) => !existingTitles.has(r.title));
-
-    let inserted = 0, skipped = allRows.length - toInsert.length, failed = 0;
-    let firstError: string | null = null;
-    const BATCH = 20;
-    for (let i = 0; i < toInsert.length; i += BATCH) {
-      const batch = toInsert.slice(i, i + BATCH);
-      const { error } = await supabase.from("roadmap_tasks").upsert(batch, { onConflict: "id" });
-      if (error) { failed += batch.length; if (!firstError) firstError = error.message; }
-      else { inserted += batch.length; }
-    }
-
-    return NextResponse.json({
-      ok: failed === 0,
-      version: "v4.0",
-      phases: ROADMAP.length,
-      totalDefined: allRows.length,
-      inserted,
-      skipped,
-      failed,
-      firstError,
-      phases_list: ROADMAP.map(p => ({ phase: p.phase, tasks: p.tasks.length })),
-    });
-  } catch (err) {
-    return NextResponse.json({ ok: false, error: String(err) }, { status: 500 });
+  // Simple auth check
+  const secret = req.headers.get("x-ingest-secret");
+  if (secret !== "henderson-standard-2026") {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+
+  let idx = 0;
+  const allRows = [];
+
+  for (const phase of ROADMAP) {
+    for (const t of phase.tasks) {
+      allRows.push({
+        id:          taskId(phase.phase, t.title, idx++),
+        phase_id:    phase.phase,
+        title:       t.title,
+        description: t.description,
+        depends_on:  [] as string[],
+        status:      "pending" as const,
+        source:      "roadmap",
+        updated_at:  Date.now(),
+      });
+    }
+  }
+
+  // Deduplicate by title
+  const { data: existing } = await supabase
+    .from("roadmap_tasks")
+    .select("title");
+
+  const existingTitles = new Set((existing ?? []).map((r: { title: string }) => r.title));
+  const toInsert = allRows.filter(r => !existingTitles.has(r.title));
+
+  const insertLogs: string[] = [];
+  const failed: string[] = [];
+
+  for (const row of toInsert) {
+    const { error } = await supabase.from("roadmap_tasks").upsert(row, {
+      onConflict: "id",
+      ignoreDuplicates: false,
+    });
+    if (error) {
+      failed.push(`${row.title}: ${error.message}`);
+    } else {
+      insertLogs.push(row.title);
+    }
+  }
+
+  return NextResponse.json({
+    ok:           true,
+    total:        allRows.length,
+    inserted:     insertLogs.length,
+    skipped:      allRows.length - toInsert.length,
+    failed:       failed.length,
+    failed_items: failed.slice(0, 5),
+    phases:       [...new Set(allRows.map(r => r.phase_id))],
+    message:      `Henderson Standard Master Ecosystem Roadmap — ${insertLogs.length} tasks queued`,
+  });
+}
+
+export async function GET() {
+  const { data, error } = await supabase
+    .from("roadmap_tasks")
+    .select("phase_id, status")
+    .order("phase_id");
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  const summary: Record<string, Record<string, number>> = {};
+  for (const row of data ?? []) {
+    if (!summary[row.phase_id]) summary[row.phase_id] = {};
+    summary[row.phase_id][row.status] = (summary[row.phase_id][row.status] ?? 0) + 1;
+  }
+
+  return NextResponse.json({ phases: summary, total: data?.length ?? 0 });
 }
