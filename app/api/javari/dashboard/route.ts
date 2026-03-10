@@ -139,17 +139,30 @@ export async function GET() {
       etaMinutes = Math.round((remaining / tasksLastHour) * 60);
     }
 
-    // ── 6. Artifacts ─────────────────────────────────────────────────────────
-    const { data: artRows, error: artErr } = await client
-      .from("task_artifacts")
-      .select("artifact_type");
-
+    // ── 6. Artifacts — try both table names ──────────────────────────────────
     let artifactsByType: Record<string, number> = {};
     let artifactTotal = 0;
-    if (!artErr && artRows) {
+
+    // Primary: roadmap_task_artifacts
+    const { data: artRows, error: artErr } = await client
+      .from("roadmap_task_artifacts")
+      .select("artifact_type");
+
+    if (!artErr && artRows && artRows.length > 0) {
       for (const a of artRows as ArtifactRow[]) {
         artifactsByType[a.artifact_type] = (artifactsByType[a.artifact_type] ?? 0) + 1;
         artifactTotal++;
+      }
+    } else {
+      // Fallback: task_artifacts
+      const { data: artRows2, error: artErr2 } = await client
+        .from("task_artifacts")
+        .select("artifact_type");
+      if (!artErr2 && artRows2) {
+        for (const a of artRows2 as ArtifactRow[]) {
+          artifactsByType[a.artifact_type] = (artifactsByType[a.artifact_type] ?? 0) + 1;
+          artifactTotal++;
+        }
       }
     }
 
