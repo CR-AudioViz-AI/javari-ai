@@ -1,12 +1,13 @@
 // lib/planner/autonomousPlanner.ts
-// Purpose: Javari Autonomous Planner — generates its own roadmap tasks without human input.
+// Purpose: Javari Autonomous Planner — generates roadmap tasks without human input.
 //          Triggered automatically by runRoadmapWorker when pending tasks drop below
 //          PLANNER_TRIGGER_THRESHOLD (10). Calls Anthropic API to produce 50 contextually
-//          relevant tasks based on completed work, platform goals, and category coverage gaps.
+//          relevant tasks based on completed work, platform goals, canonical docs,
+//          and knowledge graph nodes (ecosystem mode).
 //
 // Schema contract:
 //   id          : "ap-{phase}-{slug}-{index}" — planner-generated IDs
-//   source      : "planner"  (distinct from "roadmap" used by manual ingests)
+//   source      : "planner"  (distinct from "roadmap" and "canonical_discovery")
 //   status      : "pending"
 //   depends_on  : []         (no cross-task deps — planner tasks are always self-contained)
 //
@@ -65,6 +66,10 @@ export interface PlannerResult {
   skipped:      number;        // duplicates skipped
   errors:       string[];
   durationMs:   number;
+  canonicalContext?: {         // present when canonical corpus was used
+    docsRead:  number;
+    nodesRead: number;
+  };
 }
 
 // ── Supabase ──────────────────────────────────────────────────────────────────
@@ -91,29 +96,31 @@ function plannerTaskId(phase: string, title: string, idx: number): string {
 }
 
 // ── Context builder ───────────────────────────────────────────────────────────
-// Summarises what has already been completed so the AI can generate
-// genuinely new tasks rather than repeating prior work.
+// Builds execution context + canonical corpus context for AI task generation.
 
-async function buildContext(): Promise<{
+interface PlannerContext {
   completedTitles:  string[];
   completedByPhase: Record<string, number>;
   pendingTitles:    string[];
   allTitles:        Set<string>;
-}> {
+  canonicalDocs:    Array<{ title: string; content: string }>;
+  knowledgeNodes:   Array<{ label: string; node_type: string; description?: string }>;
+}
+
+async function buildContext(): Promise<PlannerContext> {
   const client = db();
 
-  const { data: completed } = await client
-    .from("roadmap_tasks")
-    .select("title, phase_id")
-    .eq("status", "completed");
+  const [completedRes, pendingRes, canonicalRes, nodesRes] = await Promise.all([
+    client.from("roadmap_tasks").select("title, phase_id").eq("status", "completed"),
+    client.from("roadmap_tasks").select("title").eq("status", "pending"),
+    client.from("canonical_docs").select("title, content").limit(15),
+    client.from("knowledge_graph_nodes").select("label, node_type, description").limit(40),
+  ]);
 
-  const { data: pending } = await client
-    .from("roadmap_tasks")
-    .select("title")
-    .eq("status", "pending");
-
-  const completedRows = (completed ?? []) as { title: string; phase_id: string }[];
-  const pendingRows   = (pending   ?? []) as { title: string }[];
+  const completedRows = (completedRes.data ?? []) as { title: string; phase_id: string }[];
+  const pendingRows   = (pendingRes.data   ?? []) as { title: string }[];
+  const canonicalDocs = (canonicalRes.data ?? []) as { title: string; content: string }[];
+  const knowledgeNodes = (nodesRes.data    ?? []) as { label: string; node_type: string; description?: string }[];
 
   const completedByPhase: Record<string, number> = {};
   for (const r of completedRows) {
@@ -124,7 +131,7 @@ async function buildContext(): Promise<{
   const pendingTitles   = pendingRows.map(r => r.title);
   const allTitles       = new Set([...completedTitles, ...pendingTitles]);
 
-  return { completedTitles, completedByPhase, pendingTitles, allTitles };
+  return { completedTitles, completedByPhase, pendingTitles, allTitles, canonicalDocs, knowledgeNodes };
 }
 
 // ── AI task generation ────────────────────────────────────────────────────────
@@ -136,11 +143,9 @@ interface AITaskDraft {
 }
 
 async function generateTasksViaAI(
-  completedByPhase: Record<string, number>,
-  completedTitles:  string[],
-  pendingTitles:    string[],
-  targetCount:      number,
-  log:              (m: string) => void,
+  context:     PlannerContext,
+  targetCount: number,
+  log:         (m: string) => void,
 ): Promise<AITaskDraft[]> {
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -149,13 +154,27 @@ async function generateTasksViaAI(
     return [];
   }
 
-  // Build a compact context summary (keep prompt size reasonable)
-  const completedSample = completedTitles.slice(-60).join("\n");
-  const pendingSample   = pendingTitles.slice(0, 20).join("\n");
+  const completedSample = context.completedTitles.slice(-60).join("\n");
+  const pendingSample   = context.pendingTitles.slice(0, 20).join("\n");
 
   const phaseBreakdown = CATEGORIES.map(c =>
-    `  ${c}: ${completedByPhase[c] ?? 0} completed`
+    `  ${c}: ${context.completedByPhase[c] ?? 0} completed`
   ).join("\n");
+
+  // Build canonical corpus section
+  const canonicalSection = context.canonicalDocs.length > 0
+    ? `\nCANONICAL DOCUMENTATION (derive tasks directly from these):\n` +
+      context.canonicalDocs
+        .map(d => `[${d.title}]: ${(d.content ?? "").slice(0, 250)}`)
+        .join("\n\n")
+    : "";
+
+  const knowledgeSection = context.knowledgeNodes.length > 0
+    ? `\nKNOWLEDGE GRAPH NODES (platform components to build around):\n` +
+      context.knowledgeNodes
+        .map(n => `${n.node_type}: ${n.label}${n.description ? ` — ${n.description.slice(0, 80)}` : ""}`)
+        .join("\n")
+    : "";
 
   const systemPrompt = `You are the Javari Autonomous Planner for CR AudioViz AI — a Fortune 50-quality AI platform serving creators, businesses, veterans, first responders, faith communities, and animal rescues.
 
@@ -170,10 +189,11 @@ RULES:
 4. title must be unique — never duplicate any completed or pending title listed below
 5. description must be 2-4 sentences, technically specific, actionable, and production-quality
 6. Distribute tasks across ALL 10 categories (aim for ~5 per category)
-7. Build on completed work — advance each category to the next logical level
-8. No vague tasks. Every task must produce a concrete deliverable.
+7. When canonical documentation is provided, derive tasks DIRECTLY from it — build what the docs describe
+8. When knowledge graph nodes are provided, generate tasks that implement or extend those components
+9. No vague tasks. Every task must produce a concrete, deployable deliverable.
 
-JSON FORMAT (array of objects):
+JSON FORMAT:
 [
   {
     "phase_id": "ai_marketplace",
@@ -184,8 +204,10 @@ JSON FORMAT (array of objects):
 
   const userPrompt = `COMPLETED TASKS BY CATEGORY:
 ${phaseBreakdown}
+${canonicalSection}
+${knowledgeSection}
 
-RECENT COMPLETED TITLES (last 60, avoid repeating these):
+RECENT COMPLETED TITLES (last 60, avoid repeating):
 ${completedSample}
 
 CURRENTLY PENDING (do not duplicate):
@@ -193,7 +215,7 @@ ${pendingSample}
 
 Generate exactly ${targetCount} new tasks as a JSON array. Return ONLY the JSON array. No other text.`;
 
-  log(`[planner] Calling Anthropic API — requesting ${targetCount} tasks`);
+  log(`[planner] Calling Anthropic API — requesting ${targetCount} tasks (ecosystem mode, canonical=${context.canonicalDocs.length} docs, nodes=${context.knowledgeNodes.length})`);
 
   let raw = "";
   try {
@@ -279,8 +301,9 @@ Generate exactly ${targetCount} new tasks as a JSON array. Return ONLY the JSON 
  *
  * Called by runRoadmapWorker when pending task count drops below
  * PLANNER_TRIGGER_THRESHOLD. Generates PLANNER_BATCH_SIZE new tasks
- * using the Anthropic API, deduplicates against all existing titles,
- * and inserts the survivors into roadmap_tasks.
+ * using the Anthropic API with canonical corpus context (ecosystem mode),
+ * deduplicates against all existing titles, and inserts survivors into
+ * roadmap_tasks.
  *
  * Never throws. All errors captured in result.errors.
  */
@@ -290,7 +313,7 @@ export async function runAutonomousPlanner(): Promise<PlannerResult> {
   const log    = (m: string) => { console.log(m); };
 
   log("[planner] ══════════════════════════════════");
-  log("[planner] Autonomous Planner starting");
+  log("[planner] Autonomous Planner starting (ecosystem mode)");
 
   // ── Step 1: Count pending tasks ───────────────────────────────────────────
   const client = db();
@@ -316,11 +339,12 @@ export async function runAutonomousPlanner(): Promise<PlannerResult> {
 
   log(`[planner] ⚡ Threshold met (${pendingCount} < ${PLANNER_TRIGGER_THRESHOLD}) — generating ${PLANNER_BATCH_SIZE} tasks`);
 
-  // ── Step 2: Build context ─────────────────────────────────────────────────
-  let context: Awaited<ReturnType<typeof buildContext>>;
+  // ── Step 2: Build context (now includes canonical corpus) ─────────────────
+  let context: PlannerContext;
   try {
     context = await buildContext();
-    log(`[planner] Context: ${context.completedTitles.length} completed, ${context.pendingTitles.length} pending, ${context.allTitles.size} total titles`);
+    log(`[planner] Context: ${context.completedTitles.length} completed, ${context.pendingTitles.length} pending`);
+    log(`[planner] Canonical corpus: ${context.canonicalDocs.length} docs, ${context.knowledgeNodes.length} KG nodes`);
     for (const [cat, count] of Object.entries(context.completedByPhase).sort()) {
       log(`[planner]   ${cat}: ${count} completed`);
     }
@@ -331,11 +355,9 @@ export async function runAutonomousPlanner(): Promise<PlannerResult> {
     return { ok: false, triggered: true, pendingCount, generated: 0, inserted: 0, skipped: 0, errors, durationMs: Date.now() - t0 };
   }
 
-  // ── Step 3: Generate tasks via AI ─────────────────────────────────────────
+  // ── Step 3: Generate tasks via AI (with canonical context) ───────────────
   const drafts = await generateTasksViaAI(
-    context.completedByPhase,
-    context.completedTitles,
-    context.pendingTitles,
+    context,
     Math.min(PLANNER_BATCH_SIZE, PLANNER_MAX_TASKS),
     log,
   );
@@ -344,7 +366,11 @@ export async function runAutonomousPlanner(): Promise<PlannerResult> {
     const msg = "[planner] AI returned 0 valid tasks — aborting insert";
     log(msg);
     errors.push(msg);
-    return { ok: false, triggered: true, pendingCount, generated: 0, inserted: 0, skipped: 0, errors, durationMs: Date.now() - t0 };
+    return {
+      ok: false, triggered: true, pendingCount, generated: 0, inserted: 0, skipped: 0, errors,
+      durationMs: Date.now() - t0,
+      canonicalContext: { docsRead: context.canonicalDocs.length, nodesRead: context.knowledgeNodes.length },
+    };
   }
 
   // ── Step 4: Deduplicate ───────────────────────────────────────────────────
@@ -354,10 +380,8 @@ export async function runAutonomousPlanner(): Promise<PlannerResult> {
     .select("title");
   const freshTitles = new Set((freshRows ?? []).map((r: { title: string }) => r.title));
 
-  // Also deduplicate within the drafts themselves (AI may repeat)
   const seenTitles = new Set<string>();
   const toInsert: PlannedTask[] = [];
-
   const phaseCounters: Record<string, number> = {};
 
   for (const draft of drafts) {
@@ -372,15 +396,15 @@ export async function runAutonomousPlanner(): Promise<PlannerResult> {
     phaseCounters[phase] = idx + 1;
 
     toInsert.push({
-      id:         plannerTaskId(phase, draft.title, idx),
-      roadmap_id: null,
-      phase_id:   phase,
-      title:      draft.title,
+      id:          plannerTaskId(phase, draft.title, idx),
+      roadmap_id:  null,
+      phase_id:    phase,
+      title:       draft.title,
       description: draft.description,
-      depends_on: [],
-      status:     "pending",
-      source:     "planner",
-      updated_at: Math.floor(Date.now() / 1000),
+      depends_on:  [],
+      status:      "pending",
+      source:      "planner",
+      updated_at:  Math.floor(Date.now() / 1000),
     });
   }
 
@@ -391,7 +415,11 @@ export async function runAutonomousPlanner(): Promise<PlannerResult> {
     const msg = "[planner] All generated tasks were duplicates — nothing inserted";
     log(msg);
     errors.push(msg);
-    return { ok: false, triggered: true, pendingCount, generated: drafts.length, inserted: 0, skipped, errors, durationMs: Date.now() - t0 };
+    return {
+      ok: false, triggered: true, pendingCount, generated: drafts.length, inserted: 0, skipped, errors,
+      durationMs: Date.now() - t0,
+      canonicalContext: { docsRead: context.canonicalDocs.length, nodesRead: context.knowledgeNodes.length },
+    };
   }
 
   // ── Step 5: Insert in batches of 25 ──────────────────────────────────────
@@ -404,13 +432,10 @@ export async function runAutonomousPlanner(): Promise<PlannerResult> {
 
     if (insErr) {
       if (insErr.code === "23505" || insErr.message.includes("duplicate")) {
-        // Batch had a stale duplicate — insert one-by-one
         for (const row of batch) {
           const { error: e2 } = await client.from("roadmap_tasks").insert(row);
           if (e2) {
-            if (e2.code === "23505" || e2.message.includes("duplicate")) {
-              log(`[planner] SKIP (race-condition dup): ${row.title.slice(0, 60)}`);
-            } else {
+            if (!(e2.code === "23505" || e2.message.includes("duplicate"))) {
               const msg = `[planner] INSERT FAIL: ${row.title.slice(0, 60)} — ${e2.message}`;
               log(msg);
               errors.push(msg);
@@ -436,12 +461,14 @@ export async function runAutonomousPlanner(): Promise<PlannerResult> {
   // ── Step 6: Summary ───────────────────────────────────────────────────────
   const durationMs = Date.now() - t0;
   log(`[planner] ══ Run complete ══`);
-  log(`[planner]   triggered:  ${pendingCount} pending < ${PLANNER_TRIGGER_THRESHOLD}`);
-  log(`[planner]   generated:  ${drafts.length}`);
-  log(`[planner]   inserted:   ${inserted}`);
-  log(`[planner]   skipped:    ${skipped}`);
-  log(`[planner]   errors:     ${errors.length}`);
-  log(`[planner]   duration:   ${durationMs}ms`);
+  log(`[planner]   mode:        ecosystem`);
+  log(`[planner]   triggered:   ${pendingCount} pending < ${PLANNER_TRIGGER_THRESHOLD}`);
+  log(`[planner]   canonical:   ${context.canonicalDocs.length} docs, ${context.knowledgeNodes.length} nodes`);
+  log(`[planner]   generated:   ${drafts.length}`);
+  log(`[planner]   inserted:    ${inserted}`);
+  log(`[planner]   skipped:     ${skipped}`);
+  log(`[planner]   errors:      ${errors.length}`);
+  log(`[planner]   duration:    ${durationMs}ms`);
 
   return {
     ok:           errors.length === 0 && inserted > 0,
@@ -452,5 +479,6 @@ export async function runAutonomousPlanner(): Promise<PlannerResult> {
     skipped,
     errors,
     durationMs,
+    canonicalContext: { docsRead: context.canonicalDocs.length, nodesRead: context.knowledgeNodes.length },
   };
 }
