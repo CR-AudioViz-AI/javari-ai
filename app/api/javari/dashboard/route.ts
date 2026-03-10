@@ -30,6 +30,7 @@ interface VelocityRow     { bucket_hour: string; cnt: number }
 interface RecentTaskRow   { id: string; title: string; phase_id: string | null; source: string | null; updated_at: string | null }
 interface ArtifactRow     { artifact_type: string }
 interface ExecLogRow      { execution_id: string; task_id: string; model_used: string | null; cost: number | null; execution_time: number | null; status: string | null; timestamp: string | null }
+interface BuildArtifactRow { artifact_type: string; status: string; commit_sha: string | null; deployment_url: string | null }
 interface WorkerLogRow    { id: string; cycle_id: string | null; tasks_run: number | null; cost_usd: number | null; duration_ms: number | null; status: string | null; created_at: string | null }
 interface CanonicalDocRow { cnt: number }
 interface KGraphRow       { nodes: number; edges: number }
@@ -378,6 +379,35 @@ export async function GET() {
     const kgEdges         = kgEdgeRes.count        ?? 0;
     const lastIngestRun   = ingestRunRes.data?.[0] ?? null;
 
+
+    // ── 10b. Build artifact telemetry (Phase 9) ───────────────────────────────
+    let buildsRunning = 0;
+    let commitsCreated = 0;
+    let deploymentsLive = 0;
+    let modulesGenerated = 0;
+    let artifactSuccessRate = 0;
+    let buildArtifactTotal = 0;
+    let buildsByType: Record<string, number> = {};
+
+    try {
+      const { data: buildRows } = await client
+        .from("build_artifacts")
+        .select("artifact_type, status, commit_sha, deployment_url");
+
+      if (buildRows && buildRows.length > 0) {
+        buildArtifactTotal = buildRows.length;
+        for (const b of buildRows as BuildArtifactRow[]) {
+          buildsByType[b.artifact_type] = (buildsByType[b.artifact_type] ?? 0) + 1;
+          if (b.status === "building") buildsRunning++;
+          if (b.commit_sha) commitsCreated++;
+          if (b.deployment_url) deploymentsLive++;
+          if (b.artifact_type === "build_module" || b.artifact_type === "generate_api" || b.artifact_type === "create_service") modulesGenerated++;
+        }
+        const successCount = (buildRows as BuildArtifactRow[]).filter(b => b.status === "completed" || b.status === "deployed").length;
+        artifactSuccessRate = buildArtifactTotal > 0 ? Math.round((successCount / buildArtifactTotal) * 100) : 0;
+      }
+    } catch { /* build_artifacts table may not exist yet — graceful degradation */ }
+
     // ── 10. System health ─────────────────────────────────────────────────────
     const artifactCoverage = completed > 0
       ? Math.round((artifactTotal / completed) * 100)
@@ -442,6 +472,20 @@ export async function GET() {
       },
 
       planner,
+
+
+      builds: {
+        buildsRunning,
+        commitsCreated,
+        deploymentsLive,
+        modulesGenerated,
+        artifactSuccessRate: `${artifactSuccessRate}%`,
+        totalBuildArtifacts: buildArtifactTotal,
+        byType: buildsByType,
+        migrationEndpoint: "/api/javari/migrate-build-artifacts",
+      },
+
+
       sources: sourceMap,
 
       workers: {
