@@ -20,7 +20,7 @@
       "schedule": "*/30 * * * *"
     },
     {
-      "path": "/api/javari/orchestrator/run",
+      "path": "/api/javari/worker-cycle",
       "schedule": "* * * * *"
     },
     {
