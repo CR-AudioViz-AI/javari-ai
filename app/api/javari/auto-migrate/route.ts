@@ -123,6 +123,71 @@ const MIGRATIONS = [
   // ── Clear any stuck scheduler lock (expired or orphaned) ──────────────
   // Safe: only deletes rows where expires_at is in the past
   `DELETE FROM javari_scheduler_lock WHERE expires_at < NOW()`,
+
+  // ── canonical_documents ────────────────────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS canonical_documents (
+    id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    title       TEXT        NOT NULL,
+    source      TEXT        NOT NULL,
+    chunk_index INTEGER     NOT NULL DEFAULT 0,
+    content     TEXT        NOT NULL,
+    content_hash TEXT       NOT NULL DEFAULT '',
+    embedding   JSONB,
+    doc_type    TEXT        DEFAULT 'markdown',
+    token_count INTEGER     DEFAULT 0,
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(source, chunk_index)
+  )`,
+  `ALTER TABLE canonical_documents DISABLE ROW LEVEL SECURITY`,
+  `GRANT ALL ON TABLE canonical_documents TO service_role`,
+  `GRANT ALL ON TABLE canonical_documents TO authenticated`,
+
+  // ── knowledge_graph_nodes ──────────────────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS knowledge_graph_nodes (
+    id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    node_type   TEXT        NOT NULL,
+    name        TEXT        NOT NULL,
+    description TEXT,
+    source_doc  TEXT,
+    metadata    JSONB       DEFAULT '{}'::jsonb,
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(node_type, name)
+  )`,
+  `ALTER TABLE knowledge_graph_nodes DISABLE ROW LEVEL SECURITY`,
+  `GRANT ALL ON TABLE knowledge_graph_nodes TO service_role`,
+  `GRANT ALL ON TABLE knowledge_graph_nodes TO authenticated`,
+
+  // ── knowledge_graph_edges ──────────────────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS knowledge_graph_edges (
+    id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    from_node_id UUID        NOT NULL,
+    to_node_id   UUID        NOT NULL,
+    relationship TEXT        NOT NULL,
+    weight       FLOAT       DEFAULT 1.0,
+    metadata     JSONB       DEFAULT '{}'::jsonb,
+    created_at   TIMESTAMPTZ DEFAULT NOW()
+  )`,
+  `ALTER TABLE knowledge_graph_edges DISABLE ROW LEVEL SECURITY`,
+  `GRANT ALL ON TABLE knowledge_graph_edges TO service_role`,
+  `GRANT ALL ON TABLE knowledge_graph_edges TO authenticated`,
+
+  // ── canonical_ingest_runs ──────────────────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS canonical_ingest_runs (
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_type        TEXT        NOT NULL DEFAULT 'r2_full',
+    docs_ingested   INTEGER     DEFAULT 0,
+    chunks_created  INTEGER     DEFAULT 0,
+    nodes_created   INTEGER     DEFAULT 0,
+    tasks_generated INTEGER     DEFAULT 0,
+    status          TEXT        DEFAULT 'running',
+    error           TEXT,
+    started_at      TIMESTAMPTZ DEFAULT NOW(),
+    completed_at    TIMESTAMPTZ
+  )`,
+  `ALTER TABLE canonical_ingest_runs DISABLE ROW LEVEL SECURITY`,
+  `GRANT ALL ON TABLE canonical_ingest_runs TO service_role`,
+  `GRANT ALL ON TABLE canonical_ingest_runs TO authenticated`
 ];
 
 type MigrationResult = { sql: string; ok: boolean; error?: string };
