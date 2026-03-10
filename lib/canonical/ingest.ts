@@ -77,9 +77,14 @@ async function ingestOneDoc(
   const start     = Date.now();
   const maxTokens = opts.maxTokens ?? 800;
 
-  // 1. Fetch from R2
-  const content = await fetchDoc(r2Key);
-  if (!content) {
+  // 1. Fetch from R2 — catch HTTP errors (403/404/etc) and skip this doc rather than aborting the run
+  let content: string;
+  try {
+    const raw = await fetchDoc(r2Key);
+    if (!raw) return { r2Key, status: "fetch_failed", chunksCreated: 0, chunksSkipped: 0, durationMs: Date.now() - start };
+    content = raw;
+  } catch (fetchErr) {
+    clog("warn", `Fetch skipped (): ${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)}`);
     return { r2Key, status: "fetch_failed", chunksCreated: 0, chunksSkipped: 0, durationMs: Date.now() - start };
   }
 
