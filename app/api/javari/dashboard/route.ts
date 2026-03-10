@@ -360,7 +360,10 @@ export async function GET() {
     }));
 
     // ── 9. Canonical corpus stats ────────────────────────────────────────────
-    const [canonicalDocRes, kgNodeRes, kgEdgeRes, ingestRunRes] = await Promise.all([
+    const [canonicalDocRes, canonicalDocRes2, kgNodeRes, kgEdgeRes, ingestRunRes] = await Promise.all([
+      // canonical_docs = the active store (lib/canonical/store.ts)
+      client.from("canonical_docs").select("*", { count: "exact", head: true }),
+      // canonical_documents = new schema table (may also be populated)
       client.from("canonical_documents").select("*", { count: "exact", head: true }),
       client.from("knowledge_graph_nodes").select("*", { count: "exact", head: true }),
       client.from("knowledge_graph_edges").select("*", { count: "exact", head: true }),
@@ -370,7 +373,7 @@ export async function GET() {
         .limit(1),
     ]);
 
-    const canonicalDocs   = canonicalDocRes.count  ?? 0;
+    const canonicalDocs   = Math.max(canonicalDocRes.count ?? 0, canonicalDocRes2.count ?? 0);
     const kgNodes         = kgNodeRes.count        ?? 0;
     const kgEdges         = kgEdgeRes.count        ?? 0;
     const lastIngestRun   = ingestRunRes.data?.[0] ?? null;
