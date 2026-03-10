@@ -47,7 +47,7 @@ export async function GET() {
     return NextResponse.json({
       ok: true,
       guardrails_active: true,
-      planner_mode: "roadmap_only",
+      planner_mode: "ecosystem",
       live_checks: {
         kill_switch:     { outcome: killResult.outcome,  reason: killResult.reason },
         rollback_trigger: { outcome: rollback.outcome,  reason: rollback.reason,  meta: rollback.meta },
