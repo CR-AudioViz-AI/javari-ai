@@ -1,5 +1,8 @@
 // lib/execution/roadmapWorker.ts
 // Purpose: Autonomous roadmap worker — one verified cycle per invocation.
+//          Integrated with Autonomous Planner: when pending tasks < PLANNER_TRIGGER_THRESHOLD,
+//          the planner is invoked BEFORE execution to generate 50 new tasks automatically.
+//          This enables continuous autonomous operation without human input.
 //          Continuous execution is provided by the Vercel cron hitting
 //          /api/javari/queue every minute. Each cron fires one cycle.
 //          No infinite loop — serverless functions have hard timeouts.
@@ -22,6 +25,7 @@ import { executeTask as runTypedTask, ExecutableTask } from "./taskExecutor";
 import { verifyTask }     from "@/lib/roadmap/verifyTask";
 import { runGuardrails }  from "./guardrails";
 import { acquireTaskLock, startHeartbeat } from "./persistence";
+import { runAutonomousPlanner, PLANNER_TRIGGER_THRESHOLD, type PlannerResult } from "@/lib/planner/autonomousPlanner";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -50,6 +54,7 @@ export interface WorkerCycleResult {
   telemetry       : TaskTelemetry[];
   stoppedReason   : "no_pending" | "max_tasks" | "consecutive_failures" | "guardrail";
   durationMs      : number;
+  planner?        : PlannerResult;   // present when planner was evaluated this cycle
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -224,11 +229,37 @@ export async function runRoadmapWorker(
 
   console.log(`[worker] ▶ Cycle ${cycleId} | cap=${cap} | userId=${userId}`);
 
-  // Quick pending count for diagnostics
-  db().from("roadmap_tasks").select("status").eq("status", "pending")
-    .then(({ data, error }) => {
-      if (!error) console.log(`[worker] DB pending count at cycle start: ${data?.length ?? "??"}`);
-    }).catch(() => {});
+  // ── Autonomous Planner gate ────────────────────────────────────────────
+  // Count pending tasks. If below PLANNER_TRIGGER_THRESHOLD, run the planner
+  // to generate 50 new tasks before executing any more work.
+  let plannerResult: PlannerResult | undefined;
+  try {
+    const { data: pendingSnap, error: snapErr } = await db()
+      .from("roadmap_tasks")
+      .select("id")
+      .eq("status", "pending");
+
+    const pendingNow = pendingSnap?.length ?? 0;
+    console.log(`[worker] DB pending count at cycle start: ${pendingNow}`);
+
+    if (pendingNow < PLANNER_TRIGGER_THRESHOLD) {
+      console.log(`[worker] 🧠 Planner trigger: ${pendingNow} pending < ${PLANNER_TRIGGER_THRESHOLD} — running Autonomous Planner`);
+      plannerResult = await runAutonomousPlanner();
+      console.log(
+        `[worker] 🧠 Planner done — ` +
+        `triggered=${plannerResult.triggered} inserted=${plannerResult.inserted} ` +
+        `generated=${plannerResult.generated} skipped=${plannerResult.skipped} ` +
+        `ok=${plannerResult.ok} duration=${plannerResult.durationMs}ms`
+      );
+      if (!plannerResult.ok && plannerResult.errors.length > 0) {
+        console.warn(`[worker] Planner errors: ${plannerResult.errors.join("; ")}`);
+      }
+    } else {
+      console.log(`[worker] Planner gate: ${pendingNow} pending ≥ ${PLANNER_TRIGGER_THRESHOLD} — planner not needed`);
+    }
+  } catch (planErr) {
+    console.error(`[worker] Planner gate exception (non-fatal): ${planErr instanceof Error ? planErr.message : String(planErr)}`);
+  }
 
   while (executed < cap) {
     // Safety: stop cycle on consecutive failure threshold
@@ -239,6 +270,7 @@ export async function runRoadmapWorker(
         tasksRetried: retried, tasksBlocked: blocked, totalCostUsd: totalCost,
         consecutiveFails, telemetry, stoppedReason: "consecutive_failures",
         durationMs: Date.now() - cycleStart,
+        planner: plannerResult,
       };
       await writeCycleLog(cycleId, result);
       return result;
@@ -358,6 +390,7 @@ export async function runRoadmapWorker(
         ? "max_tasks"
         : "no_pending",
     durationMs: Date.now() - cycleStart,
+    planner: plannerResult,
   };
 
   console.log(
