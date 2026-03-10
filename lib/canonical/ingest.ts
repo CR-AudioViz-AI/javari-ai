@@ -186,8 +186,9 @@ export async function ingestAllCanonicalDocs(
   }
   clog("info", `R2: ${conn.message}`);
 
-  // Step 2 — list docs
-  const docs = await listRoadmapDocs();
+  // Step 2 — list docs (filter to .md and .txt only — skip ZIP/binary placeholders)
+  const allObjects = await listRoadmapDocs();
+  const docs = allObjects.filter(d => d.key.endsWith(".md") || d.key.endsWith(".txt") || d.key.endsWith(".json"));
 
   if (!docs.length) {
     clog("warn", "No docs found in R2 — nothing to ingest");
@@ -229,3 +230,4 @@ export async function ingestAllCanonicalDocs(
 
 // Re-export getStoreStats so the API route only needs to import from here
 export { getStoreStats };
+
