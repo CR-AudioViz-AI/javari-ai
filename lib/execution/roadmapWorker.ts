@@ -89,33 +89,73 @@ function routingHint(type: string): "quality" | "cost" {
 async function fetchNext(): Promise<ExecutableTask | null> {
   const client = db();
 
-  // Pull up to 3 pending tasks — no ordering to avoid updated_at sort bug
+  // Pull up to 25 pending tasks — enough to find executable ones past dep-blocked rows.
+  // LIMIT 3 was insufficient: blocked tasks can occupy the first N slots.
   const { data, error } = await client
     .from("roadmap_tasks")
     .select("id, title, description, source, depends_on")
     .eq("status", "pending")
-    .limit(3);
+    .limit(25);
 
-  if (error || !data?.length) return null;
+  if (error) {
+    console.error(`[worker] fetchNext DB error: ${error.message}`);
+    return null;
+  }
+  if (!data?.length) {
+    console.log("[worker] fetchNext: 0 pending tasks in DB");
+    return null;
+  }
 
-  // Resolve dependencies — only execute tasks whose deps are all completed
-  const { data: done } = await client
+  console.log(`[worker] fetchNext: ${data.length} pending candidates`);
+
+  // Resolve dependencies — only execute tasks whose deps are all completed.
+  // Tasks with depends_on referencing nonexistent IDs are treated as unblocked
+  // (the dep ID simply doesn't exist — it was never inserted or already cleaned up).
+  // This prevents orphaned dep references from permanently blocking execution.
+  const { data: done, error: doneErr } = await client
     .from("roadmap_tasks")
     .select("id")
     .eq("status", "completed");
 
+  if (doneErr) {
+    console.warn(`[worker] fetchNext: completed-set query failed: ${doneErr.message} — treating all deps as met`);
+  }
+
   const doneSet = new Set((done ?? []).map((r: { id: string }) => r.id));
+
+  // Also fetch ALL task IDs (any status) to distinguish "dep exists but not done"
+  // from "dep ID doesn't exist at all" (orphaned reference)
+  const { data: allIds } = await client
+    .from("roadmap_tasks")
+    .select("id");
+  const allIdSet = new Set((allIds ?? []).map((r: { id: string }) => r.id));
 
   for (const row of data as Array<{
     id: string; title: string; description: string;
     source?: string; depends_on?: string[] | null;
   }>) {
     const deps = row.depends_on ?? [];
-    if (deps.every((d: string) => doneSet.has(d))) {
+
+    // Filter to only deps that actually exist in the table
+    // Orphaned dep IDs (not in allIdSet) are ignored — they can never be met
+    const realDeps = deps.filter((d: string) => allIdSet.has(d));
+    const unmetReal = realDeps.filter((d: string) => !doneSet.has(d));
+
+    if (deps.length > 0 && deps.length !== realDeps.length) {
+      const orphaned = deps.filter((d: string) => !allIdSet.has(d));
+      console.log(`[worker] ${row.id}: ${orphaned.length} orphaned dep(s) ignored: ${orphaned.join(", ")}`);
+    }
+
+    if (unmetReal.length === 0) {
       const typeTag = row.description?.match(/\[type:([^\]]+)\]/)?.[1] ?? "ai_task";
+      console.log(`[worker] fetchNext: selected ${row.id} | deps=${deps.length} real=${realDeps.length} unmet=${unmetReal.length} | ${row.title.slice(0,60)}`);
       return { id: row.id, title: row.title, description: row.description, type: typeTag };
+    } else {
+      console.log(`[worker] fetchNext: skip ${row.id} — ${unmetReal.length} unmet dep(s): ${unmetReal.join(", ")}`);
     }
   }
+
+  console.log("[worker] fetchNext: all candidates blocked by unmet deps");
   return null;
 }
 
@@ -182,7 +222,13 @@ export async function runRoadmapWorker(
   let totalCost = 0;
   const telemetry: TaskTelemetry[] = [];
 
-  console.log(`[worker] ▶ Cycle ${cycleId} | cap=${cap}`);
+  console.log(`[worker] ▶ Cycle ${cycleId} | cap=${cap} | userId=${userId}`);
+
+  // Quick pending count for diagnostics
+  db().from("roadmap_tasks").select("status").eq("status", "pending")
+    .then(({ data, error }) => {
+      if (!error) console.log(`[worker] DB pending count at cycle start: ${data?.length ?? "??"}`);
+    }).catch(() => {});
 
   while (executed < cap) {
     // Safety: stop cycle on consecutive failure threshold
@@ -200,7 +246,10 @@ export async function runRoadmapWorker(
 
     // Fetch next task with dependency resolution
     const task = await fetchNext();
-    if (!task) break;  // no pending work
+    if (!task) {
+      console.log(`[worker] fetchNext returned null — stopping cycle (executed=${executed})`);
+      break;  // no pending work or all blocked
+    }
 
     executed++;
     const taskStart = Date.now();
