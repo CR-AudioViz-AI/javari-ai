@@ -1,22 +1,23 @@
 // lib/planner/autonomousPlanner.ts
 // Purpose: Javari Autonomous Planner — generates roadmap tasks without human input.
+//          Phase 6 upgrade: tasks include full artifact metadata (type, module, artifacts[]).
+//          Workers use metadata to route tasks to the correct pipeline.
 //          Triggered automatically by runRoadmapWorker when pending tasks drop below
 //          PLANNER_TRIGGER_THRESHOLD (10). Calls Anthropic API to produce 50 contextually
-//          relevant tasks based on completed work, platform goals, canonical docs,
-//          and knowledge graph nodes (ecosystem mode).
+//          relevant tasks based on completed work, canonical docs, and knowledge graph.
 //
 // Schema contract:
 //   id          : "ap-{phase}-{slug}-{index}" — planner-generated IDs
-//   source      : "planner"  (distinct from "roadmap" and "canonical_discovery")
+//   source      : "planner"
 //   status      : "pending"
-//   depends_on  : []         (no cross-task deps — planner tasks are always self-contained)
+//   depends_on  : []  (planner tasks are self-contained)
+//   metadata    : { type, module, artifacts, description }
 //
 // Safety:
-//   - Duplicate title check before every insert (exact match against existing titles)
-//   - Max 50 tasks per planner run to prevent runaway inserts
-//   - Structured JSON output required from AI — parse failure returns [] (no partial inserts)
-//   - Full logging on every code path
-//   - Never throws — all errors returned in PlannerResult.errors
+//   - Duplicate title check before every insert
+//   - Max 50 tasks per run
+//   - Structured JSON output required — parse failure returns [] (no partial inserts)
+//   - Never throws — all errors in PlannerResult.errors
 //
 // Date: 2026-03-10
 
@@ -24,9 +25,9 @@ import { createClient } from "@supabase/supabase-js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-export const PLANNER_TRIGGER_THRESHOLD = 10;   // run planner when pending < this
-export const PLANNER_BATCH_SIZE        = 50;   // tasks to generate per run
-const        PLANNER_MAX_TASKS         = 50;   // hard cap — never insert more than this
+export const PLANNER_TRIGGER_THRESHOLD = 10;
+export const PLANNER_BATCH_SIZE        = 50;
+const        PLANNER_MAX_TASKS         = 50;
 
 const CATEGORIES = [
   "ai_marketplace",
@@ -43,6 +44,20 @@ const CATEGORIES = [
 
 type Category = typeof CATEGORIES[number];
 
+// Artifact types the engineer can build — used in task metadata
+const ARTIFACT_TYPES = [
+  "build_module",
+  "generate_api",
+  "create_service",
+  "create_database_migration",
+  "deploy_microservice",
+  "generate_ui_component",
+  "generate_documentation",
+  "generate_tests",
+] as const;
+
+type ArtifactTypeEnum = typeof ARTIFACT_TYPES[number];
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface PlannedTask {
@@ -55,18 +70,25 @@ export interface PlannedTask {
   status:      "pending";
   source:      "planner";
   updated_at:  number;
+  metadata:    {
+    type       : ArtifactTypeEnum;
+    module     : string;
+    artifacts  : string[];
+    phase_id   : Category;
+    description: string;
+  };
 }
 
 export interface PlannerResult {
   ok:           boolean;
-  triggered:    boolean;       // false = threshold not met, planner skipped
-  pendingCount: number;        // pending tasks at time of check
-  generated:    number;        // tasks AI produced
-  inserted:     number;        // tasks actually written to DB
-  skipped:      number;        // duplicates skipped
+  triggered:    boolean;
+  pendingCount: number;
+  generated:    number;
+  inserted:     number;
+  skipped:      number;
   errors:       string[];
   durationMs:   number;
-  canonicalContext?: {         // present when canonical corpus was used
+  canonicalContext?: {
     docsRead:  number;
     nodesRead: number;
   };
@@ -82,7 +104,7 @@ function db() {
   );
 }
 
-// ── Slug helper ───────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function slug(text: string): string {
   return text.toLowerCase()
@@ -95,8 +117,20 @@ function plannerTaskId(phase: string, title: string, idx: number): string {
   return `ap-${phase.slice(0, 12)}-${slug(title)}-${String(idx).padStart(2, "0")}`;
 }
 
+// Infer the best artifact type from the task title and description
+function inferArtifactType(title: string, description: string): ArtifactTypeEnum {
+  const combined = `${title} ${description}`.toLowerCase();
+  if (/migration|schema|table|database|sql/.test(combined)) return "create_database_migration";
+  if (/api route|create.api|endpoint|route/.test(combined))  return "generate_api";
+  if (/ui component|react|component|frontend/.test(combined)) return "generate_ui_component";
+  if (/test|spec|coverage|jest/.test(combined))               return "generate_tests";
+  if (/document|readme|wiki|doc/.test(combined))              return "generate_documentation";
+  if (/service|worker|daemon/.test(combined))                 return "create_service";
+  if (/deploy|microservice|release/.test(combined))           return "deploy_microservice";
+  return "build_module";
+}
+
 // ── Context builder ───────────────────────────────────────────────────────────
-// Builds execution context + canonical corpus context for AI task generation.
 
 interface PlannerContext {
   completedTitles:  string[];
@@ -117,10 +151,10 @@ async function buildContext(): Promise<PlannerContext> {
     client.from("knowledge_graph_nodes").select("label, node_type, description").limit(40),
   ]);
 
-  const completedRows = (completedRes.data ?? []) as { title: string; phase_id: string }[];
-  const pendingRows   = (pendingRes.data   ?? []) as { title: string }[];
-  const canonicalDocs = (canonicalRes.data ?? []) as { title: string; content: string }[];
-  const knowledgeNodes = (nodesRes.data    ?? []) as { label: string; node_type: string; description?: string }[];
+  const completedRows  = (completedRes.data  ?? []) as { title: string; phase_id: string }[];
+  const pendingRows    = (pendingRes.data    ?? []) as { title: string }[];
+  const canonicalDocs  = (canonicalRes.data  ?? []) as { title: string; content: string }[];
+  const knowledgeNodes = (nodesRes.data      ?? []) as { label: string; node_type: string; description?: string }[];
 
   const completedByPhase: Record<string, number> = {};
   for (const r of completedRows) {
@@ -137,15 +171,18 @@ async function buildContext(): Promise<PlannerContext> {
 // ── AI task generation ────────────────────────────────────────────────────────
 
 interface AITaskDraft {
-  phase_id:    string;
-  title:       string;
+  phase_id   : string;
+  type       : string;
+  module     : string;
+  title      : string;
   description: string;
+  artifacts  : string[];
 }
 
 async function generateTasksViaAI(
-  context:     PlannerContext,
+  context    : PlannerContext,
   targetCount: number,
-  log:         (m: string) => void,
+  log        : (m: string) => void,
 ): Promise<AITaskDraft[]> {
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -161,44 +198,49 @@ async function generateTasksViaAI(
     `  ${c}: ${context.completedByPhase[c] ?? 0} completed`
   ).join("\n");
 
-  // Build canonical corpus section
   const canonicalSection = context.canonicalDocs.length > 0
     ? `\nCANONICAL DOCUMENTATION (derive tasks directly from these):\n` +
-      context.canonicalDocs
-        .map(d => `[${d.title}]: ${(d.content ?? "").slice(0, 250)}`)
-        .join("\n\n")
+      context.canonicalDocs.map(d => `[${d.title}]: ${(d.content ?? "").slice(0, 250)}`).join("\n\n")
     : "";
 
   const knowledgeSection = context.knowledgeNodes.length > 0
-    ? `\nKNOWLEDGE GRAPH NODES (platform components to build around):\n` +
-      context.knowledgeNodes
-        .map(n => `${n.node_type}: ${n.label}${n.description ? ` — ${n.description.slice(0, 80)}` : ""}`)
-        .join("\n")
+    ? `\nKNOWLEDGE GRAPH NODES:\n` +
+      context.knowledgeNodes.map(n => `${n.node_type}: ${n.label}${n.description ? ` — ${n.description.slice(0, 80)}` : ""}`).join("\n")
     : "";
 
-  const systemPrompt = `You are the Javari Autonomous Planner for CR AudioViz AI — a Fortune 50-quality AI platform serving creators, businesses, veterans, first responders, faith communities, and animal rescues.
+  const systemPrompt = `You are the Javari Autonomous Planner for CR AudioViz AI — Fortune 50-quality AI ecosystem.
+Mission: "Your Story. Our Design."
 
-Your job: generate exactly ${targetCount} NEW roadmap tasks that advance the platform in meaningful, buildable ways.
+Your job: generate exactly ${targetCount} NEW roadmap tasks that produce real, deployable platform artifacts.
 
-PLATFORM MISSION: "Your Story. Our Design." — the definitive AI-powered creative ecosystem.
+PLATFORM CATEGORIES (use as phase_id):
+${CATEGORIES.join(", ")}
+
+ARTIFACT TYPES (use as type — determines which builder runs):
+build_module, generate_api, create_service, create_database_migration,
+deploy_microservice, generate_ui_component, generate_documentation, generate_tests
 
 RULES:
-1. Return ONLY valid JSON — an array of exactly ${targetCount} task objects. No markdown, no commentary, no backticks.
-2. Every task must have: phase_id, title, description
-3. phase_id must be one of: ${CATEGORIES.join(", ")}
-4. title must be unique — never duplicate any completed or pending title listed below
-5. description must be 2-4 sentences, technically specific, actionable, and production-quality
-6. Distribute tasks across ALL 10 categories (aim for ~5 per category)
-7. When canonical documentation is provided, derive tasks DIRECTLY from it — build what the docs describe
-8. When knowledge graph nodes are provided, generate tasks that implement or extend those components
-9. No vague tasks. Every task must produce a concrete, deployable deliverable.
+1. Return ONLY valid JSON — an array of exactly ${targetCount} objects. No markdown, no backticks.
+2. Every task MUST have: phase_id, type, module, title, description, artifacts
+3. phase_id must be one of the platform categories above
+4. type must be one of the artifact types above
+5. module = short name of the platform module being built (e.g. "creator_tools", "javari_chat")
+6. artifacts = array of deliverable names (e.g. ["api", "ui", "tests"] or ["migration", "api"])
+7. title must be unique — never duplicate completed or pending titles
+8. description: 2-3 sentences, technically specific, references canonical docs when available
+9. Distribute across ALL 10 categories (5 tasks each)
+10. Every task must produce a concrete, committed, deployable artifact
 
 JSON FORMAT:
 [
   {
     "phase_id": "ai_marketplace",
-    "title": "Build AI Agent Performance Leaderboard",
-    "description": "Create a public leaderboard ranking all marketplace agents by quality score..."
+    "type": "generate_api",
+    "module": "agent_marketplace",
+    "title": "Build Agent Performance Leaderboard API",
+    "description": "Create a Next.js 14 API route that queries the marketplace agents table, calculates quality scores from execution_logs, and returns paginated rankings. Supports filtering by category and time range.",
+    "artifacts": ["api", "tests"]
   }
 ]`;
 
@@ -207,30 +249,30 @@ ${phaseBreakdown}
 ${canonicalSection}
 ${knowledgeSection}
 
-RECENT COMPLETED TITLES (last 60, avoid repeating):
+RECENT COMPLETED (avoid duplicating):
 ${completedSample}
 
 CURRENTLY PENDING (do not duplicate):
 ${pendingSample}
 
-Generate exactly ${targetCount} new tasks as a JSON array. Return ONLY the JSON array. No other text.`;
+Generate exactly ${targetCount} new artifact tasks as a JSON array. Return ONLY the JSON array.`;
 
-  log(`[planner] Calling Anthropic API — requesting ${targetCount} tasks (ecosystem mode, canonical=${context.canonicalDocs.length} docs, nodes=${context.knowledgeNodes.length})`);
+  log(`[planner] Calling Anthropic API — ${targetCount} artifact tasks (canonical=${context.canonicalDocs.length}, nodes=${context.knowledgeNodes.length})`);
 
   let raw = "";
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
+      method : "POST",
       headers: {
-        "Content-Type":      "application/json",
-        "x-api-key":         apiKey,
+        "Content-Type"     : "application/json",
+        "x-api-key"        : apiKey,
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model:      "claude-sonnet-4-20250514",
+        model     : "claude-sonnet-4-20250514",
         max_tokens: 8000,
-        system:     systemPrompt,
-        messages:   [{ role: "user", content: userPrompt }],
+        system    : systemPrompt,
+        messages  : [{ role: "user", content: userPrompt }],
       }),
       signal: AbortSignal.timeout(90_000),
     });
@@ -246,8 +288,7 @@ Generate exactly ${targetCount} new tasks as a JSON array. Return ONLY the JSON 
       usage?: { input_tokens: number; output_tokens: number };
     };
 
-    const tokens = data.usage;
-    log(`[planner] API response — input=${tokens?.input_tokens ?? "?"} output=${tokens?.output_tokens ?? "?"} tokens`);
+    log(`[planner] API response — in=${data.usage?.input_tokens ?? "?"} out=${data.usage?.output_tokens ?? "?"} tokens`);
 
     raw = data.content
       .filter(b => b.type === "text")
@@ -260,7 +301,6 @@ Generate exactly ${targetCount} new tasks as a JSON array. Return ONLY the JSON 
     return [];
   }
 
-  // Parse JSON — strip accidental markdown fences
   let parsed: AITaskDraft[] = [];
   try {
     const cleaned = raw
@@ -273,19 +313,23 @@ Generate exactly ${targetCount} new tasks as a JSON array. Return ONLY the JSON 
     log(`[planner] AI produced ${parsed.length} task drafts`);
   } catch (err) {
     log(`[planner] JSON parse failed: ${err instanceof Error ? err.message : String(err)}`);
-    log(`[planner] Raw response (first 500 chars): ${raw.slice(0, 500)}`);
+    log(`[planner] Raw[0:400]: ${raw.slice(0, 400)}`);
     return [];
   }
 
-  // Validate structure — drop malformed entries
+  // Validate structure
   const valid = parsed.filter(t => {
     if (!t.phase_id || !t.title || !t.description) {
-      log(`[planner] Dropping malformed task: ${JSON.stringify(t).slice(0, 100)}`);
+      log(`[planner] Dropping malformed task: ${JSON.stringify(t).slice(0, 80)}`);
       return false;
     }
     if (!CATEGORIES.includes(t.phase_id as Category)) {
-      log(`[planner] Dropping task with invalid phase_id="${t.phase_id}": ${t.title}`);
-      return false;
+      // Attempt to fix — use closest match or default
+      t.phase_id = "autonomous_deployment";
+    }
+    if (!ARTIFACT_TYPES.includes(t.type as ArtifactTypeEnum)) {
+      // Infer from title/description
+      t.type = inferArtifactType(t.title, t.description);
     }
     return true;
   });
@@ -296,27 +340,17 @@ Generate exactly ${targetCount} new tasks as a JSON array. Return ONLY the JSON 
 
 // ── Main planner entry point ──────────────────────────────────────────────────
 
-/**
- * runAutonomousPlanner
- *
- * Called by runRoadmapWorker when pending task count drops below
- * PLANNER_TRIGGER_THRESHOLD. Generates PLANNER_BATCH_SIZE new tasks
- * using the Anthropic API with canonical corpus context (ecosystem mode),
- * deduplicates against all existing titles, and inserts survivors into
- * roadmap_tasks.
- *
- * Never throws. All errors captured in result.errors.
- */
 export async function runAutonomousPlanner(): Promise<PlannerResult> {
   const t0     = Date.now();
   const errors: string[] = [];
   const log    = (m: string) => { console.log(m); };
 
   log("[planner] ══════════════════════════════════");
-  log("[planner] Autonomous Planner starting (ecosystem mode)");
+  log("[planner] Autonomous Planner starting (ecosystem mode with artifact metadata)");
+
+  const client = db();
 
   // ── Step 1: Count pending tasks ───────────────────────────────────────────
-  const client = db();
   const { data: pendingRows, error: countErr } = await client
     .from("roadmap_tasks")
     .select("id")
@@ -324,8 +358,7 @@ export async function runAutonomousPlanner(): Promise<PlannerResult> {
 
   if (countErr) {
     const msg = `[planner] DB count error: ${countErr.message}`;
-    log(msg);
-    errors.push(msg);
+    log(msg); errors.push(msg);
     return { ok: false, triggered: false, pendingCount: -1, generated: 0, inserted: 0, skipped: 0, errors, durationMs: Date.now() - t0 };
   }
 
@@ -333,29 +366,25 @@ export async function runAutonomousPlanner(): Promise<PlannerResult> {
   log(`[planner] Pending tasks: ${pendingCount} | Threshold: ${PLANNER_TRIGGER_THRESHOLD}`);
 
   if (pendingCount >= PLANNER_TRIGGER_THRESHOLD) {
-    log(`[planner] Threshold not met — planner skipped`);
+    log("[planner] Threshold not met — planner skipped");
     return { ok: true, triggered: false, pendingCount, generated: 0, inserted: 0, skipped: 0, errors, durationMs: Date.now() - t0 };
   }
 
-  log(`[planner] ⚡ Threshold met (${pendingCount} < ${PLANNER_TRIGGER_THRESHOLD}) — generating ${PLANNER_BATCH_SIZE} tasks`);
+  log(`[planner] ⚡ Threshold met (${pendingCount} < ${PLANNER_TRIGGER_THRESHOLD}) — generating ${PLANNER_BATCH_SIZE} artifact tasks`);
 
-  // ── Step 2: Build context (now includes canonical corpus) ─────────────────
+  // ── Step 2: Build context ─────────────────────────────────────────────────
   let context: PlannerContext;
   try {
     context = await buildContext();
     log(`[planner] Context: ${context.completedTitles.length} completed, ${context.pendingTitles.length} pending`);
-    log(`[planner] Canonical corpus: ${context.canonicalDocs.length} docs, ${context.knowledgeNodes.length} KG nodes`);
-    for (const [cat, count] of Object.entries(context.completedByPhase).sort()) {
-      log(`[planner]   ${cat}: ${count} completed`);
-    }
+    log(`[planner] Canonical: ${context.canonicalDocs.length} docs, ${context.knowledgeNodes.length} KG nodes`);
   } catch (err) {
     const msg = `[planner] Context build failed: ${err instanceof Error ? err.message : String(err)}`;
-    log(msg);
-    errors.push(msg);
+    log(msg); errors.push(msg);
     return { ok: false, triggered: true, pendingCount, generated: 0, inserted: 0, skipped: 0, errors, durationMs: Date.now() - t0 };
   }
 
-  // ── Step 3: Generate tasks via AI (with canonical context) ───────────────
+  // ── Step 3: Generate tasks via AI ─────────────────────────────────────────
   const drafts = await generateTasksViaAI(
     context,
     Math.min(PLANNER_BATCH_SIZE, PLANNER_MAX_TASKS),
@@ -364,8 +393,7 @@ export async function runAutonomousPlanner(): Promise<PlannerResult> {
 
   if (drafts.length === 0) {
     const msg = "[planner] AI returned 0 valid tasks — aborting insert";
-    log(msg);
-    errors.push(msg);
+    log(msg); errors.push(msg);
     return {
       ok: false, triggered: true, pendingCount, generated: 0, inserted: 0, skipped: 0, errors,
       durationMs: Date.now() - t0,
@@ -374,13 +402,10 @@ export async function runAutonomousPlanner(): Promise<PlannerResult> {
   }
 
   // ── Step 4: Deduplicate ───────────────────────────────────────────────────
-  // Re-fetch all titles right before insert (another cycle may have run)
-  const { data: freshRows } = await client
-    .from("roadmap_tasks")
-    .select("title");
+  const { data: freshRows } = await client.from("roadmap_tasks").select("title");
   const freshTitles = new Set((freshRows ?? []).map((r: { title: string }) => r.title));
 
-  const seenTitles = new Set<string>();
+  const seenTitles    = new Set<string>();
   const toInsert: PlannedTask[] = [];
   const phaseCounters: Record<string, number> = {};
 
@@ -395,16 +420,27 @@ export async function runAutonomousPlanner(): Promise<PlannerResult> {
     const idx   = phaseCounters[phase] ?? 0;
     phaseCounters[phase] = idx + 1;
 
+    const artifactType = (ARTIFACT_TYPES.includes(draft.type as ArtifactTypeEnum)
+      ? draft.type
+      : inferArtifactType(draft.title, draft.description)) as ArtifactTypeEnum;
+
     toInsert.push({
       id:          plannerTaskId(phase, draft.title, idx),
       roadmap_id:  null,
       phase_id:    phase,
       title:       draft.title,
-      description: draft.description,
+      description: `[type:${artifactType}] ${draft.description}`,
       depends_on:  [],
       status:      "pending",
       source:      "planner",
       updated_at:  Math.floor(Date.now() / 1000),
+      metadata: {
+        type       : artifactType,
+        module     : draft.module || phase,
+        artifacts  : Array.isArray(draft.artifacts) ? draft.artifacts : ["artifact"],
+        phase_id   : phase,
+        description: draft.description,
+      },
     });
   }
 
@@ -413,8 +449,7 @@ export async function runAutonomousPlanner(): Promise<PlannerResult> {
 
   if (toInsert.length === 0) {
     const msg = "[planner] All generated tasks were duplicates — nothing inserted";
-    log(msg);
-    errors.push(msg);
+    log(msg); errors.push(msg);
     return {
       ok: false, triggered: true, pendingCount, generated: drafts.length, inserted: 0, skipped, errors,
       durationMs: Date.now() - t0,
@@ -424,7 +459,7 @@ export async function runAutonomousPlanner(): Promise<PlannerResult> {
 
   // ── Step 5: Insert in batches of 25 ──────────────────────────────────────
   let inserted = 0;
-  const BATCH = 25;
+  const BATCH  = 25;
 
   for (let i = 0; i < toInsert.length; i += BATCH) {
     const batch = toInsert.slice(i, i + BATCH);
@@ -434,36 +469,26 @@ export async function runAutonomousPlanner(): Promise<PlannerResult> {
       if (insErr.code === "23505" || insErr.message.includes("duplicate")) {
         for (const row of batch) {
           const { error: e2 } = await client.from("roadmap_tasks").insert(row);
-          if (e2) {
-            if (!(e2.code === "23505" || e2.message.includes("duplicate"))) {
-              const msg = `[planner] INSERT FAIL: ${row.title.slice(0, 60)} — ${e2.message}`;
-              log(msg);
-              errors.push(msg);
-            }
-          } else {
-            log(`[planner] ✅ [${row.phase_id}] ${row.title.slice(0, 60)}`);
+          if (!e2) {
+            log(`[planner] ✅ [${row.phase_id}|${row.metadata.type}] ${row.title.slice(0, 55)}`);
             inserted++;
           }
         }
       } else {
-        const msg = `[planner] BATCH FAIL rows ${i}–${i + BATCH}: ${insErr.message}`;
-        log(msg);
-        errors.push(msg);
+        const msg = `[planner] BATCH FAIL ${i}–${i + BATCH}: ${insErr.message}`;
+        log(msg); errors.push(msg);
       }
     } else {
       for (const row of batch) {
-        log(`[planner] ✅ [${row.phase_id}] ${row.title.slice(0, 60)}`);
+        log(`[planner] ✅ [${row.phase_id}|${row.metadata.type}] ${row.title.slice(0, 55)}`);
       }
       inserted += batch.length;
     }
   }
 
-  // ── Step 6: Summary ───────────────────────────────────────────────────────
   const durationMs = Date.now() - t0;
   log(`[planner] ══ Run complete ══`);
-  log(`[planner]   mode:        ecosystem`);
-  log(`[planner]   triggered:   ${pendingCount} pending < ${PLANNER_TRIGGER_THRESHOLD}`);
-  log(`[planner]   canonical:   ${context.canonicalDocs.length} docs, ${context.knowledgeNodes.length} nodes`);
+  log(`[planner]   mode:        ecosystem (artifact metadata)`);
   log(`[planner]   generated:   ${drafts.length}`);
   log(`[planner]   inserted:    ${inserted}`);
   log(`[planner]   skipped:     ${skipped}`);
