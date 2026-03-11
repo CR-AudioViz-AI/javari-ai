@@ -1,93 +1,86 @@
-# Build Advanced Weather Simulation API
+# Create CRAIverse Weather Simulation API
 
-# Advanced Weather Simulation API Documentation
+# CRAIverse Weather Simulation API Documentation
 
 ## Purpose
-The Advanced Weather Simulation API provides a robust framework for simulating and querying weather patterns across various regions and biomes. This API allows for the generation and manipulation of weather data over specified durations, as well as the retrieval of current and forecasted weather information.
+The CRAIverse Weather Simulation API allows developers to simulate and forecast weather patterns and events based on specified environmental parameters. It utilizes a combination of Supabase for data storage and Redis for caching, ensuring efficient retrieval and manipulation of weather-related data.
 
 ## Usage
-To use the API, requests must be made to the defined routes with appropriate parameters matching the specified schemas. The API supports both weather simulation creation and querying of weather conditions.
+This API supports creating, retrieving, and forecasting weather patterns and events using HTTP requests. The endpoints can be utilized to manage various weather attributes such as temperature, humidity, wind conditions, and weather events.
 
-### Routes
-- **POST /weather/simulate** - To create a simulated weather pattern.
-- **GET /weather/query** - To query current or forecasted weather data.
+### Endpoints
+1. **Create Weather Pattern**
+2. **Create Weather Event**
+3. **Forecast Weather**
 
-## Parameters / Props
+## Parameters/Props
 
-### Weather Simulation Parameters
-- **regionId** (string, uuid): The unique identifier of the region where weather simulation occurs.
-- **biomeType** (string): The type of biome for the simulation. Possible values include:
-  - `desert`
-  - `forest`
-  - `mountain`
-  - `coastal`
-  - `plains`
-  - `arctic`
-  - `tropical`
-- **duration** (number): The duration in days for the simulation. Minimum: 1, Maximum: 365.
-- **seasonOverride** (string, optional): Overrides the season for the simulation. Possible values are `spring`, `summer`, `autumn`, `winter`.
-- **intensityModifier** (number, default: 1.0): A modifier that adjusts the intensity of the weather patterns. Minimum: 0.1, Maximum: 3.0.
-- **eventTriggers** (array of strings, optional): An array of events that may influence the simulation.
+### Weather Pattern Parameters
+- **environmentId**: `string` (UUID) - Unique identifier for the environment.
+- **temperature**: `number` - Temperature in degrees Celsius (range: -50 to 60).
+- **humidity**: `number` - Humidity percentage (range: 0 to 100).
+- **windSpeed**: `number` - Wind speed in km/h (range: 0 to 200).
+- **windDirection**: `number` - Wind direction in degrees (range: 0 to 360).
+- **precipitation**: `number` - Precipitation percentage (range: 0 to 100).
+- **pressure**: `number` - Atmospheric pressure in hPa (range: 900 to 1100).
+- **visibility**: `number` - Visibility distance in kilometers (range: 0 to 50).
+- **cloudCover**: `number` - Cloud cover percentage (range: 0 to 100).
+- **season**: `string` (enum: spring, summer, autumn, winter) - Specifies the season.
+- **climateZone**: `string` (enum: arctic, temperate, tropical, desert, mediterranean) - Specifies the climate zone.
 
-### Weather Query Parameters
-- **regionId** (string, uuid): The unique identifier of the region for the query.
-- **timeRange** (string, default: `current`): The range of time for which weather data is requested. Possible values are `current`, `hourly`, `daily`, `weekly`.
-- **includeEffects** (boolean, default: `false`): Indicates whether to include effects of weather events in the response.
-- **forecastDays** (number, optional): Number of days to include in the forecast. Minimum: 1, Maximum: 30.
+### Weather Event Parameters
+- **environmentId**: `string` (UUID) - Unique identifier for the environment.
+- **eventType**: `string` (enum: storm, blizzard, heatwave, drought, fog, tornado) - Type of weather event.
+- **intensity**: `number` - Intensity of the event on a scale of 1 to 10.
+- **duration**: `number` - Duration of the event in hours (range: 1 to 24).
+
+### Forecast Request Parameters
+- **environmentId**: `string` (UUID) - Unique identifier for the environment.
+- **hours**: `number` - Number of hours to forecast (optional, default is 24, max is 168).
 
 ## Return Values
-
-### Weather Pattern Response
-On successful simulation, a weather pattern object will be returned containing:
-- id (string)
-- regionId (string)
-- timestamp (Date)
-- temperature (number)
-- humidity (number)
-- precipitation (number)
-- windSpeed (number)
-- windDirection (number)
-- pressure (number)
-- cloudCover (number)
-- visibility (number)
-- uvIndex (number)
-- season (string)
-- weatherType (string)
-- intensity (number)
-
-### Weather Event Response
-When querying weather data, the API may return weather event details, including:
-- id (string)
-- type (string)
-- severity (number)
-- duration (number)
-- startTime (Date)
-- endTime (Date)
-- affectedRegions (array of strings)
-- effects (array of WeatherEffect objects)
+- **Weather Pattern**: Object containing the parameters of the weather pattern saved, including a timestamp and optional conditions.
+- **Weather Event**: Object containing details of the weather event with start and end times and its active status.
+- **Forecast**: Predicted weather conditions for the specified environment and timeframe.
 
 ## Examples
 
-### Simulating Weather
-```json
-POST /weather/simulate
+### Create a Weather Pattern
+```http
+POST /api/craiverse/weather/pattern
+Content-Type: application/json
+
 {
-  "regionId": "123e4567-e89b-12d3-a456-426614174000",
-  "biomeType": "forest",
-  "duration": 30,
-  "seasonOverride": "summer",
-  "intensityModifier": 1.5
+  "environmentId": "123e4567-e89b-12d3-a456-426614174000",
+  "temperature": 25,
+  "humidity": 60,
+  "windSpeed": 15,
+  "windDirection": 180,
+  "precipitation": 10,
+  "pressure": 1013,
+  "visibility": 10,
+  "cloudCover": 50,
+  "season": "summer",
+  "climateZone": "temperate"
 }
 ```
 
-### Querying Weather
-```json
-GET /weather/query
+### Create a Weather Event
+```http
+POST /api/craiverse/weather/event
+Content-Type: application/json
+
 {
-  "regionId": "123e4567-e89b-12d3-a456-426614174000",
-  "timeRange": "daily",
-  "includeEffects": true,
-  "forecastDays": 7
+  "environmentId": "123e4567-e89b-12d3-a456-426614174000",
+  "eventType": "storm",
+  "intensity": 7,
+  "duration": 12
 }
 ```
-This API facilitates dynamic weather simulations, providing an advanced tool for scenarios like gaming, environmental studies, and educational purposes.
+
+### Forecast Weather
+```http
+GET /api/craiverse/weather/forecast?environmentId=123e4567-e89b-12d3-a456-426614174000&hours=24
+```
+
+This comprehensive API enables detailed simulations and forecasts of weather conditions, enhancing application functionality within the CRAIverse.
