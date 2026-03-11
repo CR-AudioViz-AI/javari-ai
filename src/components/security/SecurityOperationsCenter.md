@@ -1,78 +1,74 @@
-# Build Security Operations Center Interface
+# Build Real-Time Security Operations Center
 
-# SecurityOperationsCenter Component
+```markdown
+# Security Operations Center Component
 
 ## Purpose
-The `SecurityOperationsCenter` component serves as an interface for monitoring and managing security operations, including tracking security events, incidents, and metrics. It provides users with visual indicators of system health and enables actions related to security incidents.
+The `SecurityOperationsCenter` component is designed to provide a real-time visual interface for monitoring and managing security events, threats, and policies within a Security Operations Center (SOC). It consolidates various data points and visual cues to help security analysts make informed decisions.
 
 ## Usage
-To use the `SecurityOperationsCenter` component, import it into your React application and include it within your component tree. Ensure that you have the necessary UI components and styles available.
+The component is used as a child component within a React application where real-time security monitoring and interaction is required.
 
 ```tsx
-import SecurityOperationsCenter from './src/components/security/SecurityOperationsCenter';
+import SecurityOperationsCenter from '@/components/security/SecurityOperationsCenter';
 
-const App = () => {
-  return (
-    <div>
-      <SecurityOperationsCenter />
-    </div>
-  );
-};
+// Inside your component render
+<SecurityOperationsCenter />
 ```
 
-## Parameters/Props
-- **No props are passed directly to this component.** The component fetches data internally, but it can be connected to external data sources as needed.
+## Parameters / Props
+The `SecurityOperationsCenter` component does not accept parameters directly via props, as it handles its own internal state and behavior. However, the component interacts with various internal types which are essential for its operations:
 
-### Interfaces Used
-- **SecurityEvent**: Represents a detailed object regarding an individual security event.
-  - `id: string`: Unique identifier for the event.
-  - `type: 'malware' | 'intrusion' | 'ddos' | 'phishing' | 'breach' | 'anomaly'`: The type of the security event.
-  - `severity: 'critical' | 'high' | 'medium' | 'low'`: Severity level of the event.
-  - `source: string`: The source of the event.
-  - `target: string`: The target affected by the event.
-  - `location`: Location information of the event.
-  - `timestamp: Date`: Event occurrence timestamp.
-  - `status: 'active' | 'investigating' | 'resolved' | 'false_positive'`: Current status of the event.
-  - `description: string`: Description of the event.
-  - `indicators: string[]`: Indicators related to the event.
-  - `affectedAssets: number`: Number of assets affected by the event.
-  - `automated: boolean`: Indicates if the event was detected by an automated system.
+### Types
 
-- **SecurityIncident**: Represents an incident that can encompass multiple events.
-  - `id: string`: Unique identifier for the incident.
-  - `title: string`: Title of the incident.
-  - `severity`: Severity of the incident.
-  - `status`: Current status of the incident.
-  - `assignee: string`: User assigned to the incident.
-  - `created: Date`: Creation date of the incident.
-  - `updated: Date`: Last update date.
-  - `events: SecurityEvent[]`: Array of events associated with the incident.
-  - `timeline`: Array of actions taken regarding the incident.
-  - `impact: string`: Impact description.
-  - `mitigation: string[]`: List of mitigation actions.
+- **SecurityEvent**: Defines the structure of a single security event.
+  - `id`: string - Unique identifier for the event.
+  - `timestamp`: Date - The time the event occurred.
+  - `type`: 'threat' | 'incident' | 'vulnerability' | 'compliance' - Type of security event.
+  - `severity`: 'critical' | 'high' | 'medium' | 'low' - Event severity level.
+  - `source`: string - Source of the event.
+  - `description`: string - Detailed explanation of the event.
+  - `status`: 'active' | 'investigating' | 'resolved' | 'false_positive' - Current status of the event.
+  - `assignedTo`: string (optional) - User assigned to handle the event.
+  - `location`: object (optional) - Geographical location related to the event containing `country`, `city`, and `coordinates`.
+  - `metadata`: object (optional) - Additional data related to the event.
 
-- **SecurityMetric**: Represents metric data related to security operations.
-  - `id: string`: Unique identifier for the metric.
-  - `name: string`: Name of the metric.
-  - `value: number`: Current value of the metric.
-  - `unit: string`: Unit of measurement for the metric.
-  - `trend: 'up' | 'down' | 'stable'`: Trend direction of the metric.
+- **ThreatIndicator**: Captures information about specific threat types.
+  - `id`: string - Unique identifier for the threat indicator.
+  - `type`: 'malware' | 'phishing' | 'ddos' | 'intrusion' | 'data_breach' - The nature of the threat.
+  - `confidence`: number - Confidence level of the threat indicator.
+  - `count`: number - Occurrences of the detected threat.
+  - `trend`: 'increasing' | 'decreasing' | 'stable' - Current trend of the threat.
+  - `lastSeen`: Date - Last detected time for the threat.
+  - `blockedCount`: number - Number of occurrences blocked.
+  - `allowedCount`: number - Number of occurrences allowed.
+
+- **SecurityPolicy**: Encapsulates information about security policies.
+  - `id`: string - Unique identifier for the policy.
+  - `name`: string - Name of the policy.
+  - `category`: string - Category of the policy (not fully defined).
 
 ## Return Values
-The component returns a fully functional security operations center interface with visual representations of events, incidents, and metrics, allowing users to navigate and interact with current security data.
+This component renders JSX directly to the DOM as part of the React component lifecycle.
 
 ## Examples
-Here's a simple example of integrating the `SecurityOperationsCenter` in a component hierarchy:
+Basic usage of the `SecurityOperationsCenter` would look like this:
 
 ```tsx
-const MySecurityDashboard = () => {
+import React from 'react';
+import SecurityOperationsCenter from '@/components/security/SecurityOperationsCenter';
+
+const App = () => {
   return (
     <div>
       <h1>Security Dashboard</h1>
       <SecurityOperationsCenter />
     </div>
   );
-};
+}
+
+export default App;
 ```
 
-This will render the security operations center, providing an interactive interface for your security team.
+This showcases a functional component embedding the SOC interface into a larger application structure, ready to facilitate real-time security monitoring and management.
+```
