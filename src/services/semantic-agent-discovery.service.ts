@@ -1,675 +1,747 @@
 ```typescript
 import { createClient } from '@supabase/supabase-js';
-import { Configuration, OpenAIApi } from 'openai';
-import { Agent, AgentCapability, SearchQuery, SearchResult, UserProfile } from '../types';
-import { CacheService } from './cache.service';
+import OpenAI from 'openai';
+import { redis } from '../lib/cache/redis';
+import { supabase } from '../lib/database/supabase';
 import { AnalyticsService } from './analytics.service';
-import { RateLimitService } from './rate-limit.service';
-import { Logger } from '../utils/logger';
+import type { Agent, AgentCapability, AgentSearchContext } from '../types/agent.types';
 
 /**
- * Interface for semantic search configuration
+ * Configuration for semantic search parameters
  */
-export interface SemanticSearchConfig {
-  openaiApiKey: string;
-  supabaseUrl: string;
-  supabaseKey: string;
-  vectorDimensions: number;
-  similarityThreshold: number;
+interface SemanticSearchConfig {
+  /** Maximum number of results to return */
   maxResults: number;
-  cacheTtl: number;
+  /** Minimum similarity threshold (0-1) */
+  similarityThreshold: number;
+  /** Enable usage pattern weighting */
+  useUsagePatterns: boolean;
+  /** Cache TTL for embeddings in seconds */
+  embeddingCacheTtl: number;
+  /** Enable contextual recommendations */
+  enableContextualRecs: boolean;
 }
 
 /**
- * Interface for search query parameters
+ * Search result with relevance scoring
  */
-export interface SearchQueryParams {
-  query: string;
-  userId?: string;
-  capabilities?: string[];
-  tags?: string[];
-  maxResults?: number;
-  minSimilarity?: number;
-  includeInactive?: boolean;
-}
-
-/**
- * Interface for agent search result with scoring
- */
-export interface AgentSearchResult {
+interface AgentSearchResult {
   agent: Agent;
-  similarity: number;
-  capabilityMatch: number;
-  contextualScore: number;
-  finalScore: number;
-  matchedCapabilities: string[];
-  reasoning: string;
+  relevanceScore: number;
+  similarityScore: number;
+  usageScore: number;
+  contextScore: number;
+  matchedCapabilities: AgentCapability[];
+  reasoning: string[];
 }
 
 /**
- * Interface for search analytics data
+ * Vector embedding with metadata
  */
-export interface SearchAnalytics {
-  queryId: string;
-  userId?: string;
-  query: string;
-  resultsCount: number;
-  executionTime: number;
-  similarityScores: number[];
-  clickThroughRate?: number;
-  timestamp: Date;
-}
-
-/**
- * Interface for agent capability metadata
- */
-export interface AgentMetadata {
+interface AgentEmbedding {
   agentId: string;
-  capabilities: AgentCapability[];
-  description: string;
-  tags: string[];
   embedding: number[];
+  capabilities: string[];
   lastUpdated: Date;
+  version: string;
 }
 
 /**
- * Advanced semantic search service for AI agent discovery
- * Uses vector embeddings and contextual analysis for intelligent agent matching
+ * Usage pattern data for contextual scoring
+ */
+interface UsagePattern {
+  userId: string;
+  agentId: string;
+  queryVector: number[];
+  successScore: number;
+  timestamp: Date;
+  context: Record<string, any>;
+}
+
+/**
+ * Search context for personalized results
+ */
+interface SearchContext {
+  userId?: string;
+  sessionId?: string;
+  previousQueries: string[];
+  currentProject?: string;
+  userPreferences: Record<string, any>;
+}
+
+/**
+ * Default configuration for semantic search
+ */
+const DEFAULT_CONFIG: SemanticSearchConfig = {
+  maxResults: 10,
+  similarityThreshold: 0.7,
+  useUsagePatterns: true,
+  embeddingCacheTtl: 3600, // 1 hour
+  enableContextualRecs: true,
+};
+
+/**
+ * Semantic Agent Discovery Service
+ * 
+ * Provides intelligent agent discovery using vector embeddings and semantic search.
+ * Matches user queries with agent capabilities using OpenAI embeddings and provides
+ * relevance scoring based on similarity, usage patterns, and contextual factors.
  */
 export class SemanticAgentDiscoveryService {
-  private readonly supabase: any;
-  private readonly openai: OpenAIApi;
-  private readonly config: SemanticSearchConfig;
-  private readonly logger: Logger;
+  private openai: OpenAI;
+  private analytics: AnalyticsService;
+  private config: SemanticSearchConfig;
+  private embeddingModel = 'text-embedding-3-small';
+  private vectorDimension = 1536;
 
-  constructor(
-    config: SemanticSearchConfig,
-    private readonly cacheService: CacheService,
-    private readonly analyticsService: AnalyticsService,
-    private readonly rateLimitService: RateLimitService
-  ) {
-    this.config = config;
-    this.logger = new Logger('SemanticAgentDiscoveryService');
-    
-    // Initialize Supabase client
-    this.supabase = createClient(config.supabaseUrl, config.supabaseKey);
-    
-    // Initialize OpenAI client
-    const openaiConfig = new Configuration({
-      apiKey: config.openaiApiKey,
+  constructor(config: Partial<SemanticSearchConfig> = {}) {
+    this.openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
     });
-    this.openai = new OpenAIApi(openaiConfig);
+    this.analytics = new AnalyticsService();
+    this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
   /**
-   * Performs semantic search for agents based on natural language query
+   * Search for agents using semantic matching
+   * 
+   * @param query - Natural language search query
+   * @param context - Search context for personalization
+   * @returns Promise resolving to ranked search results
    */
-  async searchAgents(params: SearchQueryParams): Promise<AgentSearchResult[]> {
-    const startTime = Date.now();
-    const queryId = this.generateQueryId();
-
+  async searchAgents(
+    query: string,
+    context: SearchContext = {}
+  ): Promise<AgentSearchResult[]> {
     try {
-      // Rate limiting check
-      if (params.userId) {
-        await this.rateLimitService.checkLimit(`semantic_search:${params.userId}`, 100, 3600);
-      }
-
-      // Process natural language query
-      const processedQuery = await this.processNaturalLanguageQuery(params.query);
-      
-      // Generate query embedding
-      const queryEmbedding = await this.generateEmbedding(processedQuery.enhancedQuery);
+      // Generate embedding for the query
+      const queryEmbedding = await this.generateQueryEmbedding(query);
       
       // Perform vector similarity search
-      const similarAgents = await this.vectorSimilaritySearch(
+      const candidates = await this.vectorSearch(queryEmbedding);
+      
+      // Score and rank results
+      const scoredResults = await this.scoreAndRankResults(
+        candidates,
         queryEmbedding,
-        params.maxResults || this.config.maxResults,
-        params.minSimilarity || this.config.similarityThreshold
+        query,
+        context
       );
-
-      // Apply capability filtering
-      const capabilityFiltered = await this.filterByCapabilities(
-        similarAgents,
-        params.capabilities,
-        processedQuery.extractedCapabilities
-      );
-
-      // Apply contextual scoring
-      const contextualResults = await this.applyContextualScoring(
-        capabilityFiltered,
-        params.userId,
-        processedQuery
-      );
-
-      // Rank and filter results
-      const rankedResults = await this.rankSearchResults(contextualResults, params);
-
-      // Track analytics
-      const executionTime = Date.now() - startTime;
-      await this.trackSearchAnalytics({
-        queryId,
-        userId: params.userId,
-        query: params.query,
-        resultsCount: rankedResults.length,
-        executionTime,
-        similarityScores: rankedResults.map(r => r.similarity),
-        timestamp: new Date()
-      });
-
-      this.logger.info('Semantic search completed', {
-        queryId,
-        resultsCount: rankedResults.length,
-        executionTime
-      });
-
-      return rankedResults;
-    } catch (error) {
-      this.logger.error('Semantic search failed', { queryId, error });
-      throw new Error(`Semantic search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }
-
-  /**
-   * Processes natural language query to extract intent and capabilities
-   */
-  private async processNaturalLanguageQuery(query: string): Promise<{
-    enhancedQuery: string;
-    extractedCapabilities: string[];
-    intent: string;
-    entities: string[];
-  }> {
-    const cacheKey = `nlp_query:${Buffer.from(query).toString('base64')}`;
-    const cached = await this.cacheService.get<any>(cacheKey);
-    
-    if (cached) {
-      return cached;
-    }
-
-    try {
-      const prompt = `
-        Analyze this search query for AI agent discovery:
-        "${query}"
-        
-        Extract:
-        1. Enhanced query (expanded with synonyms and technical terms)
-        2. Specific capabilities mentioned
-        3. User intent (find, compare, recommend, etc.)
-        4. Named entities (technologies, domains, etc.)
-        
-        Return JSON format.
-      `;
-
-      const response = await this.openai.createChatCompletion({
-        model: 'gpt-3.5-turbo',
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.3,
-        max_tokens: 500
-      });
-
-      const analysis = JSON.parse(response.data.choices[0]?.message?.content || '{}');
       
-      const result = {
-        enhancedQuery: analysis.enhancedQuery || query,
-        extractedCapabilities: analysis.capabilities || [],
-        intent: analysis.intent || 'find',
-        entities: analysis.entities || []
-      };
-
-      await this.cacheService.set(cacheKey, result, this.config.cacheTtl);
-      return result;
-    } catch (error) {
-      this.logger.warn('NLP processing failed, using original query', { error });
-      return {
-        enhancedQuery: query,
-        extractedCapabilities: [],
-        intent: 'find',
-        entities: []
-      };
-    }
-  }
-
-  /**
-   * Generates embedding vector for text using OpenAI
-   */
-  private async generateEmbedding(text: string): Promise<number[]> {
-    const cacheKey = `embedding:${Buffer.from(text).toString('base64')}`;
-    const cached = await this.cacheService.get<number[]>(cacheKey);
-    
-    if (cached) {
-      return cached;
-    }
-
-    try {
-      const response = await this.openai.createEmbedding({
-        model: 'text-embedding-ada-002',
-        input: text
-      });
-
-      const embedding = response.data.data[0]?.embedding;
-      if (!embedding) {
-        throw new Error('No embedding returned from OpenAI');
-      }
-
-      await this.cacheService.set(cacheKey, embedding, this.config.cacheTtl * 24); // Cache embeddings longer
-      return embedding;
-    } catch (error) {
-      this.logger.error('Embedding generation failed', { error, text: text.substring(0, 100) });
-      throw new Error(`Embedding generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }
-
-  /**
-   * Performs vector similarity search using Supabase pgvector
-   */
-  private async vectorSimilaritySearch(
-    queryEmbedding: number[],
-    maxResults: number,
-    minSimilarity: number
-  ): Promise<{ agent: Agent; similarity: number }[]> {
-    try {
-      const { data, error } = await this.supabase.rpc('search_agents_by_similarity', {
-        query_embedding: queryEmbedding,
-        similarity_threshold: minSimilarity,
-        match_count: maxResults
-      });
-
-      if (error) {
-        throw new Error(`Supabase vector search error: ${error.message}`);
-      }
-
-      return data || [];
-    } catch (error) {
-      this.logger.error('Vector similarity search failed', { error });
-      throw new Error(`Vector search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }
-
-  /**
-   * Filters results based on capability matching
-   */
-  private async filterByCapabilities(
-    results: { agent: Agent; similarity: number }[],
-    requestedCapabilities?: string[],
-    extractedCapabilities: string[] = []
-  ): Promise<{ agent: Agent; similarity: number; capabilityMatch: number }[]> {
-    const allCapabilities = [...(requestedCapabilities || []), ...extractedCapabilities];
-    
-    if (allCapabilities.length === 0) {
-      return results.map(r => ({ ...r, capabilityMatch: 0.5 }));
-    }
-
-    return results.map(result => {
-      const agentCapabilities = result.agent.capabilities?.map(cap => cap.name.toLowerCase()) || [];
-      const requestedCapsLower = allCapabilities.map(cap => cap.toLowerCase());
+      // Track search analytics
+      await this.trackSearchAnalytics(query, scoredResults, context);
       
-      const matches = requestedCapsLower.filter(cap => 
-        agentCapabilities.some(agentCap => 
-          agentCap.includes(cap) || cap.includes(agentCap)
-        )
-      );
-
-      const capabilityMatch = matches.length / Math.max(requestedCapsLower.length, 1);
-      
-      return {
-        ...result,
-        capabilityMatch
-      };
-    });
-  }
-
-  /**
-   * Applies contextual scoring based on user profile and behavior
-   */
-  private async applyContextualScoring(
-    results: { agent: Agent; similarity: number; capabilityMatch: number }[],
-    userId?: string,
-    queryContext?: any
-  ): Promise<{ agent: Agent; similarity: number; capabilityMatch: number; contextualScore: number }[]> {
-    if (!userId) {
-      return results.map(r => ({ ...r, contextualScore: 0.5 }));
-    }
-
-    try {
-      // Get user profile and interaction history
-      const userProfile = await this.getUserProfile(userId);
-      const interactionHistory = await this.getUserAgentInteractions(userId);
-
-      return results.map(result => {
-        let contextualScore = 0.5;
-
-        // User preference alignment
-        if (userProfile?.preferences?.domains) {
-          const domainMatch = userProfile.preferences.domains.some(domain =>
-            result.agent.tags?.includes(domain) || 
-            result.agent.description?.toLowerCase().includes(domain.toLowerCase())
-          );
-          if (domainMatch) contextualScore += 0.2;
-        }
-
-        // Previous interaction success
-        const pastInteraction = interactionHistory.find(h => h.agentId === result.agent.id);
-        if (pastInteraction) {
-          contextualScore += (pastInteraction.rating - 3) * 0.1; // Scale rating to -0.2 to +0.2
-        }
-
-        // Query context alignment
-        if (queryContext?.intent === 'recommend' && result.agent.metadata?.recommended) {
-          contextualScore += 0.15;
-        }
-
-        return {
-          ...result,
-          contextualScore: Math.max(0, Math.min(1, contextualScore))
-        };
-      });
+      return scoredResults.slice(0, this.config.maxResults);
     } catch (error) {
-      this.logger.warn('Contextual scoring failed', { error, userId });
-      return results.map(r => ({ ...r, contextualScore: 0.5 }));
+      console.error('Agent search failed:', error);
+      throw new Error(`Agent search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
   /**
-   * Ranks search results using multi-factor scoring
-   */
-  private async rankSearchResults(
-    results: { agent: Agent; similarity: number; capabilityMatch: number; contextualScore: number }[],
-    params: SearchQueryParams
-  ): Promise<AgentSearchResult[]> {
-    const rankedResults = results.map(result => {
-      // Multi-factor scoring weights
-      const weights = {
-        similarity: 0.4,
-        capability: 0.35,
-        contextual: 0.25
-      };
-
-      const finalScore = 
-        (result.similarity * weights.similarity) +
-        (result.capabilityMatch * weights.capability) +
-        (result.contextualScore * weights.contextual);
-
-      // Generate reasoning
-      const reasoning = this.generateSearchReasoning(result, finalScore);
-
-      // Find matched capabilities
-      const matchedCapabilities = this.findMatchedCapabilities(
-        result.agent,
-        params.capabilities || []
-      );
-
-      return {
-        agent: result.agent,
-        similarity: result.similarity,
-        capabilityMatch: result.capabilityMatch,
-        contextualScore: result.contextualScore,
-        finalScore,
-        matchedCapabilities,
-        reasoning
-      };
-    });
-
-    // Sort by final score (descending)
-    rankedResults.sort((a, b) => b.finalScore - a.finalScore);
-
-    // Apply additional filters
-    return this.applyFinalFilters(rankedResults, params);
-  }
-
-  /**
-   * Generates human-readable reasoning for search result ranking
-   */
-  private generateSearchReasoning(
-    result: { agent: Agent; similarity: number; capabilityMatch: number; contextualScore: number },
-    finalScore: number
-  ): string {
-    const reasons = [];
-
-    if (result.similarity > 0.8) {
-      reasons.push('High semantic similarity to query');
-    } else if (result.similarity > 0.6) {
-      reasons.push('Good semantic match');
-    }
-
-    if (result.capabilityMatch > 0.7) {
-      reasons.push('Strong capability alignment');
-    } else if (result.capabilityMatch > 0.4) {
-      reasons.push('Partial capability match');
-    }
-
-    if (result.contextualScore > 0.6) {
-      reasons.push('Matches user preferences');
-    }
-
-    if (finalScore > 0.8) {
-      reasons.push('Highly recommended');
-    }
-
-    return reasons.join(', ') || 'Basic relevance match';
-  }
-
-  /**
-   * Finds capabilities that match the search criteria
-   */
-  private findMatchedCapabilities(agent: Agent, requestedCapabilities: string[]): string[] {
-    if (!agent.capabilities || requestedCapabilities.length === 0) {
-      return [];
-    }
-
-    const agentCapNames = agent.capabilities.map(cap => cap.name.toLowerCase());
-    return requestedCapabilities.filter(reqCap =>
-      agentCapNames.some(agentCap =>
-        agentCap.includes(reqCap.toLowerCase()) || reqCap.toLowerCase().includes(agentCap)
-      )
-    );
-  }
-
-  /**
-   * Applies final filters to search results
-   */
-  private applyFinalFilters(
-    results: AgentSearchResult[],
-    params: SearchQueryParams
-  ): AgentSearchResult[] {
-    let filtered = results;
-
-    // Filter by activity status
-    if (!params.includeInactive) {
-      filtered = filtered.filter(result => result.agent.status === 'active');
-    }
-
-    // Apply minimum similarity threshold
-    const minSimilarity = params.minSimilarity || this.config.similarityThreshold;
-    filtered = filtered.filter(result => result.similarity >= minSimilarity);
-
-    // Limit results
-    const maxResults = params.maxResults || this.config.maxResults;
-    return filtered.slice(0, maxResults);
-  }
-
-  /**
-   * Indexes agent metadata for semantic search
+   * Index an agent's capabilities for semantic search
+   * 
+   * @param agent - Agent to index
+   * @returns Promise resolving when indexing is complete
    */
   async indexAgent(agent: Agent): Promise<void> {
     try {
-      // Extract agent metadata
-      const metadata = await this.extractAgentMetadata(agent);
+      // Extract searchable text from agent capabilities
+      const capabilityText = this.extractCapabilityText(agent);
       
-      // Generate embedding for agent description and capabilities
-      const text = this.createAgentSearchText(agent);
-      const embedding = await this.generateEmbedding(text);
-
-      // Store in vector database
-      const { error } = await this.supabase
-        .from('agent_embeddings')
-        .upsert({
-          agent_id: agent.id,
-          embedding,
-          metadata,
-          search_text: text,
-          updated_at: new Date().toISOString()
-        });
-
-      if (error) {
-        throw new Error(`Failed to index agent: ${error.message}`);
-      }
-
-      this.logger.info('Agent indexed successfully', { agentId: agent.id });
+      // Generate embedding for agent capabilities
+      const embedding = await this.generateEmbedding(capabilityText);
+      
+      // Store embedding in vector database
+      await this.storeAgentEmbedding({
+        agentId: agent.id,
+        embedding,
+        capabilities: agent.capabilities.map(c => c.name),
+        lastUpdated: new Date(),
+        version: agent.version || '1.0.0',
+      });
+      
+      console.log(`Agent ${agent.id} successfully indexed`);
     } catch (error) {
-      this.logger.error('Agent indexing failed', { agentId: agent.id, error });
+      console.error(`Failed to index agent ${agent.id}:`, error);
       throw new Error(`Agent indexing failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
   /**
-   * Removes agent from search index
+   * Update agent index when capabilities change
+   * 
+   * @param agentId - ID of agent to update
+   * @param agent - Updated agent data
+   * @returns Promise resolving when update is complete
+   */
+  async updateAgentIndex(agentId: string, agent: Agent): Promise<void> {
+    try {
+      // Check if agent exists in index
+      const existingEmbedding = await this.getAgentEmbedding(agentId);
+      
+      if (!existingEmbedding) {
+        // Index as new agent
+        await this.indexAgent(agent);
+        return;
+      }
+      
+      // Generate new embedding
+      const capabilityText = this.extractCapabilityText(agent);
+      const newEmbedding = await this.generateEmbedding(capabilityText);
+      
+      // Update existing record
+      await this.updateAgentEmbedding(agentId, {
+        embedding: newEmbedding,
+        capabilities: agent.capabilities.map(c => c.name),
+        lastUpdated: new Date(),
+        version: agent.version || existingEmbedding.version,
+      });
+      
+      console.log(`Agent ${agentId} index updated`);
+    } catch (error) {
+      console.error(`Failed to update agent index ${agentId}:`, error);
+      throw new Error(`Agent index update failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Remove agent from search index
+   * 
+   * @param agentId - ID of agent to remove
+   * @returns Promise resolving when removal is complete
    */
   async removeAgentFromIndex(agentId: string): Promise<void> {
     try {
-      const { error } = await this.supabase
+      await supabase
         .from('agent_embeddings')
         .delete()
         .eq('agent_id', agentId);
-
-      if (error) {
-        throw new Error(`Failed to remove agent from index: ${error.message}`);
-      }
-
-      this.logger.info('Agent removed from index', { agentId });
+      
+      // Clear related cache entries
+      await this.clearAgentCache(agentId);
+      
+      console.log(`Agent ${agentId} removed from index`);
     } catch (error) {
-      this.logger.error('Agent index removal failed', { agentId, error });
-      throw new Error(`Agent index removal failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error(`Failed to remove agent ${agentId} from index:`, error);
+      throw new Error(`Agent removal failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
   /**
-   * Gets recommendations based on user behavior and preferences
+   * Get contextual agent recommendations based on usage patterns
+   * 
+   * @param userId - User ID for personalization
+   * @param context - Current context
+   * @returns Promise resolving to recommended agents
    */
-  async getPersonalizedRecommendations(
+  async getContextualRecommendations(
     userId: string,
-    limit: number = 10
+    context: AgentSearchContext = {}
   ): Promise<AgentSearchResult[]> {
     try {
-      const userProfile = await this.getUserProfile(userId);
-      const interactionHistory = await this.getUserAgentInteractions(userId);
-
-      // Generate recommendation query based on user profile
-      const recommendationQuery = this.generateRecommendationQuery(userProfile, interactionHistory);
+      if (!this.config.enableContextualRecs) {
+        return [];
+      }
       
-      // Perform semantic search with recommendation context
-      return await this.searchAgents({
-        query: recommendationQuery,
-        userId,
-        maxResults: limit,
-        minSimilarity: 0.3 // Lower threshold for recommendations
-      });
+      // Analyze user patterns
+      const userPatterns = await this.analyzeUserPatterns(userId);
+      
+      // Get agents with high usage correlation
+      const recommendations = await this.generateRecommendations(
+        userPatterns,
+        context
+      );
+      
+      return recommendations.slice(0, 5); // Top 5 recommendations
     } catch (error) {
-      this.logger.error('Personalized recommendations failed', { userId, error });
-      throw new Error(`Recommendations failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }
-
-  /**
-   * Tracks search analytics
-   */
-  private async trackSearchAnalytics(analytics: SearchAnalytics): Promise<void> {
-    try {
-      await this.analyticsService.track('semantic_search', {
-        queryId: analytics.queryId,
-        userId: analytics.userId,
-        query: analytics.query,
-        resultsCount: analytics.resultsCount,
-        executionTime: analytics.executionTime,
-        avgSimilarity: analytics.similarityScores.reduce((a, b) => a + b, 0) / analytics.similarityScores.length,
-        timestamp: analytics.timestamp
-      });
-    } catch (error) {
-      this.logger.warn('Analytics tracking failed', { error });
-    }
-  }
-
-  // Helper methods
-  private generateQueryId(): string {
-    return `query_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  }
-
-  private async extractAgentMetadata(agent: Agent): Promise<AgentMetadata> {
-    return {
-      agentId: agent.id,
-      capabilities: agent.capabilities || [],
-      description: agent.description || '',
-      tags: agent.tags || [],
-      embedding: [], // Will be filled by indexing process
-      lastUpdated: new Date()
-    };
-  }
-
-  private createAgentSearchText(agent: Agent): string {
-    const parts = [
-      agent.name,
-      agent.description,
-      agent.capabilities?.map(c => `${c.name}: ${c.description}`).join(' '),
-      agent.tags?.join(' ')
-    ].filter(Boolean);
-
-    return parts.join(' ');
-  }
-
-  private async getUserProfile(userId: string): Promise<UserProfile | null> {
-    try {
-      const { data, error } = await this.supabase
-        .from('user_profiles')
-        .select('*')
-        .eq('user_id', userId)
-        .single();
-
-      return error ? null : data;
-    } catch {
-      return null;
-    }
-  }
-
-  private async getUserAgentInteractions(userId: string): Promise<any[]> {
-    try {
-      const { data, error } = await this.supabase
-        .from('user_agent_interactions')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(50);
-
-      return error ? [] : data;
-    } catch {
+      console.error('Failed to generate recommendations:', error);
       return [];
     }
   }
 
-  private generateRecommendationQuery(
-    userProfile: UserProfile | null,
-    interactions: any[]
-  ): string {
-    const preferences = userProfile?.preferences;
-    const recentInteractions = interactions.slice(0, 10);
-
-    let query = 'AI agent recommendation';
-
-    if (preferences?.domains?.length) {
-      query += ` for ${preferences.domains.join(', ')}`;
-    }
-
-    if (recentInteractions.length > 0) {
-      const topRatedAgents = recentInteractions
-        .filter(i => i.rating >= 4)
-        .map(i => i.agent_name)
-        .slice(0, 3);
+  /**
+   * Generate embedding for query with caching
+   */
+  private async generateQueryEmbedding(query: string): Promise<number[]> {
+    const cacheKey = `query_embedding:${Buffer.from(query).toString('base64')}`;
+    
+    try {
+      // Check cache first
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        return JSON.parse(cached);
+      }
       
-      if (topRatedAgents.length > 0) {
-        query += ` similar to ${topRatedAgents.join(', ')}`;
+      // Generate new embedding
+      const embedding = await this.generateEmbedding(query);
+      
+      // Cache with TTL
+      await redis.setex(
+        cacheKey,
+        this.config.embeddingCacheTtl,
+        JSON.stringify(embedding)
+      );
+      
+      return embedding;
+    } catch (error) {
+      console.error('Query embedding generation failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Generate embedding using OpenAI API
+   */
+  private async generateEmbedding(text: string): Promise<number[]> {
+    try {
+      const response = await this.openai.embeddings.create({
+        model: this.embeddingModel,
+        input: text.trim(),
+        encoding_format: 'float',
+      });
+      
+      return response.data[0].embedding;
+    } catch (error) {
+      console.error('OpenAI embedding generation failed:', error);
+      throw new Error(`Embedding generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Perform vector similarity search using pgvector
+   */
+  private async vectorSearch(queryEmbedding: number[]): Promise<Agent[]> {
+    try {
+      const { data, error } = await supabase.rpc('search_agents_by_embedding', {
+        query_embedding: queryEmbedding,
+        similarity_threshold: this.config.similarityThreshold,
+        match_count: this.config.maxResults * 2, // Get more candidates for ranking
+      });
+      
+      if (error) throw error;
+      
+      return data || [];
+    } catch (error) {
+      console.error('Vector search failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Score and rank search results using multiple factors
+   */
+  private async scoreAndRankResults(
+    candidates: Agent[],
+    queryEmbedding: number[],
+    originalQuery: string,
+    context: SearchContext
+  ): Promise<AgentSearchResult[]> {
+    const scoredResults: AgentSearchResult[] = [];
+    
+    for (const agent of candidates) {
+      try {
+        // Get agent embedding for detailed scoring
+        const agentEmbedding = await this.getAgentEmbedding(agent.id);
+        if (!agentEmbedding) continue;
+        
+        // Calculate similarity score
+        const similarityScore = this.calculateCosineSimilarity(
+          queryEmbedding,
+          agentEmbedding.embedding
+        );
+        
+        // Calculate usage score
+        const usageScore = this.config.useUsagePatterns
+          ? await this.calculateUsageScore(agent.id, context.userId)
+          : 0;
+        
+        // Calculate context score
+        const contextScore = await this.calculateContextScore(
+          agent,
+          context,
+          originalQuery
+        );
+        
+        // Find matched capabilities
+        const matchedCapabilities = await this.findMatchedCapabilities(
+          agent,
+          originalQuery,
+          queryEmbedding
+        );
+        
+        // Calculate combined relevance score
+        const relevanceScore = this.calculateRelevanceScore(
+          similarityScore,
+          usageScore,
+          contextScore
+        );
+        
+        // Generate reasoning
+        const reasoning = this.generateReasoning(
+          similarityScore,
+          usageScore,
+          contextScore,
+          matchedCapabilities
+        );
+        
+        scoredResults.push({
+          agent,
+          relevanceScore,
+          similarityScore,
+          usageScore,
+          contextScore,
+          matchedCapabilities,
+          reasoning,
+        });
+      } catch (error) {
+        console.error(`Error scoring agent ${agent.id}:`, error);
+        continue;
       }
     }
+    
+    // Sort by relevance score
+    return scoredResults.sort((a, b) => b.relevanceScore - a.relevanceScore);
+  }
 
-    return query;
+  /**
+   * Extract searchable text from agent capabilities
+   */
+  private extractCapabilityText(agent: Agent): string {
+    const parts = [
+      agent.name,
+      agent.description,
+      ...agent.capabilities.map(c => `${c.name}: ${c.description}`),
+      agent.tags?.join(' ') || '',
+    ];
+    
+    return parts.join(' ').trim();
+  }
+
+  /**
+   * Store agent embedding in database
+   */
+  private async storeAgentEmbedding(embedding: AgentEmbedding): Promise<void> {
+    const { error } = await supabase
+      .from('agent_embeddings')
+      .upsert({
+        agent_id: embedding.agentId,
+        embedding: embedding.embedding,
+        capabilities: embedding.capabilities,
+        last_updated: embedding.lastUpdated.toISOString(),
+        version: embedding.version,
+      });
+    
+    if (error) throw error;
+  }
+
+  /**
+   * Get agent embedding from database
+   */
+  private async getAgentEmbedding(agentId: string): Promise<AgentEmbedding | null> {
+    const { data, error } = await supabase
+      .from('agent_embeddings')
+      .select('*')
+      .eq('agent_id', agentId)
+      .single();
+    
+    if (error || !data) return null;
+    
+    return {
+      agentId: data.agent_id,
+      embedding: data.embedding,
+      capabilities: data.capabilities,
+      lastUpdated: new Date(data.last_updated),
+      version: data.version,
+    };
+  }
+
+  /**
+   * Update agent embedding in database
+   */
+  private async updateAgentEmbedding(
+    agentId: string,
+    updates: Partial<AgentEmbedding>
+  ): Promise<void> {
+    const { error } = await supabase
+      .from('agent_embeddings')
+      .update({
+        ...(updates.embedding && { embedding: updates.embedding }),
+        ...(updates.capabilities && { capabilities: updates.capabilities }),
+        ...(updates.lastUpdated && { last_updated: updates.lastUpdated.toISOString() }),
+        ...(updates.version && { version: updates.version }),
+      })
+      .eq('agent_id', agentId);
+    
+    if (error) throw error;
+  }
+
+  /**
+   * Calculate cosine similarity between vectors
+   */
+  private calculateCosineSimilarity(a: number[], b: number[]): number {
+    if (a.length !== b.length) return 0;
+    
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+    
+    for (let i = 0; i < a.length; i++) {
+      dotProduct += a[i] * b[i];
+      normA += a[i] * a[i];
+      normB += b[i] * b[i];
+    }
+    
+    const magnitude = Math.sqrt(normA) * Math.sqrt(normB);
+    return magnitude === 0 ? 0 : dotProduct / magnitude;
+  }
+
+  /**
+   * Calculate usage-based score for an agent
+   */
+  private async calculateUsageScore(
+    agentId: string,
+    userId?: string
+  ): Promise<number> {
+    if (!userId) return 0;
+    
+    try {
+      const { data } = await supabase
+        .from('agent_usage_patterns')
+        .select('success_score')
+        .eq('agent_id', agentId)
+        .eq('user_id', userId)
+        .gte('timestamp', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+      
+      if (!data || data.length === 0) return 0;
+      
+      const averageSuccess = data.reduce((sum, p) => sum + p.success_score, 0) / data.length;
+      return averageSuccess;
+    } catch (error) {
+      console.error('Usage score calculation failed:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * Calculate contextual relevance score
+   */
+  private async calculateContextScore(
+    agent: Agent,
+    context: SearchContext,
+    query: string
+  ): Promise<number> {
+    let score = 0;
+    
+    // Project context matching
+    if (context.currentProject && agent.tags?.includes(context.currentProject)) {
+      score += 0.2;
+    }
+    
+    // Query history relevance
+    if (context.previousQueries.length > 0) {
+      const queryRelevance = await this.calculateQueryHistoryRelevance(
+        agent,
+        context.previousQueries
+      );
+      score += queryRelevance * 0.3;
+    }
+    
+    // User preference matching
+    if (context.userPreferences) {
+      const prefScore = this.calculatePreferenceMatch(agent, context.userPreferences);
+      score += prefScore * 0.1;
+    }
+    
+    return Math.min(score, 1.0);
+  }
+
+  /**
+   * Find capabilities that match the query
+   */
+  private async findMatchedCapabilities(
+    agent: Agent,
+    query: string,
+    queryEmbedding: number[]
+  ): Promise<AgentCapability[]> {
+    const matched: AgentCapability[] = [];
+    const queryLower = query.toLowerCase();
+    
+    for (const capability of agent.capabilities) {
+      // Keyword matching
+      const capabilityText = `${capability.name} ${capability.description}`.toLowerCase();
+      if (capabilityText.includes(queryLower) || 
+          queryLower.includes(capability.name.toLowerCase())) {
+        matched.push(capability);
+      }
+    }
+    
+    return matched;
+  }
+
+  /**
+   * Calculate combined relevance score
+   */
+  private calculateRelevanceScore(
+    similarityScore: number,
+    usageScore: number,
+    contextScore: number
+  ): number {
+    // Weighted combination of scores
+    const weights = {
+      similarity: 0.6,
+      usage: 0.25,
+      context: 0.15,
+    };
+    
+    return (
+      similarityScore * weights.similarity +
+      usageScore * weights.usage +
+      contextScore * weights.context
+    );
+  }
+
+  /**
+   * Generate human-readable reasoning for the match
+   */
+  private generateReasoning(
+    similarityScore: number,
+    usageScore: number,
+    contextScore: number,
+    matchedCapabilities: AgentCapability[]
+  ): string[] {
+    const reasoning: string[] = [];
+    
+    if (similarityScore > 0.8) {
+      reasoning.push('High semantic similarity to your query');
+    } else if (similarityScore > 0.6) {
+      reasoning.push('Good semantic match for your needs');
+    }
+    
+    if (usageScore > 0.7) {
+      reasoning.push('Previously successful for similar tasks');
+    } else if (usageScore > 0.4) {
+      reasoning.push('Some positive usage history');
+    }
+    
+    if (contextScore > 0.5) {
+      reasoning.push('Well-suited for your current context');
+    }
+    
+    if (matchedCapabilities.length > 0) {
+      reasoning.push(
+        `Matches ${matchedCapabilities.length} relevant ${matchedCapabilities.length === 1 ? 'capability' : 'capabilities'}`
+      );
+    }
+    
+    if (reasoning.length === 0) {
+      reasoning.push('Basic compatibility with your query');
+    }
+    
+    return reasoning;
+  }
+
+  /**
+   * Analyze user patterns for recommendations
+   */
+  private async analyzeUserPatterns(userId: string): Promise<UsagePattern[]> {
+    try {
+      const { data } = await supabase
+        .from('agent_usage_patterns')
+        .select('*')
+        .eq('user_id', userId)
+        .gte('timestamp', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
+        .order('timestamp', { ascending: false })
+        .limit(50);
+      
+      return data || [];
+    } catch (error) {
+      console.error('User pattern analysis failed:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Generate contextual recommendations
+   */
+  private async generateRecommendations(
+    patterns: UsagePattern[],
+    context: AgentSearchContext
+  ): Promise<AgentSearchResult[]> {
+    // Implementation would analyze patterns and generate recommendations
+    // This is a simplified version
+    return [];
+  }
+
+  /**
+   * Calculate query history relevance
+   */
+  private async calculateQueryHistoryRelevance(
+    agent: Agent,
+    previousQueries: string[]
+  ): Promise<number> {
+    // Implementation would compare agent capabilities with previous queries
+    return 0;
+  }
+
+  /**
+   * Calculate preference matching score
+   */
+  private calculatePreferenceMatch(
+    agent: Agent,
+    preferences: Record<string, any>
+  ): number {
+    // Implementation would match agent properties with user preferences
+    return 0;
+  }
+
+  /**
+   * Clear agent-related cache entries
+   */
+  private async clearAgentCache(agentId: string): Promise<void> {
+    try {
+      const pattern = `*agent*${agentId}*`;
+      const keys = await redis.keys(pattern);
+      if (keys.length > 0) {
+        await redis.del(...keys);
+      }
+    } catch (error) {
+      console.error('Cache clearing failed:', error);
+    }
+  }
+
+  /**
+   * Track search analytics
+   */
+  private async trackSearchAnalytics(
+    query: string,
+    results: AgentSearchResult[],
+    context: SearchContext
+  ): Promise<void> {
+    try {
+      await this.analytics.trackEvent('agent_search', {
+        query,
+        resultCount: results.length,
+        topScore: results[0]?.relevanceScore || 0,
+        userId: context.userId,
+        sessionId: context.sessionId,
+        timestamp: new Date(),
+      });
+    } catch (error) {
+      console.error('Search analytics tracking failed:', error);
+    }
   }
 }
 
-export default SemanticAgentDiscoveryService;
+// Export default instance
+export const semanticAgentDiscovery = new SemanticAgentDiscoveryService();
+
+// Export types for external use
+export type {
+  SemanticSearchConfig,
+  AgentSearchResult,
+  AgentEmbedding,
+  UsagePattern,
+  SearchContext,
+};
 ```
