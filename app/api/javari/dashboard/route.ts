@@ -11,6 +11,7 @@ import { NextResponse } from "next/server";
 import { createClient }         from "@supabase/supabase-js";
 import { getModuleMetrics }    from "@/lib/javari/moduleFactory";
 import { getOrchestratorStatus } from "@/lib/javari/orchestrator";
+import { getAppMetrics }        from "@/lib/javari/appFactory";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -421,6 +422,15 @@ export async function GET() {
       orchestratorStatus = await getOrchestratorStatus();
     } catch { /* orchestrator_cycles table may not exist yet */ }
 
+    // ── 9zz. App factory metrics ──────────────────────────────────────────────
+    let appMetrics = {
+      apps_total: 0, apps_complete: 0, apps_building: 0,
+      apps_planned: 0, apps_missing: 8, by_category: {} as Record<string, number>,
+    };
+    try {
+      appMetrics = await getAppMetrics();
+    } catch { /* app_registry table may not exist yet */ }
+
     // ── 10a. Module registry metrics (Module Factory) ───────────────────────
     let moduleMetrics = {
       modules_total: 0, modules_complete: 0, modules_in_progress: 0,
@@ -526,9 +536,21 @@ export async function GET() {
         cycles_total      : orchestratorStatus.cyclesTotal,
         tasks_completed   : orchestratorStatus.tasksCompletedTotal,
         modules_generated : orchestratorStatus.modulesGeneratedTotal,
+        apps_generated    : orchestratorStatus.appsGeneratedTotal,
         recent_cycles     : orchestratorStatus.recentCycles,
         cron              : "* * * * *",
         endpoint          : "/api/javari/orchestrator/run",
+      },
+
+      apps: {
+        total      : appMetrics.apps_total,
+        complete   : appMetrics.apps_complete,
+        building   : appMetrics.apps_building,
+        planned    : appMetrics.apps_planned,
+        missing    : appMetrics.apps_missing,
+        by_category: appMetrics.by_category,
+        endpoint   : "/api/javari/orchestrator/run",
+        factoryNote: "POST { action: 'app-factory' } to trigger",
       },
 
 

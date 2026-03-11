@@ -77,6 +77,8 @@ const ARTIFACT_TYPES = new Set([
   "generate_ui_component",
   "generate_documentation",
   "generate_tests",
+  // App builder — full Next.js service generation
+  "build_app",
   // Default fallback — ALL tasks produce artifacts in ecosystem mode
   "ai_task",
   // planner-generated artifact metadata tags

@@ -1,60 +1,65 @@
 // lib/javari/orchestrator.ts
-// Purpose: Javari Autonomous Orchestrator — the top-level execution coordinator.
-//          Runs a complete ecosystem cycle: gap detection → planning → task execution → telemetry.
+// Purpose: Javari Autonomous Orchestrator — top-level execution coordinator with self-healing.
 //
-// Single cycle flow (called every ~30s internally, cron fires every minute):
-//   1. Read dashboard metrics (pending tasks, module gaps)
-//   2. If pending < 10 → runModuleFactory({ maxGapsToFill: 5 })
-//   3. runAutonomousPlanner() — generates new tasks from canonical docs + KG
-//   4. runRoadmapWorker() — executes up to MAX_TASKS through build pipeline
-//   5. Write cycle telemetry to orchestrator_cycles table
+// Single cycle (runOrchestratorCycle):
+//   1. Read dashboard metrics
+//   2. If pending < 10 → runModuleFactory (gap fill, priority: critical→high→medium)
+//   3. runAppFactory (detect app opportunities, inject build_app tasks)
+//   4. runAutonomousPlanner (generate 50 tasks from canonical docs + KG)
+//   5. runRoadmapWorker (execute up to 20 tasks through build pipeline)
+//   6. Persist OrchestratorCycle telemetry
 //
-// Continuous mode (POST /api/javari/orchestrator/run):
-//   Runs up to 5 sequential cycles within a single 300s serverless invocation,
-//   with a 30s pause between cycles. Vercel cron minimum is 1 minute, so this
-//   pattern achieves near-30s effective cadence.
+// Self-healing watchdog:
+//   Every subsystem call is wrapped in withWatchdog().
+//   On failure: logs error + retries once with exponential backoff.
+//   Never halts — errors captured in cycle.errors, execution continues.
 //
-// Safety:
-//   - Guardrails check runs before every cycle (cost ceiling, kill switch)
-//   - Never throws — all errors captured in OrchestratorResult.errors
-//   - Each cycle is idempotent — safe to overlap with cron trigger
+// Continuous mode (runOrchestrator):
+//   Up to 4 sequential cycles × 30s interval within a 300s serverless invocation.
+//   Hard abort at 270s to stay within Vercel function limit.
+//   Idempotent — safe to run concurrently with cron triggers.
 //
 // Date: 2026-03-11
 
-import { createClient }          from "@supabase/supabase-js";
-import { runModuleFactory }      from "@/lib/javari/moduleFactory";
+import { createClient }             from "@supabase/supabase-js";
+import { runModuleFactory }         from "@/lib/javari/moduleFactory";
+import { runAppFactory }            from "@/lib/javari/appFactory";
 import { runAutonomousPlanner,
-         PLANNER_TRIGGER_THRESHOLD }  from "@/lib/planner/autonomousPlanner";
-import { runRoadmapWorker }      from "@/lib/execution/roadmapWorker";
+         PLANNER_TRIGGER_THRESHOLD } from "@/lib/planner/autonomousPlanner";
+import { runRoadmapWorker }         from "@/lib/execution/roadmapWorker";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface OrchestratorCycle {
-  cycleId          : string;
-  cycleStart       : string;
-  cycleEnd?        : string;
-  pendingAtStart   : number;
-  factoryRan       : boolean;
-  factoryTasksAdded: number;
-  plannerRan       : boolean;
-  plannerTasksAdded: number;
-  workerTasksRun   : number;
-  workerTasksDone  : number;
-  modulesGenerated : number;
-  costUsd          : number;
-  errors           : string[];
-  durationMs       : number;
+  cycleId              : string;
+  cycleStart           : string;
+  cycleEnd?            : string;
+  pendingAtStart       : number;
+  factoryRan           : boolean;
+  factoryTasksAdded    : number;
+  appFactoryRan        : boolean;
+  appTasksAdded        : number;
+  plannerRan           : boolean;
+  plannerTasksAdded    : number;
+  workerTasksRun       : number;
+  workerTasksDone      : number;
+  modulesGenerated     : number;
+  appsGenerated        : number;
+  costUsd              : number;
+  errors               : string[];
+  watchdogRetries      : number;
+  durationMs           : number;
 }
 
 export interface OrchestratorResult {
-  ok            : boolean;
-  mode          : "single" | "continuous";
-  cyclesRun     : number;
-  totalTasksDone: number;
-  totalCostUsd  : number;
-  cycles        : OrchestratorCycle[];
-  errors        : string[];
-  durationMs    : number;
+  ok             : boolean;
+  mode           : "single" | "continuous";
+  cyclesRun      : number;
+  totalTasksDone : number;
+  totalCostUsd   : number;
+  cycles         : OrchestratorCycle[];
+  errors         : string[];
+  durationMs     : number;
 }
 
 // ── DB ────────────────────────────────────────────────────────────────────────
@@ -67,7 +72,42 @@ function db() {
   );
 }
 
-// ── Read pending task count ───────────────────────────────────────────────────
+// ── Self-healing watchdog ─────────────────────────────────────────────────────
+// Wraps any async subsystem call. On failure: waits backoffMs, retries once.
+// Returns { result, error, retried } — never throws.
+
+async function withWatchdog<T>(
+  label    : string,
+  fn       : () => Promise<T>,
+  backoffMs: number = 3000,
+): Promise<{ result: T | null; error: string | null; retried: boolean }> {
+  // Attempt 1
+  try {
+    const result = await fn();
+    return { result, error: null, retried: false };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[watchdog] ${label} failed: ${msg} — retrying in ${backoffMs}ms`);
+    await sleep(backoffMs);
+  }
+
+  // Attempt 2 (retry)
+  try {
+    const result = await fn();
+    console.log(`[watchdog] ${label} recovered on retry`);
+    return { result, error: null, retried: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[watchdog] ${label} failed after retry: ${msg}`);
+    return { result: null, error: `${label}: ${msg}`, retried: true };
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 async function getPendingCount(): Promise<number> {
   try {
@@ -81,106 +121,109 @@ async function getPendingCount(): Promise<number> {
   }
 }
 
-// ── Persist cycle telemetry ───────────────────────────────────────────────────
-
 async function persistCycle(cycle: OrchestratorCycle): Promise<void> {
   try {
     await db().from("orchestrator_cycles").insert({
       id               : cycle.cycleId,
       cycle_start      : cycle.cycleStart,
       cycle_end        : cycle.cycleEnd ?? new Date().toISOString(),
-      tasks_created    : cycle.plannerTasksAdded + cycle.factoryTasksAdded,
+      tasks_created    : cycle.plannerTasksAdded + cycle.factoryTasksAdded + cycle.appTasksAdded,
       tasks_completed  : cycle.workerTasksDone,
       modules_generated: cycle.modulesGenerated,
+      apps_generated   : cycle.appsGenerated,
       errors           : cycle.errors,
       cost_usd         : cycle.costUsd,
       created_at       : cycle.cycleStart,
     });
   } catch {
-    // Non-fatal — telemetry never blocks execution
+    // Non-fatal — table may not exist yet (run /api/javari/run-migration)
   }
-}
-
-// ── Sleep helper ──────────────────────────────────────────────────────────────
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 // ── Single orchestrator cycle ─────────────────────────────────────────────────
 
 export async function runOrchestratorCycle(): Promise<OrchestratorCycle> {
-  const t0        = Date.now();
-  const cycleId   = `oc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const t0         = Date.now();
+  const cycleId    = `oc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const cycleStart = new Date().toISOString();
-  const errors    : string[] = [];
+  const errors     : string[] = [];
+  let watchdogRetries = 0;
 
-  let pendingAtStart   = 0;
-  let factoryRan       = false;
+  let pendingAtStart    = 0;
+  let factoryRan        = false;
   let factoryTasksAdded = 0;
-  let plannerRan       = false;
+  let appFactoryRan     = false;
+  let appTasksAdded     = 0;
+  let plannerRan        = false;
   let plannerTasksAdded = 0;
-  let workerTasksRun   = 0;
-  let workerTasksDone  = 0;
-  let modulesGenerated = 0;
-  let costUsd          = 0;
+  let workerTasksRun    = 0;
+  let workerTasksDone   = 0;
+  let modulesGenerated  = 0;
+  let appsGenerated     = 0;
+  let costUsd           = 0;
 
-  console.log(`[orchestrator] ═══════════════════════════════`);
-  console.log(`[orchestrator] Cycle ${cycleId} starting`);
+  console.log(`[orchestrator] ═══════════════ Cycle ${cycleId} ═══════════════`);
 
-  // ── Step 1: Read pending count ────────────────────────────────────────────
+  // ── Step 1: Read pending count ─────────────────────────────────────────────
   pendingAtStart = await getPendingCount();
-  console.log(`[orchestrator] Pending tasks: ${pendingAtStart}`);
+  console.log(`[orchestrator] Pending: ${pendingAtStart} | Threshold: ${PLANNER_TRIGGER_THRESHOLD}`);
 
-  // ── Step 2: Module factory (gap fill) ────────────────────────────────────
+  // ── Step 2: Module factory (gap fill) — watchdog protected ────────────────
   if (pendingAtStart < PLANNER_TRIGGER_THRESHOLD) {
-    console.log(`[orchestrator] Queue low (${pendingAtStart} < ${PLANNER_TRIGGER_THRESHOLD}) — running module factory`);
-    try {
-      const factoryResult = await runModuleFactory({ maxGapsToFill: 5 });
+    const wd = await withWatchdog("moduleFactory", () =>
+      runModuleFactory({ maxGapsToFill: 5 })
+    );
+    if (wd.result) {
       factoryRan        = true;
-      factoryTasksAdded = factoryResult.tasksGenerated;
-      modulesGenerated += factoryResult.modulesRegistered;
-      if (factoryResult.errors.length > 0) {
-        errors.push(...factoryResult.errors.map(e => `factory: ${e}`));
-      }
-      console.log(`[orchestrator] Factory: ${factoryTasksAdded} tasks added, ${factoryResult.gapsFound} gaps found`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      errors.push(`factory: ${msg}`);
-      console.warn(`[orchestrator] Factory error (non-fatal): ${msg}`);
+      factoryTasksAdded = wd.result.tasksGenerated;
+      modulesGenerated += wd.result.modulesRegistered;
+      if (wd.result.errors.length > 0) errors.push(...wd.result.errors.map(e => `factory: ${e}`));
     }
+    if (wd.error) errors.push(wd.error);
+    if (wd.retried) watchdogRetries++;
+    console.log(`[orchestrator] Factory: ran=${factoryRan} tasks=${factoryTasksAdded} retried=${wd.retried}`);
   }
 
-  // ── Step 3: Autonomous planner ────────────────────────────────────────────
-  try {
-    const plannerResult = await runAutonomousPlanner();
-    plannerRan        = plannerResult.triggered;
-    plannerTasksAdded = plannerResult.inserted;
-    if (plannerResult.errors.length > 0) {
-      errors.push(...plannerResult.errors.slice(0, 3).map(e => `planner: ${e}`));
+  // ── Step 3: App factory (ecosystem app generation) — watchdog protected ───
+  if (pendingAtStart < PLANNER_TRIGGER_THRESHOLD) {
+    const wd = await withWatchdog("appFactory", () =>
+      runAppFactory({ maxAppsToQueue: 3 })
+    );
+    if (wd.result) {
+      appFactoryRan  = true;
+      appTasksAdded  = wd.result.tasksGenerated;
+      appsGenerated += wd.result.appsRegistered;
+      if (wd.result.errors.length > 0) errors.push(...wd.result.errors.map(e => `appFactory: ${e}`));
     }
-    console.log(`[orchestrator] Planner: triggered=${plannerResult.triggered} inserted=${plannerResult.inserted}`);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    errors.push(`planner: ${msg}`);
-    console.warn(`[orchestrator] Planner error (non-fatal): ${msg}`);
+    if (wd.error) errors.push(wd.error);
+    if (wd.retried) watchdogRetries++;
+    console.log(`[orchestrator] AppFactory: ran=${appFactoryRan} tasks=${appTasksAdded} retried=${wd.retried}`);
   }
 
-  // ── Step 4: Worker cycle ──────────────────────────────────────────────────
-  try {
-    const workerResult = await runRoadmapWorker("orchestrator", 20);
-    workerTasksRun  = workerResult.tasksExecuted;
-    workerTasksDone = workerResult.tasksCompleted;
-    costUsd        += workerResult.totalCostUsd;
-    if (workerResult.artifactBuilds) {
-      modulesGenerated += workerResult.artifactBuilds;
+  // ── Step 4: Autonomous planner — watchdog protected ───────────────────────
+  const wdPlanner = await withWatchdog("planner", () => runAutonomousPlanner());
+  if (wdPlanner.result) {
+    plannerRan        = wdPlanner.result.triggered;
+    plannerTasksAdded = wdPlanner.result.inserted;
+    if (wdPlanner.result.errors.length > 0) {
+      errors.push(...wdPlanner.result.errors.slice(0, 3).map(e => `planner: ${e}`));
     }
-    console.log(`[orchestrator] Worker: ${workerTasksRun} run, ${workerTasksDone} done, ${workerResult.stoppedReason}, $${costUsd.toFixed(4)}`);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    errors.push(`worker: ${msg}`);
-    console.error(`[orchestrator] Worker error: ${msg}`);
   }
+  if (wdPlanner.error) errors.push(wdPlanner.error);
+  if (wdPlanner.retried) watchdogRetries++;
+  console.log(`[orchestrator] Planner: triggered=${plannerRan} inserted=${plannerTasksAdded}`);
+
+  // ── Step 5: Worker cycle — watchdog protected ──────────────────────────────
+  const wdWorker = await withWatchdog("worker", () => runRoadmapWorker("orchestrator", 20));
+  if (wdWorker.result) {
+    workerTasksRun  = wdWorker.result.tasksExecuted;
+    workerTasksDone = wdWorker.result.tasksCompleted;
+    costUsd        += wdWorker.result.totalCostUsd;
+    if (wdWorker.result.artifactBuilds) modulesGenerated += wdWorker.result.artifactBuilds;
+  }
+  if (wdWorker.error) errors.push(wdWorker.error);
+  if (wdWorker.retried) watchdogRetries++;
+  console.log(`[orchestrator] Worker: run=${workerTasksRun} done=${workerTasksDone} cost=$${costUsd.toFixed(4)}`);
 
   const durationMs = Date.now() - t0;
   const cycleEnd   = new Date().toISOString();
@@ -189,63 +232,54 @@ export async function runOrchestratorCycle(): Promise<OrchestratorCycle> {
     cycleId, cycleStart, cycleEnd,
     pendingAtStart,
     factoryRan, factoryTasksAdded,
+    appFactoryRan, appTasksAdded,
     plannerRan, plannerTasksAdded,
     workerTasksRun, workerTasksDone,
-    modulesGenerated, costUsd,
-    errors, durationMs,
+    modulesGenerated, appsGenerated,
+    costUsd, errors, watchdogRetries, durationMs,
   };
 
-  // ── Step 5: Persist telemetry ──────────────────────────────────────────────
   await persistCycle(cycle);
 
-  console.log(`[orchestrator] ✅ Cycle ${cycleId} complete in ${durationMs}ms`);
-  console.log(`[orchestrator] ═══════════════════════════════`);
+  console.log(`[orchestrator] ✅ Done in ${durationMs}ms | watchdogRetries=${watchdogRetries} | errors=${errors.length}`);
+  console.log(`[orchestrator] ═══════════════════════════════════════════════`);
 
   return cycle;
 }
 
 // ── Continuous orchestrator ───────────────────────────────────────────────────
-// Runs sequential cycles within a single serverless invocation.
-// Vercel cron minimum = 1 minute. maxDuration = 300s.
-// Strategy: up to maxCycles with intervalSeconds pause between each.
-// Default: 4 cycles × 30s = 120s — safe within 300s limit.
 
 export async function runOrchestrator(options?: {
   intervalSeconds?: number;
   maxCycles?      : number;
 }): Promise<OrchestratorResult> {
-  const t0             = Date.now();
-  const intervalMs     = (options?.intervalSeconds ?? 30) * 1000;
-  const maxCycles      = options?.maxCycles ?? 4;
-  const cycles         : OrchestratorCycle[] = [];
-  const globalErrors   : string[] = [];
-  let totalTasksDone   = 0;
-  let totalCostUsd     = 0;
+  const t0           = Date.now();
+  const intervalMs   = (options?.intervalSeconds ?? 30) * 1000;
+  const maxCycles    = options?.maxCycles ?? 4;
+  const cycles       : OrchestratorCycle[] = [];
+  const globalErrors : string[] = [];
+  let totalTasksDone = 0;
+  let totalCostUsd   = 0;
 
-  console.log(`[orchestrator] Starting continuous mode: ${maxCycles} cycles × ${intervalMs / 1000}s`);
+  console.log(`[orchestrator] Continuous mode: ${maxCycles} cycles × ${intervalMs / 1000}s`);
 
   for (let i = 0; i < maxCycles; i++) {
-    // Abort if we're approaching the 300s Vercel function limit
     if (Date.now() - t0 > 270_000) {
       globalErrors.push(`Stopped at cycle ${i + 1} — approaching 300s function limit`);
-      console.warn(`[orchestrator] Stopping at cycle ${i + 1} — function limit`);
+      console.warn(`[orchestrator] Hard stop at cycle ${i + 1} — 270s limit`);
       break;
     }
 
-    try {
-      const cycle = await runOrchestratorCycle();
-      cycles.push(cycle);
-      totalTasksDone += cycle.workerTasksDone;
-      totalCostUsd   += cycle.costUsd;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      globalErrors.push(`cycle-${i + 1}: ${msg}`);
-      console.error(`[orchestrator] Cycle ${i + 1} threw: ${msg}`);
+    const wd = await withWatchdog(`cycle-${i + 1}`, () => runOrchestratorCycle());
+    if (wd.result) {
+      cycles.push(wd.result);
+      totalTasksDone += wd.result.workerTasksDone;
+      totalCostUsd   += wd.result.costUsd;
     }
+    if (wd.error) globalErrors.push(wd.error);
 
-    // Pause between cycles (skip after last)
     if (i < maxCycles - 1) {
-      console.log(`[orchestrator] Sleeping ${intervalMs / 1000}s before next cycle...`);
+      console.log(`[orchestrator] Sleeping ${intervalMs / 1000}s...`);
       await sleep(intervalMs);
     }
   }
@@ -262,16 +296,17 @@ export async function runOrchestrator(options?: {
   };
 }
 
-// ── Orchestrator status from DB ───────────────────────────────────────────────
+// ── Status ────────────────────────────────────────────────────────────────────
 
 export async function getOrchestratorStatus(): Promise<{
-  running          : boolean;
-  lastCycle?       : string;
-  lastCycleDurationMs?: number;
-  cyclesTotal      : number;
-  tasksCompletedTotal: number;
-  modulesGeneratedTotal: number;
-  recentCycles     : OrchestratorCycle[];
+  running               : boolean;
+  lastCycle?            : string;
+  lastCycleDurationMs?  : number;
+  cyclesTotal           : number;
+  tasksCompletedTotal   : number;
+  modulesGeneratedTotal : number;
+  appsGeneratedTotal    : number;
+  recentCycles          : OrchestratorCycle[];
 }> {
   try {
     const client = db();
@@ -281,27 +316,20 @@ export async function getOrchestratorStatus(): Promise<{
 
     const { data: recent } = await client
       .from("orchestrator_cycles")
-      .select("id, cycle_start, cycle_end, tasks_completed, modules_generated, errors, cost_usd")
+      .select("id, cycle_start, cycle_end, tasks_completed, modules_generated, apps_generated, errors, cost_usd")
       .order("cycle_start", { ascending: false })
       .limit(5);
 
-    const totalDone = await client
-      .from("orchestrator_cycles")
-      .select("tasks_completed")
-      .then(({ data }) => (data ?? []).reduce((s: number, r: { tasks_completed: number }) => s + (r.tasks_completed ?? 0), 0));
+    const totalDone = ((await client.from("orchestrator_cycles").select("tasks_completed")).data ?? [])
+      .reduce((s: number, r: { tasks_completed: number }) => s + (r.tasks_completed ?? 0), 0);
 
-    const totalMods = await client
-      .from("orchestrator_cycles")
-      .select("modules_generated")
-      .then(({ data }) => (data ?? []).reduce((s: number, r: { modules_generated: number }) => s + (r.modules_generated ?? 0), 0));
+    const totalMods = ((await client.from("orchestrator_cycles").select("modules_generated")).data ?? [])
+      .reduce((s: number, r: { modules_generated: number }) => s + (r.modules_generated ?? 0), 0);
 
-    const last = recent?.[0] as {
-      cycle_start?: string;
-      cycle_end?: string;
-      id?: string;
-    } | undefined;
+    const totalApps = ((await client.from("orchestrator_cycles").select("apps_generated")).data ?? [])
+      .reduce((s: number, r: { apps_generated: number }) => s + (r.apps_generated ?? 0), 0);
 
-    // "Running" = a cycle started within the last 60s with no end time
+    const last = recent?.[0] as { cycle_start?: string; cycle_end?: string } | undefined;
     const lastCycleStart = last?.cycle_start ? new Date(last.cycle_start).getTime() : 0;
     const running = (Date.now() - lastCycleStart) < 60_000 && !last?.cycle_end;
 
@@ -311,15 +339,16 @@ export async function getOrchestratorStatus(): Promise<{
       lastCycleDurationMs : last?.cycle_end && last?.cycle_start
         ? new Date(last.cycle_end).getTime() - new Date(last.cycle_start).getTime()
         : undefined,
-      cyclesTotal         : count ?? 0,
-      tasksCompletedTotal : totalDone,
-      modulesGeneratedTotal: totalMods,
-      recentCycles        : (recent ?? []) as unknown as OrchestratorCycle[],
+      cyclesTotal           : count ?? 0,
+      tasksCompletedTotal   : totalDone,
+      modulesGeneratedTotal : totalMods,
+      appsGeneratedTotal    : totalApps,
+      recentCycles          : (recent ?? []) as unknown as OrchestratorCycle[],
     };
   } catch {
     return {
       running: false, cyclesTotal: 0,
-      tasksCompletedTotal: 0, modulesGeneratedTotal: 0, recentCycles: [],
+      tasksCompletedTotal: 0, modulesGeneratedTotal: 0, appsGeneratedTotal: 0, recentCycles: [],
     };
   }
 }

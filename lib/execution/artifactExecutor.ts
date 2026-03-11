@@ -34,6 +34,7 @@ function db() {
 
 export type ArtifactType =
   | "build_module"
+  | "build_app"
   | "generate_api"
   | "create_service"
   | "create_database_migration"
@@ -152,6 +153,7 @@ function deriveFilePath(task: ArtifactTask, artifactType: ArtifactType): string 
     case "create_service":            return `lib/services/generated/${slug}.ts`;
     case "deploy_microservice":       return `app/api/javari/services/${slug}/route.ts`;
     case "build_module":              return `lib/modules/generated/${slug}/index.ts`;
+    case "build_app":                 return `lib/apps/generated/${slug}/app.ts`;
     default:                          return `docs/artifacts/${ts}-${slug}.md`;
   }
 }
@@ -265,6 +267,14 @@ Return ONLY the complete test file content.`,
     ai_task: `You are the Engineer AI on the CR AudioViz AI platform.
 Generate a detailed, production-quality implementation for the described task.
 Return a complete, actionable artifact — code, documentation, or analysis as appropriate.`,
+
+    build_app: `You are the Engineer AI building a complete Next.js 14 full-stack application for CR AudioViz AI.
+Generate a production-ready application service with: Next.js App Router structure, TypeScript strict mode,
+Supabase integration (auth + database), Tailwind CSS + shadcn/ui styling, Stripe payment integration where relevant,
+comprehensive error handling, and WCAG 2.2 AA accessibility.
+Return the main application entry file (app.ts) with complete service initialization, exports, and inline documentation.
+Include: exported AppConfig interface, service initialization function, health check, and key API route handlers.
+Rules: No placeholders, no TODO comments, production-quality code only.`,
   };
 
   const systemPrompt = prompts[artifactType] ?? prompts.ai_task;
