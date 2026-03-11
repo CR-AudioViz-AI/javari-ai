@@ -36,12 +36,18 @@ const TABLES_TO_CHECK = [
   "app_registry",
 ];
 
+// Some tables use non-standard PK names
+const TABLE_PK: Record<string, string> = {
+  build_artifacts: "artifact_id",
+};
+
 async function checkTables(): Promise<Record<string, boolean>> {
   const client  = db();
   const results : Record<string, boolean> = {};
   for (const table of TABLES_TO_CHECK) {
+    const pk = TABLE_PK[table] ?? "id";
     try {
-      const { error } = await client.from(table).select("id", { head: true, count: "exact" }).limit(1);
+      const { error } = await client.from(table).select(pk, { head: true, count: "exact" }).limit(1);
       results[table] = !error;
     } catch {
       results[table] = false;
