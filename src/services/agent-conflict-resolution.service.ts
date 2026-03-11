@@ -1,36 +1,31 @@
-import { supabase } from '@/lib/supabase/client';
-import { Database } from '@/lib/supabase/database.types';
-import { Agent, Task, TaskStatus, AgentCapability, ConflictResolutionStrategy } from '@/types/agent-types';
-import { calculatePriority, PriorityFactors } from '@/utils/priority-calculator';
-import { EventEmitter } from 'events';
-
-type Tables = Database['public']['Tables'];
+```typescript
+import { Database } from '../lib/supabase/database.types';
+import { Agent, AgentOutput, AgentPriority, AgentPerformanceMetrics } from '../types/agents';
 
 /**
- * Interface for agent conflict information
+ * Represents a conflict between agents
  */
 export interface AgentConflict {
   id: string;
   type: ConflictType;
+  agentIds: string[];
+  timestamp: Date;
+  description: string;
   severity: ConflictSeverity;
-  agents: string[];
-  tasks: string[];
-  resources: string[];
-  detectedAt: Date;
-  resolvedAt?: Date;
-  resolution?: ConflictResolution;
   metadata: Record<string, any>;
+  outputs?: AgentOutput[];
+  resourceContention?: ResourceContention;
 }
 
 /**
- * Types of conflicts that can occur between agents
+ * Types of conflicts that can occur
  */
 export enum ConflictType {
-  TASK_OVERLAP = 'task_overlap',
+  OUTPUT_CONTRADICTION = 'output_contradiction',
   RESOURCE_CONTENTION = 'resource_contention',
   PRIORITY_COLLISION = 'priority_collision',
-  DEPENDENCY_VIOLATION = 'dependency_violation',
-  CAPABILITY_MISMATCH = 'capability_mismatch'
+  CONSENSUS_FAILURE = 'consensus_failure',
+  PERFORMANCE_DEGRADATION = 'performance_degradation'
 }
 
 /**
@@ -44,644 +39,665 @@ export enum ConflictSeverity {
 }
 
 /**
- * Conflict resolution outcome
+ * Resource contention information
  */
-export interface ConflictResolution {
-  strategy: ConflictResolutionStrategy;
-  actions: ResolutionAction[];
-  affectedAgents: string[];
-  affectedTasks: string[];
-  outcome: ResolutionOutcome;
-  reasoning: string;
-  metrics: ResolutionMetrics;
+export interface ResourceContention {
+  resource: string;
+  requestingAgents: string[];
+  availableCapacity: number;
+  totalDemand: number;
 }
 
 /**
- * Actions taken to resolve conflicts
+ * Vote cast by an agent or system component
  */
-export interface ResolutionAction {
-  type: 'reassign_task' | 'share_resource' | 'adjust_priority' | 'delay_execution' | 'merge_tasks';
+export interface Vote {
   agentId: string;
-  taskId?: string;
-  resourceId?: string;
-  parameters: Record<string, any>;
+  choice: string;
+  confidence: number;
+  weight: number;
+  reasoning?: string;
+  timestamp: Date;
 }
 
 /**
- * Resolution outcome status
+ * Voting session configuration
  */
-export enum ResolutionOutcome {
-  RESOLVED = 'resolved',
-  PARTIALLY_RESOLVED = 'partially_resolved',
-  ESCALATED = 'escalated',
-  FAILED = 'failed'
-}
-
-/**
- * Metrics for resolution performance
- */
-export interface ResolutionMetrics {
-  timeToResolve: number;
-  agentsAffected: number;
-  tasksReassigned: number;
-  resourcesReallocated: number;
-  satisfactionScore: number;
-}
-
-/**
- * Negotiation protocol interface
- */
-export interface NegotiationProtocol {
-  type: 'cooperative' | 'competitive' | 'collaborative' | 'hierarchical';
+export interface VotingSession {
+  id: string;
+  conflictId: string;
   participants: string[];
-  rounds: NegotiationRound[];
-  outcome: NegotiationOutcome;
+  options: string[];
+  strategy: VotingStrategy;
+  weights: Map<string, number>;
+  timeout: number;
+  startTime: Date;
 }
 
 /**
- * Negotiation round data
+ * Available voting strategies
  */
-export interface NegotiationRound {
-  round: number;
-  proposals: NegotiationProposal[];
-  responses: NegotiationResponse[];
-  consensus: boolean;
+export enum VotingStrategy {
+  MAJORITY = 'majority',
+  WEIGHTED_MAJORITY = 'weighted_majority',
+  EXPERTISE_WEIGHTED = 'expertise_weighted',
+  CONSENSUS = 'consensus',
+  HYBRID = 'hybrid'
 }
 
 /**
- * Agent proposal during negotiation
+ * Resolution strategy configuration
  */
-export interface NegotiationProposal {
-  agentId: string;
-  proposalType: 'yield' | 'share' | 'alternative' | 'counter';
+export interface ResolutionStrategy {
+  name: string;
+  priority: number;
+  conditions: string[];
+  action: ResolutionAction;
   parameters: Record<string, any>;
-  priority: number;
-  reasoning: string;
 }
 
 /**
- * Agent response to proposals
+ * Available resolution actions
  */
-export interface NegotiationResponse {
-  agentId: string;
-  proposalId: string;
-  response: 'accept' | 'reject' | 'counter';
-  reasoning: string;
-  counterProposal?: NegotiationProposal;
+export enum ResolutionAction {
+  VOTE = 'vote',
+  PRIORITY_OVERRIDE = 'priority_override',
+  MERGE_OUTPUTS = 'merge_outputs',
+  DELEGATE_TO_EXPERT = 'delegate_to_expert',
+  ESCALATE = 'escalate',
+  RETRY = 'retry'
 }
 
 /**
- * Negotiation outcome
+ * Result of conflict resolution
  */
-export interface NegotiationOutcome {
+export interface ResolutionResult {
+  conflictId: string;
+  strategy: string;
+  resolution: any;
+  confidence: number;
+  participatingAgents: string[];
+  votes?: Vote[];
+  executionTime: number;
   success: boolean;
-  agreement?: ConflictResolution;
-  failureReason?: string;
-  consensusLevel: number;
+  metadata: Record<string, any>;
 }
 
 /**
- * Task overlap analysis result
+ * Conflict metrics for tracking
  */
-export interface TaskOverlap {
-  tasks: string[];
-  overlapType: 'resource' | 'time' | 'capability' | 'goal';
-  severity: number;
-  details: Record<string, any>;
+export interface ConflictMetrics {
+  totalConflicts: number;
+  resolvedConflicts: number;
+  averageResolutionTime: number;
+  conflictsByType: Map<ConflictType, number>;
+  resolutionSuccessRate: number;
+  agentConflictFrequency: Map<string, number>;
 }
 
 /**
- * Agent coordination state
+ * Service for detecting and resolving conflicts between agents in team mode
  */
-export interface CoordinationState {
-  agentId: string;
-  activeTasks: string[];
-  allocatedResources: string[];
-  capabilities: AgentCapability[];
-  priority: number;
-  status: 'available' | 'busy' | 'blocked' | 'negotiating';
-  lastUpdate: Date;
-}
-
-/**
- * Service class for detecting and resolving agent conflicts
- */
-export class AgentConflictResolutionService extends EventEmitter {
-  private conflictCache = new Map<string, AgentConflict>();
-  private coordinationStates = new Map<string, CoordinationState>();
-  private activeNegotiations = new Map<string, NegotiationProtocol>();
-  private resolutionHistory: ConflictResolution[] = [];
+export class AgentConflictResolutionService {
+  private conflicts: Map<string, AgentConflict> = new Map();
+  private votingSessions: Map<string, VotingSession> = new Map();
+  private resolutionStrategies: ResolutionStrategy[] = [];
+  private metrics: ConflictMetrics;
+  private eventListeners: Map<string, Function[]> = new Map();
 
   constructor() {
-    super();
-    this.initializeService();
+    this.initializeMetrics();
+    this.initializeDefaultStrategies();
   }
 
   /**
-   * Initialize the conflict resolution service
+   * Initialize conflict metrics
    */
-  private async initializeService(): Promise<void> {
-    try {
-      await this.loadCoordinationStates();
-      this.startConflictMonitoring();
-      this.emit('service_initialized');
-    } catch (error) {
-      console.error('Failed to initialize conflict resolution service:', error);
-      throw new Error(`Service initialization failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+  private initializeMetrics(): void {
+    this.metrics = {
+      totalConflicts: 0,
+      resolvedConflicts: 0,
+      averageResolutionTime: 0,
+      conflictsByType: new Map(),
+      resolutionSuccessRate: 0,
+      agentConflictFrequency: new Map()
+    };
   }
 
   /**
-   * Detect conflicts between agents
+   * Initialize default resolution strategies
    */
-  public async detectConflicts(): Promise<AgentConflict[]> {
+  private initializeDefaultStrategies(): void {
+    this.resolutionStrategies = [
+      {
+        name: 'high_confidence_override',
+        priority: 1,
+        conditions: ['confidence_difference > 0.3'],
+        action: ResolutionAction.PRIORITY_OVERRIDE,
+        parameters: { threshold: 0.3 }
+      },
+      {
+        name: 'expertise_weighted_vote',
+        priority: 2,
+        conditions: ['agent_expertise_available'],
+        action: ResolutionAction.VOTE,
+        parameters: { strategy: VotingStrategy.EXPERTISE_WEIGHTED }
+      },
+      {
+        name: 'majority_vote',
+        priority: 3,
+        conditions: ['agent_count >= 3'],
+        action: ResolutionAction.VOTE,
+        parameters: { strategy: VotingStrategy.MAJORITY }
+      },
+      {
+        name: 'merge_similar_outputs',
+        priority: 4,
+        conditions: ['similarity_score > 0.7'],
+        action: ResolutionAction.MERGE_OUTPUTS,
+        parameters: { similarity_threshold: 0.7 }
+      }
+    ];
+  }
+
+  /**
+   * Detect conflicts between agent outputs
+   */
+  public async detectConflicts(
+    outputs: AgentOutput[],
+    agents: Agent[]
+  ): Promise<AgentConflict[]> {
     try {
-      const activeAgents = await this.getActiveAgents();
       const conflicts: AgentConflict[] = [];
 
-      // Analyze task overlaps
-      const taskOverlaps = await this.analyzeTaskOverlaps(activeAgents);
-      conflicts.push(...await this.convertOverlapsToConflicts(taskOverlaps));
+      // Detect output contradictions
+      const outputConflicts = await this.detectOutputContradictions(outputs);
+      conflicts.push(...outputConflicts);
 
-      // Check resource contentions
-      const resourceConflicts = await this.detectResourceContentions(activeAgents);
+      // Detect resource contentions
+      const resourceConflicts = await this.detectResourceContentions(agents);
       conflicts.push(...resourceConflicts);
 
-      // Identify priority collisions
-      const priorityConflicts = await this.detectPriorityCollisions(activeAgents);
+      // Detect priority collisions
+      const priorityConflicts = await this.detectPriorityCollisions(agents);
       conflicts.push(...priorityConflicts);
 
-      // Update conflict cache
+      // Store detected conflicts
       conflicts.forEach(conflict => {
-        this.conflictCache.set(conflict.id, conflict);
+        this.conflicts.set(conflict.id, conflict);
+        this.updateConflictMetrics(conflict);
       });
 
-      this.emit('conflicts_detected', { count: conflicts.length, conflicts });
+      this.emit('conflictsDetected', conflicts);
       return conflicts;
     } catch (error) {
       console.error('Error detecting conflicts:', error);
-      throw new Error(`Conflict detection failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(`Failed to detect conflicts: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
   /**
-   * Calculate priority scores for conflict resolution
+   * Detect output contradictions between agents
    */
-  public async calculatePriorityScores(agentIds: string[], taskIds: string[]): Promise<Map<string, number>> {
-    try {
-      const scores = new Map<string, number>();
+  private async detectOutputContradictions(outputs: AgentOutput[]): Promise<AgentConflict[]> {
+    const conflicts: AgentConflict[] = [];
 
-      for (const agentId of agentIds) {
-        const agent = await this.getAgentById(agentId);
-        const agentTasks = await this.getAgentTasks(agentId);
-        
-        let totalScore = 0;
-        for (const task of agentTasks) {
-          if (taskIds.includes(task.id)) {
-            const factors: PriorityFactors = {
-              taskCriticality: this.assessTaskCriticality(task),
-              agentExpertiseMatch: this.calculateExpertiseMatch(agent, task),
-              deadlineProximity: this.calculateDeadlineUrgency(task),
-              resourceAvailability: await this.assessResourceAvailability(task)
-            };
+    for (let i = 0; i < outputs.length; i++) {
+      for (let j = i + 1; j < outputs.length; j++) {
+        const similarity = await this.calculateOutputSimilarity(outputs[i], outputs[j]);
+        const contradiction = await this.detectContradiction(outputs[i], outputs[j]);
 
-            const taskScore = calculatePriority(factors);
-            totalScore += taskScore;
+        if (contradiction && similarity < 0.3) {
+          conflicts.push({
+            id: `output_conflict_${Date.now()}_${i}_${j}`,
+            type: ConflictType.OUTPUT_CONTRADICTION,
+            agentIds: [outputs[i].agentId, outputs[j].agentId],
+            timestamp: new Date(),
+            description: `Contradictory outputs detected between agents`,
+            severity: this.calculateConflictSeverity(similarity, outputs[i].confidence, outputs[j].confidence),
+            metadata: {
+              similarity,
+              outputs: [outputs[i], outputs[j]]
+            },
+            outputs: [outputs[i], outputs[j]]
+          });
+        }
+      }
+    }
+
+    return conflicts;
+  }
+
+  /**
+   * Detect resource contentions between agents
+   */
+  private async detectResourceContentions(agents: Agent[]): Promise<AgentConflict[]> {
+    const conflicts: AgentConflict[] = [];
+    const resourceMap = new Map<string, string[]>();
+
+    // Group agents by requested resources
+    agents.forEach(agent => {
+      if (agent.resourceRequirements) {
+        agent.resourceRequirements.forEach(resource => {
+          if (!resourceMap.has(resource)) {
+            resourceMap.set(resource, []);
           }
-        }
-
-        scores.set(agentId, totalScore);
+          resourceMap.get(resource)!.push(agent.id);
+        });
       }
+    });
 
-      return scores;
-    } catch (error) {
-      console.error('Error calculating priority scores:', error);
-      throw new Error(`Priority calculation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+    // Check for contentions
+    resourceMap.forEach((agentIds, resource) => {
+      if (agentIds.length > 1) {
+        const availableCapacity = this.getResourceCapacity(resource);
+        const totalDemand = this.calculateResourceDemand(resource, agentIds);
+
+        if (totalDemand > availableCapacity) {
+          conflicts.push({
+            id: `resource_conflict_${Date.now()}_${resource}`,
+            type: ConflictType.RESOURCE_CONTENTION,
+            agentIds,
+            timestamp: new Date(),
+            description: `Resource contention detected for ${resource}`,
+            severity: totalDemand > availableCapacity * 2 ? ConflictSeverity.HIGH : ConflictSeverity.MEDIUM,
+            metadata: { resource, availableCapacity, totalDemand },
+            resourceContention: {
+              resource,
+              requestingAgents: agentIds,
+              availableCapacity,
+              totalDemand
+            }
+          });
+        }
+      }
+    });
+
+    return conflicts;
   }
 
   /**
-   * Initiate negotiation protocol between conflicting agents
+   * Detect priority collisions between agents
    */
-  public async initiateNegotiation(conflictId: string, protocol: 'cooperative' | 'competitive' | 'collaborative' | 'hierarchical'): Promise<NegotiationProtocol> {
-    try {
-      const conflict = this.conflictCache.get(conflictId);
-      if (!conflict) {
-        throw new Error(`Conflict not found: ${conflictId}`);
+  private async detectPriorityCollisions(agents: Agent[]): Promise<AgentConflict[]> {
+    const conflicts: AgentConflict[] = [];
+    const priorityMap = new Map<number, string[]>();
+
+    // Group agents by priority level
+    agents.forEach(agent => {
+      const priority = agent.priority || 0;
+      if (!priorityMap.has(priority)) {
+        priorityMap.set(priority, []);
       }
+      priorityMap.get(priority)!.push(agent.id);
+    });
 
-      const negotiation: NegotiationProtocol = {
-        type: protocol,
-        participants: conflict.agents,
-        rounds: [],
-        outcome: {
-          success: false,
-          consensusLevel: 0
-        }
-      };
+    // Check for high-priority collisions
+    priorityMap.forEach((agentIds, priority) => {
+      if (agentIds.length > 1 && priority > 7) {
+        conflicts.push({
+          id: `priority_conflict_${Date.now()}_${priority}`,
+          type: ConflictType.PRIORITY_COLLISION,
+          agentIds,
+          timestamp: new Date(),
+          description: `Priority collision detected at level ${priority}`,
+          severity: ConflictSeverity.MEDIUM,
+          metadata: { priority, agentCount: agentIds.length }
+        });
+      }
+    });
 
-      this.activeNegotiations.set(conflictId, negotiation);
-
-      // Start negotiation rounds
-      const result = await this.conductNegotiation(conflictId, negotiation);
-      
-      this.emit('negotiation_completed', { conflictId, result });
-      return result;
-    } catch (error) {
-      console.error('Error initiating negotiation:', error);
-      throw new Error(`Negotiation initiation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+    return conflicts;
   }
 
   /**
-   * Resolve conflicts using appropriate strategies
+   * Resolve a conflict using appropriate strategy
    */
-  public async resolveConflict(conflictId: string, strategy?: ConflictResolutionStrategy): Promise<ConflictResolution> {
+  public async resolveConflict(conflictId: string): Promise<ResolutionResult> {
     try {
-      const conflict = this.conflictCache.get(conflictId);
+      const conflict = this.conflicts.get(conflictId);
       if (!conflict) {
         throw new Error(`Conflict not found: ${conflictId}`);
       }
 
       const startTime = Date.now();
-      const resolvedStrategy = strategy || await this.selectOptimalStrategy(conflict);
-
-      let resolution: ConflictResolution;
+      const strategy = this.selectResolutionStrategy(conflict);
       
-      switch (resolvedStrategy) {
-        case 'reassign_tasks':
-          resolution = await this.resolveByTaskReassignment(conflict);
+      let result: ResolutionResult;
+
+      switch (strategy.action) {
+        case ResolutionAction.VOTE:
+          result = await this.resolveByVoting(conflict, strategy);
           break;
-        case 'share_resources':
-          resolution = await this.resolveByResourceSharing(conflict);
+        case ResolutionAction.PRIORITY_OVERRIDE:
+          result = await this.resolveByPriorityOverride(conflict, strategy);
           break;
-        case 'parallel_execution':
-          resolution = await this.resolveByParallelExecution(conflict);
+        case ResolutionAction.MERGE_OUTPUTS:
+          result = await this.resolveByMergingOutputs(conflict, strategy);
           break;
-        case 'priority_adjustment':
-          resolution = await this.resolveByPriorityAdjustment(conflict);
-          break;
-        case 'escalation':
-          resolution = await this.escalateConflict(conflict);
+        case ResolutionAction.DELEGATE_TO_EXPERT:
+          result = await this.resolveByCeferDelegatingToExpert(conflict, strategy);
           break;
         default:
-          throw new Error(`Unknown resolution strategy: ${resolvedStrategy}`);
+          throw new Error(`Unsupported resolution action: ${strategy.action}`);
       }
 
-      // Update resolution metrics
-      resolution.metrics.timeToResolve = Date.now() - startTime;
-      
-      // Mark conflict as resolved
-      conflict.resolvedAt = new Date();
-      conflict.resolution = resolution;
+      result.executionTime = Date.now() - startTime;
+      this.updateResolutionMetrics(result);
+      this.emit('conflictResolved', result);
 
-      // Update database
-      await this.saveConflictResolution(conflictId, resolution);
-      
-      // Update coordination states
-      await this.updateCoordinationStates(resolution);
-
-      // Add to resolution history
-      this.resolutionHistory.push(resolution);
-
-      this.emit('conflict_resolved', { conflictId, resolution });
-      return resolution;
+      return result;
     } catch (error) {
       console.error('Error resolving conflict:', error);
-      throw new Error(`Conflict resolution failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(`Failed to resolve conflict: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
   /**
-   * Analyze task overlaps between agents
+   * Resolve conflict using voting mechanism
    */
-  public async analyzeTaskOverlaps(agents: Agent[]): Promise<TaskOverlap[]> {
-    try {
-      const overlaps: TaskOverlap[] = [];
-      
-      for (let i = 0; i < agents.length; i++) {
-        for (let j = i + 1; j < agents.length; j++) {
-          const agent1 = agents[i];
-          const agent2 = agents[j];
-          
-          const agent1Tasks = await this.getAgentTasks(agent1.id);
-          const agent2Tasks = await this.getAgentTasks(agent2.id);
-          
-          const overlap = this.findTaskOverlap(agent1Tasks, agent2Tasks);
-          if (overlap) {
-            overlaps.push(overlap);
-          }
-        }
+  private async resolveByVoting(
+    conflict: AgentConflict,
+    strategy: ResolutionStrategy
+  ): Promise<ResolutionResult> {
+    const votingStrategy = strategy.parameters.strategy as VotingStrategy;
+    const session = await this.createVotingSession(conflict, votingStrategy);
+    
+    const votes = await this.collectVotes(session);
+    const winner = this.calculateVotingResult(votes, votingStrategy);
+    
+    return {
+      conflictId: conflict.id,
+      strategy: strategy.name,
+      resolution: winner,
+      confidence: this.calculateResolutionConfidence(votes),
+      participatingAgents: conflict.agentIds,
+      votes,
+      executionTime: 0,
+      success: true,
+      metadata: { votingStrategy, sessionId: session.id }
+    };
+  }
+
+  /**
+   * Resolve conflict by priority override
+   */
+  private async resolveByPriorityOverride(
+    conflict: AgentConflict,
+    strategy: ResolutionStrategy
+  ): Promise<ResolutionResult> {
+    const outputs = conflict.outputs || [];
+    const highestConfidenceOutput = outputs.reduce((prev, current) => 
+      (current.confidence > prev.confidence) ? current : prev
+    );
+
+    return {
+      conflictId: conflict.id,
+      strategy: strategy.name,
+      resolution: highestConfidenceOutput,
+      confidence: highestConfidenceOutput.confidence,
+      participatingAgents: conflict.agentIds,
+      executionTime: 0,
+      success: true,
+      metadata: { overrideReason: 'highest_confidence' }
+    };
+  }
+
+  /**
+   * Resolve conflict by merging outputs
+   */
+  private async resolveByMergingOutputs(
+    conflict: AgentConflict,
+    strategy: ResolutionStrategy
+  ): Promise<ResolutionResult> {
+    const outputs = conflict.outputs || [];
+    const mergedOutput = await this.mergeAgentOutputs(outputs);
+
+    return {
+      conflictId: conflict.id,
+      strategy: strategy.name,
+      resolution: mergedOutput,
+      confidence: this.calculateMergedConfidence(outputs),
+      participatingAgents: conflict.agentIds,
+      executionTime: 0,
+      success: true,
+      metadata: { mergeStrategy: 'weighted_average' }
+    };
+  }
+
+  /**
+   * Resolve conflict by delegating to expert agent
+   */
+  private async resolveByCeferDelegatingToExpert(
+    conflict: AgentConflict,
+    strategy: ResolutionStrategy
+  ): Promise<ResolutionResult> {
+    const expertAgent = await this.findExpertAgent(conflict);
+    if (!expertAgent) {
+      throw new Error('No expert agent available for conflict resolution');
+    }
+
+    return {
+      conflictId: conflict.id,
+      strategy: strategy.name,
+      resolution: { delegatedTo: expertAgent.id },
+      confidence: 0.9,
+      participatingAgents: [expertAgent.id],
+      executionTime: 0,
+      success: true,
+      metadata: { expertAgent: expertAgent.id }
+    };
+  }
+
+  /**
+   * Create a voting session for conflict resolution
+   */
+  private async createVotingSession(
+    conflict: AgentConflict,
+    strategy: VotingStrategy
+  ): Promise<VotingSession> {
+    const session: VotingSession = {
+      id: `voting_${Date.now()}_${conflict.id}`,
+      conflictId: conflict.id,
+      participants: conflict.agentIds,
+      options: this.generateVotingOptions(conflict),
+      strategy,
+      weights: await this.calculateVotingWeights(conflict.agentIds, strategy),
+      timeout: 30000, // 30 seconds
+      startTime: new Date()
+    };
+
+    this.votingSessions.set(session.id, session);
+    return session;
+  }
+
+  /**
+   * Collect votes from participating agents
+   */
+  private async collectVotes(session: VotingSession): Promise<Vote[]> {
+    const votes: Vote[] = [];
+    
+    // Simulate vote collection (in real implementation, this would be async)
+    for (const agentId of session.participants) {
+      const vote: Vote = {
+        agentId,
+        choice: session.options[Math.floor(Math.random() * session.options.length)],
+        confidence: Math.random(),
+        weight: session.weights.get(agentId) || 1,
+        timestamp: new Date()
+      };
+      votes.push(vote);
+    }
+
+    return votes;
+  }
+
+  /**
+   * Calculate voting result based on strategy
+   */
+  private calculateVotingResult(votes: Vote[], strategy: VotingStrategy): string {
+    const tallies = new Map<string, number>();
+
+    votes.forEach(vote => {
+      const currentTally = tallies.get(vote.choice) || 0;
+      let voteValue = 1;
+
+      switch (strategy) {
+        case VotingStrategy.WEIGHTED_MAJORITY:
+          voteValue = vote.weight;
+          break;
+        case VotingStrategy.EXPERTISE_WEIGHTED:
+          voteValue = vote.weight * vote.confidence;
+          break;
+        case VotingStrategy.HYBRID:
+          voteValue = (vote.weight + vote.confidence) / 2;
+          break;
+        default:
+          voteValue = 1;
       }
 
-      return overlaps;
-    } catch (error) {
-      console.error('Error analyzing task overlaps:', error);
-      throw new Error(`Task overlap analysis failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+      tallies.set(vote.choice, currentTally + voteValue);
+    });
+
+    // Find winner
+    let winner = '';
+    let maxVotes = 0;
+    tallies.forEach((count, choice) => {
+      if (count > maxVotes) {
+        maxVotes = count;
+        winner = choice;
+      }
+    });
+
+    return winner;
   }
 
   /**
-   * Update coordination states for agents
+   * Select appropriate resolution strategy for conflict
    */
-  public async updateCoordinationState(agentId: string, update: Partial<CoordinationState>): Promise<CoordinationState> {
-    try {
-      const currentState = this.coordinationStates.get(agentId) || {
-        agentId,
-        activeTasks: [],
-        allocatedResources: [],
-        capabilities: [],
-        priority: 0,
-        status: 'available',
-        lastUpdate: new Date()
-      };
-
-      const updatedState: CoordinationState = {
-        ...currentState,
-        ...update,
-        lastUpdate: new Date()
-      };
-
-      this.coordinationStates.set(agentId, updatedState);
-      
-      // Save to database
-      await this.saveCoordinationState(updatedState);
-
-      this.emit('coordination_state_updated', { agentId, state: updatedState });
-      return updatedState;
-    } catch (error) {
-      console.error('Error updating coordination state:', error);
-      throw new Error(`Coordination state update failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  private selectResolutionStrategy(conflict: AgentConflict): ResolutionStrategy {
+    for (const strategy of this.resolutionStrategies.sort((a, b) => a.priority - b.priority)) {
+      if (this.evaluateStrategyConditions(strategy, conflict)) {
+        return strategy;
+      }
     }
+    
+    // Fallback to majority vote
+    return this.resolutionStrategies.find(s => s.action === ResolutionAction.VOTE) 
+      || this.resolutionStrategies[0];
   }
 
   /**
-   * Get coordination state for an agent
+   * Evaluate if strategy conditions are met
    */
-  public getCoordinationState(agentId: string): CoordinationState | undefined {
-    return this.coordinationStates.get(agentId);
-  }
-
-  /**
-   * Get all active conflicts
-   */
-  public getActiveConflicts(): AgentConflict[] {
-    return Array.from(this.conflictCache.values()).filter(conflict => !conflict.resolvedAt);
-  }
-
-  /**
-   * Get resolution history with filtering options
-   */
-  public getResolutionHistory(filters?: {
-    strategy?: ConflictResolutionStrategy;
-    outcome?: ResolutionOutcome;
-    limit?: number;
-  }): ConflictResolution[] {
-    let history = [...this.resolutionHistory];
-
-    if (filters?.strategy) {
-      history = history.filter(r => r.strategy === filters.strategy);
-    }
-
-    if (filters?.outcome) {
-      history = history.filter(r => r.outcome === filters.outcome);
-    }
-
-    if (filters?.limit) {
-      history = history.slice(-filters.limit);
-    }
-
-    return history.reverse();
-  }
-
-  // Private helper methods
-
-  private async loadCoordinationStates(): Promise<void> {
-    const { data, error } = await supabase
-      .from('agent_coordination_states')
-      .select('*');
-
-    if (error) throw error;
-
-    data?.forEach(state => {
-      this.coordinationStates.set(state.agent_id, {
-        agentId: state.agent_id,
-        activeTasks: state.active_tasks || [],
-        allocatedResources: state.allocated_resources || [],
-        capabilities: state.capabilities || [],
-        priority: state.priority || 0,
-        status: state.status,
-        lastUpdate: new Date(state.updated_at)
-      });
+  private evaluateStrategyConditions(strategy: ResolutionStrategy, conflict: AgentConflict): boolean {
+    // Simplified condition evaluation
+    return strategy.conditions.every(condition => {
+      switch (condition) {
+        case 'confidence_difference > 0.3':
+          return this.hasHighConfidenceDifference(conflict);
+        case 'agent_expertise_available':
+          return this.hasExpertiseInfo(conflict.agentIds);
+        case 'agent_count >= 3':
+          return conflict.agentIds.length >= 3;
+        case 'similarity_score > 0.7':
+          return this.hasHighSimilarity(conflict);
+        default:
+          return true;
+      }
     });
   }
 
-  private startConflictMonitoring(): void {
-    setInterval(async () => {
-      try {
-        await this.detectConflicts();
-      } catch (error) {
-        console.error('Error in conflict monitoring cycle:', error);
-      }
-    }, 30000); // Check every 30 seconds
+  /**
+   * Calculate output similarity between two agent outputs
+   */
+  private async calculateOutputSimilarity(output1: AgentOutput, output2: AgentOutput): Promise<number> {
+    // Simplified similarity calculation
+    if (typeof output1.data === 'string' && typeof output2.data === 'string') {
+      const words1 = output1.data.toLowerCase().split(' ');
+      const words2 = output2.data.toLowerCase().split(' ');
+      const intersection = words1.filter(word => words2.includes(word));
+      return intersection.length / Math.max(words1.length, words2.length);
+    }
+    return Math.random(); // Placeholder
   }
 
-  private async getActiveAgents(): Promise<Agent[]> {
-    const { data, error } = await supabase
-      .from('agents')
-      .select('*')
-      .eq('status', 'active');
-
-    if (error) throw error;
-    return data as Agent[];
+  /**
+   * Detect contradiction between two outputs
+   */
+  private async detectContradiction(output1: AgentOutput, output2: AgentOutput): Promise<boolean> {
+    // Simplified contradiction detection
+    if (typeof output1.data === 'string' && typeof output2.data === 'string') {
+      const contradictoryWords = ['not', 'never', 'opposite', 'contrary', 'false'];
+      const text1 = output1.data.toLowerCase();
+      const text2 = output2.data.toLowerCase();
+      
+      return contradictoryWords.some(word => 
+        (text1.includes(word) && !text2.includes(word)) ||
+        (!text1.includes(word) && text2.includes(word))
+      );
+    }
+    return false;
   }
 
-  private async getAgentById(agentId: string): Promise<Agent> {
-    const { data, error } = await supabase
-      .from('agents')
-      .select('*')
-      .eq('id', agentId)
-      .single();
-
-    if (error) throw error;
-    return data as Agent;
-  }
-
-  private async getAgentTasks(agentId: string): Promise<Task[]> {
-    const { data, error } = await supabase
-      .from('tasks')
-      .select('*')
-      .eq('assigned_agent_id', agentId)
-      .in('status', ['pending', 'in_progress']);
-
-    if (error) throw error;
-    return data as Task[];
-  }
-
-  private async convertOverlapsToConflicts(overlaps: TaskOverlap[]): Promise<AgentConflict[]> {
-    return overlaps.map(overlap => ({
-      id: `conflict_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      type: ConflictType.TASK_OVERLAP,
-      severity: this.calculateConflictSeverity(overlap.severity),
-      agents: [], // Will be populated based on task assignments
-      tasks: overlap.tasks,
-      resources: [],
-      detectedAt: new Date(),
-      metadata: { overlap }
-    }));
-  }
-
-  private async detectResourceContentions(agents: Agent[]): Promise<AgentConflict[]> {
-    // Implementation for resource contention detection
-    return [];
-  }
-
-  private async detectPriorityCollisions(agents: Agent[]): Promise<AgentConflict[]> {
-    // Implementation for priority collision detection
-    return [];
-  }
-
-  private assessTaskCriticality(task: Task): number {
-    // Implementation for task criticality assessment
-    return 0.5;
-  }
-
-  private calculateExpertiseMatch(agent: Agent, task: Task): number {
-    // Implementation for expertise matching
-    return 0.8;
-  }
-
-  private calculateDeadlineUrgency(task: Task): number {
-    if (!task.deadline) return 0;
+  /**
+   * Calculate conflict severity
+   */
+  private calculateConflictSeverity(
+    similarity: number,
+    confidence1: number,
+    confidence2: number
+  ): ConflictSeverity {
+    const avgConfidence = (confidence1 + confidence2) / 2;
     
-    const now = new Date();
-    const deadline = new Date(task.deadline);
-    const timeUntilDeadline = deadline.getTime() - now.getTime();
-    
-    // Convert to hours and normalize
-    const hoursUntilDeadline = timeUntilDeadline / (1000 * 60 * 60);
-    
-    if (hoursUntilDeadline <= 0) return 1.0;
-    if (hoursUntilDeadline >= 168) return 0.0; // 1 week
-    
-    return Math.max(0, 1 - (hoursUntilDeadline / 168));
-  }
-
-  private async assessResourceAvailability(task: Task): Promise<number> {
-    // Implementation for resource availability assessment
-    return 0.7;
-  }
-
-  private findTaskOverlap(tasks1: Task[], tasks2: Task[]): TaskOverlap | null {
-    // Implementation for finding task overlaps
-    return null;
-  }
-
-  private calculateConflictSeverity(overlapSeverity: number): ConflictSeverity {
-    if (overlapSeverity >= 0.8) return ConflictSeverity.CRITICAL;
-    if (overlapSeverity >= 0.6) return ConflictSeverity.HIGH;
-    if (overlapSeverity >= 0.4) return ConflictSeverity.MEDIUM;
+    if (similarity < 0.2 && avgConfidence > 0.8) {
+      return ConflictSeverity.CRITICAL;
+    } else if (similarity < 0.4 && avgConfidence > 0.6) {
+      return ConflictSeverity.HIGH;
+    } else if (similarity < 0.6) {
+      return ConflictSeverity.MEDIUM;
+    }
     return ConflictSeverity.LOW;
   }
 
-  private async conductNegotiation(conflictId: string, negotiation: NegotiationProtocol): Promise<NegotiationProtocol> {
-    // Implementation for conducting negotiation
-    return negotiation;
-  }
-
-  private async selectOptimalStrategy(conflict: AgentConflict): Promise<ConflictResolutionStrategy> {
-    // Implementation for strategy selection
-    return 'reassign_tasks';
-  }
-
-  private async resolveByTaskReassignment(conflict: AgentConflict): Promise<ConflictResolution> {
-    return {
-      strategy: 'reassign_tasks',
-      actions: [],
-      affectedAgents: conflict.agents,
-      affectedTasks: conflict.tasks,
-      outcome: ResolutionOutcome.RESOLVED,
-      reasoning: 'Tasks reassigned based on priority scores',
-      metrics: {
-        timeToResolve: 0,
-        agentsAffected: conflict.agents.length,
-        tasksReassigned: conflict.tasks.length,
-        resourcesReallocated: 0,
-        satisfactionScore: 0.8
-      }
+  /**
+   * Get resource capacity for a given resource
+   */
+  private getResourceCapacity(resource: string): number {
+    // Placeholder - would fetch from configuration or monitoring service
+    const capacities: Record<string, number> = {
+      'cpu': 100,
+      'memory': 1000,
+      'gpu': 10,
+      'network': 1000
     };
+    return capacities[resource] || 100;
   }
 
-  private async resolveByResourceSharing(conflict: AgentConflict): Promise<ConflictResolution> {
-    return {
-      strategy: 'share_resources',
-      actions: [],
-      affectedAgents: conflict.agents,
-      affectedTasks: conflict.tasks,
-      outcome: ResolutionOutcome.RESOLVED,
-      reasoning: 'Resources shared between conflicting agents',
-      metrics: {
-        timeToResolve: 0,
-        agentsAffected: conflict.agents.length,
-        tasksReassigned: 0,
-        resourcesReallocated: conflict.resources.length,
-        satisfactionScore: 0.7
-      }
-    };
+  /**
+   * Calculate total resource demand
+   */
+  private calculateResourceDemand(resource: string, agentIds: string[]): number {
+    // Placeholder - would calculate based on agent requirements
+    return agentIds.length * 10;
   }
 
-  private async resolveByParallelExecution(conflict: AgentConflict): Promise<ConflictResolution> {
-    return {
-      strategy: 'parallel_execution',
-      actions: [],
-      affectedAgents: conflict.agents,
-      affectedTasks: conflict.tasks,
-      outcome: ResolutionOutcome.RESOLVED,
-      reasoning: 'Tasks configured for parallel execution',
-      metrics: {
-        timeToResolve: 0,
-        agentsAffected: conflict.agents.length,
-        tasksReassigned: 0,
-        resourcesReallocated: 0,
-        satisfactionScore: 0.9
-      }
-    };
+  /**
+   * Helper methods for strategy condition evaluation
+   */
+  private hasHighConfidenceDifference(conflict: AgentConflict): boolean {
+    if (!conflict.outputs || conflict.outputs.length < 2) return false;
+    const confidences = conflict.outputs.map(o => o.confidence);
+    const max = Math.max(...confidences);
+    const min = Math.min(...confidences);
+    return (max - min) > 0.3;
   }
 
-  private async resolveByPriorityAdjustment(conflict: AgentConflict): Promise<ConflictResolution> {
-    return {
-      strategy: 'priority_adjustment',
-      actions: [],
-      affectedAgents: conflict.agents,
-      affectedTasks: conflict.tasks,
-      outcome: ResolutionOutcome.RESOLVED,
-      reasoning: 'Task priorities adjusted to resolve conflict',
-      metrics: {
-        timeToResolve: 0,
-        agentsAffected: conflict.agents.length,
-        tasksReassigned: 0,
-        resourcesReallocated: 0,
-        satisfactionScore: 0.6
-      }
-    };
+  private hasExpertiseInfo(agentIds: string[]): boolean {
+    // Placeholder - would check if agents have expertise metadata
+    return true;
   }
 
-  private async escalateConflict(conflict: AgentConflict): Promise<ConflictResolution> {
-    return {
-      strategy: 'escalation',
-      actions: [],
-      affectedAgents: conflict.agents,
-      affectedTasks: conflict.tasks,
-      outcome: ResolutionOutcome.ESCALATED,
-      reasoning: 'Conflict escalated to human supervisor',
-      metrics: {
-        timeToResolve: 0,
-        agentsAffected: conflict.agents.length,
-        tasksReassigned: 0,
-        resourcesReallocated: 0,
-        satisfactionScore: 0.3
-      }
-    };
-  }
-
-  private async saveConflictResolution(conflictId: string, resolution: ConflictResolution): Promise<void> {
+  private hasHighSimilarity(conflict: AgentConflict): boolean {
+    // Placeholder - would calculate actual similarity
+    return Math.
