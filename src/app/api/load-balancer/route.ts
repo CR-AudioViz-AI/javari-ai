@@ -1,610 +1,646 @@
+```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { z } from 'zod';
 import Redis from 'ioredis';
 
-// Types
-interface ServiceNode {
-  id: string;
-  url: string;
-  region: string;
-  weight: number;
-  maxConnections: number;
-  currentConnections: number;
-  responseTime: number;
-  healthStatus: 'healthy' | 'degraded' | 'unhealthy';
-  lastHealthCheck: Date;
-}
-
+// Types and Interfaces
 interface LoadBalancerConfig {
-  algorithm: 'round-robin' | 'least-connections' | 'weighted' | 'geographic';
-  healthCheckInterval: number;
-  maxRetries: number;
-  timeoutMs: number;
-  circuitBreakerThreshold: number;
+  id: string;
+  name: string;
+  algorithm: 'round_robin' | 'weighted_round_robin' | 'least_connections' | 'ip_hash' | 'predictive';
+  health_check_interval: number;
+  failure_threshold: number;
+  recovery_threshold: number;
+  sticky_sessions: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
-interface CircuitBreakerState {
-  state: 'closed' | 'open' | 'half-open';
-  failureCount: number;
-  lastFailureTime: Date;
-  successCount: number;
+interface NodeMetrics {
+  node_id: string;
+  cpu_usage: number;
+  memory_usage: number;
+  active_connections: number;
+  response_time: number;
+  error_rate: number;
+  throughput: number;
+  health_status: 'healthy' | 'degraded' | 'unhealthy';
+  timestamp: string;
 }
 
-interface HealthCheckResult {
-  serviceId: string;
-  healthy: boolean;
-  responseTime: number;
-  timestamp: Date;
-  error?: string;
+interface RoutingPolicy {
+  id: string;
+  load_balancer_id: string;
+  node_id: string;
+  weight: number;
+  max_connections: number;
+  backup: boolean;
+  enabled: boolean;
+  priority: number;
 }
 
-interface GeoLocation {
-  country: string;
-  region: string;
-  latitude: number;
-  longitude: number;
+interface PredictiveAnalysis {
+  node_id: string;
+  predicted_load: number;
+  confidence: number;
+  recommendation: 'increase_weight' | 'decrease_weight' | 'maintain' | 'remove';
+  factors: string[];
 }
 
-// Services
-class LoadBalancerService {
-  private services: Map<string, ServiceNode> = new Map();
-  private circuitBreakers: Map<string, CircuitBreakerState> = new Map();
-  private roundRobinIndex = 0;
-  private redis: Redis;
-  private supabase: any;
-  private config: LoadBalancerConfig;
+// Validation Schemas
+const WeightUpdateSchema = z.object({
+  node_id: z.string().uuid(),
+  weight: z.number().min(0).max(100),
+  reason: z.string().optional()
+});
+
+const PolicyUpdateSchema = z.object({
+  load_balancer_id: z.string().uuid(),
+  algorithm: z.enum(['round_robin', 'weighted_round_robin', 'least_connections', 'ip_hash', 'predictive']),
+  health_check_interval: z.number().min(1000).max(300000),
+  failure_threshold: z.number().min(1).max(10),
+  recovery_threshold: z.number().min(1).max(10)
+});
+
+const HealthCheckSchema = z.object({
+  nodes: z.array(z.string().uuid()).optional(),
+  force_check: z.boolean().default(false)
+});
+
+// Supabase Client
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
+
+// Redis Client
+const redis = new Redis(process.env.REDIS_URL!);
+
+class LoadBalancerController {
+  private static instance: LoadBalancerController;
+  private metricsCollector: MetricsCollector;
+  private predictiveAnalyzer: PredictiveAnalyzer;
+  private routingEngine: RoutingPolicyEngine;
+  private weightCalculator: WeightCalculator;
+  private healthChecker: HealthChecker;
 
   constructor() {
-    this.redis = new Redis(process.env.REDIS_URL!);
-    this.supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
-    this.config = {
-      algorithm: 'weighted',
-      healthCheckInterval: 30000,
-      maxRetries: 3,
-      timeoutMs: 5000,
-      circuitBreakerThreshold: 5
-    };
+    this.metricsCollector = new MetricsCollector();
+    this.predictiveAnalyzer = new PredictiveAnalyzer();
+    this.routingEngine = new RoutingPolicyEngine();
+    this.weightCalculator = new WeightCalculator();
+    this.healthChecker = new HealthChecker();
   }
 
-  async initializeServices(): Promise<void> {
+  static getInstance(): LoadBalancerController {
+    if (!LoadBalancerController.instance) {
+      LoadBalancerController.instance = new LoadBalancerController();
+    }
+    return LoadBalancerController.instance;
+  }
+
+  async getStatus(loadBalancerId?: string) {
     try {
-      const { data: services, error } = await this.supabase
-        .from('service_nodes')
-        .select('*')
-        .eq('active', true);
+      const query = supabase
+        .from('load_balancers')
+        .select(`
+          *,
+          routing_policies (*),
+          node_metrics (*)
+        `);
+
+      if (loadBalancerId) {
+        query.eq('id', loadBalancerId);
+      }
+
+      const { data: loadBalancers, error } = await query;
 
       if (error) throw error;
 
-      for (const service of services) {
-        const node: ServiceNode = {
-          id: service.id,
-          url: service.url,
-          region: service.region,
-          weight: service.weight || 1,
-          maxConnections: service.max_connections || 100,
-          currentConnections: 0,
-          responseTime: service.avg_response_time || 0,
-          healthStatus: 'healthy',
-          lastHealthCheck: new Date()
-        };
+      const status = await Promise.all(
+        loadBalancers.map(async (lb) => {
+          const cachedMetrics = await redis.get(`lb:${lb.id}:metrics`);
+          const realtimeMetrics = cachedMetrics 
+            ? JSON.parse(cachedMetrics) 
+            : await this.metricsCollector.getCurrentMetrics(lb.id);
 
-        this.services.set(service.id, node);
-        this.circuitBreakers.set(service.id, {
-          state: 'closed',
-          failureCount: 0,
-          lastFailureTime: new Date(),
-          successCount: 0
-        });
-      }
-
-      // Subscribe to real-time updates
-      this.supabase
-        .channel('service_health')
-        .on('postgres_changes', {
-          event: '*',
-          schema: 'public',
-          table: 'service_nodes'
-        }, (payload: any) => {
-          this.handleServiceUpdate(payload);
+          return {
+            ...lb,
+            current_metrics: realtimeMetrics,
+            health_summary: await this.healthChecker.getHealthSummary(lb.id),
+            predictive_insights: await this.predictiveAnalyzer.getInsights(lb.id)
+          };
         })
-        .subscribe();
-
-    } catch (error) {
-      console.error('Failed to initialize services:', error);
-      throw error;
-    }
-  }
-
-  async selectService(clientLocation?: GeoLocation): Promise<ServiceNode | null> {
-    const healthyServices = Array.from(this.services.values())
-      .filter(service => this.isServiceAvailable(service.id));
-
-    if (healthyServices.length === 0) {
-      return null;
-    }
-
-    let selectedService: ServiceNode;
-
-    switch (this.config.algorithm) {
-      case 'round-robin':
-        selectedService = this.roundRobinSelection(healthyServices);
-        break;
-      case 'least-connections':
-        selectedService = this.leastConnectionsSelection(healthyServices);
-        break;
-      case 'weighted':
-        selectedService = this.weightedSelection(healthyServices);
-        break;
-      case 'geographic':
-        selectedService = this.geographicSelection(healthyServices, clientLocation);
-        break;
-      default:
-        selectedService = this.weightedSelection(healthyServices);
-    }
-
-    // Update connection count
-    selectedService.currentConnections++;
-    await this.updateServiceMetrics(selectedService.id, {
-      currentConnections: selectedService.currentConnections
-    });
-
-    return selectedService;
-  }
-
-  private roundRobinSelection(services: ServiceNode[]): ServiceNode {
-    const service = services[this.roundRobinIndex % services.length];
-    this.roundRobinIndex = (this.roundRobinIndex + 1) % services.length;
-    return service;
-  }
-
-  private leastConnectionsSelection(services: ServiceNode[]): ServiceNode {
-    return services.reduce((prev, current) =>
-      current.currentConnections < prev.currentConnections ? current : prev
-    );
-  }
-
-  private weightedSelection(services: ServiceNode[]): ServiceNode {
-    const totalWeight = services.reduce((sum, service) => sum + service.weight, 0);
-    const random = Math.random() * totalWeight;
-    let weightSum = 0;
-
-    for (const service of services) {
-      weightSum += service.weight;
-      if (random <= weightSum) {
-        return service;
-      }
-    }
-
-    return services[0];
-  }
-
-  private geographicSelection(services: ServiceNode[], clientLocation?: GeoLocation): ServiceNode {
-    if (!clientLocation) {
-      return this.weightedSelection(services);
-    }
-
-    const servicesWithDistance = services.map(service => {
-      // Simple distance calculation (in practice, use proper geo library)
-      const distance = Math.sqrt(
-        Math.pow(clientLocation.latitude - this.getServiceLatitude(service.region), 2) +
-        Math.pow(clientLocation.longitude - this.getServiceLongitude(service.region), 2)
       );
 
-      return { service, distance };
-    });
-
-    servicesWithDistance.sort((a, b) => a.distance - b.distance);
-    return servicesWithDistance[0].service;
+      return status;
+    } catch (error) {
+      throw new Error(`Failed to get load balancer status: ${error}`);
+    }
   }
 
-  private getServiceLatitude(region: string): number {
-    const regionCoords: Record<string, [number, number]> = {
-      'us-east-1': [39.0458, -76.6413],
-      'us-west-2': [45.5152, -122.6784],
-      'eu-west-1': [53.3498, -6.2603],
-      'ap-southeast-1': [1.3521, 103.8198]
-    };
-    return regionCoords[region]?.[0] || 0;
+  async updateWeights(updates: z.infer<typeof WeightUpdateSchema>[]) {
+    try {
+      const results = await Promise.all(
+        updates.map(async (update) => {
+          // Validate current node status
+          const nodeHealth = await this.healthChecker.checkNode(update.node_id);
+          if (nodeHealth.status === 'unhealthy' && update.weight > 0) {
+            throw new Error(`Cannot assign weight to unhealthy node: ${update.node_id}`);
+          }
+
+          // Calculate optimal weight based on metrics
+          const optimalWeight = await this.weightCalculator.calculateOptimalWeight(
+            update.node_id,
+            update.weight
+          );
+
+          // Update routing policy
+          const { data, error } = await supabase
+            .from('routing_policies')
+            .update({
+              weight: optimalWeight,
+              updated_at: new Date().toISOString()
+            })
+            .eq('node_id', update.node_id)
+            .select();
+
+          if (error) throw error;
+
+          // Cache the update
+          await redis.setex(
+            `lb:policy:${update.node_id}`,
+            300,
+            JSON.stringify({ weight: optimalWeight, timestamp: Date.now() })
+          );
+
+          // Trigger real-time update
+          await supabase.realtime.channel('load-balancer-updates').send({
+            type: 'broadcast',
+            event: 'weight_updated',
+            payload: {
+              node_id: update.node_id,
+              old_weight: data[0]?.weight,
+              new_weight: optimalWeight,
+              reason: update.reason || 'Manual update'
+            }
+          });
+
+          return {
+            node_id: update.node_id,
+            old_weight: data[0]?.weight,
+            new_weight: optimalWeight,
+            status: 'updated'
+          };
+        })
+      );
+
+      return results;
+    } catch (error) {
+      throw new Error(`Failed to update weights: ${error}`);
+    }
   }
 
-  private getServiceLongitude(region: string): number {
-    const regionCoords: Record<string, [number, number]> = {
-      'us-east-1': [39.0458, -76.6413],
-      'us-west-2': [45.5152, -122.6784],
-      'eu-west-1': [53.3498, -6.2603],
-      'ap-southeast-1': [1.3521, 103.8198]
-    };
-    return regionCoords[region]?.[1] || 0;
-  }
-
-  private isServiceAvailable(serviceId: string): boolean {
-    const service = this.services.get(serviceId);
-    const circuitBreaker = this.circuitBreakers.get(serviceId);
-
-    if (!service || !circuitBreaker) return false;
-
-    return service.healthStatus !== 'unhealthy' && 
-           circuitBreaker.state !== 'open' &&
-           service.currentConnections < service.maxConnections;
-  }
-
-  async recordResponse(serviceId: string, success: boolean, responseTime: number): Promise<void> {
-    const service = this.services.get(serviceId);
-    const circuitBreaker = this.circuitBreakers.get(serviceId);
-
-    if (!service || !circuitBreaker) return;
-
-    // Update service connection count
-    service.currentConnections = Math.max(0, service.currentConnections - 1);
-
-    // Update circuit breaker state
-    if (success) {
-      circuitBreaker.successCount++;
-      circuitBreaker.failureCount = Math.max(0, circuitBreaker.failureCount - 1);
-      
-      if (circuitBreaker.state === 'half-open' && circuitBreaker.successCount >= 3) {
-        circuitBreaker.state = 'closed';
-        circuitBreaker.failureCount = 0;
+  async updatePolicy(policyUpdate: z.infer<typeof PolicyUpdateSchema>) {
+    try {
+      // Validate policy configuration
+      const isValid = await ConfigValidator.validatePolicy(policyUpdate);
+      if (!isValid.valid) {
+        throw new Error(`Invalid policy configuration: ${isValid.errors.join(', ')}`);
       }
 
-      // Update response time using exponential moving average
-      service.responseTime = service.responseTime * 0.8 + responseTime * 0.2;
+      const { data, error } = await supabase
+        .from('load_balancers')
+        .update({
+          ...policyUpdate,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', policyUpdate.load_balancer_id)
+        .select();
 
-    } else {
-      circuitBreaker.failureCount++;
-      circuitBreaker.lastFailureTime = new Date();
+      if (error) throw error;
 
-      if (circuitBreaker.failureCount >= this.config.circuitBreakerThreshold) {
-        circuitBreaker.state = 'open';
-        await this.notifyServiceFailure(serviceId);
-      }
-    }
+      // Update routing engine
+      await this.routingEngine.updateAlgorithm(
+        policyUpdate.load_balancer_id,
+        policyUpdate.algorithm
+      );
 
-    // Update metrics in Redis
-    await this.updateServiceMetrics(serviceId, {
-      currentConnections: service.currentConnections,
-      responseTime: service.responseTime,
-      circuitBreakerState: circuitBreaker.state
-    });
-  }
+      // Clear relevant caches
+      await redis.del(`lb:${policyUpdate.load_balancer_id}:*`);
 
-  private async updateServiceMetrics(serviceId: string, metrics: any): Promise<void> {
-    try {
-      const key = `service:${serviceId}:metrics`;
-      await this.redis.hset(key, metrics);
-      await this.redis.expire(key, 300); // 5 minutes TTL
+      return data[0];
     } catch (error) {
-      console.error('Failed to update service metrics:', error);
+      throw new Error(`Failed to update policy: ${error}`);
     }
   }
 
-  private async notifyServiceFailure(serviceId: string): Promise<void> {
+  async performHealthCheck(request: z.infer<typeof HealthCheckSchema>) {
     try {
-      await this.supabase.from('service_alerts').insert({
-        service_id: serviceId,
-        alert_type: 'circuit_breaker_open',
-        message: `Circuit breaker opened for service ${serviceId}`,
-        created_at: new Date().toISOString()
-      });
+      const results = await this.healthChecker.checkNodes(
+        request.nodes,
+        request.force_check
+      );
+
+      // Update node statuses based on health check results
+      await Promise.all(
+        results.map(async (result) => {
+          if (result.status_changed) {
+            await supabase
+              .from('node_metrics')
+              .upsert({
+                node_id: result.node_id,
+                health_status: result.status,
+                last_check: new Date().toISOString(),
+                response_time: result.response_time,
+                error_rate: result.error_rate
+              });
+
+            // Trigger automatic weight adjustment for unhealthy nodes
+            if (result.status === 'unhealthy') {
+              await this.weightCalculator.adjustForUnhealthyNode(result.node_id);
+            }
+          }
+        })
+      );
+
+      return results;
     } catch (error) {
-      console.error('Failed to create service alert:', error);
-    }
-  }
-
-  private handleServiceUpdate(payload: any): void {
-    const { eventType, new: newRecord, old: oldRecord } = payload;
-
-    if (eventType === 'INSERT' || eventType === 'UPDATE') {
-      const service: ServiceNode = {
-        id: newRecord.id,
-        url: newRecord.url,
-        region: newRecord.region,
-        weight: newRecord.weight || 1,
-        maxConnections: newRecord.max_connections || 100,
-        currentConnections: 0,
-        responseTime: newRecord.avg_response_time || 0,
-        healthStatus: newRecord.health_status || 'healthy',
-        lastHealthCheck: new Date(newRecord.last_health_check)
-      };
-
-      this.services.set(newRecord.id, service);
-    } else if (eventType === 'DELETE') {
-      this.services.delete(oldRecord.id);
-      this.circuitBreakers.delete(oldRecord.id);
+      throw new Error(`Health check failed: ${error}`);
     }
   }
 }
 
-class HealthMonitor {
-  private loadBalancer: LoadBalancerService;
-  private healthCheckInterval: NodeJS.Timeout | null = null;
+class MetricsCollector {
+  async getCurrentMetrics(loadBalancerId: string): Promise<NodeMetrics[]> {
+    const { data, error } = await supabase
+      .from('node_metrics')
+      .select('*')
+      .eq('load_balancer_id', loadBalancerId)
+      .gte('timestamp', new Date(Date.now() - 5 * 60 * 1000).toISOString()) // Last 5 minutes
+      .order('timestamp', { ascending: false });
 
-  constructor(loadBalancer: LoadBalancerService) {
-    this.loadBalancer = loadBalancer;
+    if (error) throw error;
+    return data || [];
   }
 
-  startHealthChecks(): void {
-    this.healthCheckInterval = setInterval(
-      () => this.performHealthChecks(),
-      30000 // 30 seconds
-    );
+  async streamMetrics(loadBalancerId: string, callback: (metrics: NodeMetrics[]) => void) {
+    const subscription = supabase
+      .channel(`metrics:${loadBalancerId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'node_metrics',
+          filter: `load_balancer_id=eq.${loadBalancerId}`
+        },
+        callback
+      )
+      .subscribe();
+
+    return subscription;
   }
+}
 
-  stopHealthChecks(): void {
-    if (this.healthCheckInterval) {
-      clearInterval(this.healthCheckInterval);
-      this.healthCheckInterval = null;
-    }
-  }
-
-  private async performHealthChecks(): Promise<void> {
-    const services = Array.from(this.loadBalancer['services'].values());
-    const healthCheckPromises = services.map(service => this.checkServiceHealth(service));
-    
-    await Promise.allSettled(healthCheckPromises);
-  }
-
-  private async checkServiceHealth(service: ServiceNode): Promise<HealthCheckResult> {
-    const startTime = Date.now();
-
+class PredictiveAnalyzer {
+  async getInsights(loadBalancerId: string): Promise<PredictiveAnalysis[]> {
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
+      // Simplified ML prediction - in production, use TensorFlow.js or external ML service
+      const historicalData = await this.getHistoricalMetrics(loadBalancerId);
+      const predictions: PredictiveAnalysis[] = [];
 
-      const response = await fetch(`${service.url}/health`, {
-        method: 'GET',
-        signal: controller.signal,
-        headers: {
-          'User-Agent': 'LoadBalancer-HealthCheck/1.0'
-        }
-      });
+      for (const nodeData of historicalData) {
+        const trend = this.calculateTrend(nodeData.metrics);
+        const prediction = this.predictLoad(trend);
 
-      clearTimeout(timeout);
-      const responseTime = Date.now() - startTime;
-      const healthy = response.ok;
-
-      service.healthStatus = healthy ? 'healthy' : 'degraded';
-      service.lastHealthCheck = new Date();
-
-      await this.loadBalancer.recordResponse(service.id, healthy, responseTime);
-
-      return {
-        serviceId: service.id,
-        healthy,
-        responseTime,
-        timestamp: new Date()
-      };
-
-    } catch (error) {
-      const responseTime = Date.now() - startTime;
-      service.healthStatus = 'unhealthy';
-      service.lastHealthCheck = new Date();
-
-      await this.loadBalancer.recordResponse(service.id, false, responseTime);
-
-      return {
-        serviceId: service.id,
-        healthy: false,
-        responseTime,
-        timestamp: new Date(),
-        error: error instanceof Error ? error.message : 'Unknown error'
-      };
-    }
-  }
-}
-
-class GeoLocationResolver {
-  async resolveLocation(ip: string): Promise<GeoLocation | null> {
-    try {
-      // In production, use a proper IP geolocation service
-      const response = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,regionName,lat,lon`);
-      const data = await response.json();
-
-      if (data.status === 'success') {
-        return {
-          country: data.country,
-          region: data.regionName,
-          latitude: data.lat,
-          longitude: data.lon
-        };
-      }
-
-      return null;
-    } catch (error) {
-      console.error('Failed to resolve geo location:', error);
-      return null;
-    }
-  }
-
-  getClientIP(request: NextRequest): string {
-    const forwarded = request.headers.get('x-forwarded-for');
-    const realIP = request.headers.get('x-real-ip');
-    
-    if (forwarded) {
-      return forwarded.split(',')[0].trim();
-    }
-    
-    if (realIP) {
-      return realIP;
-    }
-    
-    return request.ip || '127.0.0.1';
-  }
-}
-
-// Global instances
-const loadBalancer = new LoadBalancerService();
-const healthMonitor = new HealthMonitor(loadBalancer);
-const geoResolver = new GeoLocationResolver();
-
-// Initialize on first request
-let initialized = false;
-
-async function initialize(): Promise<void> {
-  if (!initialized) {
-    await loadBalancer.initializeServices();
-    healthMonitor.startHealthChecks();
-    initialized = true;
-  }
-}
-
-// API Routes
-export async function GET(request: NextRequest): Promise<NextResponse> {
-  try {
-    await initialize();
-
-    const { searchParams } = new URL(request.url);
-    const action = searchParams.get('action') || 'status';
-
-    switch (action) {
-      case 'status':
-        const services = Array.from(loadBalancer['services'].values());
-        const healthyCount = services.filter(s => s.healthStatus === 'healthy').length;
-        
-        return NextResponse.json({
-          status: 'active',
-          totalServices: services.length,
-          healthyServices: healthyCount,
-          algorithm: loadBalancer['config'].algorithm,
-          services: services.map(s => ({
-            id: s.id,
-            region: s.region,
-            healthStatus: s.healthStatus,
-            currentConnections: s.currentConnections,
-            responseTime: s.responseTime
-          }))
+        predictions.push({
+          node_id: nodeData.node_id,
+          predicted_load: prediction.load,
+          confidence: prediction.confidence,
+          recommendation: this.generateRecommendation(prediction),
+          factors: prediction.factors
         });
+      }
 
-      case 'metrics':
-        const redis = loadBalancer['redis'];
-        const serviceIds = Array.from(loadBalancer['services'].keys());
-        const metrics: Record<string, any> = {};
+      return predictions;
+    } catch (error) {
+      throw new Error(`Predictive analysis failed: ${error}`);
+    }
+  }
 
-        for (const serviceId of serviceIds) {
-          const serviceMetrics = await redis.hgetall(`service:${serviceId}:metrics`);
-          metrics[serviceId] = serviceMetrics;
+  private async getHistoricalMetrics(loadBalancerId: string) {
+    const { data, error } = await supabase
+      .from('node_metrics')
+      .select('*')
+      .eq('load_balancer_id', loadBalancerId)
+      .gte('timestamp', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()) // Last 24 hours
+      .order('timestamp', { ascending: false });
+
+    if (error) throw error;
+
+    // Group by node_id
+    const groupedData = data?.reduce((acc, metric) => {
+      if (!acc[metric.node_id]) {
+        acc[metric.node_id] = { node_id: metric.node_id, metrics: [] };
+      }
+      acc[metric.node_id].metrics.push(metric);
+      return acc;
+    }, {} as Record<string, { node_id: string; metrics: NodeMetrics[] }>);
+
+    return Object.values(groupedData || {});
+  }
+
+  private calculateTrend(metrics: NodeMetrics[]) {
+    if (metrics.length < 2) return { direction: 'stable', magnitude: 0 };
+
+    const recent = metrics.slice(0, Math.ceil(metrics.length / 3));
+    const older = metrics.slice(Math.floor(metrics.length * 2 / 3));
+
+    const recentAvg = recent.reduce((sum, m) => sum + m.cpu_usage + m.memory_usage, 0) / recent.length;
+    const olderAvg = older.reduce((sum, m) => sum + m.cpu_usage + m.memory_usage, 0) / older.length;
+
+    const change = (recentAvg - olderAvg) / olderAvg;
+
+    return {
+      direction: change > 0.1 ? 'increasing' : change < -0.1 ? 'decreasing' : 'stable',
+      magnitude: Math.abs(change)
+    };
+  }
+
+  private predictLoad(trend: any) {
+    // Simplified prediction logic
+    let predictedLoad = 50; // Base load percentage
+    let confidence = 0.7;
+    const factors = ['historical_trend'];
+
+    if (trend.direction === 'increasing') {
+      predictedLoad += trend.magnitude * 100;
+      factors.push('increasing_trend');
+    } else if (trend.direction === 'decreasing') {
+      predictedLoad -= trend.magnitude * 50;
+      factors.push('decreasing_trend');
+    }
+
+    return {
+      load: Math.max(0, Math.min(100, predictedLoad)),
+      confidence,
+      factors
+    };
+  }
+
+  private generateRecommendation(prediction: any): PredictiveAnalysis['recommendation'] {
+    if (prediction.load > 80) return 'decrease_weight';
+    if (prediction.load < 20) return 'increase_weight';
+    if (prediction.confidence < 0.5) return 'maintain';
+    return 'maintain';
+  }
+}
+
+class RoutingPolicyEngine {
+  async updateAlgorithm(loadBalancerId: string, algorithm: LoadBalancerConfig['algorithm']) {
+    // Cache the new algorithm
+    await redis.setex(`lb:${loadBalancerId}:algorithm`, 3600, algorithm);
+
+    // Trigger policy recalculation based on algorithm
+    switch (algorithm) {
+      case 'predictive':
+        await this.enablePredictiveRouting(loadBalancerId);
+        break;
+      case 'weighted_round_robin':
+        await this.recalculateWeights(loadBalancerId);
+        break;
+      default:
+        await this.applyStandardAlgorithm(loadBalancerId, algorithm);
+    }
+  }
+
+  private async enablePredictiveRouting(loadBalancerId: string) {
+    // Implementation for predictive routing logic
+    const analyzer = new PredictiveAnalyzer();
+    const insights = await analyzer.getInsights(loadBalancerId);
+
+    // Apply insights to routing weights
+    const weightUpdates = insights.map(insight => ({
+      node_id: insight.node_id,
+      weight: this.calculatePredictiveWeight(insight),
+      reason: `Predictive adjustment: ${insight.recommendation}`
+    }));
+
+    // Apply updates
+    for (const update of weightUpdates) {
+      await supabase
+        .from('routing_policies')
+        .update({ weight: update.weight })
+        .eq('node_id', update.node_id);
+    }
+  }
+
+  private calculatePredictiveWeight(insight: PredictiveAnalysis): number {
+    const baseWeight = 50;
+    const loadFactor = (100 - insight.predicted_load) / 100;
+    const confidenceFactor = insight.confidence;
+
+    return Math.max(0, Math.min(100, baseWeight * loadFactor * confidenceFactor));
+  }
+
+  private async recalculateWeights(loadBalancerId: string) {
+    const metrics = await new MetricsCollector().getCurrentMetrics(loadBalancerId);
+    const calculator = new WeightCalculator();
+
+    for (const metric of metrics) {
+      const optimalWeight = await calculator.calculateOptimalWeight(metric.node_id);
+      await supabase
+        .from('routing_policies')
+        .update({ weight: optimalWeight })
+        .eq('node_id', metric.node_id);
+    }
+  }
+
+  private async applyStandardAlgorithm(loadBalancerId: string, algorithm: string) {
+    // Reset to equal weights for round_robin, etc.
+    if (algorithm === 'round_robin') {
+      await supabase
+        .from('routing_policies')
+        .update({ weight: 100 })
+        .eq('load_balancer_id', loadBalancerId);
+    }
+  }
+}
+
+class WeightCalculator {
+  async calculateOptimalWeight(nodeId: string, targetWeight?: number): Promise<number> {
+    const metrics = await this.getNodeMetrics(nodeId);
+    if (!metrics) return targetWeight || 50;
+
+    // Calculate weight based on performance metrics
+    const cpuScore = Math.max(0, 100 - metrics.cpu_usage);
+    const memoryScore = Math.max(0, 100 - metrics.memory_usage);
+    const responseScore = Math.max(0, 100 - (metrics.response_time / 10));
+    const errorScore = Math.max(0, 100 - (metrics.error_rate * 100));
+
+    const performanceScore = (cpuScore + memoryScore + responseScore + errorScore) / 4;
+
+    // If target weight provided, blend with performance score
+    if (targetWeight !== undefined) {
+      return Math.round((performanceScore * 0.7) + (targetWeight * 0.3));
+    }
+
+    return Math.round(performanceScore);
+  }
+
+  async adjustForUnhealthyNode(nodeId: string) {
+    await supabase
+      .from('routing_policies')
+      .update({ weight: 0, enabled: false })
+      .eq('node_id', nodeId);
+
+    // Cache the adjustment
+    await redis.setex(`lb:node:${nodeId}:unhealthy`, 300, 'true');
+  }
+
+  private async getNodeMetrics(nodeId: string): Promise<NodeMetrics | null> {
+    const { data, error } = await supabase
+      .from('node_metrics')
+      .select('*')
+      .eq('node_id', nodeId)
+      .order('timestamp', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error) return null;
+    return data;
+  }
+}
+
+class HealthChecker {
+  async checkNodes(nodeIds?: string[], forceCheck = false): Promise<any[]> {
+    const query = supabase.from('routing_policies').select(`
+      node_id,
+      load_balancers!inner(health_check_interval, failure_threshold)
+    `);
+
+    if (nodeIds?.length) {
+      query.in('node_id', nodeIds);
+    }
+
+    const { data: policies, error } = await query;
+    if (error) throw error;
+
+    const results = await Promise.all(
+      policies.map(async (policy) => {
+        const lastCheck = await redis.get(`health:${policy.node_id}:last_check`);
+        const shouldCheck = forceCheck || 
+          !lastCheck || 
+          (Date.now() - parseInt(lastCheck)) > policy.load_balancers.health_check_interval;
+
+        if (!shouldCheck) {
+          return { node_id: policy.node_id, status: 'cached', status_changed: false };
         }
 
-        return NextResponse.json({ metrics });
-
-      default:
-        return NextResponse.json(
-          { error: 'Invalid action parameter' },
-          { status: 400 }
-        );
-    }
-
-  } catch (error) {
-    console.error('Load balancer GET error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
+        return await this.checkNode(policy.node_id);
+      })
     );
+
+    return results;
+  }
+
+  async checkNode(nodeId: string): Promise<any> {
+    try {
+      // Simulate health check - in production, make actual HTTP requests to nodes
+      const startTime = Date.now();
+      
+      // Get node endpoint from database
+      const { data: node, error } = await supabase
+        .from('load_balancer_nodes')
+        .select('endpoint, health_check_path')
+        .eq('id', nodeId)
+        .single();
+
+      if (error) throw error;
+
+      // Perform health check
+      const response = await fetch(`${node.endpoint}${node.health_check_path || '/health'}`, {
+        method: 'GET',
+        timeout: 5000
+      });
+
+      const responseTime = Date.now() - startTime;
+      const isHealthy = response.ok && responseTime < 5000;
+
+      const currentStatus = isHealthy ? 'healthy' : 'unhealthy';
+      const previousStatus = await redis.get(`health:${nodeId}:status`);
+      const statusChanged = previousStatus !== currentStatus;
+
+      // Update cache
+      await redis.setex(`health:${nodeId}:status`, 300, currentStatus);
+      await redis.setex(`health:${nodeId}:last_check`, 300, Date.now().toString());
+      await redis.setex(`health:${nodeId}:response_time`, 300, responseTime.toString());
+
+      return {
+        node_id: nodeId,
+        status: currentStatus,
+        response_time: responseTime,
+        error_rate: isHealthy ? 0 : 1,
+        status_changed: statusChanged,
+        timestamp: new Date().toISOString()
+      };
+    } catch (error) {
+      await redis.setex(`health:${nodeId}:status`, 300, 'unhealthy');
+      return {
+        node_id: nodeId,
+        status: 'unhealthy',
+        response_time: 5000,
+        error_rate: 1,
+        status_changed: true,
+        error: error.message
+      };
+    }
+  }
+
+  async getHealthSummary(loadBalancerId: string) {
+    const { data: policies, error } = await supabase
+      .from('routing_policies')
+      .select('node_id')
+      .eq('load_balancer_id', loadBalancerId);
+
+    if (error) throw error;
+
+    const healthStatuses = await Promise.all(
+      policies.map(async (policy) => {
+        const status = await redis.get(`health:${policy.node_id}:status`) || 'unknown';
+        return { node_id: policy.node_id, status };
+      })
+    );
+
+    const summary = healthStatuses.reduce((acc, { status }) => {
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    return {
+      total_nodes: healthStatuses.length,
+      healthy: summary.healthy || 0,
+      unhealthy: summary.unhealthy || 0,
+      degraded: summary.degraded || 0,
+      unknown: summary.unknown || 0,
+      health_percentage: ((summary.healthy || 0) / healthStatuses.length) * 100
+    };
   }
 }
 
-export async function POST(request: NextRequest): Promise<NextResponse> {
-  try {
-    await initialize();
+class ConfigValidator {
+  static async validatePolicy(policy: z.infer<typeof PolicyUpdateSchema>): Promise<{valid: boolean, errors: string[]}> {
+    const errors: string[] = [];
 
-    const clientIP = geoResolver.getClientIP(request);
-    const clientLocation = await geoResolver.resolveLocation(clientIP);
+    // Validate load balancer exists
+    const { data: lb, error } = await supabase
+      .from('load_balancers')
+      .select('id')
+      .eq('id', policy.load_balancer_id)
+      .single();
 
-    // Select best service based on load balancing algorithm
-    const selectedService = await loadBalancer.selectService(clientLocation);
-
-    if (!selectedService) {
-      return NextResponse.json(
-        { error: 'No healthy services available' },
-        { status: 503 }
-      );
+    if (error || !lb) {
+      errors.push('Load balancer not found');
     }
-
-    // Return selected service information
-    return NextResponse.json({
-      serviceId: selectedService.id,
-      url: selectedService.url,
-      region: selectedService.region,
-      estimatedResponseTime: selectedService.responseTime,
-      clientLocation: clientLocation ? {
-        country: clientLocation.country,
-        region: clientLocation.region
-      } : null
-    });
-
-  } catch (error) {
-    console.error('Load balancer POST error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
-  }
-}
-
-export async function PUT(request: NextRequest): Promise<NextResponse> {
-  try {
-    await initialize();
-
-    const body = await request.json();
-    const { serviceId, success, responseTime } = body;
-
-    if (!serviceId || typeof success !== 'boolean' || typeof responseTime !== 'number') {
-      return NextResponse.json(
-        { error: 'Missing or invalid parameters' },
-        { status: 400 }
-      );
-    }
-
-    await loadBalancer.recordResponse(serviceId, success, responseTime);
-
-    return NextResponse.json({ success: true });
-
-  } catch (error) {
-    console.error('Load balancer PUT error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
-  }
-}
-
-export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  try {
-    await initialize();
-
-    const body = await request.json();
-    const { algorithm, healthCheckInterval, maxRetries, timeoutMs } = body;
-
-    // Update load balancer configuration
-    if (algorithm && ['round-robin', 'least-connections', 'weighted', 'geographic'].includes(algorithm)) {
-      loadBalancer['config'].algorithm = algorithm;
-    }
-
-    if (healthCheckInterval && typeof healthCheckInterval === 'number') {
-      loadBalancer['config'].healthCheckInterval = healthCheckInterval;
-    }
-
-    if (maxRetries && typeof maxRetries === 'number') {
-      loadBalancer['config'].maxRetries = maxRetries;
-    }
-
-    if (timeoutMs && typeof timeoutMs === 'number') {
-      loadBalancer['config'].timeoutMs = timeoutMs;
-    }
-
-    return NextResponse.json({
-      success: true,
-      config: loadBalancer['config']
-    });
-
-  } catch (error) {
-    console.error('Load balancer PATCH error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
-  }
-}
