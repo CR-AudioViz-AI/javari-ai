@@ -5,47 +5,5 @@
     "autoAlias": false,
     "silent": false,
     "autoJobCancelation": true
-  },
-  "crons": [
-    {
-      "path": "/api/javari/autonomy/cycle",
-      "schedule": "*/3 * * * *"
-    },
-    {
-      "path": "/api/javari/autonomy/loop",
-      "schedule": "*/10 * * * *"
-    },
-    {
-      "path": "/api/javari/autonomy/metrics",
-      "schedule": "*/30 * * * *"
-    },
-    {
-      "path": "/api/javari/worker-cycle",
-      "schedule": "* * * * *"
-    },
-    {
-      "path": "/api/javari/auto-migrate",
-      "schedule": "0 5 * * *"
-    },
-    {
-      "path": "/api/javari/autonomy/start",
-      "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/javari/ecosystem/analyze",
-      "schedule": "0 */6 * * *"
-    },
-    {
-      "path": "/api/javari/operations/status",
-      "schedule": "*/10 * * * *"
-    },
-    {
-      "path": "/api/javari/learning/status",
-      "schedule": "0 * * * *"
-    },
-    {
-      "path": "/api/javari/orchestrator/run",
-      "schedule": "* * * * *"
-    }
-  ]
+  }
 }
