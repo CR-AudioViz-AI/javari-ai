@@ -1,74 +1,90 @@
-# Implement Key Rotation and Management Service
+# Build Key Management and Rotation Engine
 
 ```markdown
-# Key Management Service Documentation
+# Key Management and Rotation Engine
 
 ## Purpose
-The Key Management Service (KMS) provides a comprehensive solution for encryption key management, focused on enterprise-grade security. It features automatic key rotation, Hardware Security Module (HSM) integration, audit logging, and compliance validation, ensuring the secure handling of sensitive cryptographic keys.
+The Key Management and Rotation Engine is designed to provide a comprehensive system for the secure generation, rotation, and distribution of encryption keys. This engine aims to enhance security through proper key lifecycle management, ensuring that sensitive data remains protected and compliant with industry standards.
 
 ## Usage
-The KMS is designed to manage keys, rotate them automatically, and provide mechanisms for encryption and decryption. It is suitable for applications that require stringent security and regulatory compliance. 
+To use the Key Management and Rotation Engine, import the key management service from the `src/services/security/keyManagement.ts` file within your application. Utilize the provided interfaces and enums to create, manage, and rotate encryption keys as needed.
 
-```typescript
-import { KeyManagementService } from 'src/services/security/keyManagement';
+## Parameters / Props
 
-// Initialize the Key Management Service
-const keyManagementService = new KeyManagementService();
-```
+### Interfaces
 
-## Parameters/Props
-The service uses the following schemas for defining keys and HSM configurations:
+- **EncryptionKey**
+  - `id`: string - Unique identifier for the key.
+  - `algorithm`: CryptoAlgorithm - The encryption algorithm being used.
+  - `keyData`: Buffer - The actual key data.
+  - `version`: number - The version number of the key.
+  - `createdAt`: Date - Timestamp when the key was created.
+  - `expiresAt`: Date - Timestamp when the key will expire.
+  - `status`: KeyStatus - Current status of the key.
+  - `metadata`: KeyMetadata - Associated metadata for the key.
 
-### KeyMetadataSchema
-- **id**: `string` (UUID) - Unique identifier for the key.
-- **name**: `string` - Name of the key (1-255 characters).
-- **algorithm**: `enum` - Supported algorithms (`AES-256-GCM`, `RSA-4096`, `ECDSA-P256`, `CHACHA20-POLY1305`).
-- **keyType**: `enum` - Type of key (`symmetric`, `asymmetric`, `signing`).
-- **purpose**: `array` - Array of purposes (`encryption`, `decryption`, `signing`, `verification`).
-- **version**: `number` - Key version (positive integer).
-- **status**: `enum` - Status of the key (`active`, `deprecated`, `revoked`, `pending`).
-- **createdAt**: `date` - Creation timestamp.
-- **expiresAt**: `date` (optional) - Expiration date of the key.
-- **rotationSchedule**: `string` (optional) - Schedule for automatic key rotation.
-- **complianceLevel**: `enum` - Compliance level (`SOC2`, `PCI_DSS`, `FIPS_140_2`, `COMMON_CRITERIA`).
-- **tags**: `record<string>` (optional) - Key-value pairs for categorization.
+- **KeyMetadata**
+  - `purpose`: KeyPurpose - Designated purpose of the key.
+  - `serviceId`: string - ID of the service using the key (optional).
+  - `environment`: string - Execution environment (e.g., production).
+  - `keySize`: number - Size of the key in bits.
+  - `derivedFrom`: string - Identifier of the originating key, if applicable.
+  - `escrowRequired`: boolean - Indicates if key escrow is needed.
 
-### HSMConfigSchema
-- **provider**: `enum` - HSM provider (`AWS_KMS`, `AZURE_KEY_VAULT`, `SOFTWARE`).
-- **region**: `string` (optional) - Region for HSM service.
-- **keyVaultUrl**: `string` (optional) - URL for accessing the key vault.
+- **RotationPolicy**
+  - `id`: string - Unique identifier for the rotation policy.
+  - `keyPurpose`: KeyPurpose - Purpose associated with the key rotation.
+  - `rotationInterval`: number - Interval for auto-rotation in milliseconds.
+  - `gracePeriod`: number - Grace period before key expiration in milliseconds.
+  - `autoRotate`: boolean - Flag indicating if the key should auto-rotate.
+  - `notificationThreshold`: number - Time before expiration to notify in milliseconds.
+
+### Enums
+
+- **CryptoAlgorithm**
+  - Values: `AES_256_GCM`, `CHACHA20_POLY1305`, `RSA_4096`, `ECDSA_P384`, `ED25519`
+
+- **KeyStatus**
+  - Values: `ACTIVE`, `PENDING`, `DEPRECATED`, `REVOKED`, `EXPIRED`
+
+- **KeyPurpose**
+  - Values: `DATA_ENCRYPTION`, others can be defined as needed.
 
 ## Return Values
-- The service allows for the generation of new keys, encryption/decryption of data, and retrieval of key metadata.
-- Automatic key rotation will update key metadata, and compliance reports can be generated based on the operational status.
+The engine returns instances of the defined interfaces during key creation, rotation, and when responding to key distribution requests. Outputs include success/failure statuses and details regarding the operations performed.
 
 ## Examples
 
-### Key Creation
+### Create a New Key
 ```typescript
-const newKey = await keyManagementService.createKey({
-    name: "Example Key",
-    algorithm: "AES-256-GCM",
-    keyType: "symmetric",
-    purpose: ["encryption", "decryption"],
-    version: 1,
-    status: "active",
-    createdAt: new Date(),
-    rotationSchedule: "0 0 * * *", // Daily rotation
-    complianceLevel: "SOC2"
-});
+const newKey: EncryptionKey = {
+  id: "key_id_123",
+  algorithm: CryptoAlgorithm.AES_256_GCM,
+  keyData: Buffer.from("your-encryption-key"),
+  version: 1,
+  createdAt: new Date(),
+  expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
+  status: KeyStatus.ACTIVE,
+  metadata: {
+    purpose: KeyPurpose.DATA_ENCRYPTION,
+    environment: "production",
+    keySize: 256,
+    escrowRequired: true,
+  }
+};
 ```
 
-### Encrypting Data
+### Define a Rotation Policy
 ```typescript
-const encryptedData = await keyManagementService.encryptData("plaintext data", newKey.id);
+const rotationPolicy: RotationPolicy = {
+  id: "policy_id_456",
+  keyPurpose: KeyPurpose.DATA_ENCRYPTION,
+  rotationInterval: 1800000, // 30 minutes
+  gracePeriod: 300000, // 5 minutes
+  autoRotate: true,
+  notificationThreshold: 86400000 // 1 day
+};
 ```
 
-### Decrypting Data
-```typescript
-const decryptedData = await keyManagementService.decryptData(encryptedData, newKey.id);
-```
-
-## Version
-1.0.0
+This documentation serves as a foundational reference for utilizing the Key Management and Rotation Engine effectively.
 ```
