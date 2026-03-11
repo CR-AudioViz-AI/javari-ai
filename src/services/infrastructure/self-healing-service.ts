@@ -1,4 +1,3 @@
-```typescript
 /**
  * Self-Healing Infrastructure Service
  * Autonomous infrastructure management with predictive scaling, cost optimization, and multi-cloud orchestration

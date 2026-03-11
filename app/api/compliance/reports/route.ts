@@ -1,4 +1,3 @@
-```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getServerSession } from 'next-auth';
@@ -446,4 +445,3 @@ export async function DELETE(request: NextRequest) {
     );
   }
 }
-```

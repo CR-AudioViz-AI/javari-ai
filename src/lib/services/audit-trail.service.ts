@@ -1,4 +1,3 @@
-```typescript
 import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { createHash, randomBytes } from 'crypto';

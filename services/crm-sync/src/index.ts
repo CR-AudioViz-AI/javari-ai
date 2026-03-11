@@ -1,4 +1,3 @@
-```typescript
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -479,4 +478,3 @@ if (require.main === module) {
 
 export { CRMSyncService };
 export default CRMSyncService;
-```

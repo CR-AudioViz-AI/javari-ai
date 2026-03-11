@@ -1,4 +1,3 @@
-```typescript
 import { SupabaseClient } from '@supabase/supabase-js';
 import { EventEmitter } from 'events';
 

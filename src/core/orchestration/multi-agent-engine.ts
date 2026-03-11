@@ -1,4 +1,3 @@
-```typescript
 import { EventEmitter } from 'events';
 import { performance } from 'perf_hooks';
 import { Database } from '../../lib/supabase/database.types';

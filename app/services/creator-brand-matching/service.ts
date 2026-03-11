@@ -1,4 +1,3 @@
-```typescript
 import { supabase } from '@/lib/supabase';
 import { openai } from '@/lib/openai';
 import { AnalyticsService } from '@/services/analytics/service';

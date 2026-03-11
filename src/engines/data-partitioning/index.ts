@@ -1,4 +1,3 @@
-```typescript
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Redis } from 'ioredis';
 import { PerformanceTracker } from '../analytics/performance-tracker';

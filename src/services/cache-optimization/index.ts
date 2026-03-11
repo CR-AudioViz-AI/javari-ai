@@ -1,4 +1,3 @@
-```typescript
 /**
  * Multi-Layer Cache Optimization Microservice
  * 

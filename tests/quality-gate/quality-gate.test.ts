@@ -1,4 +1,3 @@
-```typescript
 import { QualityGateService } from '../../src/quality-gate/quality-gate.service';
 import { SecurityScanValidator } from '../../src/quality-gate/validators/security-scan.validator';
 import { PerformanceBenchmarkValidator } from '../../src/quality-gate/validators/performance-benchmark.validator';

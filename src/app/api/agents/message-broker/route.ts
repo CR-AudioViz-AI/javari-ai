@@ -1,4 +1,3 @@
-```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { Redis } from 'ioredis';
@@ -551,4 +550,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-```

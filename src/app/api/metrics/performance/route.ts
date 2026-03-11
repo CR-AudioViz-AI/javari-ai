@@ -1,4 +1,3 @@
-```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import Redis from 'ioredis';
@@ -482,4 +481,3 @@ export async function DELETE() {
     { status: 405, headers: { Allow: 'GET, HEAD' } }
   );
 }
-```

@@ -1,4 +1,3 @@
-```typescript
 import { createClient } from '@supabase/supabase-js';
 import { Redis } from 'ioredis';
 import { EventEmitter } from 'events';
@@ -709,4 +708,3 @@ export const createSharedMemoryService = (config: SharedMemoryConfig): SharedMem
 };
 
 export default SharedMemoryService;
-```

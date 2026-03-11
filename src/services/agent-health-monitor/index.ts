@@ -1,4 +1,3 @@
-```typescript
 /**
  * @fileoverview Agent Health Monitoring Service
  * @description Distributed monitoring service for agent availability, response times, and quality metrics

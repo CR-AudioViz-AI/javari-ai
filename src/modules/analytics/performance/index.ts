@@ -1,4 +1,3 @@
-```typescript
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { RealtimeChannel } from '@supabase/realtime-js';
 

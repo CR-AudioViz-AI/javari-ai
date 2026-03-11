@@ -1,4 +1,3 @@
-```typescript
 /**
  * Enterprise Data Synchronization Microservice
  * 

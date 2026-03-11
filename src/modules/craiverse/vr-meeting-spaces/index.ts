@@ -1,4 +1,3 @@
-```typescript
 import { EventEmitter } from 'events';
 import * as THREE from 'three';
 import { WebXRManager } from 'three/examples/jsm/webxr/WebXRManager';

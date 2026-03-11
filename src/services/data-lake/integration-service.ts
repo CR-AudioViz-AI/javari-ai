@@ -1,4 +1,3 @@
-```typescript
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { createClient as createRedisClient, RedisClientType } from 'redis';
 import OpenAI from 'openai';

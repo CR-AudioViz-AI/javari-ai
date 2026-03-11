@@ -1,4 +1,3 @@
-```typescript
 import { TeamOptimizationService } from '../../services/team-optimization';
 import { PerformanceAnalyzer } from '../../services/performance-analyzer';
 import { TeamCompositionScorer } from '../../services/team-composition-scorer';
@@ -539,4 +538,3 @@ expect.extend({
     }
   },
 });
-```

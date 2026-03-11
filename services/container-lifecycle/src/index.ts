@@ -1,4 +1,3 @@
-```typescript
 /**
  * @fileoverview Container Lifecycle Management Microservice
  * @description Main entry point for the container lifecycle management microservice
@@ -530,4 +529,3 @@ if (require.main === module) {
 }
 
 export default ContainerLifecycleService;
-```

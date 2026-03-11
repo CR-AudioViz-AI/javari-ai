@@ -1,4 +1,3 @@
-```typescript
 /**
  * Self-Healing Infrastructure Service
  * Monitors system health, detects anomalies, and automatically resolves common issues

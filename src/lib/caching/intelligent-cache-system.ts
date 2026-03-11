@@ -1,4 +1,3 @@
-```typescript
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Redis, Cluster as RedisCluster } from 'ioredis';
 import * as tf from '@tensorflow/tfjs';

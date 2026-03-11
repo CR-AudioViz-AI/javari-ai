@@ -1,4 +1,3 @@
-```typescript
 /**
  * Automated Compliance Assessment Framework
  * Evaluates security posture against SOC 2, ISO 27001, and GDPR standards

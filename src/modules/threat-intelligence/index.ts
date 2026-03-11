@@ -1,4 +1,3 @@
-```typescript
 /**
  * AI Threat Intelligence Module
  * 

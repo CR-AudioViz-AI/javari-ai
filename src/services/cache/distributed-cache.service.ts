@@ -1,4 +1,3 @@
-```typescript
 import { Redis, Cluster } from 'ioredis';
 import { EventEmitter } from 'events';
 import { Logger } from '../../utils/logger';

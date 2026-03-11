@@ -1,4 +1,3 @@
-```typescript
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { OpenAI } from 'openai';
 import { ImageAnnotatorClient } from '@google-cloud/vision';

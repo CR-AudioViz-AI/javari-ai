@@ -1,4 +1,3 @@
-```typescript
 /**
  * @fileoverview Advanced Identity Federation Service
  * @module IdentityFederationService

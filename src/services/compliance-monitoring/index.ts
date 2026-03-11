@@ -1,4 +1,3 @@
-```typescript
 /**
  * CR AudioViz AI - Compliance Monitoring Microservice
  * Enterprise compliance monitoring with real-time alerting and audit trails

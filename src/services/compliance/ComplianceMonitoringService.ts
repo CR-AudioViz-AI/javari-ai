@@ -1,4 +1,3 @@
-```typescript
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { EventEmitter } from 'events';
 import Redis from 'ioredis';

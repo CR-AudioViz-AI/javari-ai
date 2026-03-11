@@ -1,4 +1,3 @@
-```typescript
 /**
  * CR AudioViz AI - Advanced Encryption Management Service
  * 

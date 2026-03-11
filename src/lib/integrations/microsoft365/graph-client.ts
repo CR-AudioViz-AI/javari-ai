@@ -1,4 +1,3 @@
-```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { Client } from '@microsoft/microsoft-graph-client';
 import { PublicClientApplication, AuthenticationResult } from '@azure/msal-node';
@@ -440,4 +439,3 @@ export async function DELETE(request: NextRequest) {
     );
   }
 }
-```

@@ -1,4 +1,3 @@
-```typescript
 /**
  * CR AudioViz AI - Enterprise API Gateway Microservice
  * Main application entry point with comprehensive gateway functionality

@@ -1,4 +1,3 @@
-```typescript
 /**
  * Team Performance Optimization Service
  * Autonomous microservice that monitors team performance metrics, analyzes collaboration patterns, 
@@ -162,4 +161,3 @@ class RebalancingController implements IRebalancingController {
 
     console.log('Team Performance Optimization Service is running...');
 })();
-```

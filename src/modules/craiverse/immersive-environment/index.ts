@@ -1,4 +1,3 @@
-```typescript
 /**
  * @fileoverview Immersive Virtual Environment Generator for CR AudioViz AI
  * @module ImmersiveEnvironmentGenerator

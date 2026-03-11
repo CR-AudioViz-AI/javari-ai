@@ -1,4 +1,3 @@
-```typescript
 /**
  * CR AudioViz AI - Distributed Task Queue System
  * 

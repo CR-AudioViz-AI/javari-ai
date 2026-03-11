@@ -1,4 +1,3 @@
-```typescript
 /**
  * Security Incident Orchestration Service
  * 

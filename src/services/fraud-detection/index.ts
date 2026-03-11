@@ -1,4 +1,3 @@
-```typescript
 /**
  * Advanced Payment Fraud Detection Service
  * 

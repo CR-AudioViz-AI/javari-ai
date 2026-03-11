@@ -1,4 +1,3 @@
-```typescript
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { ethers, BigNumber, Contract, providers } from 'ethers';
 import { EventEmitter } from 'events';

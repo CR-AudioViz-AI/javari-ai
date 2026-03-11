@@ -1,4 +1,3 @@
-```typescript
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { jest } from '@jest/globals';
 import { createClient } from '@supabase/supabase-js';

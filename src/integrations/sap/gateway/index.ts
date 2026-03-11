@@ -1,4 +1,3 @@
-```typescript
 /**
  * @fileoverview SAP Integration Gateway - Enterprise module for CR AudioViz AI platform
  * Provides standardized API connectivity between CR AudioViz AI and SAP ERP systems

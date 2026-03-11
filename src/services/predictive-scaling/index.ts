@@ -1,4 +1,3 @@
-```typescript
 /**
  * Predictive Scaling Service for CR AudioViz AI
  * 

@@ -1,4 +1,3 @@
-```typescript
 /**
  * Dynamic Content Pricing Service
  * 

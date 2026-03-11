@@ -1,4 +1,3 @@
-```typescript
 /**
  * Dynamic Event Generation Service
  * 

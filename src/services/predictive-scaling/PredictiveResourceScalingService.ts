@@ -1,4 +1,3 @@
-```typescript
 import { Database } from '@supabase/supabase-js';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import Redis from 'ioredis';

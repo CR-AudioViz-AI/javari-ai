@@ -1,4 +1,3 @@
-```typescript
 import { TrafficPredictor } from './models/TrafficPredictor';
 import { PredictionService } from './services/PredictionService';
 import { DataCollectionService } from './services/DataCollectionService';

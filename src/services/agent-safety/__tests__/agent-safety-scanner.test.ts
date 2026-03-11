@@ -1,4 +1,3 @@
-```typescript
 import { jest } from '@jest/globals';
 import { AgentSafetyScanner } from '../agent-safety-scanner';
 import { StaticAnalyzer } from '../static-analyzer';

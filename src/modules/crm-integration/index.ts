@@ -1,4 +1,3 @@
-```typescript
 /**
  * Universal CRM Integration Module
  * Provides bi-directional sync, custom field mapping, and AI-powered lead qualification

@@ -1,4 +1,3 @@
-```typescript
 /**
  * Shared Team Memory Service
  * 

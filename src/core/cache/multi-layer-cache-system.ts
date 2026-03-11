@@ -1,4 +1,3 @@
-```typescript
 import { EventEmitter } from 'events';
 import { performance } from 'perf_hooks';
 import { Redis, Cluster as RedisCluster } from 'ioredis';

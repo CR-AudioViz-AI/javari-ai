@@ -1,4 +1,3 @@
-```typescript
 /**
  * @fileoverview AI Load Prediction Module for CR AudioViz AI Platform
  * @version 1.0.0

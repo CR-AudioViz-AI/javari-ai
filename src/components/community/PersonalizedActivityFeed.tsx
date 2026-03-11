@@ -1,4 +1,3 @@
-```tsx
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useUser } from '@/lib/auth';

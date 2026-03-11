@@ -1,4 +1,3 @@
-```tsx
 "use client";
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -537,4 +536,3 @@ export const TeamActivityMonitor: React.FC<TeamActivityMonitorProps> = ({
 };
 
 export default TeamActivityMonitor;
-```

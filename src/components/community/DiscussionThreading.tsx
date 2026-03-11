@@ -1,4 +1,3 @@
-```tsx
 'use client'
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'

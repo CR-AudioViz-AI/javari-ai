@@ -1,4 +1,3 @@
-```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import * as crypto from 'crypto';
@@ -629,4 +628,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-```

@@ -1,4 +1,3 @@
-```typescript
 /**
  * CRAIverse 3D Spatial Audio Engine
  * 

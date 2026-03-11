@@ -1,4 +1,3 @@
-```typescript
 import express, { Application, Request, Response, NextFunction } from 'express';
 import Bull, { Queue, Job, JobOptions } from 'bull';
 import Redis from 'ioredis';

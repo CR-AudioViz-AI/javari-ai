@@ -1,4 +1,3 @@
-```typescript
 import { supabase } from '../../lib/supabase';
 import { GraphBuilder } from '../../lib/knowledge-graph/graph-builder';
 import { SemanticAnalyzer } from '../../lib/knowledge-graph/semantic-analyzer';

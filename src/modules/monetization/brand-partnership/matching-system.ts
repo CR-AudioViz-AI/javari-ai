@@ -1,4 +1,3 @@
-```typescript
 import { createClient } from '@supabase/supabase-js';
 import { OpenAIApi, Configuration } from 'openai';
 import * as SendGrid from '@sendgrid/mail';
@@ -110,4 +109,3 @@ interface PartnershipRecommendations {
 
 // Initialization of external services
 SendGrid.setApiKey(process.env.SENDGRID_API_KEY!);
-```

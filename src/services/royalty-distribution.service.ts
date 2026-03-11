@@ -1,4 +1,3 @@
-```typescript
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { PaymentProcessingService } from './payment-processing.service';
 import { NotificationService } from './notification.service';

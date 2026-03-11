@@ -1,4 +1,3 @@
-```typescript
 import { supabase } from '../../config/database';
 import { redis } from '../../config/redis';
 import { openai } from '../../config/openai';

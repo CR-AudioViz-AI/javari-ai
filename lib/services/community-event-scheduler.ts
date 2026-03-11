@@ -1,4 +1,3 @@
-```typescript
 /**
  * @fileoverview Community Event Auto-Scheduler Service
  * 

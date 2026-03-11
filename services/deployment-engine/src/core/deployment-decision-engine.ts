@@ -1,4 +1,3 @@
-```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import * as tf from '@tensorflow/tfjs';
@@ -621,4 +620,3 @@ export async function GET() {
     timestamp: new Date().toISOString()
   });
 }
-```

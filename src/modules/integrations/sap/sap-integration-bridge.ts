@@ -1,4 +1,3 @@
-```typescript
 import { SupabaseClient } from '@supabase/supabase-js';
 import { QueueManager } from '../../lib/queue-manager';
 import { Logger } from '../../lib/logger';

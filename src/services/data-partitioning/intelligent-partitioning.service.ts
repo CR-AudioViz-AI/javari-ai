@@ -1,4 +1,3 @@
-```sql
 -- Migration: Create Intelligent Data Partitioning Service
 -- File: supabase/migrations/20240101000000_create_intelligent_partitioning_service.sql
 

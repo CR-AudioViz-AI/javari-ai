@@ -1,4 +1,3 @@
-```typescript
 /**
  * Zero-Downtime Deployment Engine
  * Orchestrates blue-green deployments with automated health checks and instant rollback

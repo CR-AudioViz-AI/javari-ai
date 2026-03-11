@@ -1,4 +1,3 @@
-```typescript
 /**
  * Multi-Tier Intelligent Caching Service
  * 

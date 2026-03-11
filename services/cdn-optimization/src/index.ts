@@ -1,4 +1,3 @@
-```typescript
 /**
  * Global CDN Optimization Service - Main Entry Point
  * 

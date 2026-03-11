@@ -1,4 +1,3 @@
-```typescript
 import { Client } from '@microsoft/microsoft-graph-client';
 import { AuthenticationProvider } from '@microsoft/microsoft-graph-client';
 import { PublicClientApplication, InteractionRequiredAuthError } from '@azure/msal-browser';

@@ -1,4 +1,3 @@
-```typescript
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 import { redis } from '../lib/cache/redis';
@@ -744,4 +743,3 @@ export type {
   UsagePattern,
   SearchContext,
 };
-```

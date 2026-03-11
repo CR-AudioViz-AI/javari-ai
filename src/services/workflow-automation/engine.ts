@@ -1,4 +1,3 @@
-```typescript
 /**
  * Enterprise Workflow Automation Engine
  * 

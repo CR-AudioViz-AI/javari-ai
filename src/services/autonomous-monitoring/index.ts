@@ -1,4 +1,3 @@
-```typescript
 /**
  * CR AudioViz AI - Autonomous Performance Monitoring Service
  * Intelligent monitoring service that automatically detects performance anomalies,

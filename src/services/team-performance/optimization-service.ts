@@ -1,4 +1,3 @@
-```typescript
 import { TensorFlowService } from '../../lib/ml/tensorflow-service';
 import { TeamMetricsTable } from '../../lib/supabase/team-metrics-table';
 import { PerformanceTracker } from '../../lib/analytics/performance-tracker';

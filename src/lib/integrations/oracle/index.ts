@@ -1,4 +1,3 @@
-```sql
 -- Oracle Database Integration API Migration
 -- File: migrations/001_oracle_integration.sql
 
@@ -455,4 +454,3 @@ COMMENT ON TABLE oracle_health_checks IS 'Oracle database health monitoring data
 COMMENT ON TABLE oracle_query_cache IS 'Query execution plan cache for optimization';
 COMMENT ON TABLE oracle_migrations IS 'Database migration tracking and execution';
 COMMENT ON TABLE oracle_connection_stats IS 'Connection usage statistics and metrics';
-```

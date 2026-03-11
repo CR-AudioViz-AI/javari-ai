@@ -1,4 +1,3 @@
-```typescript
 /**
  * Key Management Service
  * 

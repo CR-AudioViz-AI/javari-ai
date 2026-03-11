@@ -1,4 +1,3 @@
-```typescript
 import express, { Application, Request, Response } from 'express';
 import { createServer, Server } from 'http';
 import { Server as SocketIOServer } from 'socket.io';

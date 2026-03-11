@@ -1,4 +1,3 @@
-```typescript
 import { supabase } from '../lib/supabase/client';
 import { AIAgentService } from './ai-agent.service';
 import { KnowledgeBaseService } from './knowledge-base.service';

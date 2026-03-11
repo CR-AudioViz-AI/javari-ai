@@ -1,4 +1,3 @@
-```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { rateLimit } from '@/lib/rate-limit';
@@ -558,4 +557,3 @@ export async function DELETE(request: NextRequest) {
     );
   }
 }
-```

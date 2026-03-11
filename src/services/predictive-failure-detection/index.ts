@@ -1,4 +1,3 @@
-```typescript
 /**
  * Predictive Failure Detection Service
  * ML-powered service for predicting and preventing system failures
@@ -537,4 +536,3 @@ export const predictiveFailureDetectionService = new PredictiveFailureDetectionS
 export * from './types';
 
 export default PredictiveFailureDetectionService;
-```

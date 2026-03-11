@@ -1,4 +1,3 @@
-```typescript
 import { ReputationEngine } from '../../community/reputation-engine';
 import { ReputationCalculator } from '../../community/reputation-calculator';
 import { BehaviorAnalyzer } from '../../community/behavior-analyzer';

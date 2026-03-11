@@ -1,4 +1,3 @@
-```typescript
 import { Client } from '@elastic/elasticsearch';
 import { z } from 'zod';
 import { Redis } from 'ioredis';

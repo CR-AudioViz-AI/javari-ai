@@ -1,4 +1,3 @@
-```typescript
 /**
  * Team Synchronization Microservice
  * Coordinates timing and dependencies between AI team members, manages workflow states,

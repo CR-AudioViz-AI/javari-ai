@@ -1,4 +1,3 @@
-```typescript
 import { EventEmitter } from 'events';
 import { Redis } from 'ioredis';
 import * as tf from '@tensorflow/tfjs-node';

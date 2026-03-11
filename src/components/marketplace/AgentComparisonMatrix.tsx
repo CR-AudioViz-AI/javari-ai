@@ -1,4 +1,3 @@
-```tsx
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -606,4 +605,3 @@ const AgentComparisonMatrix: React.FC<AgentComparisonMatrixProps> = ({
 };
 
 export default AgentComparisonMatrix;
-```

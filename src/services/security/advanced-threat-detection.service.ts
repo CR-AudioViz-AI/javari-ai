@@ -1,4 +1,3 @@
-```typescript
 /**
  * @fileoverview Advanced Threat Detection Service
  * AI-powered security service that analyzes network traffic, user behavior, and system logs

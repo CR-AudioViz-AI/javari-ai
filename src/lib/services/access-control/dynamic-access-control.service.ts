@@ -1,4 +1,3 @@
-```typescript
 import { createClient } from '@supabase/supabase-js';
 import { Redis } from 'ioredis';
 import type { User } from '@clerk/nextjs/server';

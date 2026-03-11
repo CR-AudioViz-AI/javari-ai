@@ -1,4 +1,3 @@
-```typescript
 /**
  * @fileoverview Enterprise Accounting Integration Service
  * 

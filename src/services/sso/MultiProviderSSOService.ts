@@ -1,4 +1,3 @@
-```typescript
 import { createClient } from '@supabase/supabase-js';
 import { Logger } from '../../lib/logger';
 import { ActiveDirectoryProvider } from './providers/ActiveDirectoryProvider';
@@ -540,4 +539,3 @@ export class MultiProviderSSOService {
 }
 
 export default MultiProviderSSOService;
-```

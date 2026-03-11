@@ -1,4 +1,3 @@
-```typescript
 /**
  * @fileoverview Autonomous NPC Personality Service
  * Generates, maintains, and evolves NPC personalities with memory, emotions, and adaptive behaviors

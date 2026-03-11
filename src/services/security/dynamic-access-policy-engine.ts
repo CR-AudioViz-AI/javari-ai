@@ -1,4 +1,3 @@
-```typescript
 /**
  * Dynamic Access Policy Engine Service
  * 

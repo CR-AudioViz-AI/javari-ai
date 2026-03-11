@@ -1,4 +1,3 @@
-```typescript
 import { EventEmitter } from 'events';
 import * as tf from '@tensorflow/tfjs-node';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';

@@ -1,4 +1,3 @@
-```typescript
 import { EventEmitter } from 'events';
 import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';

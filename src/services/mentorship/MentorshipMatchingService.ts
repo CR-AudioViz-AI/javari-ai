@@ -1,4 +1,3 @@
-```typescript
 /**
  * AI-Powered Mentorship Matching Service
  * Intelligently pairs community members for mentorship relationships based on

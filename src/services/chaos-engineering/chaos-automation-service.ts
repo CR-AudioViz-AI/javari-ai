@@ -1,4 +1,3 @@
-```typescript
 import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
 import { ChaosAutomationService } from '../../src/services/chaos-engineering/chaos-automation-service';
 import { SupabaseClient } from '@supabase/supabase-js';

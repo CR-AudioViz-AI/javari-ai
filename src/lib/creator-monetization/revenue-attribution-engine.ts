@@ -1,4 +1,3 @@
-```typescript
 import { supabase } from '../database/supabase';
 import { AnalyticsEngine } from '../analytics/analytics-engine';
 import { MonetizationCore } from './monetization-core';

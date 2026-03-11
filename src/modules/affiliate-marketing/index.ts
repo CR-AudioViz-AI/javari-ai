@@ -1,4 +1,3 @@
-```typescript
 import { z } from 'zod';
 import { supabase } from '@/lib/supabase/client';
 import { logger } from '@/lib/logger';

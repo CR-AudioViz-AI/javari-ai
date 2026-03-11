@@ -1,4 +1,3 @@
-```typescript
 import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
 import WebSocket from 'ws';
 import Redis from 'ioredis';

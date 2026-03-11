@@ -1,4 +1,3 @@
-```typescript
 import { EventEmitter } from 'events';
 import Bull, { Queue, Job, JobOptions } from 'bull';
 import Redis from 'ioredis';

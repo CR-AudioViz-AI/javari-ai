@@ -1,4 +1,3 @@
-```typescript
 import { supabase } from '../../lib/supabase';
 import { logger } from '../../utils/logger';
 import { createError } from '../../utils/error-handler';

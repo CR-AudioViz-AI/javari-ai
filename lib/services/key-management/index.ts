@@ -1,4 +1,3 @@
-```typescript
 /**
  * @fileoverview Key Management and Encryption Service
  * Provides secure key lifecycle management, certificate handling, cryptographic operations,

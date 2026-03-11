@@ -1,4 +1,3 @@
-```typescript
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import * as saml2 from 'saml2-js';

@@ -1,4 +1,3 @@
-```typescript
 /**
  * Self-Healing Infrastructure Module
  * Autonomous infrastructure management with failure detection, remediation, and scaling

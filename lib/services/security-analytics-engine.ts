@@ -1,4 +1,3 @@
-```typescript
 /**
  * @fileoverview Advanced Security Analytics Engine
  * @module SecurityAnalyticsEngine

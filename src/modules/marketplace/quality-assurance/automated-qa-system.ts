@@ -1,4 +1,3 @@
-```typescript
 import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
 import { AutomatedQASystem } from '../automated-qa-system';
 import type { 
@@ -514,4 +513,3 @@ describe('AutomatedQASystem', () => {
     });
   });
 });
-```

@@ -1,4 +1,3 @@
-```typescript
 /**
  * @fileoverview Revenue Optimization Advisory Service
  * @module RevenueOptimizationService
@@ -627,4 +626,3 @@ export class RevenueOptimizationService extends EventEmitter {
 // Export singleton instance
 export const revenueOptimizationService = new RevenueOptimizationService();
 export default revenueOptimizationService;
-```

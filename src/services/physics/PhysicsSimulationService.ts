@@ -1,4 +1,3 @@
-```typescript
 import { EventEmitter } from 'events';
 
 /**

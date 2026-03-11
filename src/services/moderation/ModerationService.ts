@@ -1,4 +1,3 @@
-```typescript
 import { createClient } from '@supabase/supabase-js';
 import { AIContentAnalyzer } from './AIContentAnalyzer';
 import { PolicyEngine } from './PolicyEngine';

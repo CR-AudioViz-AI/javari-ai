@@ -1,4 +1,3 @@
-```typescript
 /**
  * @fileoverview Automated Incident Containment Service
  * @description Microservice that automatically contains security incidents by isolating 

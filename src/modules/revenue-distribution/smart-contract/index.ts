@@ -1,4 +1,3 @@
-```typescript
 import { ethers, Contract, Wallet, JsonRpcProvider, parseEther, formatEther } from 'ethers';
 import { createPublicClient, createWalletClient, http, parseUnits, formatUnits } from 'viem';
 import { mainnet, polygon, base } from 'viem/chains';

@@ -1,4 +1,3 @@
-```typescript
 /**
  * Agent Task Delegation Microservice
  * Intelligently delegates tasks among team members based on capabilities, workload, and complexity

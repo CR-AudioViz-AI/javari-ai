@@ -1,4 +1,3 @@
-```typescript
 import { jest } from '@jest/globals';
 import { ConfigManagementService } from '../../../src/microservices/config-management/config-management.service';
 import { ConfigValidator } from '../../../src/microservices/config-management/config-validator';

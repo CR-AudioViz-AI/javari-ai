@@ -1,4 +1,3 @@
-```typescript
 import { SupabaseClient, createClient } from '@supabase/supabase-js';
 import { Database } from '../types/supabase';
 import { Logger } from '../utils/Logger';

@@ -1,4 +1,3 @@
-```typescript
 /**
  * Dynamic Configuration Management Service for CR AudioViz AI
  * 

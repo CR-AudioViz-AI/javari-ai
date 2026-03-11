@@ -1,4 +1,3 @@
-```typescript
 /**
  * Advanced Threat Hunting Module
  * 

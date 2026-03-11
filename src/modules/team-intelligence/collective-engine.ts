@@ -1,4 +1,3 @@
-```typescript
 import { EventEmitter } from 'events';
 import { createClient } from '@supabase/supabase-js';
 import { AgentManager } from '../ai-agents/agent-manager.js';

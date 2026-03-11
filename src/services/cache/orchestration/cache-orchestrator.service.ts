@@ -1,4 +1,3 @@
-```typescript
 /**
  * @fileoverview Multi-Level Cache Orchestration Service
  * @description Sophisticated caching system that manages multiple cache layers including 

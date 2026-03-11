@@ -1,4 +1,3 @@
-```typescript
 import { createClient } from '@supabase/supabase-js';
 import { logger } from '../utils/logger.utils';
 import { weightedVoting } from '../utils/weighted-voting.utils';

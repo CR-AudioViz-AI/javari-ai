@@ -1,4 +1,3 @@
-```typescript
 /**
  * Dynamic Encryption Key Management System
  * Comprehensive key lifecycle management with HSM integration and compliance monitoring

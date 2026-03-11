@@ -1,4 +1,3 @@
-```typescript
 import { createClient } from '@supabase/supabase-js';
 import { Redis } from '@upstash/redis';
 import { SignJWT, jwtVerify } from 'jose';
@@ -589,4 +588,3 @@ export function createAgentCommunicationClient(config: CommunicationConfig): Age
 // Utility exports
 export { MessageSchema };
 export type { Agent, Message, MessageAcknowledgment, CommunicationConfig };
-```

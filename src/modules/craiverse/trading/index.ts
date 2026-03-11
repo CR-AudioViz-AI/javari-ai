@@ -1,4 +1,3 @@
-```typescript
 /**
  * @fileoverview CRAIverse Virtual Asset Trading Engine
  * @version 1.0.0

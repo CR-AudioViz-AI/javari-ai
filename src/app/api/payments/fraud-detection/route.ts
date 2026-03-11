@@ -1,4 +1,3 @@
-```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { Redis } from 'ioredis';
@@ -467,4 +466,3 @@ async function handleWhitelist(request: NextRequest) {
 
   return NextResponse.json({ success: true });
 }
-```

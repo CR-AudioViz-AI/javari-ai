@@ -1,4 +1,3 @@
-```typescript
 /**
  * Team Performance Monitoring Microservice
  * Tracks team-level KPIs including task completion rates, collaboration efficiency,

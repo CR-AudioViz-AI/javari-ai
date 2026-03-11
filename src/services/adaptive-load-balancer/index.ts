@@ -1,4 +1,3 @@
-```typescript
 /**
  * Adaptive Load Balancing Service
  * 

@@ -1,4 +1,3 @@
-```typescript
 /**
  * CR AudioViz Enterprise SSO Identity Provider
  * Comprehensive single sign-on system supporting SAML 2.0, OAuth 2.0, and OpenID Connect

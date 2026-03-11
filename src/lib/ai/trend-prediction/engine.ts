@@ -1,4 +1,3 @@
-```typescript
 import * as tf from '@tensorflow/tfjs';
 import { createClient } from '@supabase/supabase-js';
 

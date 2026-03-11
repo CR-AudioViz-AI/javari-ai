@@ -1,4 +1,3 @@
-```typescript
 /**
  * Creator Content Monetization Engine
  * 

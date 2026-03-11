@@ -1,4 +1,3 @@
-```typescript
 import { supabase } from '@/lib/supabase/client';
 import { Database } from '@/lib/supabase/database.types';
 import { Agent, Task, TaskStatus, AgentCapability, ConflictResolutionStrategy } from '@/types/agent-types';

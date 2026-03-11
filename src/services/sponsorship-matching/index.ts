@@ -1,4 +1,3 @@
-```typescript
 /**
  * @fileoverview Brand-Creator Sponsorship Matching Service
  * @description AI-powered service that matches creators with relevant brand partnerships

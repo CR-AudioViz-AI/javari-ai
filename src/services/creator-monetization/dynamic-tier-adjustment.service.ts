@@ -1,4 +1,3 @@
-```typescript
 /**
  * Dynamic Tier Adjustment Service
  * Automatically adjusts creator subscription tiers based on engagement metrics,

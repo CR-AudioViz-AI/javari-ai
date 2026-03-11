@@ -1,4 +1,3 @@
-```typescript
 import { NextRequest } from 'next/server';
 import { WebSocket, WebSocketServer } from 'ws';
 import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
@@ -409,4 +408,3 @@ process.on('SIGINT', () => {
     metricsStream.destroy();
   }
 });
-```

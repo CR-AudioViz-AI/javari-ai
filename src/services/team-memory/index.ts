@@ -1,4 +1,3 @@
-```typescript
 /**
  * Distributed Team Memory Service for CR AudioViz AI
  * Enables AI agents to share context across team interactions with conflict resolution,

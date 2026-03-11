@@ -1,4 +1,3 @@
-```typescript
 import React, { createContext, useContext, useReducer, useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Text, Box, Sphere, Plane } from '@react-three/drei';
