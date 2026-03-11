@@ -1,696 +1,513 @@
+```typescript
+import { EventEmitter } from 'events';
+import { SystemMonitor } from './monitoring/system-monitor';
+import { MetricsCollector } from './monitoring/metrics-collector';
+import { MLDetector } from './anomaly/ml-detector';
+import { AutoRemediation } from './remediation/auto-remediation';
+import { MemoryCleanup } from './remediation/memory-cleanup';
+import { DiskCleanup } from './remediation/disk-cleanup';
+import { NetworkRecovery } from './remediation/network-recovery';
+import { HealthChecker } from '../lib/infrastructure/health-checker';
+import { MLModels } from '../lib/infrastructure/ml-models';
+import { createClient } from '@supabase/supabase-js';
+import {
+  HealthMetrics,
+  SystemHealth,
+  HealthThresholds,
+  HealthStatus
+} from '../types/infrastructure/health-metrics';
+import {
+  AnomalyDetectionResult,
+  AnomalyType,
+  AnomalyConfig
+} from '../types/infrastructure/anomaly-detection';
+import {
+  RemediationAction,
+  RemediationResult,
+  RemediationConfig
+} from '../types/infrastructure/remediation-actions';
+
+/**
+ * Configuration for the self-healing infrastructure service
+ */
+interface SelfHealingConfig {
+  /** Monitoring interval in milliseconds */
+  monitoringInterval: number;
+  /** Health thresholds for different metrics */
+  thresholds: HealthThresholds;
+  /** Anomaly detection configuration */
+  anomalyConfig: AnomalyConfig;
+  /** Remediation configuration */
+  remediationConfig: RemediationConfig;
+  /** Enable/disable automatic remediation */
+  autoRemediationEnabled: boolean;
+  /** Maximum remediation attempts per issue */
+  maxRemediationAttempts: number;
+  /** Cooldown period between remediation attempts (ms) */
+  remediationCooldown: number;
+}
+
+/**
+ * Health issue tracking
+ */
+interface HealthIssue {
+  id: string;
+  type: AnomalyType;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  detectedAt: Date;
+  description: string;
+  metrics: HealthMetrics;
+  remediationAttempts: number;
+  lastRemediationAt?: Date;
+  resolved: boolean;
+  resolvedAt?: Date;
+}
+
+/**
+ * Service events
+ */
+interface SelfHealingEvents {
+  healthUpdate: (health: SystemHealth) => void;
+  anomalyDetected: (issue: HealthIssue) => void;
+  remediationStarted: (issue: HealthIssue, action: RemediationAction) => void;
+  remediationCompleted: (issue: HealthIssue, result: RemediationResult) => void;
+  issueResolved: (issue: HealthIssue) => void;
+  criticalAlert: (issue: HealthIssue) => void;
+}
+
 /**
  * Self-Healing Infrastructure Service
- * Autonomous infrastructure management with predictive scaling, cost optimization, and multi-cloud orchestration
+ * 
+ * Monitors system health, detects anomalies using ML, and automatically
+ * remediates common infrastructure issues like memory leaks, disk space
+ * problems, and network connectivity failures.
  */
+export class SelfHealingService extends EventEmitter {
+  private config: SelfHealingConfig;
+  private systemMonitor: SystemMonitor;
+  private metricsCollector: MetricsCollector;
+  private mlDetector: MLDetector;
+  private autoRemediation: AutoRemediation;
+  private memoryCleanup: MemoryCleanup;
+  private diskCleanup: DiskCleanup;
+  private networkRecovery: NetworkRecovery;
+  private healthChecker: HealthChecker;
+  private mlModels: MLModels;
+  private supabase: any;
+  private monitoringTimer?: NodeJS.Timeout;
+  private activeIssues: Map<string, HealthIssue> = new Map();
+  private isRunning = false;
+  private lastHealthCheck: Date = new Date();
 
-import { EventEmitter } from 'events';
-import { WebSocket } from 'ws';
-
-/**
- * Cloud provider types
- */
-export enum CloudProvider {
-  AWS = 'aws',
-  GCP = 'gcp',
-  AZURE = 'azure',
-  KUBERNETES = 'kubernetes'
-}
-
-/**
- * Resource types that can be managed
- */
-export enum ResourceType {
-  COMPUTE = 'compute',
-  STORAGE = 'storage',
-  DATABASE = 'database',
-  LOAD_BALANCER = 'load_balancer',
-  CONTAINER = 'container',
-  SERVERLESS = 'serverless'
-}
-
-/**
- * Infrastructure health status
- */
-export enum HealthStatus {
-  HEALTHY = 'healthy',
-  DEGRADED = 'degraded',
-  CRITICAL = 'critical',
-  FAILED = 'failed',
-  UNKNOWN = 'unknown'
-}
-
-/**
- * Scaling direction
- */
-export enum ScalingDirection {
-  UP = 'up',
-  DOWN = 'down',
-  NONE = 'none'
-}
-
-/**
- * Alert severity levels
- */
-export enum AlertSeverity {
-  INFO = 'info',
-  WARNING = 'warning',
-  ERROR = 'error',
-  CRITICAL = 'critical'
-}
-
-/**
- * Infrastructure resource configuration
- */
-export interface ResourceConfig {
-  id: string;
-  name: string;
-  type: ResourceType;
-  provider: CloudProvider;
-  region: string;
-  specs: {
-    cpu?: number;
-    memory?: number;
-    storage?: number;
-    replicas?: number;
-    [key: string]: any;
-  };
-  tags: Record<string, string>;
-  costBudget?: number;
-}
-
-/**
- * Resource metrics data
- */
-export interface ResourceMetrics {
-  resourceId: string;
-  timestamp: number;
-  cpu: {
-    usage: number;
-    limit: number;
-  };
-  memory: {
-    usage: number;
-    limit: number;
-  };
-  network: {
-    inbound: number;
-    outbound: number;
-  };
-  requests: {
-    total: number;
-    errors: number;
-    latency: number;
-  };
-  cost: {
-    hourly: number;
-    daily: number;
-    monthly: number;
-  };
-}
-
-/**
- * Health check result
- */
-export interface HealthCheckResult {
-  resourceId: string;
-  status: HealthStatus;
-  timestamp: number;
-  checks: {
-    name: string;
-    status: HealthStatus;
-    message: string;
-    responseTime?: number;
-  }[];
-  overallScore: number;
-}
-
-/**
- * Scaling recommendation
- */
-export interface ScalingRecommendation {
-  resourceId: string;
-  direction: ScalingDirection;
-  targetSpecs: ResourceConfig['specs'];
-  confidence: number;
-  reasoning: string;
-  estimatedCostImpact: number;
-  estimatedPerformanceGain: number;
-  urgency: 'low' | 'medium' | 'high';
-}
-
-/**
- * Failure prediction result
- */
-export interface FailurePrediction {
-  resourceId: string;
-  probability: number;
-  timeToFailure: number; // minutes
-  failureType: string;
-  indicators: string[];
-  preventiveActions: string[];
-}
-
-/**
- * Cost optimization recommendation
- */
-export interface CostOptimization {
-  resourceId: string;
-  currentCost: number;
-  optimizedCost: number;
-  savings: number;
-  savingsPercentage: number;
-  recommendations: {
-    type: 'rightsize' | 'schedule' | 'spot_instance' | 'reserved_instance';
-    description: string;
-    impact: 'low' | 'medium' | 'high';
-  }[];
-}
-
-/**
- * Infrastructure alert
- */
-export interface InfrastructureAlert {
-  id: string;
-  resourceId: string;
-  severity: AlertSeverity;
-  title: string;
-  description: string;
-  timestamp: number;
-  resolved: boolean;
-  resolvedAt?: number;
-  actions: string[];
-}
-
-/**
- * Auto-healing action
- */
-export interface HealingAction {
-  id: string;
-  resourceId: string;
-  type: 'restart' | 'scale' | 'replace' | 'migrate' | 'rollback';
-  status: 'pending' | 'executing' | 'completed' | 'failed';
-  startTime: number;
-  endTime?: number;
-  description: string;
-  result?: string;
-}
-
-/**
- * Infrastructure orchestration event
- */
-export interface OrchestrationEvent {
-  type: 'resource_created' | 'resource_updated' | 'resource_deleted' | 'scaling_triggered' | 'healing_action' | 'alert_triggered';
-  resourceId: string;
-  timestamp: number;
-  data: any;
-}
-
-/**
- * Service configuration
- */
-export interface SelfHealingConfig {
-  metricsCollectionInterval: number;
-  healthCheckInterval: number;
-  predictionInterval: number;
-  costOptimizationInterval: number;
-  autoHealingEnabled: boolean;
-  predictiveScalingEnabled: boolean;
-  costOptimizationEnabled: boolean;
-  alertThresholds: {
-    cpu: number;
-    memory: number;
-    errorRate: number;
-    latency: number;
-  };
-  cloudProviders: {
-    provider: CloudProvider;
-    credentials: Record<string, string>;
-    regions: string[];
-  }[];
-  notifications: {
-    slack?: {
-      webhook: string;
-      channels: string[];
-    };
-    email?: {
-      smtp: Record<string, string>;
-      recipients: string[];
-    };
-    sms?: {
-      provider: string;
-      credentials: Record<string, string>;
-      numbers: string[];
-    };
-  };
-}
-
-/**
- * Health Monitor Component
- */
-class HealthMonitor extends EventEmitter {
-  private resources: Map<string, ResourceConfig> = new Map();
-  private healthHistory: Map<string, HealthCheckResult[]> = new Map();
-
-  /**
-   * Add resource to monitoring
-   */
-  addResource(resource: ResourceConfig): void {
-    this.resources.set(resource.id, resource);
-    this.healthHistory.set(resource.id, []);
-  }
-
-  /**
-   * Perform health check on resource
-   */
-  async checkHealth(resourceId: string): Promise<HealthCheckResult> {
-    const resource = this.resources.get(resourceId);
-    if (!resource) {
-      throw new Error(`Resource ${resourceId} not found`);
-    }
-
-    const checks = await this.performHealthChecks(resource);
-    const overallScore = this.calculateHealthScore(checks);
-    const status = this.determineHealthStatus(overallScore);
-
-    const result: HealthCheckResult = {
-      resourceId,
-      status,
-      timestamp: Date.now(),
-      checks,
-      overallScore
-    };
-
-    // Store health history
-    const history = this.healthHistory.get(resourceId) || [];
-    history.push(result);
-    if (history.length > 1000) {
-      history.splice(0, history.length - 1000);
-    }
-    this.healthHistory.set(resourceId, history);
-
-    this.emit('healthCheck', result);
-    return result;
-  }
-
-  /**
-   * Perform individual health checks
-   */
-  private async performHealthChecks(resource: ResourceConfig): Promise<HealthCheckResult['checks']> {
-    const checks: HealthCheckResult['checks'] = [];
-
-    try {
-      // Connectivity check
-      const connectivityCheck = await this.checkConnectivity(resource);
-      checks.push(connectivityCheck);
-
-      // Resource availability check
-      const availabilityCheck = await this.checkAvailability(resource);
-      checks.push(availabilityCheck);
-
-      // Performance check
-      const performanceCheck = await this.checkPerformance(resource);
-      checks.push(performanceCheck);
-
-      // Security check
-      const securityCheck = await this.checkSecurity(resource);
-      checks.push(securityCheck);
-
-    } catch (error) {
-      checks.push({
-        name: 'Health Check Error',
-        status: HealthStatus.FAILED,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-
-    return checks;
-  }
-
-  /**
-   * Check resource connectivity
-   */
-  private async checkConnectivity(resource: ResourceConfig): Promise<HealthCheckResult['checks'][0]> {
-    const startTime = Date.now();
+  constructor(config: SelfHealingConfig, supabaseUrl?: string, supabaseKey?: string) {
+    super();
+    this.config = config;
     
+    // Initialize monitoring components
+    this.systemMonitor = new SystemMonitor();
+    this.metricsCollector = new MetricsCollector();
+    this.mlDetector = new MLDetector(config.anomalyConfig);
+    
+    // Initialize remediation components
+    this.autoRemediation = new AutoRemediation(config.remediationConfig);
+    this.memoryCleanup = new MemoryCleanup();
+    this.diskCleanup = new DiskCleanup();
+    this.networkRecovery = new NetworkRecovery();
+    
+    // Initialize utility components
+    this.healthChecker = new HealthChecker(config.thresholds);
+    this.mlModels = new MLModels();
+    
+    // Initialize Supabase if credentials provided
+    if (supabaseUrl && supabaseKey) {
+      this.supabase = createClient(supabaseUrl, supabaseKey);
+    }
+    
+    this.setupEventListeners();
+  }
+
+  /**
+   * Start the self-healing service
+   */
+  async start(): Promise<void> {
     try {
-      // Simulate connectivity check based on provider
-      await new Promise(resolve => setTimeout(resolve, Math.random() * 100));
+      if (this.isRunning) {
+        throw new Error('Self-healing service is already running');
+      }
+
+      console.log('Starting self-healing infrastructure service...');
       
-      return {
-        name: 'Connectivity',
-        status: HealthStatus.HEALTHY,
-        message: 'Resource is reachable',
-        responseTime: Date.now() - startTime
-      };
+      // Initialize ML models
+      await this.mlModels.initialize();
+      
+      // Start system monitoring
+      await this.systemMonitor.start();
+      
+      // Setup monitoring interval
+      this.monitoringTimer = setInterval(
+        () => this.performHealthCheck(),
+        this.config.monitoringInterval
+      );
+      
+      this.isRunning = true;
+      
+      // Perform initial health check
+      await this.performHealthCheck();
+      
+      console.log('Self-healing service started successfully');
     } catch (error) {
-      return {
-        name: 'Connectivity',
-        status: HealthStatus.FAILED,
-        message: error instanceof Error ? error.message : 'Connectivity check failed',
-        responseTime: Date.now() - startTime
-      };
+      console.error('Failed to start self-healing service:', error);
+      throw error;
     }
   }
 
   /**
-   * Check resource availability
+   * Stop the self-healing service
    */
-  private async checkAvailability(resource: ResourceConfig): Promise<HealthCheckResult['checks'][0]> {
+  async stop(): Promise<void> {
     try {
-      // Simulate availability check
-      const isAvailable = Math.random() > 0.05; // 95% availability simulation
-      
-      return {
-        name: 'Availability',
-        status: isAvailable ? HealthStatus.HEALTHY : HealthStatus.FAILED,
-        message: isAvailable ? 'Resource is available' : 'Resource is unavailable'
-      };
-    } catch (error) {
-      return {
-        name: 'Availability',
-        status: HealthStatus.FAILED,
-        message: error instanceof Error ? error.message : 'Availability check failed'
-      };
-    }
-  }
+      if (!this.isRunning) {
+        return;
+      }
 
-  /**
-   * Check resource performance
-   */
-  private async checkPerformance(resource: ResourceConfig): Promise<HealthCheckResult['checks'][0]> {
-    try {
-      // Simulate performance metrics
-      const cpuUsage = Math.random() * 100;
-      const memoryUsage = Math.random() * 100;
+      console.log('Stopping self-healing infrastructure service...');
       
-      let status = HealthStatus.HEALTHY;
-      let message = 'Performance is optimal';
-      
-      if (cpuUsage > 90 || memoryUsage > 90) {
-        status = HealthStatus.CRITICAL;
-        message = 'High resource utilization detected';
-      } else if (cpuUsage > 75 || memoryUsage > 75) {
-        status = HealthStatus.DEGRADED;
-        message = 'Elevated resource utilization';
+      // Clear monitoring timer
+      if (this.monitoringTimer) {
+        clearInterval(this.monitoringTimer);
+        this.monitoringTimer = undefined;
       }
       
-      return {
-        name: 'Performance',
-        status,
-        message: `${message} (CPU: ${cpuUsage.toFixed(1)}%, Memory: ${memoryUsage.toFixed(1)}%)`
-      };
+      // Stop system monitoring
+      await this.systemMonitor.stop();
+      
+      this.isRunning = false;
+      
+      console.log('Self-healing service stopped successfully');
     } catch (error) {
-      return {
-        name: 'Performance',
-        status: HealthStatus.FAILED,
-        message: error instanceof Error ? error.message : 'Performance check failed'
-      };
+      console.error('Error stopping self-healing service:', error);
+      throw error;
     }
   }
 
   /**
-   * Check resource security
+   * Perform comprehensive health check
    */
-  private async checkSecurity(resource: ResourceConfig): Promise<HealthCheckResult['checks'][0]> {
+  private async performHealthCheck(): Promise<void> {
     try {
-      // Simulate security check
-      const securityScore = Math.random() * 100;
+      const startTime = Date.now();
       
-      let status = HealthStatus.HEALTHY;
-      let message = 'Security posture is good';
+      // Collect current metrics
+      const metrics = await this.metricsCollector.collectMetrics();
       
-      if (securityScore < 50) {
-        status = HealthStatus.CRITICAL;
-        message = 'Critical security issues detected';
-      } else if (securityScore < 75) {
-        status = HealthStatus.DEGRADED;
-        message = 'Security improvements needed';
+      // Assess system health
+      const health = await this.healthChecker.assessHealth(metrics);
+      
+      // Detect anomalies using ML
+      const anomalies = await this.mlDetector.detectAnomalies(metrics);
+      
+      // Update last check time
+      this.lastHealthCheck = new Date();
+      
+      // Emit health update
+      this.emit('healthUpdate', health);
+      
+      // Process any detected anomalies
+      if (anomalies.length > 0) {
+        await this.processAnomalies(anomalies, metrics);
       }
       
-      return {
-        name: 'Security',
-        status,
-        message
-      };
+      // Check for resolved issues
+      await this.checkResolvedIssues(health);
+      
+      // Store metrics if Supabase is available
+      if (this.supabase) {
+        await this.storeHealthMetrics(metrics, health);
+      }
+      
+      const duration = Date.now() - startTime;
+      console.log(`Health check completed in ${duration}ms`);
+      
     } catch (error) {
-      return {
-        name: 'Security',
-        status: HealthStatus.FAILED,
-        message: error instanceof Error ? error.message : 'Security check failed'
-      };
+      console.error('Health check failed:', error);
     }
   }
 
   /**
-   * Calculate overall health score
+   * Process detected anomalies
    */
-  private calculateHealthScore(checks: HealthCheckResult['checks']): number {
-    if (checks.length === 0) return 0;
+  private async processAnomalies(
+    anomalies: AnomalyDetectionResult[],
+    metrics: HealthMetrics
+  ): Promise<void> {
+    for (const anomaly of anomalies) {
+      const issueId = this.generateIssueId(anomaly);
+      
+      // Check if this is a new issue or existing one
+      let issue = this.activeIssues.get(issueId);
+      
+      if (!issue) {
+        // Create new issue
+        issue = {
+          id: issueId,
+          type: anomaly.type,
+          severity: this.determineSeverity(anomaly),
+          detectedAt: new Date(),
+          description: anomaly.description,
+          metrics,
+          remediationAttempts: 0,
+          resolved: false
+        };
+        
+        this.activeIssues.set(issueId, issue);
+        this.emit('anomalyDetected', issue);
+      }
+      
+      // Attempt remediation if enabled and within limits
+      if (this.shouldAttemptRemediation(issue)) {
+        await this.attemptRemediation(issue);
+      }
+    }
+  }
 
-    const scores = checks.map(check => {
-      switch (check.status) {
-        case HealthStatus.HEALTHY: return 100;
-        case HealthStatus.DEGRADED: return 75;
-        case HealthStatus.CRITICAL: return 25;
-        case HealthStatus.FAILED: return 0;
-        default: return 50;
+  /**
+   * Attempt automatic remediation for an issue
+   */
+  private async attemptRemediation(issue: HealthIssue): Promise<void> {
+    try {
+      // Check cooldown period
+      if (issue.lastRemediationAt) {
+        const timeSinceLastAttempt = Date.now() - issue.lastRemediationAt.getTime();
+        if (timeSinceLastAttempt < this.config.remediationCooldown) {
+          return;
+        }
+      }
+      
+      // Determine remediation action
+      const action = await this.autoRemediation.determineAction(issue);
+      
+      issue.remediationAttempts++;
+      issue.lastRemediationAt = new Date();
+      
+      this.emit('remediationStarted', issue, action);
+      
+      // Execute remediation based on issue type
+      let result: RemediationResult;
+      
+      switch (issue.type) {
+        case 'memory_leak':
+        case 'high_memory_usage':
+          result = await this.memoryCleanup.performCleanup(action);
+          break;
+          
+        case 'disk_space_low':
+        case 'disk_io_high':
+          result = await this.diskCleanup.performCleanup(action);
+          break;
+          
+        case 'network_connectivity':
+        case 'network_latency_high':
+          result = await this.networkRecovery.performRecovery(action);
+          break;
+          
+        default:
+          result = await this.autoRemediation.executeAction(action);
+      }
+      
+      this.emit('remediationCompleted', issue, result);
+      
+      // Mark as resolved if successful
+      if (result.success) {
+        issue.resolved = true;
+        issue.resolvedAt = new Date();
+        this.emit('issueResolved', issue);
+      }
+      
+    } catch (error) {
+      console.error(`Remediation failed for issue ${issue.id}:`, error);
+    }
+  }
+
+  /**
+   * Check for resolved issues and clean up
+   */
+  private async checkResolvedIssues(health: SystemHealth): Promise<void> {
+    for (const [issueId, issue] of this.activeIssues) {
+      if (!issue.resolved) {
+        // Check if issue is naturally resolved
+        const isResolved = await this.isIssueResolved(issue, health);
+        
+        if (isResolved) {
+          issue.resolved = true;
+          issue.resolvedAt = new Date();
+          this.emit('issueResolved', issue);
+        }
+      }
+      
+      // Remove old resolved issues (older than 1 hour)
+      if (issue.resolved && issue.resolvedAt) {
+        const hoursSinceResolved = (Date.now() - issue.resolvedAt.getTime()) / (1000 * 60 * 60);
+        if (hoursSinceResolved > 1) {
+          this.activeIssues.delete(issueId);
+        }
+      }
+    }
+  }
+
+  /**
+   * Check if an issue is resolved based on current health
+   */
+  private async isIssueResolved(issue: HealthIssue, health: SystemHealth): Promise<boolean> {
+    switch (issue.type) {
+      case 'memory_leak':
+      case 'high_memory_usage':
+        return health.memory.status === HealthStatus.HEALTHY;
+        
+      case 'disk_space_low':
+      case 'disk_io_high':
+        return health.disk.status === HealthStatus.HEALTHY;
+        
+      case 'network_connectivity':
+      case 'network_latency_high':
+        return health.network.status === HealthStatus.HEALTHY;
+        
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * Store health metrics in Supabase
+   */
+  private async storeHealthMetrics(metrics: HealthMetrics, health: SystemHealth): Promise<void> {
+    try {
+      const { error } = await this.supabase
+        .from('health_metrics')
+        .insert({
+          timestamp: new Date().toISOString(),
+          metrics,
+          health,
+          active_issues: Array.from(this.activeIssues.values())
+        });
+      
+      if (error) {
+        console.error('Failed to store health metrics:', error);
+      }
+    } catch (error) {
+      console.error('Error storing health metrics:', error);
+    }
+  }
+
+  /**
+   * Setup event listeners
+   */
+  private setupEventListeners(): void {
+    // Handle critical alerts
+    this.on('anomalyDetected', (issue: HealthIssue) => {
+      if (issue.severity === 'critical') {
+        this.emit('criticalAlert', issue);
       }
     });
-
-    return scores.reduce((sum, score) => sum + score, 0) / scores.length;
+    
+    // Log important events
+    this.on('anomalyDetected', (issue) => {
+      console.warn(`Anomaly detected: ${issue.description} (${issue.severity})`);
+    });
+    
+    this.on('issueResolved', (issue) => {
+      console.log(`Issue resolved: ${issue.description}`);
+    });
   }
 
   /**
-   * Determine health status from score
+   * Generate unique issue ID
    */
-  private determineHealthStatus(score: number): HealthStatus {
-    if (score >= 90) return HealthStatus.HEALTHY;
-    if (score >= 75) return HealthStatus.DEGRADED;
-    if (score >= 25) return HealthStatus.CRITICAL;
-    return HealthStatus.FAILED;
+  private generateIssueId(anomaly: AnomalyDetectionResult): string {
+    return `${anomaly.type}_${Date.now()}`;
   }
 
   /**
-   * Get health history for resource
+   * Determine issue severity based on anomaly
    */
-  getHealthHistory(resourceId: string, limit = 100): HealthCheckResult[] {
-    const history = this.healthHistory.get(resourceId) || [];
-    return history.slice(-limit);
+  private determineSeverity(anomaly: AnomalyDetectionResult): HealthIssue['severity'] {
+    if (anomaly.confidence > 0.9) return 'critical';
+    if (anomaly.confidence > 0.7) return 'high';
+    if (anomaly.confidence > 0.5) return 'medium';
+    return 'low';
+  }
+
+  /**
+   * Check if remediation should be attempted
+   */
+  private shouldAttemptRemediation(issue: HealthIssue): boolean {
+    return (
+      this.config.autoRemediationEnabled &&
+      !issue.resolved &&
+      issue.remediationAttempts < this.config.maxRemediationAttempts
+    );
+  }
+
+  /**
+   * Get current system health
+   */
+  async getCurrentHealth(): Promise<SystemHealth> {
+    const metrics = await this.metricsCollector.collectMetrics();
+    return await this.healthChecker.assessHealth(metrics);
+  }
+
+  /**
+   * Get active issues
+   */
+  getActiveIssues(): HealthIssue[] {
+    return Array.from(this.activeIssues.values()).filter(issue => !issue.resolved);
+  }
+
+  /**
+   * Get service status
+   */
+  getStatus() {
+    return {
+      isRunning: this.isRunning,
+      lastHealthCheck: this.lastHealthCheck,
+      activeIssueCount: this.getActiveIssues().length,
+      totalIssuesTracked: this.activeIssues.size
+    };
+  }
+
+  /**
+   * Force a health check
+   */
+  async forceHealthCheck(): Promise<SystemHealth> {
+    await this.performHealthCheck();
+    return this.getCurrentHealth();
+  }
+
+  /**
+   * Update configuration
+   */
+  updateConfig(newConfig: Partial<SelfHealingConfig>): void {
+    this.config = { ...this.config, ...newConfig };
+    
+    // Update component configurations
+    if (newConfig.thresholds) {
+      this.healthChecker.updateThresholds(newConfig.thresholds);
+    }
+    
+    if (newConfig.anomalyConfig) {
+      this.mlDetector.updateConfig(newConfig.anomalyConfig);
+    }
+    
+    if (newConfig.remediationConfig) {
+      this.autoRemediation.updateConfig(newConfig.remediationConfig);
+    }
   }
 }
 
-/**
- * Predictive Scaler Component
- */
-class PredictiveScaler extends EventEmitter {
-  private metricsHistory: Map<string, ResourceMetrics[]> = new Map();
-  private scalingHistory: Map<string, ScalingRecommendation[]> = new Map();
+// Type augmentation for EventEmitter
+declare interface SelfHealingService {
+  on<K extends keyof SelfHealingEvents>(event: K, listener: SelfHealingEvents[K]): this;
+  emit<K extends keyof SelfHealingEvents>(event: K, ...args: Parameters<SelfHealingEvents[K]>): boolean;
+}
 
-  /**
-   * Analyze metrics and generate scaling recommendation
-   */
-  async analyzeScaling(resourceId: string, metrics: ResourceMetrics): Promise<ScalingRecommendation> {
-    // Store metrics history
-    const history = this.metricsHistory.get(resourceId) || [];
-    history.push(metrics);
-    if (history.length > 1000) {
-      history.splice(0, history.length - 1000);
-    }
-    this.metricsHistory.set(resourceId, history);
-
-    // Analyze trends
-    const trends = this.analyzeTrends(history);
-    const prediction = await this.predictFutureLoad(history);
-    
-    // Generate recommendation
-    const recommendation = this.generateScalingRecommendation(
-      resourceId,
-      metrics,
-      trends,
-      prediction
-    );
-
-    // Store scaling history
-    const scalingHistory = this.scalingHistory.get(resourceId) || [];
-    scalingHistory.push(recommendation);
-    if (scalingHistory.length > 100) {
-      scalingHistory.splice(0, scalingHistory.length - 100);
-    }
-    this.scalingHistory.set(resourceId, scalingHistory);
-
-    this.emit('scalingRecommendation', recommendation);
-    return recommendation;
-  }
-
-  /**
-   * Analyze resource usage trends
-   */
-  private analyzeTrends(history: ResourceMetrics[]): {
-    cpuTrend: 'increasing' | 'decreasing' | 'stable';
-    memoryTrend: 'increasing' | 'decreasing' | 'stable';
-    requestTrend: 'increasing' | 'decreasing' | 'stable';
-  } {
-    if (history.length < 10) {
-      return {
-        cpuTrend: 'stable',
-        memoryTrend: 'stable',
-        requestTrend: 'stable'
-      };
-    }
-
-    const recent = history.slice(-10);
-    const older = history.slice(-20, -10);
-
-    const recentCpuAvg = recent.reduce((sum, m) => sum + m.cpu.usage, 0) / recent.length;
-    const olderCpuAvg = older.length > 0 ? older.reduce((sum, m) => sum + m.cpu.usage, 0) / older.length : recentCpuAvg;
-
-    const recentMemoryAvg = recent.reduce((sum, m) => sum + m.memory.usage, 0) / recent.length;
-    const olderMemoryAvg = older.length > 0 ? older.reduce((sum, m) => sum + m.memory.usage, 0) / older.length : recentMemoryAvg;
-
-    const recentRequestAvg = recent.reduce((sum, m) => sum + m.requests.total, 0) / recent.length;
-    const olderRequestAvg = older.length > 0 ? older.reduce((sum, m) => sum + m.requests.total, 0) / older.length : recentRequestAvg;
-
-    return {
-      cpuTrend: this.determineTrend(recentCpuAvg, olderCpuAvg),
-      memoryTrend: this.determineTrend(recentMemoryAvg, olderMemoryAvg),
-      requestTrend: this.determineTrend(recentRequestAvg, olderRequestAvg)
-    };
-  }
-
-  /**
-   * Determine trend direction
-   */
-  private determineTrend(recent: number, older: number): 'increasing' | 'decreasing' | 'stable' {
-    const threshold = 0.1; // 10% threshold
-    const change = (recent - older) / older;
-
-    if (change > threshold) return 'increasing';
-    if (change < -threshold) return 'decreasing';
-    return 'stable';
-  }
-
-  /**
-   * Predict future load using simple linear regression
-   */
-  private async predictFutureLoad(history: ResourceMetrics[]): Promise<{
-    predictedCpu: number;
-    predictedMemory: number;
-    predictedRequests: number;
-    confidence: number;
-  }> {
-    if (history.length < 5) {
-      const latest = history[history.length - 1] || {
-        cpu: { usage: 50 },
-        memory: { usage: 50 },
-        requests: { total: 100 }
-      };
-
-      return {
-        predictedCpu: latest.cpu.usage,
-        predictedMemory: latest.memory.usage,
-        predictedRequests: latest.requests.total,
-        confidence: 0.5
-      };
-    }
-
-    // Simple linear prediction
-    const recent = history.slice(-30); // Last 30 data points
-    const n = recent.length;
-
-    // Calculate linear regression for CPU usage
-    const cpuValues = recent.map(m => m.cpu.usage);
-    const cpuPrediction = this.linearRegression(cpuValues);
-
-    // Calculate linear regression for Memory usage
-    const memoryValues = recent.map(m => m.memory.usage);
-    const memoryPrediction = this.linearRegression(memoryValues);
-
-    // Calculate linear regression for Request count
-    const requestValues = recent.map(m => m.requests.total);
-    const requestPrediction = this.linearRegression(requestValues);
-
-    // Calculate confidence based on data consistency
-    const confidence = Math.min(0.9, n / 30);
-
-    return {
-      predictedCpu: Math.max(0, Math.min(100, cpuPrediction)),
-      predictedMemory: Math.max(0, Math.min(100, memoryPrediction)),
-      predictedRequests: Math.max(0, requestPrediction),
-      confidence
-    };
-  }
-
-  /**
-   * Simple linear regression prediction
-   */
-  private linearRegression(values: number[]): number {
-    const n = values.length;
-    if (n < 2) return values[0] || 0;
-
-    const sumX = (n * (n - 1)) / 2;
-    const sumY = values.reduce((sum, val) => sum + val, 0);
-    const sumXY = values.reduce((sum, val, i) => sum + val * i, 0);
-    const sumXX = (n * (n - 1) * (2 * n - 1)) / 6;
-
-    const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
-    const intercept = (sumY - slope * sumX) / n;
-
-    // Predict next value
-    return slope * n + intercept;
-  }
-
-  /**
-   * Generate scaling recommendation
-   */
-  private generateScalingRecommendation(
-    resourceId: string,
-    currentMetrics: ResourceMetrics,
-    trends: ReturnType<PredictiveScaler['analyzeTrends']>,
-    prediction: Awaited<ReturnType<PredictiveScaler['predictFutureLoad']>>
-  ): ScalingRecommendation {
-    let direction = ScalingDirection.NONE;
-    let confidence = prediction.confidence;
-    let reasoning = 'Resource utilization is stable';
-    let urgency: 'low' | 'medium' | 'high' = 'low';
-
-    // Analyze current utilization
-    const cpuUtilization = (currentMetrics.cpu.usage / currentMetrics.cpu.limit) * 100;
-    const memoryUtilization = (currentMetrics.memory.usage / currentMetrics.memory.limit) * 100;
-
-    // Determine scaling needs
-    if (prediction.predictedCpu > 80 || prediction.predictedMemory > 80) {
-      direction = ScalingDirection.UP;
-      reasoning = 'Predicted high resource utilization requires scaling up';
-      urgency = prediction.predictedCpu > 90 || prediction.predictedMemory > 90 ? 'high' : 'medium';
-    } else if (cpuUtilization > 85 || memoryUtilization > 85) {
-      direction = ScalingDirection.UP;
-      reasoning = 'Current high resource utilization requires immediate scaling up';
-      urgency = 'high';
-    } else if (prediction.predictedCpu < 30 && prediction.predictedMemory < 30 && 
-               trends.cpuTrend === 'decreasing' && trends.memoryTrend === 'decreasing') {
-      direction = ScalingDirection.DOWN;
-      reasoning = 'Predicted low resource utilization allows for scaling down';
-      urgency = 'low';
-    }
-
-    // Calculate target specs
-    const currentSpecs = {
-      cpu: currentMetrics.cpu.limit,
-      memory: currentMetrics.memory.limit
-    };
-
-    let targetSpecs = { ...currentSpecs };
-    let estimatedCostImpact = 0;
-    let estimatedPerformanceGain = 0;
-
-    if (direction === ScalingDirection.UP) {
-      const scaleFactor = urgency === 'high' ? 2 : 1.5;
-      targetSpecs.cpu = Math.ceil(currentSpecs.cpu * scaleFactor);
-      targetSpecs.memory = Math.ceil(currentSpecs.memory * scaleFactor);
-      estimatedCostImpact = (scaleFactor - 1) * currentMetrics.cost.hourly;
-      estimatedPerformanceGain = 0.3; // 30% performance improvement estimate
-    } else if (direction === ScalingDirection.DOWN) {
-      const scaleFactor = 0.7;
-      targetSpecs.cpu = Math.ceil(currentSpecs.cpu * scaleFactor);
-      targetSpecs.memory = Math.ceil(currentSpecs.memory * scaleFactor);
-      estimatedCostImpact = -(1 - scaleFactor) * currentMetrics.cost.hourly;
+export default SelfHealingService;
+```
