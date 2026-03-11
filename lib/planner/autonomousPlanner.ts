@@ -19,10 +19,11 @@
 //   - Structured JSON output required — parse failure returns [] (no partial inserts)
 //   - Never throws — all errors in PlannerResult.errors
 //
-// Date: 2026-03-10
+// Date: 2026-03-11 — Phase 12: Module gap detection via runModuleFactory()
 
-import { JavariRouter } from "@/lib/javari/router";
-import { createClient } from "@supabase/supabase-js";
+import { JavariRouter }    from "@/lib/javari/router";
+import { createClient }    from "@supabase/supabase-js";
+import { runModuleFactory } from "@/lib/javari/moduleFactory";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -348,6 +349,24 @@ export async function runAutonomousPlanner(): Promise<PlannerResult> {
   }
 
   log(`[planner] ⚡ Threshold met (${pendingCount} < ${PLANNER_TRIGGER_THRESHOLD}) — generating ${PLANNER_BATCH_SIZE} artifact tasks`);
+
+  // ── Step 1b: Module gap detection — fills critical capability gaps first ──
+  // Runs BEFORE AI planner so infrastructure modules (auth, payments) get
+  // queued immediately without waiting for AI task generation.
+  try {
+    const factoryResult = await runModuleFactory({ maxGapsToFill: 5 });
+    if (factoryResult.tasksGenerated > 0) {
+      log(`[planner] 🏭 Module factory: ${factoryResult.tasksGenerated} gap tasks added (${factoryResult.gapsFound} gaps found)`);
+    } else {
+      log(`[planner] 🏭 Module factory: no critical gaps found (${factoryResult.gapsFound} total gaps, all planned)`);
+    }
+    if (factoryResult.errors.length > 0) {
+      log(`[planner] ⚠️ Module factory warnings: ${factoryResult.errors.slice(0, 3).join("; ")}`);
+    }
+  } catch (factoryErr) {
+    // Non-fatal — planner continues without factory if it errors
+    log(`[planner] ⚠️ Module factory skipped: ${factoryErr instanceof Error ? factoryErr.message : String(factoryErr)}`);
+  }
 
   // ── Step 2: Build context ─────────────────────────────────────────────────
   let context: PlannerContext;

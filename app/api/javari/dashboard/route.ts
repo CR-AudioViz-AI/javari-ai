@@ -8,7 +8,8 @@
 // Date: 2026-03-10
 
 import { NextResponse } from "next/server";
-import { createClient }  from "@supabase/supabase-js";
+import { createClient }         from "@supabase/supabase-js";
+import { getModuleMetrics }    from "@/lib/javari/moduleFactory";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -408,6 +409,16 @@ export async function GET() {
       }
     } catch { /* build_artifacts table may not exist yet — graceful degradation */ }
 
+    // ── 10a. Module registry metrics (Module Factory) ───────────────────────
+    let moduleMetrics = {
+      modules_total: 0, modules_complete: 0, modules_in_progress: 0,
+      modules_planned: 0, modules_missing: 0,
+      by_capability: {} as Record<string, { total: number; complete: number; missing: number }>,
+    };
+    try {
+      moduleMetrics = await getModuleMetrics();
+    } catch { /* module_registry table may not exist yet */ }
+
     // ── 10. System health ─────────────────────────────────────────────────────
     const artifactCoverage = completed > 0
       ? Math.round((artifactTotal / completed) * 100)
@@ -483,6 +494,17 @@ export async function GET() {
         totalBuildArtifacts: buildArtifactTotal,
         byType: buildsByType,
         migrationEndpoint: "/api/javari/migrate-build-artifacts",
+      },
+
+      modules: {
+        total       : moduleMetrics.modules_total,
+        complete    : moduleMetrics.modules_complete,
+        in_progress : moduleMetrics.modules_in_progress,
+        planned     : moduleMetrics.modules_planned,
+        missing     : moduleMetrics.modules_missing,
+        generated   : modulesGenerated,
+        by_capability: moduleMetrics.by_capability,
+        factoryEndpoint: "/api/javari/module-factory",
       },
 
 

@@ -182,3 +182,36 @@ ALTER TABLE chat_sessions ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Service role full access" ON chat_sessions;
 CREATE POLICY "Service role full access" ON chat_sessions
   FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+-- ── module_registry — tracks platform modules and their build status ─────────
+
+CREATE TABLE IF NOT EXISTS module_registry (
+  id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  module_name text        NOT NULL UNIQUE,
+  capability  text        NOT NULL,
+  status      text        NOT NULL DEFAULT 'planned'
+                          CHECK (status IN ('planned','in_progress','complete','failed')),
+  version     text        NOT NULL DEFAULT '0.1.0',
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS module_registry_capability_idx ON module_registry (capability);
+CREATE INDEX IF NOT EXISTS module_registry_status_idx     ON module_registry (status);
+
+ALTER TABLE module_registry ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Service role full access" ON module_registry;
+CREATE POLICY "Service role full access" ON module_registry
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+-- updated_at auto-trigger
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN NEW.updated_at = now(); RETURN NEW; END;
+$$ language 'plpgsql';
+
+DROP TRIGGER IF EXISTS update_module_registry_updated_at ON module_registry;
+CREATE TRIGGER update_module_registry_updated_at
+  BEFORE UPDATE ON module_registry
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

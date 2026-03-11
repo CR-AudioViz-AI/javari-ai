@@ -16,9 +16,9 @@
 // Date: 2026-03-10
 
 import { createClient }    from "@supabase/supabase-js";
+import { JavariRouter }    from "@/lib/javari/router";
 import { commitFileChange, triggerVercelDeploy, verifyDeployment } from "./devopsExecutor";
 import { recordArtifact }  from "@/lib/roadmap/artifactRecorder";
-import { getSecret }       from "@/lib/platform-secrets/getSecret";
 
 // ── DB ────────────────────────────────────────────────────────────────────
 
@@ -93,40 +93,34 @@ const PLATFORM_URL    =
 
 // ── Anthropic AI caller ───────────────────────────────────────────────────
 
+// callAI — routes through JavariRouter for cost-optimized multi-provider execution.
+// role maps to task types: architect→reasoning, engineer→code, validator→validation, documenter→documentation
 async function callAI(
   systemPrompt: string,
   userPrompt  : string,
   maxTokens   : number = 4000,
   role        : string = "ai"
 ): Promise<string> {
-  const apiKey = await getSecret("ANTHROPIC_API_KEY")
-    .catch(() => process.env.ANTHROPIC_API_KEY ?? "");
+  const taskTypeMap: Record<string, "reasoning_task" | "code_task" | "validation_task" | "documentation_task" | "simple_task"> = {
+    architect : "reasoning_task",
+    engineer  : "code_task",
+    validator : "validation_task",
+    documenter: "documentation_task",
+  };
+  const taskType = taskTypeMap[role] ?? "code_task";
 
-  if (!apiKey) throw new Error(`[artifactExecutor:${role}] ANTHROPIC_API_KEY not available`);
-
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method : "POST",
-    headers: {
-      "Content-Type"     : "application/json",
-      "x-api-key"        : apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model     : "claude-sonnet-4-20250514",
-      max_tokens: maxTokens,
-      system    : systemPrompt,
-      messages  : [{ role: "user", content: userPrompt }],
-    }),
-    signal: AbortSignal.timeout(120_000),
+  const result = await JavariRouter.generate({
+    taskType,
+    prompt   : userPrompt,
+    system   : systemPrompt,
+    maxTokens,
   });
 
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Anthropic API ${res.status}: ${errText.slice(0, 300)}`);
+  if (!result.ok) {
+    throw new Error(`[artifactExecutor:${role}] JavariRouter failed: ${result.error}`);
   }
 
-  const data = await res.json() as { content: Array<{ type: string; text?: string }> };
-  return data.content.filter(b => b.type === "text").map(b => b.text ?? "").join("").trim();
+  return result.content;
 }
 
 // ── Artifact type classifier ───────────────────────────────────────────────
