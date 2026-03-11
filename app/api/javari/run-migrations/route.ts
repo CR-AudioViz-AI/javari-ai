@@ -70,6 +70,35 @@ const MIGRATIONS: Array<{ name: string; sql: string }> = [
       GRANT USAGE ON SEQUENCE guardrail_audit_log_id_seq TO service_role;
     `.trim(),
   },
+  {
+    name: "create_build_artifacts",
+    sql: `
+      CREATE TABLE IF NOT EXISTS build_artifacts (
+        artifact_id      UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+        task_id          TEXT         NOT NULL,
+        artifact_type    TEXT         NOT NULL,
+        repo             TEXT         NOT NULL DEFAULT 'CR-AudioViz-AI/javari-ai',
+        branch           TEXT         NOT NULL DEFAULT 'main',
+        commit_sha       TEXT,
+        deployment_url   TEXT,
+        status           TEXT         NOT NULL DEFAULT 'pending',
+        file_path        TEXT,
+        documentation    TEXT,
+        validation_notes TEXT,
+        created_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_build_artifacts_task_id ON build_artifacts (task_id);
+      CREATE INDEX IF NOT EXISTS idx_build_artifacts_status ON build_artifacts (status);
+      CREATE INDEX IF NOT EXISTS idx_build_artifacts_artifact_type ON build_artifacts (artifact_type);
+      CREATE INDEX IF NOT EXISTS idx_build_artifacts_created_at ON build_artifacts (created_at DESC);
+      ALTER TABLE build_artifacts ENABLE ROW LEVEL SECURITY;
+      DO $$ BEGIN
+        CREATE POLICY "service_role_all" ON build_artifacts
+          FOR ALL TO service_role USING (true) WITH CHECK (true);
+      EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+      GRANT ALL ON build_artifacts TO service_role;
+    `.trim(),
+  },
 ];
 
 // Build pooler connection URL from Supabase project ref + password
