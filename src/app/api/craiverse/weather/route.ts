@@ -1,13 +1,33 @@
+```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { z } from 'zod';
-import { createNoise2D, createNoise3D } from 'simplex-noise';
+import { rateLimit } from '@/lib/rate-limit';
+import { validateApiKey } from '@/lib/auth';
 
-// Weather data structures
+// Enhanced validation schemas
+const weatherSimulateSchema = z.object({
+  regionId: z.string().uuid(),
+  biomeType: z.enum(['desert', 'forest', 'mountain', 'coastal', 'plains', 'arctic', 'tropical']),
+  duration: z.number().min(1).max(365),
+  seasonOverride: z.enum(['spring', 'summer', 'autumn', 'winter']).optional(),
+  intensityModifier: z.number().min(0.1).max(3.0).default(1.0),
+  eventTriggers: z.array(z.string()).optional()
+});
+
+const weatherQuerySchema = z.object({
+  regionId: z.string().uuid(),
+  timeRange: z.enum(['current', 'hourly', 'daily', 'weekly']).default('current'),
+  includeEffects: z.boolean().default(false),
+  forecastDays: z.number().min(1).max(30).optional()
+});
+
+// Weather system interfaces
 interface WeatherPattern {
   id: string;
-  zoneId: string;
+  regionId: string;
+  timestamp: Date;
   temperature: number;
   humidity: number;
   precipitation: number;
@@ -16,647 +36,506 @@ interface WeatherPattern {
   pressure: number;
   cloudCover: number;
   visibility: number;
-  weatherType: WeatherType;
+  uvIndex: number;
+  season: string;
+  weatherType: string;
   intensity: number;
-  timestamp: Date;
-  seasonalModifier: number;
-  climateZone: ClimateZone;
 }
 
-interface ClimateModel {
-  zoneId: string;
-  climateType: ClimateZone;
+interface WeatherEvent {
+  id: string;
+  type: 'storm' | 'heatwave' | 'drought' | 'flood' | 'blizzard' | 'hurricane';
+  severity: number;
+  duration: number;
+  startTime: Date;
+  endTime: Date;
+  affectedRegions: string[];
+  effects: WeatherEffect[];
+}
+
+interface WeatherEffect {
+  type: 'temperature' | 'mobility' | 'energy' | 'mood' | 'health' | 'visibility';
+  modifier: number;
+  duration: number;
+  targetBehaviors: string[];
+}
+
+interface ClimateData {
+  biome: string;
   baseTemperature: number;
   temperatureVariance: number;
-  precipitationLevel: number;
-  seasonalIntensity: number;
-  elevation: number;
-  latitude: number;
-  longitude: number;
-  moistureRetention: number;
-  windPatterns: WindPattern[];
+  precipitationProbability: number;
+  seasonalModifiers: Record<string, number>;
+  weatherEventProbabilities: Record<string, number>;
 }
 
-interface EnvironmentalEffects {
-  activityId: string;
-  weatherImpact: number;
-  visibilityReduction: number;
-  mobilityModifier: number;
-  comfortLevel: number;
-  energyDrain: number;
-  safetyRisk: number;
-  recommendedActions: string[];
-}
+// Weather simulation engine
+class WeatherSimulationEngine {
+  private climateData: Map<string, ClimateData> = new Map();
 
-interface WeatherForecast {
-  zoneId: string;
-  predictions: WeatherPattern[];
-  confidence: number;
-  trendAnalysis: {
-    temperatureTrend: 'rising' | 'falling' | 'stable';
-    precipitationTrend: 'increasing' | 'decreasing' | 'stable';
-    pressureTrend: 'rising' | 'falling' | 'stable';
-  };
-}
-
-enum WeatherType {
-  CLEAR = 'clear',
-  CLOUDY = 'cloudy',
-  OVERCAST = 'overcast',
-  LIGHT_RAIN = 'light_rain',
-  MODERATE_RAIN = 'moderate_rain',
-  HEAVY_RAIN = 'heavy_rain',
-  THUNDERSTORM = 'thunderstorm',
-  SNOW = 'snow',
-  BLIZZARD = 'blizzard',
-  FOG = 'fog',
-  MIST = 'mist',
-  SANDSTORM = 'sandstorm',
-  HURRICANE = 'hurricane'
-}
-
-enum ClimateZone {
-  TROPICAL = 'tropical',
-  ARID = 'arid',
-  TEMPERATE = 'temperate',
-  CONTINENTAL = 'continental',
-  POLAR = 'polar',
-  MEDITERRANEAN = 'mediterranean',
-  OCEANIC = 'oceanic',
-  SUBARCTIC = 'subarctic'
-}
-
-interface WindPattern {
-  direction: number;
-  speed: number;
-  seasonalVariation: number;
-  elevation: number;
-}
-
-// Validation schemas
-const weatherQuerySchema = z.object({
-  zoneId: z.string().uuid(),
-  timeframe: z.enum(['current', 'hourly', 'daily']).optional().default('current'),
-  includeEffects: z.boolean().optional().default(false)
-});
-
-const forecastQuerySchema = z.object({
-  zoneId: z.string().uuid(),
-  days: z.number().min(1).max(14).optional().default(7),
-  detailed: z.boolean().optional().default(false)
-});
-
-const generateWeatherSchema = z.object({
-  zoneId: z.string().uuid(),
-  duration: z.number().min(1).max(168).optional().default(24), // hours
-  seed: z.number().optional(),
-  forcePattern: z.nativeEnum(WeatherType).optional()
-});
-
-const effectsQuerySchema = z.object({
-  activityId: z.string().uuid(),
-  zoneId: z.string().uuid(),
-  duration: z.number().min(1).max(24).optional().default(1)
-});
-
-class WeatherEngine {
-  private noise2D = createNoise2D();
-  private noise3D = createNoise3D();
-  private readonly WEATHER_SCALE = 0.01;
-  private readonly TIME_SCALE = 0.001;
-
-  constructor(seed?: number) {
-    if (seed) {
-      this.noise2D = createNoise2D(() => seed);
-      this.noise3D = createNoise3D(() => seed);
-    }
+  constructor() {
+    this.initializeClimateProfiles();
   }
 
-  generateWeatherPattern(
-    climateModel: ClimateModel,
-    timestamp: Date,
-    seasonalModifier: number
-  ): WeatherPattern {
-    const x = climateModel.longitude * this.WEATHER_SCALE;
-    const y = climateModel.latitude * this.WEATHER_SCALE;
-    const t = timestamp.getTime() * this.TIME_SCALE;
+  private initializeClimateProfiles() {
+    this.climateData.set('desert', {
+      biome: 'desert',
+      baseTemperature: 35,
+      temperatureVariance: 25,
+      precipitationProbability: 0.05,
+      seasonalModifiers: { spring: 0.9, summer: 1.3, autumn: 0.8, winter: 0.6 },
+      weatherEventProbabilities: { heatwave: 0.15, drought: 0.25, storm: 0.02 }
+    });
 
-    // Generate base weather parameters using noise
-    const temperatureNoise = this.noise3D(x, y, t);
-    const humidityNoise = this.noise3D(x + 100, y, t);
-    const precipitationNoise = this.noise3D(x, y + 100, t);
-    const pressureNoise = this.noise2D(x, y);
-    const windNoise = this.noise3D(x + 200, y + 200, t);
+    this.climateData.set('forest', {
+      biome: 'forest',
+      baseTemperature: 18,
+      temperatureVariance: 15,
+      precipitationProbability: 0.35,
+      seasonalModifiers: { spring: 1.1, summer: 1.2, autumn: 0.9, winter: 0.7 },
+      weatherEventProbabilities: { storm: 0.12, flood: 0.08, drought: 0.05 }
+    });
 
-    // Apply climate model and seasonal modifications
-    const temperature = this.calculateTemperature(
-      climateModel,
-      temperatureNoise,
-      seasonalModifier
-    );
+    this.climateData.set('coastal', {
+      biome: 'coastal',
+      baseTemperature: 22,
+      temperatureVariance: 12,
+      precipitationProbability: 0.25,
+      seasonalModifiers: { spring: 1.0, summer: 1.1, autumn: 1.0, winter: 0.9 },
+      weatherEventProbabilities: { hurricane: 0.08, storm: 0.18, flood: 0.10 }
+    });
+
+    this.climateData.set('mountain', {
+      biome: 'mountain',
+      baseTemperature: 8,
+      temperatureVariance: 20,
+      precipitationProbability: 0.40,
+      seasonalModifiers: { spring: 1.2, summer: 1.1, autumn: 0.8, winter: 0.5 },
+      weatherEventProbabilities: { blizzard: 0.20, storm: 0.15, heatwave: 0.02 }
+    });
+
+    this.climateData.set('arctic', {
+      biome: 'arctic',
+      baseTemperature: -15,
+      temperatureVariance: 30,
+      precipitationProbability: 0.15,
+      seasonalModifiers: { spring: 1.4, summer: 2.0, autumn: 1.1, winter: 0.3 },
+      weatherEventProbabilities: { blizzard: 0.35, storm: 0.08, heatwave: 0.01 }
+    });
+  }
+
+  generateWeatherPattern(regionId: string, biomeType: string, season: string, intensityModifier: number = 1.0): WeatherPattern {
+    const climate = this.climateData.get(biomeType);
+    if (!climate) throw new Error(`Unknown biome type: ${biomeType}`);
+
+    const seasonModifier = climate.seasonalModifiers[season] || 1.0;
+    const baseTemp = climate.baseTemperature * seasonModifier;
     
-    const humidity = this.calculateHumidity(
-      climateModel,
-      humidityNoise,
-      temperature
-    );
-    
-    const precipitation = this.calculatePrecipitation(
-      climateModel,
-      precipitationNoise,
-      humidity,
-      temperature
-    );
-
-    const pressure = this.calculatePressure(
-      climateModel,
-      pressureNoise,
-      seasonalModifier
-    );
-
-    const windData = this.calculateWind(climateModel, windNoise);
-    
+    // Generate realistic weather values with natural variation
+    const temperature = this.addNaturalVariation(baseTemp, climate.temperatureVariance) * intensityModifier;
+    const humidity = this.calculateHumidity(temperature, biomeType);
+    const precipitation = this.calculatePrecipitation(climate.precipitationProbability, humidity, season);
+    const windSpeed = this.generateWindSpeed(biomeType, precipitation);
+    const windDirection = Math.random() * 360;
+    const pressure = this.calculateBarometricPressure(temperature, altitude: this.getAltitude(biomeType));
     const cloudCover = this.calculateCloudCover(humidity, precipitation);
-    
-    const visibility = this.calculateVisibility(precipitation, cloudCover, humidity);
-
-    const weatherType = this.determineWeatherType(
-      temperature,
-      precipitation,
-      humidity,
-      cloudCover
-    );
-
-    const intensity = this.calculateIntensity(precipitation, windData.speed, pressure);
+    const visibility = this.calculateVisibility(precipitation, cloudCover);
+    const uvIndex = this.calculateUVIndex(season, cloudCover, latitude: 45);
 
     return {
       id: crypto.randomUUID(),
-      zoneId: climateModel.zoneId,
-      temperature,
-      humidity,
-      precipitation,
-      windSpeed: windData.speed,
-      windDirection: windData.direction,
-      pressure,
-      cloudCover,
-      visibility,
-      weatherType,
-      intensity,
-      timestamp,
-      seasonalModifier,
-      climateZone: climateModel.climateType
+      regionId,
+      timestamp: new Date(),
+      temperature: Math.round(temperature * 10) / 10,
+      humidity: Math.round(humidity * 10) / 10,
+      precipitation: Math.round(precipitation * 100) / 100,
+      windSpeed: Math.round(windSpeed * 10) / 10,
+      windDirection: Math.round(windDirection),
+      pressure: Math.round(pressure * 100) / 100,
+      cloudCover: Math.round(cloudCover * 10) / 10,
+      visibility: Math.round(visibility * 10) / 10,
+      uvIndex: Math.round(uvIndex * 10) / 10,
+      season,
+      weatherType: this.determineWeatherType(temperature, precipitation, windSpeed, cloudCover),
+      intensity: intensityModifier
     };
   }
 
-  private calculateTemperature(
-    climate: ClimateModel,
-    noise: number,
-    seasonal: number
-  ): number {
-    const baseTemp = climate.baseTemperature + (seasonal * 10);
-    const variance = climate.temperatureVariance * noise;
-    const elevationEffect = -0.0065 * climate.elevation; // Temperature lapse rate
-    
-    return Math.round((baseTemp + variance + elevationEffect) * 10) / 10;
+  private addNaturalVariation(base: number, variance: number): number {
+    return base + (Math.random() - 0.5) * variance;
   }
 
-  private calculateHumidity(
-    climate: ClimateModel,
-    noise: number,
-    temperature: number
-  ): number {
+  private calculateHumidity(temperature: number, biome: string): number {
     let baseHumidity = 50;
     
-    // Climate-based humidity adjustments
-    switch (climate.climateType) {
-      case ClimateZone.TROPICAL:
-        baseHumidity = 80;
-        break;
-      case ClimateZone.ARID:
-        baseHumidity = 20;
-        break;
-      case ClimateZone.OCEANIC:
-        baseHumidity = 70;
-        break;
-      case ClimateZone.POLAR:
-        baseHumidity = 60;
-        break;
-      default:
-        baseHumidity = 50;
+    switch (biome) {
+      case 'desert': baseHumidity = 20; break;
+      case 'coastal': baseHumidity = 70; break;
+      case 'forest': baseHumidity = 65; break;
+      case 'arctic': baseHumidity = 40; break;
     }
 
-    const noiseEffect = noise * 30;
-    const temperatureEffect = Math.max(0, (30 - temperature) * 0.5);
-    
-    return Math.max(0, Math.min(100, baseHumidity + noiseEffect + temperatureEffect));
+    // Temperature affects humidity capacity
+    const tempEffect = Math.max(0, (30 - Math.abs(temperature - 20)) / 30);
+    return Math.max(0, Math.min(100, baseHumidity + tempEffect * 30 + (Math.random() - 0.5) * 20));
   }
 
-  private calculatePrecipitation(
-    climate: ClimateModel,
-    noise: number,
-    humidity: number,
-    temperature: number
-  ): number {
-    const humidityFactor = Math.max(0, (humidity - 60) / 40);
-    const climateFactor = climate.precipitationLevel;
-    const noiseFactor = Math.max(0, noise);
+  private calculatePrecipitation(probability: number, humidity: number, season: string): number {
+    const humidityBonus = Math.max(0, (humidity - 60) / 40);
+    const adjustedProbability = probability + humidityBonus * 0.2;
     
-    let precipitation = humidityFactor * climateFactor * noiseFactor * 50;
-    
-    // Reduce precipitation for very low temperatures (snow threshold)
-    if (temperature < 0) {
-      precipitation *= 0.7;
+    if (Math.random() < adjustedProbability) {
+      return Math.random() * 25; // mm
     }
-    
-    return Math.max(0, precipitation);
+    return 0;
   }
 
-  private calculatePressure(
-    climate: ClimateModel,
-    noise: number,
-    seasonal: number
-  ): number {
+  private generateWindSpeed(biome: string, precipitation: number): number {
+    let baseWind = 5;
+    
+    switch (biome) {
+      case 'coastal': baseWind = 12; break;
+      case 'mountain': baseWind = 15; break;
+      case 'plains': baseWind = 8; break;
+      case 'desert': baseWind = 6; break;
+    }
+
+    const precipitationEffect = precipitation * 0.3;
+    return Math.max(0, baseWind + precipitationEffect + (Math.random() - 0.5) * 8);
+  }
+
+  private calculateBarometricPressure(temperature: number, altitude: number): number {
     const seaLevelPressure = 1013.25;
-    const elevationEffect = -climate.elevation * 0.12; // hPa per meter
-    const noiseEffect = noise * 20;
-    const seasonalEffect = seasonal * 5;
+    const altitudeEffect = altitude * 0.12;
+    const temperatureEffect = (temperature - 15) * 0.5;
     
-    return Math.round((seaLevelPressure + elevationEffect + noiseEffect + seasonalEffect) * 10) / 10;
+    return seaLevelPressure - altitudeEffect + temperatureEffect + (Math.random() - 0.5) * 10;
   }
 
-  private calculateWind(climate: ClimateModel, noise: number): { speed: number; direction: number } {
-    const baseWindPattern = climate.windPatterns[0] || { direction: 0, speed: 5, seasonalVariation: 1, elevation: 0 };
-    
-    const speed = Math.max(0, baseWindPattern.speed + (noise * 15));
-    const direction = (baseWindPattern.direction + (noise * 60)) % 360;
-    
-    return { speed: Math.round(speed * 10) / 10, direction: Math.round(direction) };
+  private getAltitude(biome: string): number {
+    switch (biome) {
+      case 'mountain': return 2000;
+      case 'desert': return 500;
+      case 'coastal': return 0;
+      case 'forest': return 300;
+      default: return 200;
+    }
   }
 
   private calculateCloudCover(humidity: number, precipitation: number): number {
-    const humidityContrib = humidity * 0.8;
-    const precipContrib = Math.min(precipitation * 2, 40);
-    
-    return Math.max(0, Math.min(100, humidityContrib + precipContrib));
+    const humidityEffect = humidity / 100 * 80;
+    const precipitationEffect = Math.min(precipitation * 10, 20);
+    return Math.max(0, Math.min(100, humidityEffect + precipitationEffect + (Math.random() - 0.5) * 20));
   }
 
-  private calculateVisibility(precipitation: number, cloudCover: number, humidity: number): number {
-    let visibility = 50; // km base visibility
+  private calculateVisibility(precipitation: number, cloudCover: number): number {
+    let visibility = 25; // km
     
-    // Reduce visibility based on precipitation
-    visibility -= precipitation * 0.5;
+    if (precipitation > 10) visibility *= 0.3;
+    else if (precipitation > 2) visibility *= 0.7;
     
-    // Reduce visibility based on humidity (fog factor)
-    if (humidity > 95) {
-      visibility *= 0.1;
-    } else if (humidity > 85) {
-      visibility *= 0.5;
+    if (cloudCover > 80) visibility *= 0.8;
+    
+    return Math.max(0.1, visibility);
+  }
+
+  private calculateUVIndex(season: string, cloudCover: number, latitude: number): number {
+    const seasonMultiplier = {
+      spring: 0.7,
+      summer: 1.0,
+      autumn: 0.6,
+      winter: 0.3
+    }[season] || 0.7;
+
+    const latitudeEffect = Math.cos(latitude * Math.PI / 180);
+    const cloudEffect = Math.max(0.1, 1 - cloudCover / 150);
+    
+    return Math.max(0, 11 * seasonMultiplier * latitudeEffect * cloudEffect);
+  }
+
+  private determineWeatherType(temperature: number, precipitation: number, windSpeed: number, cloudCover: number): string {
+    if (precipitation > 10) return windSpeed > 20 ? 'thunderstorm' : 'heavy_rain';
+    if (precipitation > 2) return 'light_rain';
+    if (temperature < 0 && precipitation > 0) return 'snow';
+    if (windSpeed > 25) return 'windy';
+    if (cloudCover > 80) return 'overcast';
+    if (cloudCover > 40) return 'partly_cloudy';
+    if (temperature > 35) return 'hot';
+    if (temperature < 5) return 'cold';
+    return 'clear';
+  }
+
+  generateWeatherEvents(patterns: WeatherPattern[]): WeatherEvent[] {
+    const events: WeatherEvent[] = [];
+    
+    for (const pattern of patterns) {
+      const eventProbability = this.calculateEventProbability(pattern);
+      
+      if (Math.random() < eventProbability) {
+        const event = this.createWeatherEvent(pattern);
+        if (event) events.push(event);
+      }
     }
     
-    // Reduce visibility based on cloud cover
-    visibility -= (cloudCover / 100) * 10;
-    
-    return Math.max(0.1, Math.min(50, visibility));
+    return events;
   }
 
-  private determineWeatherType(
-    temperature: number,
-    precipitation: number,
-    humidity: number,
-    cloudCover: number
-  ): WeatherType {
-    if (precipitation > 20) {
-      if (temperature < 0) return WeatherType.SNOW;
-      if (precipitation > 40) return WeatherType.HEAVY_RAIN;
-      if (precipitation > 10) return WeatherType.MODERATE_RAIN;
-      return WeatherType.LIGHT_RAIN;
+  private calculateEventProbability(pattern: WeatherPattern): number {
+    let probability = 0.02; // Base 2% chance
+    
+    if (pattern.temperature > 40) probability += 0.05; // Heatwave risk
+    if (pattern.temperature < -20) probability += 0.08; // Blizzard risk
+    if (pattern.precipitation > 15) probability += 0.06; // Flood risk
+    if (pattern.windSpeed > 30) probability += 0.04; // Storm risk
+    
+    return Math.min(0.15, probability * pattern.intensity);
+  }
+
+  private createWeatherEvent(pattern: WeatherPattern): WeatherEvent | null {
+    let eventType: WeatherEvent['type'];
+    let severity: number;
+    let duration: number;
+
+    if (pattern.temperature > 40) {
+      eventType = 'heatwave';
+      severity = Math.min(5, (pattern.temperature - 35) / 5);
+      duration = 24 + Math.random() * 72;
+    } else if (pattern.temperature < -20) {
+      eventType = 'blizzard';
+      severity = Math.min(5, Math.abs(pattern.temperature + 15) / 10);
+      duration = 6 + Math.random() * 18;
+    } else if (pattern.precipitation > 15 && pattern.windSpeed > 25) {
+      eventType = 'storm';
+      severity = Math.min(5, (pattern.precipitation * pattern.windSpeed) / 300);
+      duration = 2 + Math.random() * 8;
+    } else if (pattern.precipitation > 20) {
+      eventType = 'flood';
+      severity = Math.min(5, pattern.precipitation / 10);
+      duration = 12 + Math.random() * 36;
+    } else {
+      return null;
     }
-    
-    if (humidity > 95 && cloudCover < 30) return WeatherType.FOG;
-    if (humidity > 85 && cloudCover < 50) return WeatherType.MIST;
-    
-    if (cloudCover > 80) return WeatherType.OVERCAST;
-    if (cloudCover > 50) return WeatherType.CLOUDY;
-    
-    return WeatherType.CLEAR;
-  }
 
-  private calculateIntensity(precipitation: number, windSpeed: number, pressure: number): number {
-    const precipIntensity = Math.min(precipitation / 50, 1);
-    const windIntensity = Math.min(windSpeed / 50, 1);
-    const pressureIntensity = Math.abs(1013.25 - pressure) / 100;
-    
-    return Math.min(1, (precipIntensity + windIntensity + pressureIntensity) / 3);
-  }
-}
+    const startTime = new Date();
+    const endTime = new Date(startTime.getTime() + duration * 60 * 60 * 1000);
 
-class ActivityImpactCalculator {
-  calculateEnvironmentalEffects(
-    weather: WeatherPattern,
-    activityType: string
-  ): EnvironmentalEffects {
-    const effects: EnvironmentalEffects = {
-      activityId: crypto.randomUUID(),
-      weatherImpact: 0,
-      visibilityReduction: 0,
-      mobilityModifier: 1,
-      comfortLevel: 1,
-      energyDrain: 1,
-      safetyRisk: 0,
-      recommendedActions: []
+    return {
+      id: crypto.randomUUID(),
+      type: eventType,
+      severity,
+      duration,
+      startTime,
+      endTime,
+      affectedRegions: [pattern.regionId],
+      effects: this.generateWeatherEffects(eventType, severity)
     };
+  }
 
-    // Temperature effects
-    if (weather.temperature < -10 || weather.temperature > 35) {
-      effects.comfortLevel *= 0.6;
-      effects.energyDrain *= 1.5;
-      effects.safetyRisk += 0.3;
+  private generateWeatherEffects(eventType: WeatherEvent['type'], severity: number): WeatherEffect[] {
+    const effects: WeatherEffect[] = [];
+    
+    switch (eventType) {
+      case 'heatwave':
+        effects.push(
+          { type: 'energy', modifier: -0.2 * severity, duration: 24, targetBehaviors: ['work', 'exercise', 'exploration'] },
+          { type: 'mood', modifier: -0.1 * severity, duration: 48, targetBehaviors: ['social', 'creative'] },
+          { type: 'health', modifier: -0.15 * severity, duration: 72, targetBehaviors: ['rest', 'hydration'] }
+        );
+        break;
+        
+      case 'blizzard':
+        effects.push(
+          { type: 'mobility', modifier: -0.4 * severity, duration: 12, targetBehaviors: ['travel', 'outdoor'] },
+          { type: 'visibility', modifier: -0.6 * severity, duration: 8, targetBehaviors: ['navigation', 'hunting'] },
+          { type: 'temperature', modifier: -10 * severity, duration: 24, targetBehaviors: ['shelter', 'warmth'] }
+        );
+        break;
+        
+      case 'storm':
+        effects.push(
+          { type: 'mobility', modifier: -0.3 * severity, duration: 6, targetBehaviors: ['outdoor', 'flight'] },
+          { type: 'mood', modifier: -0.2 * severity, duration: 12, targetBehaviors: ['anxiety', 'shelter-seeking'] },
+          { type: 'visibility', modifier: -0.4 * severity, duration: 4, targetBehaviors: ['visual_navigation'] }
+        );
+        break;
+        
+      case 'flood':
+        effects.push(
+          { type: 'mobility', modifier: -0.5 * severity, duration: 24, targetBehaviors: ['ground_travel', 'foraging'] },
+          { type: 'health', modifier: -0.1 * severity, duration: 48, targetBehaviors: ['water_safety', 'disease_prevention'] }
+        );
+        break;
     }
-
-    // Precipitation effects
-    if (weather.precipitation > 0) {
-      effects.mobilityModifier *= Math.max(0.3, 1 - (weather.precipitation / 50));
-      effects.visibilityReduction = Math.min(0.8, weather.precipitation / 30);
-      effects.safetyRisk += weather.precipitation / 100;
-    }
-
-    // Wind effects
-    if (weather.windSpeed > 30) {
-      effects.mobilityModifier *= 0.7;
-      effects.safetyRisk += 0.2;
-      effects.energyDrain *= 1.3;
-    }
-
-    // Visibility effects
-    if (weather.visibility < 1) {
-      effects.mobilityModifier *= 0.2;
-      effects.safetyRisk += 0.5;
-      effects.recommendedActions.push('Avoid outdoor activities');
-    }
-
-    // Activity-specific modifications
-    effects.weatherImpact = 1 - ((effects.mobilityModifier + effects.comfortLevel) / 2);
     
     return effects;
   }
 }
 
-class WeatherZoneManager {
-  constructor(private supabase: any) {}
+// Rate limiting configuration
+const limiter = rateLimit({
+  interval: 60 * 1000, // 1 minute
+  uniqueTokenPerInterval: 500,
+});
 
-  async getClimateModel(zoneId: string): Promise<ClimateModel | null> {
-    const { data, error } = await this.supabase
-      .from('craiverse_zones')
-      .select(`
-        id,
-        climate_type,
-        base_temperature,
-        temperature_variance,
-        precipitation_level,
-        seasonal_intensity,
-        elevation,
-        latitude,
-        longitude,
-        moisture_retention,
-        wind_patterns
-      `)
-      .eq('id', zoneId)
-      .single();
-
-    if (error || !data) return null;
-
-    return {
-      zoneId: data.id,
-      climateType: data.climate_type as ClimateZone,
-      baseTemperature: data.base_temperature,
-      temperatureVariance: data.temperature_variance,
-      precipitationLevel: data.precipitation_level,
-      seasonalIntensity: data.seasonal_intensity,
-      elevation: data.elevation,
-      latitude: data.latitude,
-      longitude: data.longitude,
-      moistureRetention: data.moisture_retention,
-      windPatterns: data.wind_patterns || [{ direction: 0, speed: 5, seasonalVariation: 1, elevation: 0 }]
-    };
-  }
-
-  async saveWeatherPattern(pattern: WeatherPattern): Promise<void> {
-    const { error } = await this.supabase
-      .from('weather_patterns')
-      .upsert({
-        id: pattern.id,
-        zone_id: pattern.zoneId,
-        temperature: pattern.temperature,
-        humidity: pattern.humidity,
-        precipitation: pattern.precipitation,
-        wind_speed: pattern.windSpeed,
-        wind_direction: pattern.windDirection,
-        pressure: pattern.pressure,
-        cloud_cover: pattern.cloudCover,
-        visibility: pattern.visibility,
-        weather_type: pattern.weatherType,
-        intensity: pattern.intensity,
-        timestamp: pattern.timestamp.toISOString(),
-        seasonal_modifier: pattern.seasonalModifier,
-        climate_zone: pattern.climateZone
-      });
-
-    if (error) {
-      throw new Error(`Failed to save weather pattern: ${error.message}`);
-    }
-  }
-
-  async getWeatherHistory(zoneId: string, hours: number = 24): Promise<WeatherPattern[]> {
-    const { data, error } = await this.supabase
-      .from('weather_patterns')
-      .select('*')
-      .eq('zone_id', zoneId)
-      .gte('timestamp', new Date(Date.now() - hours * 60 * 60 * 1000).toISOString())
-      .order('timestamp', { ascending: false });
-
-    if (error) throw new Error(error.message);
-
-    return data?.map(this.mapDbToWeatherPattern) || [];
-  }
-
-  private mapDbToWeatherPattern(dbData: any): WeatherPattern {
-    return {
-      id: dbData.id,
-      zoneId: dbData.zone_id,
-      temperature: dbData.temperature,
-      humidity: dbData.humidity,
-      precipitation: dbData.precipitation,
-      windSpeed: dbData.wind_speed,
-      windDirection: dbData.wind_direction,
-      pressure: dbData.pressure,
-      cloudCover: dbData.cloud_cover,
-      visibility: dbData.visibility,
-      weatherType: dbData.weather_type as WeatherType,
-      intensity: dbData.intensity,
-      timestamp: new Date(dbData.timestamp),
-      seasonalModifier: dbData.seasonal_modifier,
-      climateZone: dbData.climate_zone as ClimateZone
-    };
-  }
-}
-
-class SeasonalTransition {
-  calculateSeasonalModifier(date: Date, latitude: number): number {
-    const dayOfYear = Math.floor((date.getTime() - new Date(date.getFullYear(), 0, 0).getTime()) / (1000 * 60 * 60 * 24));
-    const latitudeEffect = Math.abs(latitude) / 90;
-    
-    // Northern hemisphere seasonal pattern
-    let seasonal = Math.sin((dayOfYear - 81) * 2 * Math.PI / 365.25);
-    
-    // Southern hemisphere (flip the seasons)
-    if (latitude < 0) {
-      seasonal = -seasonal;
-    }
-    
-    return seasonal * latitudeEffect;
-  }
-}
-
-// GET /api/craiverse/weather
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
+    // Rate limiting
+    const identifier = request.ip ?? 'anonymous';
+    const { success } = await limiter.check(10, identifier); // 10 requests per minute
+    if (!success) {
+      return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 });
+    }
+
+    // API key validation
+    const apiKey = request.headers.get('x-api-key');
+    if (!apiKey || !(await validateApiKey(apiKey))) {
+      return NextResponse.json({ error: 'Invalid API key' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
+    const regionId = searchParams.get('regionId');
     
-    // Handle different query patterns
-    if (searchParams.has('forecast')) {
-      return handleForecastRequest(request, supabase);
+    if (!regionId) {
+      return NextResponse.json({ error: 'Region ID is required' }, { status: 400 });
     }
-    
-    if (searchParams.has('effects')) {
-      return handleEffectsRequest(request, supabase);
-    }
-    
-    // Default weather query
-    const query = weatherQuerySchema.parse({
-      zoneId: searchParams.get('zoneId'),
-      timeframe: searchParams.get('timeframe'),
-      includeEffects: searchParams.get('includeEffects') === 'true'
+
+    // Validate query parameters
+    const queryData = weatherQuerySchema.safeParse({
+      regionId,
+      timeRange: searchParams.get('timeRange') || 'current',
+      includeEffects: searchParams.get('includeEffects') === 'true',
+      forecastDays: searchParams.get('forecastDays') ? parseInt(searchParams.get('forecastDays')!) : undefined
     });
 
-    const weatherManager = new WeatherZoneManager(supabase);
-    const weatherEngine = new WeatherEngine();
-    const seasonalTransition = new SeasonalTransition();
-
-    const climateModel = await weatherManager.getClimateModel(query.zoneId);
-    if (!climateModel) {
-      return NextResponse.json(
-        { error: 'Zone not found or no climate data available' },
-        { status: 404 }
-      );
+    if (!queryData.success) {
+      return NextResponse.json({ 
+        error: 'Invalid query parameters',
+        details: queryData.error.issues
+      }, { status: 400 });
     }
 
-    const now = new Date();
-    const seasonalModifier = seasonalTransition.calculateSeasonalModifier(
-      now,
-      climateModel.latitude
-    );
+    const supabase = createRouteHandlerClient({ cookies });
 
-    const currentWeather = weatherEngine.generateWeatherPattern(
-      climateModel,
-      now,
-      seasonalModifier
-    );
+    // Fetch current weather data
+    const { data: weatherData, error: weatherError } = await supabase
+      .from('weather_systems')
+      .select(`
+        *,
+        weather_events (
+          id,
+          type,
+          severity,
+          duration,
+          start_time,
+          end_time,
+          effects
+        )
+      `)
+      .eq('region_id', queryData.data.regionId)
+      .order('timestamp', { ascending: false })
+      .limit(queryData.data.timeRange === 'current' ? 1 : 24);
 
-    // Save current weather pattern
-    await weatherManager.saveWeatherPattern(currentWeather);
-
-    let response: any = { weather: currentWeather };
-
-    if (query.includeEffects) {
-      const impactCalculator = new ActivityImpactCalculator();
-      const effects = impactCalculator.calculateEnvironmentalEffects(
-        currentWeather,
-        'general'
-      );
-      response.effects = effects;
+    if (weatherError) {
+      console.error('Weather data fetch error:', weatherError);
+      return NextResponse.json({ error: 'Failed to fetch weather data' }, { status: 500 });
     }
 
-    if (query.timeframe === 'hourly') {
-      const history = await weatherManager.getWeatherHistory(query.zoneId, 24);
-      response.hourlyData = history;
-    } else if (query.timeframe === 'daily') {
-      const history = await weatherManager.getWeatherHistory(query.zoneId, 168); // 7 days
-      response.dailyData = history;
+    // Fetch biome information for context
+    const { data: biomeData } = await supabase
+      .from('biome_climates')
+      .select('biome_type, climate_profile')
+      .eq('region_id', queryData.data.regionId)
+      .single();
+
+    // Calculate inhabitant behavior effects if requested
+    let behaviorEffects = null;
+    if (queryData.data.includeEffects && weatherData?.length > 0) {
+      const { data: effectsData } = await supabase
+        .from('inhabitant_behaviors')
+        .select('behavior_type, weather_modifiers')
+        .eq('region_id', queryData.data.regionId);
+
+      behaviorEffects = effectsData;
     }
 
-    return NextResponse.json(response);
+    // Generate forecast if requested
+    let forecast = null;
+    if (queryData.data.forecastDays) {
+      const weatherEngine = new WeatherSimulationEngine();
+      const currentSeason = this.getCurrentSeason();
+      
+      forecast = Array.from({ length: queryData.data.forecastDays }, (_, i) => {
+        return weatherEngine.generateWeatherPattern(
+          queryData.data.regionId,
+          biomeData?.biome_type || 'forest',
+          currentSeason,
+          1.0
+        );
+      });
+    }
+
+    const response = {
+      success: true,
+      data: {
+        current: weatherData?.[0] || null,
+        historical: queryData.data.timeRange !== 'current' ? weatherData : null,
+        biome: biomeData,
+        behaviorEffects,
+        forecast,
+        metadata: {
+          regionId: queryData.data.regionId,
+          timeRange: queryData.data.timeRange,
+          timestamp: new Date().toISOString(),
+          includeEffects: queryData.data.includeEffects
+        }
+      }
+    };
+
+    return NextResponse.json(response, {
+      headers: {
+        'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+      },
+    });
 
   } catch (error) {
-    console.error('Weather API error:', error);
-    
-    if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: 'Invalid parameters', details: error.errors },
-        { status: 400 }
-      );
-    }
-
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    console.error('Weather API GET error:', error);
+    return NextResponse.json({ 
+      error: 'Internal server error',
+      message: process.env.NODE_ENV === 'development' ? String(error) : undefined
+    }, { status: 500 });
   }
 }
 
-// POST /api/craiverse/weather/generate
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
+    // Rate limiting for POST requests
+    const identifier = request.ip ?? 'anonymous';
+    const { success } = await limiter.check(5, identifier); // 5 requests per minute
+    if (!success) {
+      return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 });
+    }
+
+    // API key validation
+    const apiKey = request.headers.get('x-api-key');
+    if (!apiKey || !(await validateApiKey(apiKey))) {
+      return NextResponse.json({ error: 'Invalid API key' }, { status: 401 });
+    }
+
     const body = await request.json();
-    
-    const params = generateWeatherSchema.parse(body);
-    
-    const weatherManager = new WeatherZoneManager(supabase);
-    const weatherEngine = new WeatherEngine(params.seed);
-    const seasonalTransition = new SeasonalTransition();
 
-    const climateModel = await weatherManager.getClimateModel(params.zoneId);
-    if (!climateModel) {
-      return NextResponse.json(
-        { error: 'Zone not found or no climate data available' },
-        { status: 404 }
-      );
+    // Validate request data
+    const simulationData = weatherSimulateSchema.safeParse(body);
+    if (!simulationData.success) {
+      return NextResponse.json({ 
+        error: 'Invalid simulation parameters',
+        details: simulationData.error.issues
+      }, { status: 400 });
     }
 
+    const supabase = createRouteHandlerClient({ cookies });
+    const weatherEngine = new WeatherSimulationEngine();
+
+    // Generate weather patterns for the specified duration
     const patterns: WeatherPattern[] = [];
-    const startTime = new Date();
-
-    for (let hour = 0; hour < params.duration; hour++) {
-      const timestamp = new Date(startTime.getTime() + hour * 60 * 60 * 1000);
-      const seasonalModifier = seasonalTransition.calculateSeasonalModifier(
-        timestamp,
-        climateModel.latitude
-      );
-
-      let pattern = weatherEngine.generateWeatherPattern(
-        climateModel,
-        timestamp,
-        seasonalModifier
-      );
-
-      // Override weather type if forced
-      if (params.forcePattern) {
-        pattern.weatherType = params.forcePattern;
-      }
-
-      patterns.push(pattern);
-      await weatherManager.saveWeatherPattern(pattern);
-    }
-
-    return NextResponse.json({
-      generated: patterns.length,
-      patterns: patterns,
-      zoneId: params.zoneId,
-      duration: params.duration
-    });
-
-  } catch (error) {
-    console.error('Weather generation error:', error);
-    
-    if (error instanceof z.Z
+    const events: WeatherEvent[] = [];
+    const currentSeason = simulation
