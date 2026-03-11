@@ -1,0 +1,14 @@
+JAVARI STABILIZATION LOCK
+Generated: 2026-03-11T19:27:00Z
+Session: Emergency Stop + Controlled Restart
+
+ACTIVE GUARDS:
+  devopsExecutor.ts  → JAVARI_AUTOCOMMIT_DISABLED blocks all commits
+  Vercel env         → AUTONOMOUS_CORE_KILL_SWITCH=true
+  Vercel env         → JAVARI_EXECUTION_ENABLED=false
+  Vercel env         → AUTONOMOUS_CORE_ENABLED=false (all envs)
+  Vercel env         → JAVARI_AUTOCOMMIT_DISABLED=true
+  Vercel crons       → DISABLED at project level
+  vercel.json        → 0 cron definitions
+
+DO NOT REMOVE THIS FILE without re-enabling guards through proper channels.
