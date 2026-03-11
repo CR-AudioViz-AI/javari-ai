@@ -1,674 +1,747 @@
-/**
- * Automated Compliance Assessment Framework
- * Evaluates security posture against SOC 2, ISO 27001, and GDPR standards
- * with gap analysis and remediation planning capabilities
- */
-
+```typescript
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { z } from 'zod';
+import { EventEmitter } from 'events';
+import crypto from 'crypto';
 
 /**
- * Compliance standard types
+ * Regulatory compliance frameworks supported by the system
  */
-export enum ComplianceStandard {
-  SOC2 = 'SOC2',
-  ISO27001 = 'ISO27001',
-  GDPR = 'GDPR'
+export enum ComplianceFramework {
+  GDPR = 'GDPR',
+  CCPA = 'CCPA',
+  HIPAA = 'HIPAA',
+  SOX = 'SOX'
 }
 
 /**
- * Control implementation status
+ * Severity levels for compliance violations
  */
-export enum ControlStatus {
-  IMPLEMENTED = 'IMPLEMENTED',
-  PARTIALLY_IMPLEMENTED = 'PARTIALLY_IMPLEMENTED',
-  NOT_IMPLEMENTED = 'NOT_IMPLEMENTED',
-  NOT_APPLICABLE = 'NOT_APPLICABLE'
-}
-
-/**
- * Risk severity levels
- */
-export enum RiskLevel {
-  CRITICAL = 'CRITICAL',
-  HIGH = 'HIGH',
+export enum ViolationSeverity {
+  LOW = 'LOW',
   MEDIUM = 'MEDIUM',
-  LOW = 'LOW'
+  HIGH = 'HIGH',
+  CRITICAL = 'CRITICAL'
 }
 
 /**
- * Evidence types
+ * Types of compliance violations
  */
-export enum EvidenceType {
-  DOCUMENT = 'DOCUMENT',
-  SCREENSHOT = 'SCREENSHOT',
-  LOG_FILE = 'LOG_FILE',
-  CONFIGURATION = 'CONFIGURATION',
-  CERTIFICATE = 'CERTIFICATE'
+export enum ViolationType {
+  DATA_BREACH = 'DATA_BREACH',
+  UNAUTHORIZED_ACCESS = 'UNAUTHORIZED_ACCESS',
+  DATA_RETENTION_VIOLATION = 'DATA_RETENTION_VIOLATION',
+  CONSENT_VIOLATION = 'CONSENT_VIOLATION',
+  ENCRYPTION_FAILURE = 'ENCRYPTION_FAILURE',
+  AUDIT_LOG_TAMPERING = 'AUDIT_LOG_TAMPERING',
+  PRIVILEGE_ESCALATION = 'PRIVILEGE_ESCALATION',
+  DATA_EXPORT_VIOLATION = 'DATA_EXPORT_VIOLATION'
 }
 
 /**
- * Remediation task status
+ * Remediation actions that can be taken automatically
  */
-export enum TaskStatus {
-  PENDING = 'PENDING',
-  IN_PROGRESS = 'IN_PROGRESS',
-  COMPLETED = 'COMPLETED',
-  BLOCKED = 'BLOCKED'
+export enum RemediationAction {
+  REVOKE_ACCESS = 'REVOKE_ACCESS',
+  ENCRYPT_DATA = 'ENCRYPT_DATA',
+  DELETE_DATA = 'DELETE_DATA',
+  QUARANTINE_USER = 'QUARANTINE_USER',
+  NOTIFY_ADMIN = 'NOTIFY_ADMIN',
+  BLOCK_OPERATION = 'BLOCK_OPERATION',
+  ARCHIVE_DATA = 'ARCHIVE_DATA',
+  AUDIT_LOG_LOCK = 'AUDIT_LOG_LOCK'
 }
 
 /**
- * Schema definitions
+ * Interface for compliance rule definitions
  */
-const ControlSchema = z.object({
-  id: z.string(),
-  standard: z.nativeEnum(ComplianceStandard),
-  category: z.string(),
-  title: z.string(),
-  description: z.string(),
-  requirements: z.array(z.string()),
-  evidenceRequirements: z.array(z.string()),
-  riskLevel: z.nativeEnum(RiskLevel),
-  frequency: z.enum(['CONTINUOUS', 'MONTHLY', 'QUARTERLY', 'ANNUALLY'])
-});
-
-const EvidenceSchema = z.object({
-  id: z.string(),
-  controlId: z.string(),
-  type: z.nativeEnum(EvidenceType),
-  title: z.string(),
-  description: z.string(),
-  filePath: z.string().optional(),
-  content: z.string().optional(),
-  collectedAt: z.date(),
-  expiresAt: z.date().optional(),
-  isValid: z.boolean(),
-  validatedBy: z.string().optional(),
-  validatedAt: z.date().optional()
-});
-
-const AssessmentResultSchema = z.object({
-  id: z.string(),
-  assessmentId: z.string(),
-  controlId: z.string(),
-  status: z.nativeEnum(ControlStatus),
-  score: z.number().min(0).max(100),
-  findings: z.array(z.string()),
-  evidence: z.array(z.string()),
-  lastAssessed: z.date(),
-  assessedBy: z.string(),
-  notes: z.string().optional()
-});
-
-const GapAnalysisSchema = z.object({
-  id: z.string(),
-  assessmentId: z.string(),
-  standard: z.nativeEnum(ComplianceStandard),
-  overallScore: z.number().min(0).max(100),
-  implementedCount: z.number(),
-  partiallyImplementedCount: z.number(),
-  notImplementedCount: z.number(),
-  notApplicableCount: z.number(),
-  criticalGaps: z.array(z.string()),
-  highRiskGaps: z.array(z.string()),
-  recommendedActions: z.array(z.string()),
-  estimatedEffort: z.number(),
-  targetCompletionDate: z.date().optional()
-});
-
-const RemediationTaskSchema = z.object({
-  id: z.string(),
-  planId: z.string(),
-  controlId: z.string(),
-  title: z.string(),
-  description: z.string(),
-  priority: z.nativeEnum(RiskLevel),
-  status: z.nativeEnum(TaskStatus),
-  assignedTo: z.string().optional(),
-  estimatedHours: z.number(),
-  dueDate: z.date(),
-  completedAt: z.date().optional(),
-  dependencies: z.array(z.string()),
-  resources: z.array(z.string())
-});
-
-export type Control = z.infer<typeof ControlSchema>;
-export type Evidence = z.infer<typeof EvidenceSchema>;
-export type AssessmentResult = z.infer<typeof AssessmentResultSchema>;
-export type GapAnalysis = z.infer<typeof GapAnalysisSchema>;
-export type RemediationTask = z.infer<typeof RemediationTaskSchema>;
-
-/**
- * Assessment configuration
- */
-export interface AssessmentConfig {
+export interface ComplianceRule {
   id: string;
+  framework: ComplianceFramework;
   name: string;
-  standards: ComplianceStandard[];
-  scope: string[];
-  scheduledDate: Date;
-  assessor: string;
-  automatedChecks: boolean;
-  includeEvidence: boolean;
-  notifyOnCompletion: boolean;
+  description: string;
+  severity: ViolationSeverity;
+  condition: (context: ComplianceContext) => boolean;
+  remediation: RemediationAction[];
+  enabled: boolean;
+  metadata: Record<string, any>;
 }
 
 /**
- * Compliance dashboard metrics
+ * Context information for compliance evaluation
+ */
+export interface ComplianceContext {
+  userId: string;
+  sessionId: string;
+  operation: string;
+  resourceType: string;
+  resourceId: string;
+  timestamp: Date;
+  metadata: Record<string, any>;
+  userRole: string;
+  dataClassification: string;
+  geolocation?: string;
+}
+
+/**
+ * Violation alert structure
+ */
+export interface ViolationAlert {
+  id: string;
+  ruleId: string;
+  framework: ComplianceFramework;
+  violationType: ViolationType;
+  severity: ViolationSeverity;
+  context: ComplianceContext;
+  timestamp: Date;
+  resolved: boolean;
+  remediationActions: RemediationAction[];
+  evidence: Record<string, any>;
+}
+
+/**
+ * Audit log entry structure
+ */
+export interface AuditLogEntry {
+  id: string;
+  timestamp: Date;
+  userId: string;
+  action: string;
+  resource: string;
+  result: 'SUCCESS' | 'FAILURE' | 'BLOCKED';
+  compliance_frameworks: ComplianceFramework[];
+  hash: string;
+  previousHash?: string;
+  signature: string;
+  metadata: Record<string, any>;
+}
+
+/**
+ * User consent record
+ */
+export interface ConsentRecord {
+  userId: string;
+  purpose: string;
+  framework: ComplianceFramework;
+  granted: boolean;
+  timestamp: Date;
+  expiresAt?: Date;
+  withdrawn: boolean;
+  withdrawnAt?: Date;
+  version: string;
+  evidence: Record<string, any>;
+}
+
+/**
+ * Data retention policy
+ */
+export interface RetentionPolicy {
+  id: string;
+  dataType: string;
+  framework: ComplianceFramework;
+  retentionPeriod: number; // days
+  archivalRequired: boolean;
+  purgeMethod: 'DELETE' | 'ANONYMIZE' | 'ENCRYPT';
+  enabled: boolean;
+}
+
+/**
+ * Compliance report structure
+ */
+export interface ComplianceReport {
+  id: string;
+  framework: ComplianceFramework;
+  period: {
+    start: Date;
+    end: Date;
+  };
+  violations: ViolationAlert[];
+  remediations: RemediationRecord[];
+  metrics: ComplianceMetrics;
+  generatedAt: Date;
+  format: 'JSON' | 'PDF' | 'CSV';
+}
+
+/**
+ * Remediation record
+ */
+export interface RemediationRecord {
+  id: string;
+  violationId: string;
+  action: RemediationAction;
+  executedAt: Date;
+  success: boolean;
+  details: Record<string, any>;
+}
+
+/**
+ * Compliance metrics
  */
 export interface ComplianceMetrics {
-  overallScore: number;
-  standardScores: Record<ComplianceStandard, number>;
-  controlsByStatus: Record<ControlStatus, number>;
-  riskDistribution: Record<RiskLevel, number>;
-  trendsOverTime: Array<{
-    date: Date;
-    score: number;
-    standard: ComplianceStandard;
-  }>;
-  upcomingDeadlines: Array<{
-    taskId: string;
-    title: string;
-    dueDate: Date;
-    priority: RiskLevel;
-  }>;
+  totalViolations: number;
+  violationsBySeverity: Record<ViolationSeverity, number>;
+  violationsByFramework: Record<ComplianceFramework, number>;
+  remediationSuccess: number;
+  averageResolutionTime: number;
+  complianceScore: number;
 }
 
 /**
- * Standards registry that maintains compliance control definitions
+ * Configuration for the compliance module
  */
-export class StandardsRegistry {
+export interface ComplianceConfig {
+  supabaseUrl: string;
+  supabaseKey: string;
+  encryptionKey: string;
+  alertWebhooks: string[];
+  enabledFrameworks: ComplianceFramework[];
+  autoRemediation: boolean;
+  auditRetentionDays: number;
+  reportSchedule: string;
+}
+
+/**
+ * Core compliance monitoring engine with rule-based violation detection
+ */
+export class ComplianceMonitor extends EventEmitter {
   private supabase: SupabaseClient;
-  private controlsCache = new Map<string, Control[]>();
-  private lastCacheUpdate = new Map<ComplianceStandard, Date>();
+  private rules: Map<string, ComplianceRule> = new Map();
+  private config: ComplianceConfig;
+  private encryptionKey: Buffer;
 
-  constructor(supabase: SupabaseClient) {
-    this.supabase = supabase;
+  constructor(config: ComplianceConfig) {
+    super();
+    this.config = config;
+    this.supabase = createClient(config.supabaseUrl, config.supabaseKey);
+    this.encryptionKey = Buffer.from(config.encryptionKey, 'hex');
+    this.initializeDefaultRules();
   }
 
   /**
-   * Get controls for a specific compliance standard
+   * Initialize default compliance rules for supported frameworks
    */
-  async getControls(standard: ComplianceStandard, forceRefresh = false): Promise<Control[]> {
-    const cacheKey = standard;
-    const lastUpdate = this.lastCacheUpdate.get(standard);
-    const cacheExpiry = 24 * 60 * 60 * 1000; // 24 hours
-
-    if (!forceRefresh && this.controlsCache.has(cacheKey) && lastUpdate && 
-        Date.now() - lastUpdate.getTime() < cacheExpiry) {
-      return this.controlsCache.get(cacheKey)!;
-    }
-
-    try {
-      const { data, error } = await this.supabase
-        .from('compliance_standards')
-        .select('controls')
-        .eq('standard', standard)
-        .eq('active', true)
-        .single();
-
-      if (error) throw error;
-
-      const controls = data.controls.map((control: any) => ControlSchema.parse(control));
-      this.controlsCache.set(cacheKey, controls);
-      this.lastCacheUpdate.set(standard, new Date());
-
-      return controls;
-    } catch (error) {
-      throw new Error(`Failed to fetch controls for ${standard}: ${error}`);
-    }
-  }
-
-  /**
-   * Update control definition
-   */
-  async updateControl(standard: ComplianceStandard, control: Control): Promise<void> {
-    try {
-      const controls = await this.getControls(standard, true);
-      const updatedControls = controls.map(c => c.id === control.id ? control : c);
-
-      const { error } = await this.supabase
-        .from('compliance_standards')
-        .update({ 
-          controls: updatedControls,
-          updated_at: new Date().toISOString()
-        })
-        .eq('standard', standard);
-
-      if (error) throw error;
-
-      // Invalidate cache
-      this.controlsCache.delete(standard);
-      this.lastCacheUpdate.delete(standard);
-    } catch (error) {
-      throw new Error(`Failed to update control: ${error}`);
-    }
-  }
-
-  /**
-   * Get control by ID across all standards
-   */
-  async getControlById(controlId: string): Promise<Control | null> {
-    for (const standard of Object.values(ComplianceStandard)) {
-      const controls = await this.getControls(standard);
-      const control = controls.find(c => c.id === controlId);
-      if (control) return control;
-    }
-    return null;
-  }
-}
-
-/**
- * Evidence collector for gathering compliance artifacts
- */
-export class EvidenceCollector {
-  private supabase: SupabaseClient;
-
-  constructor(supabase: SupabaseClient) {
-    this.supabase = supabase;
-  }
-
-  /**
-   * Collect evidence for a control
-   */
-  async collectEvidence(controlId: string, evidence: Omit<Evidence, 'id'>): Promise<string> {
-    try {
-      const validatedEvidence = EvidenceSchema.omit({ id: true }).parse(evidence);
-      
-      const { data, error } = await this.supabase
-        .from('compliance_evidence')
-        .insert({
-          ...validatedEvidence,
-          control_id: controlId,
-          collected_at: new Date().toISOString(),
-          expires_at: validatedEvidence.expiresAt?.toISOString()
-        })
-        .select('id')
-        .single();
-
-      if (error) throw error;
-
-      return data.id;
-    } catch (error) {
-      throw new Error(`Failed to collect evidence: ${error}`);
-    }
-  }
-
-  /**
-   * Get evidence for a control
-   */
-  async getEvidence(controlId: string): Promise<Evidence[]> {
-    try {
-      const { data, error } = await this.supabase
-        .from('compliance_evidence')
-        .select('*')
-        .eq('control_id', controlId)
-        .order('collected_at', { ascending: false });
-
-      if (error) throw error;
-
-      return data.map(item => EvidenceSchema.parse({
-        id: item.id,
-        controlId: item.control_id,
-        type: item.type,
-        title: item.title,
-        description: item.description,
-        filePath: item.file_path,
-        content: item.content,
-        collectedAt: new Date(item.collected_at),
-        expiresAt: item.expires_at ? new Date(item.expires_at) : undefined,
-        isValid: item.is_valid,
-        validatedBy: item.validated_by,
-        validatedAt: item.validated_at ? new Date(item.validated_at) : undefined
-      }));
-    } catch (error) {
-      throw new Error(`Failed to get evidence: ${error}`);
-    }
-  }
-
-  /**
-   * Validate evidence
-   */
-  async validateEvidence(evidenceId: string, isValid: boolean, validatedBy: string): Promise<void> {
-    try {
-      const { error } = await this.supabase
-        .from('compliance_evidence')
-        .update({
-          is_valid: isValid,
-          validated_by: validatedBy,
-          validated_at: new Date().toISOString()
-        })
-        .eq('id', evidenceId);
-
-      if (error) throw error;
-    } catch (error) {
-      throw new Error(`Failed to validate evidence: ${error}`);
-    }
-  }
-
-  /**
-   * Get expired evidence
-   */
-  async getExpiredEvidence(): Promise<Evidence[]> {
-    try {
-      const { data, error } = await this.supabase
-        .from('compliance_evidence')
-        .select('*')
-        .lt('expires_at', new Date().toISOString())
-        .eq('is_valid', true);
-
-      if (error) throw error;
-
-      return data.map(item => EvidenceSchema.parse({
-        id: item.id,
-        controlId: item.control_id,
-        type: item.type,
-        title: item.title,
-        description: item.description,
-        filePath: item.file_path,
-        content: item.content,
-        collectedAt: new Date(item.collected_at),
-        expiresAt: item.expires_at ? new Date(item.expires_at) : undefined,
-        isValid: item.is_valid,
-        validatedBy: item.validated_by,
-        validatedAt: item.validated_at ? new Date(item.validated_at) : undefined
-      }));
-    } catch (error) {
-      throw new Error(`Failed to get expired evidence: ${error}`);
-    }
-  }
-}
-
-/**
- * Risk scorer for compliance controls
- */
-export class RiskScorer {
-  /**
-   * Calculate risk score for a control based on implementation status and inherent risk
-   */
-  calculateControlRisk(control: Control, status: ControlStatus, evidence: Evidence[]): number {
-    let baseRisk = this.getRiskLevelScore(control.riskLevel);
-    let implementationMultiplier = this.getImplementationMultiplier(status);
-    let evidenceQualityScore = this.calculateEvidenceQuality(evidence);
-
-    // Adjust risk based on implementation status
-    let adjustedRisk = baseRisk * implementationMultiplier;
-
-    // Reduce risk based on evidence quality
-    adjustedRisk = adjustedRisk * (1 - (evidenceQualityScore * 0.2));
-
-    return Math.max(0, Math.min(100, adjustedRisk));
-  }
-
-  /**
-   * Calculate overall compliance score
-   */
-  calculateComplianceScore(results: AssessmentResult[]): number {
-    if (results.length === 0) return 0;
-
-    const totalScore = results.reduce((sum, result) => sum + result.score, 0);
-    return Math.round(totalScore / results.length);
-  }
-
-  /**
-   * Calculate gap analysis metrics
-   */
-  calculateGapMetrics(results: AssessmentResult[]): {
-    implemented: number;
-    partiallyImplemented: number;
-    notImplemented: number;
-    notApplicable: number;
-  } {
-    const counts = {
-      implemented: 0,
-      partiallyImplemented: 0,
-      notImplemented: 0,
-      notApplicable: 0
-    };
-
-    results.forEach(result => {
-      switch (result.status) {
-        case ControlStatus.IMPLEMENTED:
-          counts.implemented++;
-          break;
-        case ControlStatus.PARTIALLY_IMPLEMENTED:
-          counts.partiallyImplemented++;
-          break;
-        case ControlStatus.NOT_IMPLEMENTED:
-          counts.notImplemented++;
-          break;
-        case ControlStatus.NOT_APPLICABLE:
-          counts.notApplicable++;
-          break;
+  private initializeDefaultRules(): void {
+    const defaultRules: ComplianceRule[] = [
+      {
+        id: 'gdpr-data-access-log',
+        framework: ComplianceFramework.GDPR,
+        name: 'GDPR Data Access Logging',
+        description: 'All personal data access must be logged',
+        severity: ViolationSeverity.HIGH,
+        condition: (context) => context.resourceType === 'personal_data' && !context.metadata.logged,
+        remediation: [RemediationAction.AUDIT_LOG_LOCK, RemediationAction.NOTIFY_ADMIN],
+        enabled: true,
+        metadata: { article: 'Article 30' }
+      },
+      {
+        id: 'ccpa-consent-required',
+        framework: ComplianceFramework.CCPA,
+        name: 'CCPA Consent Requirement',
+        description: 'Personal information processing requires valid consent',
+        severity: ViolationSeverity.CRITICAL,
+        condition: (context) => context.resourceType === 'personal_info' && !context.metadata.hasConsent,
+        remediation: [RemediationAction.BLOCK_OPERATION, RemediationAction.NOTIFY_ADMIN],
+        enabled: true,
+        metadata: { section: '1798.100' }
+      },
+      {
+        id: 'hipaa-phi-encryption',
+        framework: ComplianceFramework.HIPAA,
+        name: 'HIPAA PHI Encryption',
+        description: 'Protected Health Information must be encrypted',
+        severity: ViolationSeverity.CRITICAL,
+        condition: (context) => context.dataClassification === 'PHI' && !context.metadata.encrypted,
+        remediation: [RemediationAction.ENCRYPT_DATA, RemediationAction.BLOCK_OPERATION],
+        enabled: true,
+        metadata: { safeguard: 'Technical Safeguards' }
+      },
+      {
+        id: 'sox-financial-access-control',
+        framework: ComplianceFramework.SOX,
+        name: 'SOX Financial Data Access Control',
+        description: 'Financial data access must be properly authorized',
+        severity: ViolationSeverity.HIGH,
+        condition: (context) => context.resourceType === 'financial_data' && context.userRole !== 'financial_analyst',
+        remediation: [RemediationAction.REVOKE_ACCESS, RemediationAction.NOTIFY_ADMIN],
+        enabled: true,
+        metadata: { section: '404' }
       }
-    });
+    ];
 
-    return counts;
-  }
-
-  private getRiskLevelScore(riskLevel: RiskLevel): number {
-    const scores = {
-      [RiskLevel.CRITICAL]: 100,
-      [RiskLevel.HIGH]: 75,
-      [RiskLevel.MEDIUM]: 50,
-      [RiskLevel.LOW]: 25
-    };
-    return scores[riskLevel];
-  }
-
-  private getImplementationMultiplier(status: ControlStatus): number {
-    const multipliers = {
-      [ControlStatus.IMPLEMENTED]: 0.1,
-      [ControlStatus.PARTIALLY_IMPLEMENTED]: 0.5,
-      [ControlStatus.NOT_IMPLEMENTED]: 1.0,
-      [ControlStatus.NOT_APPLICABLE]: 0.0
-    };
-    return multipliers[status];
-  }
-
-  private calculateEvidenceQuality(evidence: Evidence[]): number {
-    if (evidence.length === 0) return 0;
-
-    const validEvidence = evidence.filter(e => e.isValid);
-    const recentEvidence = evidence.filter(e => {
-      const daysSinceCollection = (Date.now() - e.collectedAt.getTime()) / (1000 * 60 * 60 * 24);
-      return daysSinceCollection <= 90; // Evidence is recent if collected within 90 days
-    });
-
-    const validityScore = validEvidence.length / evidence.length;
-    const recencyScore = recentEvidence.length / evidence.length;
-
-    return (validityScore + recencyScore) / 2;
-  }
-}
-
-/**
- * Gap analysis processor
- */
-export class GapAnalysisProcessor {
-  private riskScorer: RiskScorer;
-
-  constructor() {
-    this.riskScorer = new RiskScorer();
+    defaultRules.forEach(rule => this.rules.set(rule.id, rule));
   }
 
   /**
-   * Process gap analysis for assessment results
+   * Evaluate compliance context against all applicable rules
    */
-  async processGapAnalysis(
-    assessmentId: string,
-    standard: ComplianceStandard,
-    results: AssessmentResult[],
-    controls: Control[]
-  ): Promise<GapAnalysis> {
-    const overallScore = this.riskScorer.calculateComplianceScore(results);
-    const metrics = this.riskScorer.calculateGapMetrics(results);
-    
-    const criticalGaps = this.identifyCriticalGaps(results, controls);
-    const highRiskGaps = this.identifyHighRiskGaps(results, controls);
-    const recommendedActions = this.generateRecommendations(results, controls);
-    const estimatedEffort = this.estimateRemediationEffort(results, controls);
+  public async evaluateCompliance(context: ComplianceContext): Promise<ViolationAlert[]> {
+    try {
+      const violations: ViolationAlert[] = [];
+      const applicableRules = Array.from(this.rules.values())
+        .filter(rule => rule.enabled && this.config.enabledFrameworks.includes(rule.framework));
 
-    return {
-      id: crypto.randomUUID(),
-      assessmentId,
-      standard,
-      overallScore,
-      implementedCount: metrics.implemented,
-      partiallyImplementedCount: metrics.partiallyImplemented,
-      notImplementedCount: metrics.notImplemented,
-      notApplicableCount: metrics.notApplicable,
-      criticalGaps,
-      highRiskGaps,
-      recommendedActions,
-      estimatedEffort,
-      targetCompletionDate: this.calculateTargetDate(estimatedEffort)
-    };
-  }
+      for (const rule of applicableRules) {
+        if (rule.condition(context)) {
+          const violation: ViolationAlert = {
+            id: crypto.randomUUID(),
+            ruleId: rule.id,
+            framework: rule.framework,
+            violationType: this.mapRuleToViolationType(rule),
+            severity: rule.severity,
+            context,
+            timestamp: new Date(),
+            resolved: false,
+            remediationActions: rule.remediation,
+            evidence: {
+              rule: rule.name,
+              condition: rule.description,
+              metadata: context.metadata
+            }
+          };
 
-  private identifyCriticalGaps(results: AssessmentResult[], controls: Control[]): string[] {
-    return results
-      .filter(result => result.status === ControlStatus.NOT_IMPLEMENTED)
-      .map(result => controls.find(c => c.id === result.controlId))
-      .filter((control): control is Control => control !== undefined && control.riskLevel === RiskLevel.CRITICAL)
-      .map(control => control.id);
-  }
+          violations.push(violation);
+          this.emit('violation', violation);
 
-  private identifyHighRiskGaps(results: AssessmentResult[], controls: Control[]): string[] {
-    return results
-      .filter(result => result.status === ControlStatus.NOT_IMPLEMENTED || result.status === ControlStatus.PARTIALLY_IMPLEMENTED)
-      .map(result => controls.find(c => c.id === result.controlId))
-      .filter((control): control is Control => control !== undefined && control.riskLevel === RiskLevel.HIGH)
-      .map(control => control.id);
-  }
+          await this.storeViolation(violation);
 
-  private generateRecommendations(results: AssessmentResult[], controls: Control[]): string[] {
-    const recommendations: string[] = [];
-    
-    const notImplementedControls = results.filter(r => r.status === ControlStatus.NOT_IMPLEMENTED);
-    const partialControls = results.filter(r => r.status === ControlStatus.PARTIALLY_IMPLEMENTED);
-
-    if (notImplementedControls.length > 0) {
-      recommendations.push(`Implement ${notImplementedControls.length} missing controls to improve compliance posture`);
-    }
-
-    if (partialControls.length > 0) {
-      recommendations.push(`Complete implementation of ${partialControls.length} partially implemented controls`);
-    }
-
-    const criticalControls = notImplementedControls.filter(result => {
-      const control = controls.find(c => c.id === result.controlId);
-      return control?.riskLevel === RiskLevel.CRITICAL;
-    });
-
-    if (criticalControls.length > 0) {
-      recommendations.push(`Prioritize ${criticalControls.length} critical controls for immediate implementation`);
-    }
-
-    return recommendations;
-  }
-
-  private estimateRemediationEffort(results: AssessmentResult[], controls: Control[]): number {
-    const baseHours = {
-      [RiskLevel.CRITICAL]: 40,
-      [RiskLevel.HIGH]: 24,
-      [RiskLevel.MEDIUM]: 16,
-      [RiskLevel.LOW]: 8
-    };
-
-    let totalHours = 0;
-
-    results.forEach(result => {
-      const control = controls.find(c => c.id === result.controlId);
-      if (!control) return;
-
-      let multiplier = 1;
-      switch (result.status) {
-        case ControlStatus.NOT_IMPLEMENTED:
-          multiplier = 1;
-          break;
-        case ControlStatus.PARTIALLY_IMPLEMENTED:
-          multiplier = 0.5;
-          break;
-        default:
-          multiplier = 0;
+          if (this.config.autoRemediation) {
+            await this.executeRemediation(violation);
+          }
+        }
       }
 
-      totalHours += baseHours[control.riskLevel] * multiplier;
-    });
-
-    return Math.ceil(totalHours);
-  }
-
-  private calculateTargetDate(estimatedHours: number): Date {
-    const workingHoursPerWeek = 40;
-    const weeksNeeded = Math.ceil(estimatedHours / workingHoursPerWeek);
-    const targetDate = new Date();
-    targetDate.setDate(targetDate.getDate() + (weeksNeeded * 7));
-    return targetDate;
-  }
-}
-
-/**
- * Remediation planner for generating action plans
- */
-export class RemediationPlanner {
-  private supabase: SupabaseClient;
-
-  constructor(supabase: SupabaseClient) {
-    this.supabase = supabase;
-  }
-
-  /**
-   * Create remediation plan from gap analysis
-   */
-  async createRemediationPlan(
-    gapAnalysis: GapAnalysis,
-    results: AssessmentResult[],
-    controls: Control[]
-  ): Promise<string> {
-    try {
-      const { data: plan, error: planError } = await this.supabase
-        .from('remediation_plans')
-        .insert({
-          assessment_id: gapAnalysis.assessmentId,
-          standard: gapAnalysis.standard,
-          total_tasks: 0,
-          estimated_hours: gapAnalysis.estimatedEffort,
-          target_completion: gapAnalysis.targetCompletionDate?.toISOString(),
-          status: 'DRAFT'
-        })
-        .select('id')
-        .single();
-
-      if (planError) throw planError;
-
-      const tasks = this.generateRemediationTasks(plan.id, results, controls);
-      await this.saveTasks(tasks);
-
-      // Update task count
-      await this.supabase
-        .from('remediation_plans')
-        .update({ total_tasks: tasks.length })
-        .eq('id', plan.id);
-
-      return plan.id;
+      return violations;
     } catch (error) {
-      throw new Error(`Failed to create remediation plan: ${error}`);
+      throw new Error(`Compliance evaluation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
   /**
-   * Get remediation tasks for a plan
+   * Map compliance rule to violation type
    */
-  async getTasks(planId: string): Promise<RemediationTask[]> {
+  private mapRuleToViolationType(rule: ComplianceRule): ViolationType {
+    if (rule.name.toLowerCase().includes('access')) return ViolationType.UNAUTHORIZED_ACCESS;
+    if (rule.name.toLowerCase().includes('encryption')) return ViolationType.ENCRYPTION_FAILURE;
+    if (rule.name.toLowerCase().includes('consent')) return ViolationType.CONSENT_VIOLATION;
+    if (rule.name.toLowerCase().includes('retention')) return ViolationType.DATA_RETENTION_VIOLATION;
+    return ViolationType.DATA_BREACH;
+  }
+
+  /**
+   * Store violation in database
+   */
+  private async storeViolation(violation: ViolationAlert): Promise<void> {
+    const { error } = await this.supabase
+      .from('compliance_violations')
+      .insert({
+        id: violation.id,
+        rule_id: violation.ruleId,
+        framework: violation.framework,
+        violation_type: violation.violationType,
+        severity: violation.severity,
+        context: violation.context,
+        timestamp: violation.timestamp.toISOString(),
+        resolved: violation.resolved,
+        remediation_actions: violation.remediationActions,
+        evidence: violation.evidence
+      });
+
+    if (error) {
+      throw new Error(`Failed to store violation: ${error.message}`);
+    }
+  }
+
+  /**
+   * Execute automated remediation
+   */
+  private async executeRemediation(violation: ViolationAlert): Promise<void> {
+    const remediationEngine = new RemediationEngine(this.supabase, this.config);
+    await remediationEngine.execute(violation);
+  }
+
+  /**
+   * Add custom compliance rule
+   */
+  public addRule(rule: ComplianceRule): void {
+    this.rules.set(rule.id, rule);
+  }
+
+  /**
+   * Remove compliance rule
+   */
+  public removeRule(ruleId: string): boolean {
+    return this.rules.delete(ruleId);
+  }
+
+  /**
+   * Get all active rules
+   */
+  public getRules(): ComplianceRule[] {
+    return Array.from(this.rules.values());
+  }
+}
+
+/**
+ * Real-time alert system with severity classification
+ */
+export class ViolationAlert extends EventEmitter {
+  private supabase: SupabaseClient;
+  private webhooks: string[];
+
+  constructor(supabase: SupabaseClient, webhooks: string[]) {
+    super();
+    this.supabase = supabase;
+    this.webhooks = webhooks;
+  }
+
+  /**
+   * Send violation alert to configured channels
+   */
+  public async sendAlert(violation: ViolationAlert): Promise<void> {
     try {
-      const { data, error } = await this.supabase
-        .from('remediation_tasks')
-        .select('*')
-        .eq('plan_id', planId)
-        .order('priority', { ascending: true });
+      const alertPayload = {
+        id: violation.id,
+        severity: violation.severity,
+        framework: violation.framework,
+        violationType: violation.violationType,
+        timestamp: violation.timestamp,
+        context: {
+          userId: violation.context.userId,
+          operation: violation.context.operation,
+          resource: violation.context.resourceType
+        },
+        evidence: violation.evidence
+      };
 
-      if (error) throw error;
+      // Send to configured webhooks
+      const webhookPromises = this.webhooks.map(async (webhook) => {
+        try {
+          const response = await fetch(webhook, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(alertPayload)
+          });
 
-      return data.
+          if (!response.ok) {
+            throw new Error(`Webhook failed: ${response.status}`);
+          }
+        } catch (error) {
+          console.error(`Webhook alert failed for ${webhook}:`, error);
+        }
+      });
+
+      await Promise.allSettled(webhookPromises);
+
+      // Store alert in database
+      await this.storeAlert(violation);
+
+      this.emit('alertSent', violation);
+    } catch (error) {
+      throw new Error(`Failed to send violation alert: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Store alert in database
+   */
+  private async storeAlert(violation: ViolationAlert): Promise<void> {
+    const { error } = await this.supabase
+      .from('compliance_alerts')
+      .insert({
+        violation_id: violation.id,
+        severity: violation.severity,
+        framework: violation.framework,
+        sent_at: new Date().toISOString(),
+        channels: this.webhooks.length,
+        payload: violation
+      });
+
+    if (error) {
+      throw new Error(`Failed to store alert: ${error.message}`);
+    }
+  }
+}
+
+/**
+ * Automated response system for compliance violations
+ */
+export class RemediationEngine {
+  private supabase: SupabaseClient;
+  private config: ComplianceConfig;
+
+  constructor(supabase: SupabaseClient, config: ComplianceConfig) {
+    this.supabase = supabase;
+    this.config = config;
+  }
+
+  /**
+   * Execute remediation actions for a violation
+   */
+  public async execute(violation: ViolationAlert): Promise<RemediationRecord[]> {
+    const records: RemediationRecord[] = [];
+
+    for (const action of violation.remediationActions) {
+      try {
+        const record: RemediationRecord = {
+          id: crypto.randomUUID(),
+          violationId: violation.id,
+          action,
+          executedAt: new Date(),
+          success: false,
+          details: {}
+        };
+
+        switch (action) {
+          case RemediationAction.REVOKE_ACCESS:
+            record.success = await this.revokeAccess(violation.context);
+            break;
+          case RemediationAction.ENCRYPT_DATA:
+            record.success = await this.encryptData(violation.context);
+            break;
+          case RemediationAction.DELETE_DATA:
+            record.success = await this.deleteData(violation.context);
+            break;
+          case RemediationAction.QUARANTINE_USER:
+            record.success = await this.quarantineUser(violation.context);
+            break;
+          case RemediationAction.BLOCK_OPERATION:
+            record.success = await this.blockOperation(violation.context);
+            break;
+          case RemediationAction.ARCHIVE_DATA:
+            record.success = await this.archiveData(violation.context);
+            break;
+          case RemediationAction.AUDIT_LOG_LOCK:
+            record.success = await this.lockAuditLog(violation.context);
+            break;
+          case RemediationAction.NOTIFY_ADMIN:
+            record.success = await this.notifyAdmin(violation);
+            break;
+        }
+
+        await this.storeRemediationRecord(record);
+        records.push(record);
+      } catch (error) {
+        console.error(`Remediation action ${action} failed:`, error);
+      }
+    }
+
+    return records;
+  }
+
+  /**
+   * Revoke user access to resource
+   */
+  private async revokeAccess(context: ComplianceContext): Promise<boolean> {
+    try {
+      const { error } = await this.supabase
+        .from('user_permissions')
+        .update({ revoked: true, revoked_at: new Date().toISOString() })
+        .eq('user_id', context.userId)
+        .eq('resource_id', context.resourceId);
+
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Encrypt sensitive data
+   */
+  private async encryptData(context: ComplianceContext): Promise<boolean> {
+    try {
+      // Implementation would depend on specific encryption requirements
+      const { error } = await this.supabase
+        .from('data_encryption_queue')
+        .insert({
+          resource_type: context.resourceType,
+          resource_id: context.resourceId,
+          requested_at: new Date().toISOString(),
+          priority: 'HIGH'
+        });
+
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Delete data according to compliance requirements
+   */
+  private async deleteData(context: ComplianceContext): Promise<boolean> {
+    try {
+      const { error } = await this.supabase
+        .from('data_deletion_queue')
+        .insert({
+          resource_type: context.resourceType,
+          resource_id: context.resourceId,
+          requested_at: new Date().toISOString(),
+          reason: 'COMPLIANCE_VIOLATION'
+        });
+
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Quarantine user account
+   */
+  private async quarantineUser(context: ComplianceContext): Promise<boolean> {
+    try {
+      const { error } = await this.supabase
+        .from('user_quarantine')
+        .insert({
+          user_id: context.userId,
+          quarantined_at: new Date().toISOString(),
+          reason: 'COMPLIANCE_VIOLATION',
+          session_id: context.sessionId
+        });
+
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Block current operation
+   */
+  private async blockOperation(context: ComplianceContext): Promise<boolean> {
+    try {
+      const { error } = await this.supabase
+        .from('blocked_operations')
+        .insert({
+          user_id: context.userId,
+          operation: context.operation,
+          resource_type: context.resourceType,
+          resource_id: context.resourceId,
+          blocked_at: new Date().toISOString(),
+          session_id: context.sessionId
+        });
+
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Archive data for compliance
+   */
+  private async archiveData(context: ComplianceContext): Promise<boolean> {
+    try {
+      const { error } = await this.supabase
+        .from('data_archive_queue')
+        .insert({
+          resource_type: context.resourceType,
+          resource_id: context.resourceId,
+          requested_at: new Date().toISOString(),
+          priority: 'HIGH'
+        });
+
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Lock audit log to prevent tampering
+   */
+  private async lockAuditLog(context: ComplianceContext): Promise<boolean> {
+    try {
+      const { error } = await this.supabase
+        .from('audit_log_locks')
+        .insert({
+          resource_type: context.resourceType,
+          resource_id: context.resourceId,
+          locked_at: new Date().toISOString(),
+          session_id: context.sessionId
+        });
+
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Notify administrators of violation
+   */
+  private async notifyAdmin(violation: ViolationAlert): Promise<boolean> {
+    try {
+      // This would integrate with actual notification systems
+      const { error } = await this.supabase
+        .from('admin_notifications')
+        .insert({
+          violation_id: violation.id,
+          severity: violation.severity,
+          framework: violation.framework,
+          sent_at: new Date().toISOString(),
+          message: `Compliance violation detected: ${violation.violationType}`
+        });
+
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Store remediation record
+   */
+  private async storeRemediationRecord(record: RemediationRecord): Promise<void> {
+    const { error } = await this.supabase
+      .from('remediation_records')
+      .insert({
+        id: record.id,
+        violation_id: record.violationId,
+        action: record.action,
+        executed_at: record.executedAt.toISOString(),
+        success: record.success,
+        details: record.details
+      });
+
+    if (error) {
+      throw new Error(`Failed to store remediation record: ${error.message}`);
+    }
+  }
+}
+
+/**
+ * Immutable audit trail with cryptographic integrity
+ */
+export class AuditLogger {
+  private supabase: SupabaseClient;
+  private encryptionKey: Buffer;
+  private lastHash: string = '';
+
+  constructor(supabase: SupabaseClient, encryptionKey: Buffer) {
+    this.supabase = supabase;
+    this.encryptionKey = encryptionKey;
+    this.initializeChain();
+  }
+
+  /**
+   * Initialize audit chain
+   */
+  private async initializeChain(): Promise<void> {
+    try {
+      const { data } = await this.supabase
+        .from('audit_logs')
+        .select('hash')
+        .order('timestamp', { ascending: false })
+        .limit(1);
+
+      this.lastHash = data?.[0]?.hash || '';
+    } catch (error) {
+      console.error('Failed to initialize audit chain:', error);
+    }
+  }
+
+  /**
+   * Log audit entry with cryptographic integrity
+   */
+  public async log(entry: Omit<
