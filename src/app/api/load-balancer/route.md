@@ -1,83 +1,89 @@
-# Build Dynamic Load Balancing API
+# Build Dynamic Load Balancing Control API
 
-```markdown
-# Dynamic Load Balancing API Documentation
+# Dynamic Load Balancing Control API Documentation
 
 ## Purpose
-The Dynamic Load Balancing API facilitates load distribution across multiple service nodes based on various algorithms. It ensures optimal resource utilization and availability through health checks and circuit breaker mechanisms, enhancing application performance and reliability.
+The Dynamic Load Balancing Control API provides a set of endpoints to manage load balancing configurations, routing policies, and health checks for a pool of nodes. It supports various load-balancing algorithms and enables predictive analysis for dynamic weight adjustments.
 
 ## Usage
-This API is designed for backend services that require dynamic load balancing when routing requests to different service instances. The Load Balancer Service maintains an updated list of service nodes, monitors their health, and intelligently directs traffic according to the specified load balancing algorithm.
+This API is designed to be used within a Next.js application and can handle requests related to load balancer settings, node health metrics, and routing policies. The API communicates with Supabase for data storage and Redis for caching and real-time updates.
 
 ## Parameters / Props
 
-### Load Balancer Configuration
-- **algorithm** (`string`): The strategy used to distribute traffic.
-  - Options: `'round-robin'`, `'least-connections'`, `'weighted'`, `'geographic'`
-  
-- **healthCheckInterval** (`number`): Time (in milliseconds) between health checks for service nodes (default: 30000).
-  
-- **maxRetries** (`number`): Maximum number of retry attempts before a service is considered unhealthy (default: 3).
-  
-- **timeoutMs** (`number`): Time (in milliseconds) to wait before timing out a request (default: 5000).
-  
-- **circuitBreakerThreshold** (`number`): Number of failures before the circuit breaker opens (default: 5).
+### LoadBalancerConfig
+- **id**: `string` (UUID) - Unique identifier for the load balancer.
+- **name**: `string` - Descriptive name for the load balancer.
+- **algorithm**: `'round_robin' | 'weighted_round_robin' | 'least_connections' | 'ip_hash' | 'predictive'` - Load balancing strategy.
+- **health_check_interval**: `number` - Interval for health checks in milliseconds.
+- **failure_threshold**: `number` - Number of failed health checks before marking a node unhealthy.
+- **recovery_threshold**: `number` - Number of successful health checks before marking a node healthy again.
+- **sticky_sessions**: `boolean` - Whether to maintain session stickiness.
+- **created_at**: `string` - Timestamp of creation.
+- **updated_at**: `string` - Timestamp of the last update.
 
-### Service Node
-- **id** (`string`): Unique identifier for the service node.
-- **url** (`string`): Endpoint URL of the service node.
-- **region** (`string`): Geographic region of the service node.
-- **weight** (`number`): Indicates the relative amount of traffic this service should receive compared to others.
-- **maxConnections** (`number`): Maximum concurrent connections allowed for this service node.
-- **currentConnections** (`number`): Current number of active connections to the service node.
-- **responseTime** (`number`): Most recent response time from the service node.
-- **healthStatus** (`'healthy' | 'degraded' | 'unhealthy'`): Current health status of the service node.
-- **lastHealthCheck** (`Date`): Timestamp of the last health check.
+### NodeMetrics
+- **node_id**: `string` (UUID) - Unique identifier for the node.
+- **cpu_usage**: `number` - Current CPU usage percentage.
+- **memory_usage**: `number` - Current memory usage percentage.
+- **active_connections**: `number` - Number of active connections to the node.
+- **response_time**: `number` - Average response time in milliseconds.
+- **error_rate**: `number` - Percentage of erroneous responses.
+- **throughput**: `number` - Requests processed per second.
+- **health_status**: `'healthy' | 'degraded' | 'unhealthy'` - Current health status of the node.
+- **timestamp**: `string` - Timestamp of the metrics report.
 
-### Circuit Breaker State
-- **state** (`'closed' | 'open' | 'half-open'`): Current state of the circuit breaker.
-- **failureCount** (`number`): Total number of failures recorded.
-- **lastFailureTime** (`Date`): Timestamp of the last failure event.
-- **successCount** (`number`): Count of successful requests since the last failure.
+### RoutingPolicy
+- **id**: `string` (UUID) - Unique identifier for the routing policy.
+- **load_balancer_id**: `string` (UUID) - Associated load balancer.
+- **node_id**: `string` (UUID) - Node affected by the policy.
+- **weight**: `number` - Weight for the node in load balancing.
+- **max_connections**: `number` - Maximum permissible connections to this node.
+- **backup**: `boolean` - Indicates if this node is a backup.
+- **enabled**: `boolean` - Status of the policy.
+- **priority**: `number` - Priority of the policy.
 
-### Health Check Result
-- **serviceId** (`string`): Identifier of the service checked.
-- **healthy** (`boolean`): Indicates if the service is considered healthy.
-- **responseTime** (`number`): Response time recorded for the health check.
-- **timestamp** (`Date`): Time when the health check was performed.
-- **error** (`string`): Description of any error that occurred during the health check (optional).
+### PredictiveAnalysis
+- **node_id**: `string` (UUID) - Node being analyzed.
+- **predicted_load**: `number` - Expected load based on analysis.
+- **confidence**: `number` - Confidence level of the prediction.
+- **recommendation**: `'increase_weight' | 'decrease_weight' | 'maintain' | 'remove'` - Suggested action based on analysis.
+- **factors**: `string[]` - Factors influencing the prediction.
 
 ## Return Values
-The primary return value of the Load Balancer API is based on the chosen algorithm, which determines the optimal service node to route incoming requests. Additional return values include the status of health checks and circuit breaker state.
+The API returns JSON responses based on the request type and the data being queried or modified. Standard error handling responses include:
+- 400 Bad Request - For validation errors.
+- 404 Not Found - When specified resources don't exist.
+- 500 Internal Server Error - For unexpected server errors.
 
 ## Examples
-
-### Initializing Services
-```typescript
-const lbService = new LoadBalancerService();
-await lbService.initializeServices();
-```
-
-### Configuring Load Balancer
-```typescript
-lbService.config = {
-  algorithm: 'least-connections',
-  healthCheckInterval: 20000,
-  maxRetries: 2,
-  timeoutMs: 4000,
-  circuitBreakerThreshold: 3
-};
-```
-
-### Health Check Example
-```typescript
-const result: HealthCheckResult = await lbService.performHealthCheck(serviceId);
-if (result.healthy) {
-  console.log(`${serviceId} is healthy.`);
-} else {
-  console.error(`Service ${serviceId} health check failed: ${result.error}`);
+### Load Balancer Creation
+```json
+{
+  "name": "Main Load Balancer",
+  "algorithm": "weighted_round_robin",
+  "health_check_interval": 5000,
+  "failure_threshold": 5,
+  "recovery_threshold": 2,
+  "sticky_sessions": true
 }
 ```
 
-This documentation provides a comprehensive overview of the Dynamic Load Balancing API components for implementation and operational management.
+### Node Health Metrics Query
+```json
+{
+  "node_id": "123e4567-e89b-12d3-a456-426614174000"
+}
 ```
+
+### Policy Update
+```json
+{
+  "load_balancer_id": "123e4567-e89b-12d3-a456-426614174001",
+  "algorithm": "least_connections",
+  "health_check_interval": 10000,
+  "failure_threshold": 3,
+  "recovery_threshold": 1
+}
+```
+
+This documentation provides a comprehensive overview of the API's capabilities and usage for effective load balancing management.
