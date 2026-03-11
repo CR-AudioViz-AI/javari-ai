@@ -1,4 +1,3 @@
-```tsx
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -609,4 +608,3 @@ export const MultiStreamRevenueVisualization: React.FC<MultiStreamRevenueVisuali
 };
 
 export default MultiStreamRevenueVisualization;
-```
