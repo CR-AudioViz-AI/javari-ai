@@ -156,7 +156,11 @@ Generate the complete implementation. No placeholders. Production-ready.`;
     : spec.artifactType === "generate_documentation" ? 3000
     : 7000;
 
-  const content = await anthropicCall(systemPrompt, userPrompt, maxTokens);
+  const raw = await anthropicCall(systemPrompt, userPrompt, maxTokens);
+
+  // Strip markdown code fences — AI may wrap output in ```typescript...``` or ```...```
+  // even when instructed not to. This is a safety net that guarantees clean file content.
+  const content = stripMarkdownFences(raw);
   const lineCount = content.split("\n").length;
 
   return {
@@ -166,4 +170,26 @@ Generate the complete implementation. No placeholders. Production-ready.`;
     lineCount,
     durationMs: Date.now() - t0,
   };
+}
+
+/**
+ * Strip markdown code fences from AI-generated content.
+ * Handles: ```typescript, ```ts, ```sql, ```tsx, ```js, ```json, ``` (generic)
+ * Also handles truncated files that end mid-content without a closing fence.
+ */
+function stripMarkdownFences(raw: string): string {
+  const lines = raw.split("\n");
+  const first = lines[0]?.trim() ?? "";
+
+  // If first line is a code fence, strip it (and trailing fence if present)
+  if (/^```/.test(first)) {
+    const body = lines.slice(1);
+    // Remove trailing ``` if present
+    if (body[body.length - 1]?.trim() === "```") {
+      body.pop();
+    }
+    return body.join("\n").trim();
+  }
+
+  return raw.trim();
 }
