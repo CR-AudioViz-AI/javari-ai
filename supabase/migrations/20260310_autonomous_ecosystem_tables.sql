@@ -215,3 +215,25 @@ DROP TRIGGER IF EXISTS update_module_registry_updated_at ON module_registry;
 CREATE TRIGGER update_module_registry_updated_at
   BEFORE UPDATE ON module_registry
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- ── orchestrator_cycles — telemetry for every autonomous orchestrator cycle ──
+
+CREATE TABLE IF NOT EXISTS orchestrator_cycles (
+  id                 text        PRIMARY KEY,
+  cycle_start        timestamptz NOT NULL DEFAULT now(),
+  cycle_end          timestamptz,
+  tasks_created      integer     NOT NULL DEFAULT 0,
+  tasks_completed    integer     NOT NULL DEFAULT 0,
+  modules_generated  integer     NOT NULL DEFAULT 0,
+  errors             text[]      DEFAULT '{}',
+  cost_usd           numeric(10,6) DEFAULT 0,
+  created_at         timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS orchestrator_cycles_start_idx ON orchestrator_cycles (cycle_start DESC);
+
+ALTER TABLE orchestrator_cycles ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Service role full access" ON orchestrator_cycles;
+CREATE POLICY "Service role full access" ON orchestrator_cycles
+  FOR ALL TO service_role USING (true) WITH CHECK (true);

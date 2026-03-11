@@ -30,6 +30,7 @@ const TABLES_TO_CHECK = [
   "ai_router_logs",
   "chat_sessions",
   "module_registry",
+  "orchestrator_cycles",
   "ai_router_logs",
   "chat_sessions",
 ];

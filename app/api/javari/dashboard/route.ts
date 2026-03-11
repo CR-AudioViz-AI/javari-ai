@@ -10,6 +10,7 @@
 import { NextResponse } from "next/server";
 import { createClient }         from "@supabase/supabase-js";
 import { getModuleMetrics }    from "@/lib/javari/moduleFactory";
+import { getOrchestratorStatus } from "@/lib/javari/orchestrator";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -409,6 +410,17 @@ export async function GET() {
       }
     } catch { /* build_artifacts table may not exist yet — graceful degradation */ }
 
+    // ── 9z. Orchestrator status ───────────────────────────────────────────────
+    let orchestratorStatus = {
+      running: false, lastCycle: undefined as string | undefined,
+      lastCycleDurationMs: undefined as number | undefined,
+      cyclesTotal: 0, tasksCompletedTotal: 0, modulesGeneratedTotal: 0,
+      recentCycles: [] as unknown[],
+    };
+    try {
+      orchestratorStatus = await getOrchestratorStatus();
+    } catch { /* orchestrator_cycles table may not exist yet */ }
+
     // ── 10a. Module registry metrics (Module Factory) ───────────────────────
     let moduleMetrics = {
       modules_total: 0, modules_complete: 0, modules_in_progress: 0,
@@ -505,6 +517,18 @@ export async function GET() {
         generated   : modulesGenerated,
         by_capability: moduleMetrics.by_capability,
         factoryEndpoint: "/api/javari/module-factory",
+      },
+
+      orchestrator: {
+        running           : orchestratorStatus.running,
+        last_cycle        : orchestratorStatus.lastCycle,
+        last_cycle_ms     : orchestratorStatus.lastCycleDurationMs,
+        cycles_total      : orchestratorStatus.cyclesTotal,
+        tasks_completed   : orchestratorStatus.tasksCompletedTotal,
+        modules_generated : orchestratorStatus.modulesGeneratedTotal,
+        recent_cycles     : orchestratorStatus.recentCycles,
+        cron              : "* * * * *",
+        endpoint          : "/api/javari/orchestrator/run",
       },
 
 
