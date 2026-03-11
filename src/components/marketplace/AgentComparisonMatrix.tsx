@@ -1,333 +1,609 @@
-```sql
--- Migration: Create Agent Comparison Matrix Tables
--- Description: Tables for agent features, pricing, benchmarks, and comparison tracking
+```tsx
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Separator } from '@/components/ui/separator';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Star, Download, X, Filter, ArrowUpDown, TrendingUp, DollarSign, Users } from 'lucide-react';
 
--- Enable UUID extension if not already enabled
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+interface Agent {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  provider: string;
+  logo: string;
+  verified: boolean;
+}
 
--- Create agent_features table for feature mapping
-CREATE TABLE IF NOT EXISTS agent_features (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-    feature_category VARCHAR(100) NOT NULL,
-    feature_name VARCHAR(200) NOT NULL,
-    feature_value TEXT,
-    score INTEGER CHECK (score >= 1 AND score <= 5),
-    is_available BOOLEAN DEFAULT true,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(agent_id, feature_category, feature_name)
-);
+interface AgentFeature {
+  id: string;
+  agent_id: string;
+  feature_name: string;
+  feature_value: string | boolean;
+  feature_type: 'boolean' | 'text' | 'number';
+  category: string;
+}
 
--- Create agent_pricing table for pricing tiers
-CREATE TABLE IF NOT EXISTS agent_pricing (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-    tier_name VARCHAR(100) NOT NULL,
-    tier_type VARCHAR(50) NOT NULL CHECK (tier_type IN ('free', 'basic', 'premium', 'enterprise')),
-    price_amount DECIMAL(10,2),
-    price_currency VARCHAR(3) DEFAULT 'USD',
-    billing_period VARCHAR(20) CHECK (billing_period IN ('hour', 'day', 'month', 'year')),
-    requests_included INTEGER,
-    features_included TEXT[],
-    is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+interface AgentPricing {
+  id: string;
+  agent_id: string;
+  tier_name: string;
+  price: number;
+  currency: string;
+  billing_cycle: string;
+  features: string[];
+  popular: boolean;
+}
 
--- Create agent_benchmarks table for performance metrics
-CREATE TABLE IF NOT EXISTS agent_benchmarks (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-    benchmark_category VARCHAR(100) NOT NULL,
-    metric_name VARCHAR(200) NOT NULL,
-    metric_value DECIMAL(10,4),
-    metric_unit VARCHAR(50),
-    benchmark_date DATE DEFAULT CURRENT_DATE,
-    test_conditions JSONB,
-    percentile_rank INTEGER CHECK (percentile_rank >= 1 AND percentile_rank <= 100),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(agent_id, benchmark_category, metric_name, benchmark_date)
-);
+interface AgentMetric {
+  id: string;
+  agent_id: string;
+  metric_name: string;
+  metric_value: number;
+  metric_unit: string;
+  category: string;
+}
 
--- Create comparison_sessions table for tracking comparisons
-CREATE TABLE IF NOT EXISTS comparison_sessions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
-    session_id VARCHAR(255),
-    agent_ids UUID[],
-    comparison_criteria JSONB,
-    criteria_weights JSONB,
-    export_count INTEGER DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+interface AgentReview {
+  id: string;
+  agent_id: string;
+  rating: number;
+  review_count: number;
+  latest_review: string;
+  sentiment_score: number;
+}
 
--- Create feature_categories table for standardized categories
-CREATE TABLE IF NOT EXISTS feature_categories (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    category_name VARCHAR(100) UNIQUE NOT NULL,
-    category_description TEXT,
-    display_order INTEGER DEFAULT 0,
-    icon_name VARCHAR(100),
-    is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+interface FilterOptions {
+  categories: string[];
+  priceRange: { min: number; max: number };
+  features: string[];
+  providers: string[];
+  ratings: number[];
+}
 
--- Create comparison_criteria table for custom criteria
-CREATE TABLE IF NOT EXISTS comparison_criteria (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    criteria_name VARCHAR(200) NOT NULL,
-    criteria_type VARCHAR(50) CHECK (criteria_type IN ('feature', 'pricing', 'performance', 'custom')),
-    weight_default DECIMAL(3,2) DEFAULT 1.0,
-    is_system_defined BOOLEAN DEFAULT false,
-    created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+interface AgentComparisonMatrixProps {
+  selectedAgentIds?: string[];
+  onAgentRemove?: (agentId: string) => void;
+  onComparisonExport?: (format: 'pdf' | 'csv') => void;
+  maxAgents?: number;
+  className?: string;
+}
 
--- Create indexes for performance optimization
-CREATE INDEX IF NOT EXISTS idx_agent_features_agent_id ON agent_features(agent_id);
-CREATE INDEX IF NOT EXISTS idx_agent_features_category ON agent_features(feature_category);
-CREATE INDEX IF NOT EXISTS idx_agent_features_score ON agent_features(score);
+const AgentComparisonMatrix: React.FC<AgentComparisonMatrixProps> = ({
+  selectedAgentIds = [],
+  onAgentRemove,
+  onComparisonExport,
+  maxAgents = 4,
+  className = '',
+}) => {
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [features, setFeatures] = useState<AgentFeature[]>([]);
+  const [pricing, setPricing] = useState<AgentPricing[]>([]);
+  const [metrics, setMetrics] = useState<AgentMetric[]>([]);
+  const [reviews, setReviews] = useState<AgentReview[]>([]);
+  const [filters, setFilters] = useState<FilterOptions>({
+    categories: [],
+    priceRange: { min: 0, max: 1000 },
+    features: [],
+    providers: [],
+    ratings: [],
+  });
+  const [activeFilters, setActiveFilters] = useState<{
+    category: string;
+    priceRange: string;
+    minRating: number;
+    features: string[];
+  }>({
+    category: 'all',
+    priceRange: 'all',
+    minRating: 0,
+    features: [],
+  });
+  const [sortBy, setSortBy] = useState<string>('name');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [isLoading, setIsLoading] = useState(true);
+  const [showFilters, setShowFilters] = useState(false);
 
-CREATE INDEX IF NOT EXISTS idx_agent_pricing_agent_id ON agent_pricing(agent_id);
-CREATE INDEX IF NOT EXISTS idx_agent_pricing_tier_type ON agent_pricing(tier_type);
-CREATE INDEX IF NOT EXISTS idx_agent_pricing_active ON agent_pricing(is_active);
+  // Mock data loading - replace with actual Supabase calls
+  useEffect(() => {
+    const loadComparisonData = async () => {
+      setIsLoading(true);
+      try {
+        // Mock data - replace with actual Supabase queries
+        const mockAgents: Agent[] = selectedAgentIds.map((id, index) => ({
+          id,
+          name: `AI Agent ${index + 1}`,
+          description: `Advanced AI agent for various tasks`,
+          category: index % 2 === 0 ? 'Conversational' : 'Analytics',
+          provider: `Provider ${String.fromCharCode(65 + index)}`,
+          logo: `/api/placeholder/40/40`,
+          verified: index % 3 === 0,
+        }));
 
-CREATE INDEX IF NOT EXISTS idx_agent_benchmarks_agent_id ON agent_benchmarks(agent_id);
-CREATE INDEX IF NOT EXISTS idx_agent_benchmarks_category ON agent_benchmarks(benchmark_category);
-CREATE INDEX IF NOT EXISTS idx_agent_benchmarks_date ON agent_benchmarks(benchmark_date);
+        const mockFeatures: AgentFeature[] = selectedAgentIds.flatMap((agentId) => [
+          {
+            id: `${agentId}-1`,
+            agent_id: agentId,
+            feature_name: 'Natural Language Processing',
+            feature_value: true,
+            feature_type: 'boolean' as const,
+            category: 'Core Features',
+          },
+          {
+            id: `${agentId}-2`,
+            agent_id: agentId,
+            feature_name: 'API Rate Limit',
+            feature_value: '1000/hour',
+            feature_type: 'text' as const,
+            category: 'Performance',
+          },
+          {
+            id: `${agentId}-3`,
+            agent_id: agentId,
+            feature_name: 'Response Time',
+            feature_value: Math.floor(Math.random() * 500) + 100,
+            feature_type: 'number' as const,
+            category: 'Performance',
+          },
+        ]);
 
-CREATE INDEX IF NOT EXISTS idx_comparison_sessions_user_id ON comparison_sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_comparison_sessions_created ON comparison_sessions(created_at);
+        setAgents(mockAgents);
+        setFeatures(mockFeatures);
+        
+        // Set other mock data similarly...
+        setPricing(selectedAgentIds.map((id, index) => ({
+          id: `pricing-${id}`,
+          agent_id: id,
+          tier_name: 'Professional',
+          price: (index + 1) * 29,
+          currency: 'USD',
+          billing_cycle: 'monthly',
+          features: ['Feature 1', 'Feature 2'],
+          popular: index === 1,
+        })));
 
--- Create function to update updated_at timestamps
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
+        setMetrics(selectedAgentIds.map((id, index) => ({
+          id: `metric-${id}`,
+          agent_id: id,
+          metric_name: 'Accuracy',
+          metric_value: 95 + index * 2,
+          metric_unit: '%',
+          category: 'Performance',
+        })));
 
--- Create triggers for updated_at
-CREATE TRIGGER update_agent_features_updated_at
-    BEFORE UPDATE ON agent_features
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
+        setReviews(selectedAgentIds.map((id, index) => ({
+          id: `review-${id}`,
+          agent_id: id,
+          rating: 4.5 - index * 0.2,
+          review_count: 100 + index * 50,
+          latest_review: 'Great agent with excellent performance',
+          sentiment_score: 0.8 - index * 0.1,
+        })));
 
-CREATE TRIGGER update_agent_pricing_updated_at
-    BEFORE UPDATE ON agent_pricing
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
+      } catch (error) {
+        console.error('Error loading comparison data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-CREATE TRIGGER update_agent_benchmarks_updated_at
-    BEFORE UPDATE ON agent_benchmarks
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
+    if (selectedAgentIds.length > 0) {
+      loadComparisonData();
+    }
+  }, [selectedAgentIds]);
 
-CREATE TRIGGER update_comparison_sessions_updated_at
-    BEFORE UPDATE ON comparison_sessions
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
+  const filteredAndSortedAgents = useMemo(() => {
+    let filtered = [...agents];
 
--- Enable RLS on all tables
-ALTER TABLE agent_features ENABLE ROW LEVEL SECURITY;
-ALTER TABLE agent_pricing ENABLE ROW LEVEL SECURITY;
-ALTER TABLE agent_benchmarks ENABLE ROW LEVEL SECURITY;
-ALTER TABLE comparison_sessions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE feature_categories ENABLE ROW LEVEL SECURITY;
-ALTER TABLE comparison_criteria ENABLE ROW LEVEL SECURITY;
+    // Apply filters
+    if (activeFilters.category !== 'all') {
+      filtered = filtered.filter(agent => agent.category === activeFilters.category);
+    }
 
--- RLS policies for agent_features
-CREATE POLICY "Agent features are publicly readable"
-    ON agent_features FOR SELECT
-    USING (true);
+    if (activeFilters.minRating > 0) {
+      filtered = filtered.filter(agent => {
+        const review = reviews.find(r => r.agent_id === agent.id);
+        return review && review.rating >= activeFilters.minRating;
+      });
+    }
 
-CREATE POLICY "Agent owners can manage features"
-    ON agent_features FOR ALL
-    USING (
-        EXISTS (
-            SELECT 1 FROM agents 
-            WHERE agents.id = agent_features.agent_id 
-            AND agents.owner_id = auth.uid()
-        )
+    // Sort agents
+    filtered.sort((a, b) => {
+      let compareValue = 0;
+      
+      switch (sortBy) {
+        case 'name':
+          compareValue = a.name.localeCompare(b.name);
+          break;
+        case 'rating':
+          const ratingA = reviews.find(r => r.agent_id === a.id)?.rating || 0;
+          const ratingB = reviews.find(r => r.agent_id === b.id)?.rating || 0;
+          compareValue = ratingA - ratingB;
+          break;
+        case 'price':
+          const priceA = pricing.find(p => p.agent_id === a.id)?.price || 0;
+          const priceB = pricing.find(p => p.agent_id === b.id)?.price || 0;
+          compareValue = priceA - priceB;
+          break;
+        default:
+          compareValue = 0;
+      }
+
+      return sortOrder === 'asc' ? compareValue : -compareValue;
+    });
+
+    return filtered;
+  }, [agents, reviews, pricing, activeFilters, sortBy, sortOrder]);
+
+  const featureCategories = useMemo(() => {
+    const categories = Array.from(new Set(features.map(f => f.category)));
+    return categories.map(category => ({
+      name: category,
+      features: features.filter(f => f.category === category),
+    }));
+  }, [features]);
+
+  const handleRemoveAgent = useCallback((agentId: string) => {
+    if (onAgentRemove) {
+      onAgentRemove(agentId);
+    }
+  }, [onAgentRemove]);
+
+  const handleExport = useCallback((format: 'pdf' | 'csv') => {
+    if (onComparisonExport) {
+      onComparisonExport(format);
+    }
+  }, [onComparisonExport]);
+
+  const ComparisonHeader: React.FC = () => (
+    <div className="flex items-center justify-between mb-6">
+      <div>
+        <h2 className="text-2xl font-bold">Agent Comparison</h2>
+        <p className="text-muted-foreground">
+          Compare {filteredAndSortedAgents.length} agents side-by-side
+        </p>
+      </div>
+      <div className="flex items-center gap-3">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setShowFilters(!showFilters)}
+        >
+          <Filter className="h-4 w-4 mr-2" />
+          Filters
+        </Button>
+        <Select value={sortBy} onValueChange={setSortBy}>
+          <SelectTrigger className="w-32">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="name">Name</SelectItem>
+            <SelectItem value="rating">Rating</SelectItem>
+            <SelectItem value="price">Price</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+        >
+          <ArrowUpDown className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => handleExport('csv')}
+        >
+          <Download className="h-4 w-4 mr-2" />
+          Export
+        </Button>
+      </div>
+    </div>
+  );
+
+  const FilterPanel: React.FC = () => (
+    <Card className={`mb-6 transition-all ${showFilters ? 'block' : 'hidden'}`}>
+      <CardHeader>
+        <CardTitle className="text-lg">Filters</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div>
+            <label className="text-sm font-medium mb-2 block">Category</label>
+            <Select
+              value={activeFilters.category}
+              onValueChange={(value) =>
+                setActiveFilters(prev => ({ ...prev, category: value }))
+              }
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Categories</SelectItem>
+                <SelectItem value="Conversational">Conversational</SelectItem>
+                <SelectItem value="Analytics">Analytics</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          
+          <div>
+            <label className="text-sm font-medium mb-2 block">Min Rating</label>
+            <Select
+              value={activeFilters.minRating.toString()}
+              onValueChange={(value) =>
+                setActiveFilters(prev => ({ ...prev, minRating: Number(value) }))
+              }
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="0">Any Rating</SelectItem>
+                <SelectItem value="3">3+ Stars</SelectItem>
+                <SelectItem value="4">4+ Stars</SelectItem>
+                <SelectItem value="4.5">4.5+ Stars</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+
+  const AgentCard: React.FC<{ agent: Agent }> = ({ agent }) => {
+    const agentPricing = pricing.find(p => p.agent_id === agent.id);
+    const agentReview = reviews.find(r => r.agent_id === agent.id);
+    const agentMetric = metrics.find(m => m.agent_id === agent.id);
+
+    return (
+      <div className="p-4 border-r min-w-[280px] sticky top-0 bg-background">
+        <div className="flex items-start justify-between mb-3">
+          <div className="flex items-start gap-3">
+            <img
+              src={agent.logo}
+              alt={`${agent.name} logo`}
+              className="w-10 h-10 rounded-lg"
+            />
+            <div>
+              <h3 className="font-semibold flex items-center gap-2">
+                {agent.name}
+                {agent.verified && (
+                  <Badge variant="secondary" className="text-xs">
+                    Verified
+                  </Badge>
+                )}
+              </h3>
+              <p className="text-sm text-muted-foreground">{agent.provider}</p>
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleRemoveAgent(agent.id)}
+            className="text-muted-foreground hover:text-destructive"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <p className="text-sm text-muted-foreground mb-4 line-clamp-2">
+          {agent.description}
+        </p>
+
+        {/* Pricing */}
+        {agentPricing && (
+          <div className="mb-4">
+            <div className="flex items-center gap-2 mb-2">
+              <DollarSign className="h-4 w-4 text-primary" />
+              <span className="text-sm font-medium">Pricing</span>
+            </div>
+            <div className="pl-6">
+              <div className="flex items-baseline gap-1">
+                <span className="text-xl font-bold">
+                  ${agentPricing.price}
+                </span>
+                <span className="text-sm text-muted-foreground">
+                  /{agentPricing.billing_cycle}
+                </span>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                {agentPricing.tier_name}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Rating */}
+        {agentReview && (
+          <div className="mb-4">
+            <div className="flex items-center gap-2 mb-2">
+              <Star className="h-4 w-4 text-primary" />
+              <span className="text-sm font-medium">Rating</span>
+            </div>
+            <div className="pl-6">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold">
+                  {agentReview.rating.toFixed(1)}
+                </span>
+                <div className="flex">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <Star
+                      key={star}
+                      className={`h-3 w-3 ${
+                        star <= agentReview.rating
+                          ? 'text-yellow-400 fill-current'
+                          : 'text-gray-300'
+                      }`}
+                    />
+                  ))}
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {agentReview.review_count} reviews
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Key Metric */}
+        {agentMetric && (
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <TrendingUp className="h-4 w-4 text-primary" />
+              <span className="text-sm font-medium">Performance</span>
+            </div>
+            <div className="pl-6">
+              <div className="flex items-baseline gap-1">
+                <span className="text-lg font-bold">
+                  {agentMetric.metric_value}
+                </span>
+                <span className="text-sm text-muted-foreground">
+                  {agentMetric.metric_unit}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {agentMetric.metric_name}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
     );
+  };
 
--- RLS policies for agent_pricing
-CREATE POLICY "Agent pricing is publicly readable"
-    ON agent_pricing FOR SELECT
-    USING (is_active = true);
+  const FeatureRow: React.FC<{
+    featureName: string;
+    features: AgentFeature[];
+    agents: Agent[];
+  }> = ({ featureName, features, agents }) => (
+    <TableRow>
+      <TableCell className="font-medium sticky left-0 bg-background border-r">
+        {featureName}
+      </TableCell>
+      {agents.map((agent) => {
+        const feature = features.find(
+          f => f.agent_id === agent.id && f.feature_name === featureName
+        );
+        
+        return (
+          <TableCell key={agent.id} className="text-center">
+            {feature ? (
+              feature.feature_type === 'boolean' ? (
+                feature.feature_value ? (
+                  <Badge variant="default" className="bg-green-100 text-green-800">
+                    Yes
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary">No</Badge>
+                )
+              ) : (
+                <span className="text-sm">{String(feature.feature_value)}</span>
+              )
+            ) : (
+              <span className="text-muted-foreground text-sm">-</span>
+            )}
+          </TableCell>
+        );
+      })}
+    </TableRow>
+  );
 
-CREATE POLICY "Agent owners can manage pricing"
-    ON agent_pricing FOR ALL
-    USING (
-        EXISTS (
-            SELECT 1 FROM agents 
-            WHERE agents.id = agent_pricing.agent_id 
-            AND agents.owner_id = auth.uid()
-        )
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
+          <p className="text-muted-foreground">Loading comparison...</p>
+        </div>
+      </div>
     );
+  }
 
--- RLS policies for agent_benchmarks
-CREATE POLICY "Agent benchmarks are publicly readable"
-    ON agent_benchmarks FOR SELECT
-    USING (true);
-
-CREATE POLICY "Agent owners can manage benchmarks"
-    ON agent_benchmarks FOR ALL
-    USING (
-        EXISTS (
-            SELECT 1 FROM agents 
-            WHERE agents.id = agent_benchmarks.agent_id 
-            AND agents.owner_id = auth.uid()
-        )
+  if (filteredAndSortedAgents.length === 0) {
+    return (
+      <div className="text-center py-12">
+        <Users className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+        <h3 className="text-lg font-semibold mb-2">No agents to compare</h3>
+        <p className="text-muted-foreground">
+          Add some agents to start comparing their features and capabilities.
+        </p>
+      </div>
     );
+  }
 
--- RLS policies for comparison_sessions
-CREATE POLICY "Users can view their own comparison sessions"
-    ON comparison_sessions FOR SELECT
-    USING (user_id = auth.uid() OR user_id IS NULL);
+  return (
+    <div className={`space-y-6 ${className}`}>
+      <ComparisonHeader />
+      <FilterPanel />
 
-CREATE POLICY "Users can create comparison sessions"
-    ON comparison_sessions FOR INSERT
-    WITH CHECK (user_id = auth.uid() OR user_id IS NULL);
+      <Card>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            {/* Agent Headers */}
+            <div className="flex border-b">
+              <div className="w-64 p-4 border-r bg-muted/50">
+                <h3 className="font-semibold">Agents</h3>
+              </div>
+              <div className="flex">
+                {filteredAndSortedAgents.map((agent) => (
+                  <AgentCard key={agent.id} agent={agent} />
+                ))}
+              </div>
+            </div>
 
-CREATE POLICY "Users can update their own comparison sessions"
-    ON comparison_sessions FOR UPDATE
-    USING (user_id = auth.uid());
+            {/* Feature Comparison Table */}
+            <ScrollArea className="h-[600px]">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="sticky left-0 bg-background border-r w-64">
+                      Features
+                    </TableHead>
+                    {filteredAndSortedAgents.map((agent) => (
+                      <TableHead key={agent.id} className="text-center min-w-[280px]">
+                        {agent.name}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {featureCategories.map((category) => (
+                    <React.Fragment key={category.name}>
+                      <TableRow>
+                        <TableCell
+                          colSpan={filteredAndSortedAgents.length + 1}
+                          className="bg-muted/50 font-semibold sticky left-0"
+                        >
+                          {category.name}
+                        </TableCell>
+                      </TableRow>
+                      {Array.from(
+                        new Set(category.features.map(f => f.feature_name))
+                      ).map((featureName) => (
+                        <FeatureRow
+                          key={featureName}
+                          featureName={featureName}
+                          features={category.features}
+                          agents={filteredAndSortedAgents}
+                        />
+                      ))}
+                    </React.Fragment>
+                  ))}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
 
--- RLS policies for feature_categories
-CREATE POLICY "Feature categories are publicly readable"
-    ON feature_categories FOR SELECT
-    USING (is_active = true);
-
-CREATE POLICY "Admins can manage feature categories"
-    ON feature_categories FOR ALL
-    USING (
-        EXISTS (
-            SELECT 1 FROM user_profiles 
-            WHERE user_profiles.user_id = auth.uid() 
-            AND user_profiles.role = 'admin'
-        )
-    );
-
--- RLS policies for comparison_criteria
-CREATE POLICY "Comparison criteria are publicly readable"
-    ON comparison_criteria FOR SELECT
-    USING (true);
-
-CREATE POLICY "Users can manage their own criteria"
-    ON comparison_criteria FOR ALL
-    USING (created_by = auth.uid());
-
-CREATE POLICY "System criteria are read-only for users"
-    ON comparison_criteria FOR SELECT
-    USING (is_system_defined = true);
-
--- Insert default feature categories
-INSERT INTO feature_categories (category_name, category_description, display_order, icon_name) VALUES
-('Core Features', 'Essential functionality and capabilities', 1, 'zap'),
-('Performance', 'Speed, accuracy, and efficiency metrics', 2, 'activity'),
-('Integration', 'API compatibility and third-party connections', 3, 'link'),
-('Scalability', 'Capacity and resource handling', 4, 'trending-up'),
-('Security', 'Data protection and compliance features', 5, 'shield'),
-('Support', 'Documentation, community, and customer service', 6, 'help-circle'),
-('Pricing', 'Cost structure and value proposition', 7, 'dollar-sign'),
-('Customization', 'Flexibility and configuration options', 8, 'settings')
-ON CONFLICT (category_name) DO NOTHING;
-
--- Insert default system comparison criteria
-INSERT INTO comparison_criteria (criteria_name, criteria_type, weight_default, is_system_defined) VALUES
-('Overall Performance Score', 'performance', 1.0, true),
-('Feature Completeness', 'feature', 0.8, true),
-('Cost Effectiveness', 'pricing', 0.9, true),
-('Accuracy Rating', 'performance', 1.0, true),
-('Response Time', 'performance', 0.7, true),
-('API Quality', 'feature', 0.6, true),
-('Documentation Quality', 'feature', 0.5, true),
-('Community Support', 'feature', 0.4, true)
-ON CONFLICT DO NOTHING;
-
--- Create view for comprehensive agent comparison data
-CREATE OR REPLACE VIEW agent_comparison_view AS
-SELECT 
-    a.id,
-    a.name,
-    a.description,
-    a.category,
-    a.logo_url,
-    a.rating,
-    a.usage_count,
-    a.is_featured,
-    
-    -- Aggregate features
-    COALESCE(
-        json_agg(
-            json_build_object(
-                'category', af.feature_category,
-                'name', af.feature_name,
-                'value', af.feature_value,
-                'score', af.score,
-                'available', af.is_available
-            ) ORDER BY af.feature_category, af.feature_name
-        ) FILTER (WHERE af.id IS NOT NULL),
-        '[]'::json
-    ) as features,
-    
-    -- Aggregate pricing
-    COALESCE(
-        json_agg(
-            json_build_object(
-                'tier', ap.tier_name,
-                'type', ap.tier_type,
-                'price', ap.price_amount,
-                'currency', ap.price_currency,
-                'billing_period', ap.billing_period,
-                'requests_included', ap.requests_included,
-                'features_included', ap.features_included
-            ) ORDER BY 
-                CASE ap.tier_type 
-                    WHEN 'free' THEN 1 
-                    WHEN 'basic' THEN 2 
-                    WHEN 'premium' THEN 3 
-                    WHEN 'enterprise' THEN 4 
-                END
-        ) FILTER (WHERE ap.id IS NOT NULL AND ap.is_active),
-        '[]'::json
-    ) as pricing,
-    
-    -- Aggregate benchmarks
-    COALESCE(
-        json_agg(
-            json_build_object(
-                'category', ab.benchmark_category,
-                'metric', ab.metric_name,
-                'value', ab.metric_value,
-                'unit', ab.metric_unit,
-                'percentile', ab.percentile_rank
-            ) ORDER BY ab.benchmark_category, ab.metric_name
-        ) FILTER (WHERE ab.id IS NOT NULL),
-        '[]'::json
-    ) as benchmarks,
-    
-    -- Calculate average feature score
-    ROUND(AVG(af.score)::numeric, 2) as avg_feature_score,
-    
-    -- Get minimum price
-    MIN(ap.price_amount) FILTER (WHERE ap.tier_type != 'free') as min_price,
-    
-    a.created_at,
-    a.updated_at
-    
-FROM agents a
-LEFT JOIN agent_features af ON a.id = af.agent_id
-LEFT JOIN agent_pricing ap ON a.id = ap.agent_id AND ap.is_active = true
-LEFT JOIN agent_benchmarks ab ON a.id = ab.agent_id
-WHERE a.status = 'active'
-GROUP BY a.id, a.name, a.description, a.category, a.logo_url, a.rating, a.usage_count, a.is_featured, a.created_at, a.updated_at;
-
--- Grant permissions on view
-GRANT SELECT ON agent_comparison_view TO authenticated, anon;
+export default AgentComparisonMatrix;
 ```
