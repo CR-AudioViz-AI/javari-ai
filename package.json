@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "TURBOPACK=0 next build",
     "start": "next start",
     "lint": "next lint"
   },
@@ -62,5 +62,5 @@
     "tailwindcss": "^3.4.15",
     "typescript": "^5.6.3"
   },
-  "description": "Javari AI — Autonomous build engine for CR AudioViz AI platform"
+  "description": "Javari AI \u2014 Autonomous build engine for CR AudioViz AI platform"
 }
