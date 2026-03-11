@@ -1,100 +1,101 @@
-# Build Advanced Payment Fraud Detection Service
+# Deploy Advanced Payment Fraud Detection Service
 
 ```markdown
 # Advanced Payment Fraud Detection Service
 
 ## Purpose
-The Advanced Payment Fraud Detection Service is a machine learning-powered application that analyzes transaction patterns, device fingerprinting, and behavioral biometrics to prevent payment fraud in real time. It integrates seamlessly with payment processing systems to enhance security and reduce fraudulent transactions.
+The Advanced Payment Fraud Detection Service utilizes machine learning to analyze transaction patterns, device fingerprinting, and behavioral biometrics to detect and prevent fraudulent payments. This service aims to enhance security for online transactions by identifying potential fraud in real-time.
 
 ## Usage
-This service is designed for backend applications where financial transactions need to be monitored for fraud. The service utilizes rich transaction data, device fingerprints, and biometrics to identify potential fraudulent activities dynamically.
+This service can be integrated into e-commerce platforms and financial applications where secure payment processing is essential. 
 
-### Installation
-Ensure you have the required dependencies:
-```bash
-npm install @supabase/supabase-js @tensorflow/tfjs ioredis
-```
+## Parameters / Props
 
-## Parameters/Props
+### Transaction
+The main data structure for a transaction.
 
-### Interfaces
-- **Transaction**
-  - `id` (string): Unique identifier for the transaction.
-  - `userId` (string): ID of the user making the transaction.
-  - `amount` (number): Amount of the transaction.
-  - `currency` (string): Currency type of the transaction.
-  - `merchantId` (string): ID of the merchant involved in the transaction.
-  - `timestamp` (Date): Date and time of the transaction.
-  - `ipAddress` (string): IP address of the user initiating the transaction.
-  - `location` (optional): Object containing latitude, longitude, country, and city of the transaction.
-  - `paymentMethod`: Object containing payment method details such as type, last four digits, BIN, and issuer.
-  - `metadata` (Record<string, any>): Additional transaction metadata.
+- `id` (string): Unique identifier for the transaction.
+- `userId` (string): Unique identifier for the user making the transaction.
+- `amount` (number): The transaction amount.
+- `currency` (string): The currency of the transaction.
+- `merchantId` (string): Unique identifier for the merchant.
+- `merchantCategory` (string): Category of the merchant.
+- `timestamp` (Date): The time the transaction occurred.
+- `paymentMethod` (PaymentMethod): Details about the payment method used.
+- `ipAddress` (string): IP address from which the transaction was made.
+- `userAgent` (string): User agent string from the client's device.
+- `geolocation` (Geolocation, optional): Geolocation data of the transaction.
+- `deviceFingerprint` (DeviceFingerprint, optional): Fingerprint data of the device used.
 
-- **DeviceFingerprint**
-  - `id` (string): Unique identifier for the fingerprint record.
-  - `userId` (string): ID of the user.
-  - `fingerprint` (string): Unique device fingerprint.
-  - `userAgent` (string): User agent string of the device.
-  - `screenResolution` (string): Screen resolution of the device.
-  - `timezone` (string): Timezone of the user.
-  - `language` (string): Language preference of the user.
-  - `platform` (string): Operating system/platform of the device.
-  - `cookiesEnabled` (boolean): Indicates if cookies are enabled.
-  - `doNotTrack` (boolean): User's DNT preference.
-  - `canvasFingerprint` (string), `webglFingerprint` (string), `audioFingerprint` (string): Various fingerprints used in fraud detection.
-  - `createdAt` (Date): Date when the fingerprint was created.
-  - `lastSeen` (Date): Last date the device was seen.
+### PaymentMethod
+Details of the payment method.
 
-- **BiometricData**
-  - `userId` (string): ID of the user.
-  - `sessionId` (string): ID of the user session.
-  - `keystrokeDynamics`: Object capturing typing behaviors (dwell times, flight times).
-  - `mouseMovements`: Object capturing mouse behaviors and patterns.
-  - `touchBehavior` (optional): Object capturing touch screen behaviors.
-  - `sessionDuration` (number): Duration of the session in seconds.
-  - `pageInteractions` (array): Array capturing user interactions on pages.
+- `type` (string): Payment method type (e.g., 'credit_card', 'debit_card').
+- `last4Digits` (string, optional): Last 4 digits of the card used.
+- `brand` (string, optional): Brand of the card.
+- `country` (string): Country of the payment method origin.
+- `isNewCard` (boolean): Indicates if the card is newly used.
+
+### Geolocation
+Geolocation data structure.
+
+- `latitude` (number): Latitude of the transaction location.
+- `longitude` (number): Longitude of the transaction location.
+- `country` (string): Country of the transaction.
+- `region` (string): Region of the transaction.
+- `city` (string): City of the transaction.
+- `accuracy` (number): Accuracy of the geolocation data.
+
+### DeviceFingerprint
+Information about the device used for the transaction.
+
+- `visitorId` (string): Unique identifier for the browser session.
+- `browserName` (string): Name of the browser used.
+- `browserVersion` (string): Version of the browser.
+- `os` (string): Operating system of the device.
+- `device` (string): Type of device (e.g., 'desktop', 'mobile').
+- `screenResolution` (string): Screen resolution of the device.
+- `timezone` (string): Timezone of the user.
+- `language` (string): Language preference of the user.
+- `plugins` (string[]): List of browser plugins.
+- `canvas` (string): Canvas fingerprint.
+- `webgl` (string): WebGL fingerprint.
+- `confidence` (number): Confidence level of the fingerprint matching.
+
+### BehavioralBiometrics
+Data related to user behavior during transactions.
+
+- `userId` (string): Unique identifier for the user.
+- `sessionId` (string): Unique identifier for the session.
+- `keystrokeDynamics` (KeystrokeDynamics): Information regarding typing behavior.
+- `mouseDynamics` (MouseDynamics): Information regarding mouse movement.
+- `touchDynamics` (TouchDynamics, optional): Touchscreen behavior data.
+- `navigationPattern` (NavigationPattern): Patterns in user navigation.
+- `sessionDuration` (number): Duration of the session in seconds.
 
 ## Return Values
-The service returns analysis results indicating whether a transaction is potentially fraudulent or not, based on machine learning model predictions and heuristic conditions. It may also return detailed logs of the analysis for further inspection.
+The service returns a response indicating whether the transaction is likely to be fraudulent based on the analysis of the provided data.
 
 ## Examples
 ```typescript
-import { Transaction, DeviceFingerprint, BiometricData } from './fraud-detection';
-
-// Sample transaction object
 const transaction: Transaction = {
-  id: '12345',
-  userId: 'user_1',
-  amount: 100.0,
-  currency: 'USD',
-  merchantId: 'merchant_1',
+  id: "txn_123456",
+  userId: "user_7890",
+  amount: 150.00,
+  currency: "USD",
+  merchantId: "merchant_1",
+  merchantCategory: "ecommerce",
   timestamp: new Date(),
-  ipAddress: '192.168.1.1',
-  paymentMethod: { type: 'card', lastFour: '1234' },
-  metadata: { referralCode: 'XYZ123' },
+  paymentMethod: {
+    type: "credit_card",
+    last4Digits: "1234",
+    brand: "Visa",
+    country: "US",
+    isNewCard: false
+  },
+  ipAddress: "192.168.1.1",
+  userAgent: "Mozilla/5.0",
 };
-
-// Sample device fingerprint
-const deviceFingerprint: DeviceFingerprint = {
-  id: 'fingerprint_1',
-  userId: 'user_1',
-  fingerprint: 'unique_fingerprint_hash',
-  userAgent: 'Mozilla/5.0',
-  screenResolution: '1920x1080',
-  timezone: 'UTC-5',
-  language: 'en-US',
-  platform: 'desktop',
-  cookiesEnabled: true,
-  doNotTrack: false,
-  canvasFingerprint: 'canvas_hash',
-  webglFingerprint: 'webgl_hash',
-  audioFingerprint: 'audio_hash',
-  createdAt: new Date(),
-  lastSeen: new Date(),
-};
-
-// Call the fraud detection method and handle response
-const isFraudulent = await detectFraud(transaction, deviceFingerprint);
-console.log(`Transaction is fraudulent: ${isFraudulent}`);
 ```
+This service can be invoked in a workflow that analyzes the provided `transaction` data for fraud detection.
 ```
