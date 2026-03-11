@@ -1,633 +1,590 @@
 ```typescript
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import { z } from 'zod';
-import { ratelimit } from '@/lib/ratelimit';
+import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
+import { z } from 'zod'
 
-// Environment variables validation
+// Validation schemas
+const healthCheckSchema = z.object({
+  deployment_id: z.string().uuid(),
+  check_type: z.enum(['full', 'performance', 'availability', 'satisfaction']).default('full'),
+  duration_hours: z.number().min(1).max(168).default(24)
+})
+
+const updateThresholdsSchema = z.object({
+  deployment_id: z.string().uuid(),
+  thresholds: z.object({
+    performance: z.object({
+      response_time_ms: z.number().min(0),
+      error_rate_percent: z.number().min(0).max(100),
+      throughput_rps: z.number().min(0)
+    }),
+    availability: z.object({
+      uptime_percent: z.number().min(0).max(100),
+      downtime_tolerance_minutes: z.number().min(0)
+    }),
+    satisfaction: z.object({
+      min_score: z.number().min(0).max(10),
+      complaint_threshold: z.number().min(0)
+    })
+  })
+})
+
+const triggerCheckSchema = z.object({
+  deployment_id: z.string().uuid(),
+  priority: z.enum(['low', 'medium', 'high', 'critical']).default('medium'),
+  notify: z.boolean().default(true)
+})
+
+interface HealthMetrics {
+  performance: {
+    avg_response_time: number
+    error_rate: number
+    throughput: number
+    cpu_usage: number
+    memory_usage: number
+  }
+  availability: {
+    uptime_percent: number
+    total_downtime_minutes: number
+    incident_count: number
+    mttr_minutes: number
+  }
+  satisfaction: {
+    user_score: number
+    complaint_count: number
+    satisfaction_trend: number
+    nps_score: number
+  }
+}
+
+interface PredictionResult {
+  risk_level: 'low' | 'medium' | 'high' | 'critical'
+  predicted_issues: string[]
+  confidence_score: number
+  time_to_issue_hours: number | null
+  recommendations: string[]
+}
+
+class HealthMetricsCollector {
+  constructor(private supabase: any) {}
+
+  async collectPerformanceMetrics(deploymentId: string, hours: number): Promise<HealthMetrics['performance']> {
+    const { data: metrics } = await this.supabase
+      .from('performance_metrics')
+      .select('*')
+      .eq('deployment_id', deploymentId)
+      .gte('timestamp', new Date(Date.now() - hours * 60 * 60 * 1000).toISOString())
+      .order('timestamp', { ascending: false })
+
+    if (!metrics?.length) {
+      throw new Error('No performance metrics available')
+    }
+
+    return {
+      avg_response_time: metrics.reduce((sum, m) => sum + m.response_time, 0) / metrics.length,
+      error_rate: (metrics.filter(m => m.status_code >= 400).length / metrics.length) * 100,
+      throughput: metrics.length / hours,
+      cpu_usage: metrics.reduce((sum, m) => sum + (m.cpu_usage || 0), 0) / metrics.length,
+      memory_usage: metrics.reduce((sum, m) => sum + (m.memory_usage || 0), 0) / metrics.length
+    }
+  }
+
+  async collectAvailabilityMetrics(deploymentId: string, hours: number): Promise<HealthMetrics['availability']> {
+    const { data: logs } = await this.supabase
+      .from('availability_logs')
+      .select('*')
+      .eq('deployment_id', deploymentId)
+      .gte('timestamp', new Date(Date.now() - hours * 60 * 60 * 1000).toISOString())
+
+    const totalMinutes = hours * 60
+    const downtimeMinutes = logs?.reduce((sum, log) => {
+      if (log.status === 'down') {
+        return sum + (log.duration_minutes || 0)
+      }
+      return sum
+    }, 0) || 0
+
+    const incidents = logs?.filter(log => log.type === 'incident').length || 0
+    const mttr = incidents > 0 ? downtimeMinutes / incidents : 0
+
+    return {
+      uptime_percent: ((totalMinutes - downtimeMinutes) / totalMinutes) * 100,
+      total_downtime_minutes: downtimeMinutes,
+      incident_count: incidents,
+      mttr_minutes: mttr
+    }
+  }
+
+  async collectSatisfactionMetrics(deploymentId: string, hours: number): Promise<HealthMetrics['satisfaction']> {
+    const { data: feedback } = await this.supabase
+      .from('user_feedback')
+      .select('*')
+      .eq('deployment_id', deploymentId)
+      .gte('created_at', new Date(Date.now() - hours * 60 * 60 * 1000).toISOString())
+
+    const avgScore = feedback?.reduce((sum, f) => sum + (f.score || 0), 0) / (feedback?.length || 1) || 0
+    const complaints = feedback?.filter(f => f.type === 'complaint').length || 0
+    const npsScore = this.calculateNPS(feedback || [])
+
+    // Calculate trend (simplified)
+    const recentFeedback = feedback?.slice(0, Math.floor(feedback.length / 2)) || []
+    const olderFeedback = feedback?.slice(Math.floor(feedback.length / 2)) || []
+    const recentAvg = recentFeedback.reduce((sum, f) => sum + f.score, 0) / (recentFeedback.length || 1)
+    const olderAvg = olderFeedback.reduce((sum, f) => sum + f.score, 0) / (olderFeedback.length || 1)
+    const trend = recentAvg - olderAvg
+
+    return {
+      user_score: avgScore,
+      complaint_count: complaints,
+      satisfaction_trend: trend,
+      nps_score: npsScore
+    }
+  }
+
+  private calculateNPS(feedback: any[]): number {
+    if (!feedback.length) return 0
+    const promoters = feedback.filter(f => f.score >= 9).length
+    const detractors = feedback.filter(f => f.score <= 6).length
+    return ((promoters - detractors) / feedback.length) * 100
+  }
+}
+
+class HealthScoreCalculator {
+  calculateCompositeScore(metrics: HealthMetrics): number {
+    const performanceScore = this.calculatePerformanceScore(metrics.performance)
+    const availabilityScore = this.calculateAvailabilityScore(metrics.availability)
+    const satisfactionScore = this.calculateSatisfactionScore(metrics.satisfaction)
+
+    // Weighted average (availability weighted highest)
+    return (performanceScore * 0.3 + availabilityScore * 0.5 + satisfactionScore * 0.2)
+  }
+
+  private calculatePerformanceScore(perf: HealthMetrics['performance']): number {
+    let score = 100
+    
+    // Response time penalty
+    if (perf.avg_response_time > 2000) score -= 30
+    else if (perf.avg_response_time > 1000) score -= 15
+    else if (perf.avg_response_time > 500) score -= 5
+
+    // Error rate penalty
+    if (perf.error_rate > 5) score -= 40
+    else if (perf.error_rate > 1) score -= 20
+    else if (perf.error_rate > 0.1) score -= 10
+
+    // Resource usage penalty
+    if (perf.cpu_usage > 80) score -= 15
+    if (perf.memory_usage > 80) score -= 15
+
+    return Math.max(0, score)
+  }
+
+  private calculateAvailabilityScore(avail: HealthMetrics['availability']): number {
+    let score = avail.uptime_percent
+
+    // Incident penalty
+    if (avail.incident_count > 5) score -= 20
+    else if (avail.incident_count > 2) score -= 10
+
+    // MTTR penalty
+    if (avail.mttr_minutes > 60) score -= 15
+    else if (avail.mttr_minutes > 30) score -= 10
+
+    return Math.max(0, score)
+  }
+
+  private calculateSatisfactionScore(sat: HealthMetrics['satisfaction']): number {
+    let score = (sat.user_score / 10) * 100
+
+    // Complaint penalty
+    if (sat.complaint_count > 10) score -= 30
+    else if (sat.complaint_count > 5) score -= 15
+
+    // Trend adjustment
+    score += sat.satisfaction_trend * 10
+
+    // NPS adjustment
+    if (sat.nps_score < -50) score -= 20
+    else if (sat.nps_score > 50) score += 10
+
+    return Math.max(0, Math.min(100, score))
+  }
+}
+
+class PredictiveHealthAnalyzer {
+  constructor(private supabase: any) {}
+
+  async analyzePredictiveHealth(deploymentId: string, metrics: HealthMetrics): Promise<PredictionResult> {
+    // Get historical data for ML analysis
+    const { data: historicalData } = await this.supabase
+      .from('deployments_health')
+      .select('*')
+      .eq('deployment_id', deploymentId)
+      .order('timestamp', { ascending: false })
+      .limit(100)
+
+    const trends = this.analyzeTrends(historicalData || [])
+    const anomalies = this.detectAnomalies(metrics, historicalData || [])
+    
+    const riskLevel = this.calculateRiskLevel(metrics, trends, anomalies)
+    const predictions = this.generatePredictions(metrics, trends, anomalies)
+
+    return {
+      risk_level: riskLevel,
+      predicted_issues: predictions.issues,
+      confidence_score: predictions.confidence,
+      time_to_issue_hours: predictions.timeToIssue,
+      recommendations: this.generateRecommendations(riskLevel, predictions.issues)
+    }
+  }
+
+  private analyzeTrends(historicalData: any[]): any {
+    if (historicalData.length < 5) return { stable: true }
+
+    const recentScores = historicalData.slice(0, 10).map(d => d.health_score)
+    const olderScores = historicalData.slice(10, 20).map(d => d.health_score)
+
+    const recentAvg = recentScores.reduce((a, b) => a + b, 0) / recentScores.length
+    const olderAvg = olderScores.reduce((a, b) => a + b, 0) / olderScores.length
+
+    return {
+      stable: Math.abs(recentAvg - olderAvg) < 5,
+      declining: recentAvg < olderAvg - 5,
+      improving: recentAvg > olderAvg + 5,
+      volatility: this.calculateVolatility(recentScores)
+    }
+  }
+
+  private detectAnomalies(current: HealthMetrics, historical: any[]): string[] {
+    const anomalies: string[] = []
+
+    if (historical.length < 5) return anomalies
+
+    const avgResponseTime = historical.reduce((sum, h) => sum + (h.avg_response_time || 0), 0) / historical.length
+    if (current.performance.avg_response_time > avgResponseTime * 2) {
+      anomalies.push('response_time_spike')
+    }
+
+    const avgErrorRate = historical.reduce((sum, h) => sum + (h.error_rate || 0), 0) / historical.length
+    if (current.performance.error_rate > avgErrorRate * 3) {
+      anomalies.push('error_rate_spike')
+    }
+
+    const avgUptime = historical.reduce((sum, h) => sum + (h.uptime_percent || 100), 0) / historical.length
+    if (current.availability.uptime_percent < avgUptime - 5) {
+      anomalies.push('availability_drop')
+    }
+
+    return anomalies
+  }
+
+  private calculateRiskLevel(metrics: HealthMetrics, trends: any, anomalies: string[]): PredictionResult['risk_level'] {
+    let riskScore = 0
+
+    // Performance risks
+    if (metrics.performance.avg_response_time > 2000) riskScore += 2
+    if (metrics.performance.error_rate > 5) riskScore += 3
+    if (metrics.performance.cpu_usage > 80) riskScore += 1
+
+    // Availability risks
+    if (metrics.availability.uptime_percent < 99) riskScore += 2
+    if (metrics.availability.incident_count > 3) riskScore += 1
+
+    // Satisfaction risks
+    if (metrics.satisfaction.user_score < 7) riskScore += 1
+    if (metrics.satisfaction.satisfaction_trend < -0.5) riskScore += 2
+
+    // Trend risks
+    if (trends.declining) riskScore += 2
+    if (trends.volatility > 10) riskScore += 1
+
+    // Anomaly risks
+    riskScore += anomalies.length
+
+    if (riskScore >= 8) return 'critical'
+    if (riskScore >= 5) return 'high'
+    if (riskScore >= 3) return 'medium'
+    return 'low'
+  }
+
+  private generatePredictions(metrics: HealthMetrics, trends: any, anomalies: string[]): {
+    issues: string[]
+    confidence: number
+    timeToIssue: number | null
+  } {
+    const issues: string[] = []
+    let confidence = 0.5
+    let timeToIssue: number | null = null
+
+    if (metrics.performance.error_rate > 2 && trends.declining) {
+      issues.push('service_degradation')
+      confidence += 0.3
+      timeToIssue = 4
+    }
+
+    if (metrics.performance.cpu_usage > 75 && trends.volatility > 5) {
+      issues.push('resource_exhaustion')
+      confidence += 0.2
+      timeToIssue = timeToIssue ? Math.min(timeToIssue, 2) : 2
+    }
+
+    if (metrics.availability.uptime_percent < 99.5 && anomalies.includes('availability_drop')) {
+      issues.push('potential_outage')
+      confidence += 0.4
+      timeToIssue = timeToIssue ? Math.min(timeToIssue, 1) : 1
+    }
+
+    if (metrics.satisfaction.satisfaction_trend < -0.3) {
+      issues.push('user_experience_decline')
+      confidence += 0.1
+    }
+
+    return {
+      issues,
+      confidence: Math.min(1, confidence),
+      timeToIssue
+    }
+  }
+
+  private generateRecommendations(riskLevel: string, issues: string[]): string[] {
+    const recommendations: string[] = []
+
+    if (issues.includes('service_degradation')) {
+      recommendations.push('Review error logs and implement circuit breakers')
+      recommendations.push('Scale horizontally to distribute load')
+    }
+
+    if (issues.includes('resource_exhaustion')) {
+      recommendations.push('Increase resource allocation')
+      recommendations.push('Optimize application performance')
+    }
+
+    if (issues.includes('potential_outage')) {
+      recommendations.push('Activate incident response plan')
+      recommendations.push('Prepare rollback procedures')
+    }
+
+    if (issues.includes('user_experience_decline')) {
+      recommendations.push('Investigate user journey bottlenecks')
+      recommendations.push('Conduct user satisfaction survey')
+    }
+
+    if (riskLevel === 'critical') {
+      recommendations.unshift('URGENT: Consider immediate rollback or hotfix')
+    }
+
+    return recommendations
+  }
+
+  private calculateVolatility(scores: number[]): number {
+    const mean = scores.reduce((a, b) => a + b, 0) / scores.length
+    const variance = scores.reduce((sum, score) => sum + Math.pow(score - mean, 2), 0) / scores.length
+    return Math.sqrt(variance)
+  }
+}
+
+class AlertManager {
+  constructor(private supabase: any) {}
+
+  async processAlerts(deploymentId: string, healthScore: number, prediction: PredictionResult): Promise<void> {
+    const alerts = []
+
+    if (prediction.risk_level === 'critical') {
+      alerts.push({
+        level: 'critical',
+        message: `Critical health risk detected for deployment ${deploymentId}`,
+        predicted_issues: prediction.predicted_issues,
+        time_to_issue: prediction.time_to_issue_hours
+      })
+    } else if (prediction.risk_level === 'high' && healthScore < 70) {
+      alerts.push({
+        level: 'high',
+        message: `High health risk with low score (${healthScore.toFixed(1)}) for deployment ${deploymentId}`,
+        predicted_issues: prediction.predicted_issues,
+        time_to_issue: prediction.time_to_issue_hours
+      })
+    }
+
+    if (alerts.length > 0) {
+      await this.supabase.from('health_alerts').insert(
+        alerts.map(alert => ({
+          deployment_id: deploymentId,
+          ...alert,
+          timestamp: new Date().toISOString()
+        }))
+      )
+    }
+  }
+}
+
+// Initialize Supabase client
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+)
 
-// Request schemas
-const healthCheckSchema = z.object({
-  deploymentId: z.string().uuid(),
-  environment: z.enum(['production', 'staging', 'development']),
-  cloudProvider: z.enum(['aws', 'azure', 'gcp', 'kubernetes']),
-  includeMetrics: z.boolean().optional().default(true),
-  anomalyDetection: z.boolean().optional().default(true)
-});
-
-const metricsSubmissionSchema = z.object({
-  deploymentId: z.string().uuid(),
-  timestamp: z.string().datetime(),
-  metrics: z.object({
-    cpu_usage: z.number().min(0).max(100),
-    memory_usage: z.number().min(0).max(100),
-    disk_usage: z.number().min(0).max(100),
-    network_io: z.number().min(0),
-    response_time: z.number().min(0),
-    error_rate: z.number().min(0).max(100),
-    throughput: z.number().min(0),
-    active_connections: z.number().min(0)
-  }),
-  cloudProvider: z.enum(['aws', 'azure', 'gcp', 'kubernetes']),
-  region: z.string(),
-  instanceId: z.string()
-});
-
-const remediationTriggerSchema = z.object({
-  deploymentId: z.string().uuid(),
-  action: z.enum(['restart', 'scale_up', 'scale_down', 'rollback', 'alert_only']),
-  severity: z.enum(['low', 'medium', 'high', 'critical']),
-  reason: z.string().min(1).max(500),
-  autoExecute: z.boolean().optional().default(false)
-});
-
-// Health Metrics Collector
-class HealthMetricsCollector {
-  static async collectMetrics(deploymentId: string, cloudProvider: string) {
-    try {
-      const { data: deployment, error } = await supabase
-        .from('deployments')
-        .select('*')
-        .eq('id', deploymentId)
-        .single();
-
-      if (error) throw error;
-
-      // Collect metrics based on cloud provider
-      const metrics = await this.getCloudProviderMetrics(deployment, cloudProvider);
-      
-      // Store metrics in database
-      const { error: insertError } = await supabase
-        .from('deployment_metrics')
-        .insert({
-          deployment_id: deploymentId,
-          metrics: metrics,
-          collected_at: new Date().toISOString(),
-          cloud_provider: cloudProvider
-        });
-
-      if (insertError) throw insertError;
-
-      return metrics;
-    } catch (error) {
-      console.error('Metrics collection failed:', error);
-      throw new Error('Failed to collect deployment metrics');
-    }
-  }
-
-  private static async getCloudProviderMetrics(deployment: any, provider: string) {
-    // Mock implementation - replace with actual cloud provider API calls
-    const baseMetrics = {
-      cpu_usage: Math.random() * 80 + 10,
-      memory_usage: Math.random() * 70 + 15,
-      disk_usage: Math.random() * 60 + 20,
-      network_io: Math.random() * 1000,
-      response_time: Math.random() * 200 + 50,
-      error_rate: Math.random() * 5,
-      throughput: Math.random() * 10000,
-      active_connections: Math.floor(Math.random() * 1000)
-    };
-
-    return {
-      ...baseMetrics,
-      provider_specific: await this.getProviderSpecificMetrics(provider, deployment)
-    };
-  }
-
-  private static async getProviderSpecificMetrics(provider: string, deployment: any) {
-    switch (provider) {
-      case 'aws':
-        return { 
-          ec2_instances: deployment.instance_count || 1,
-          load_balancer_health: 'healthy',
-          rds_connections: Math.floor(Math.random() * 100)
-        };
-      case 'azure':
-        return {
-          vm_instances: deployment.instance_count || 1,
-          app_service_health: 'healthy',
-          storage_usage: Math.random() * 1000
-        };
-      case 'gcp':
-        return {
-          compute_instances: deployment.instance_count || 1,
-          cloud_run_health: 'healthy',
-          pub_sub_messages: Math.floor(Math.random() * 10000)
-        };
-      case 'kubernetes':
-        return {
-          pod_count: deployment.pod_count || 3,
-          node_health: 'ready',
-          persistent_volume_usage: Math.random() * 100
-        };
-      default:
-        return {};
-    }
-  }
-}
-
-// Anomaly Detection Engine
-class AnomalyDetectionEngine {
-  static async detectAnomalies(deploymentId: string, currentMetrics: any) {
-    try {
-      // Get historical metrics for baseline
-      const { data: historicalMetrics, error } = await supabase
-        .from('deployment_metrics')
-        .select('metrics, collected_at')
-        .eq('deployment_id', deploymentId)
-        .gte('collected_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-        .order('collected_at', { ascending: false })
-        .limit(100);
-
-      if (error) throw error;
-
-      const anomalies = [];
-      
-      // CPU usage anomaly detection
-      if (this.detectCPUAnomaly(currentMetrics, historicalMetrics)) {
-        anomalies.push({
-          metric: 'cpu_usage',
-          current_value: currentMetrics.cpu_usage,
-          severity: currentMetrics.cpu_usage > 90 ? 'critical' : 'high',
-          description: `CPU usage spike detected: ${currentMetrics.cpu_usage.toFixed(2)}%`
-        });
-      }
-
-      // Memory usage anomaly detection
-      if (this.detectMemoryAnomaly(currentMetrics, historicalMetrics)) {
-        anomalies.push({
-          metric: 'memory_usage',
-          current_value: currentMetrics.memory_usage,
-          severity: currentMetrics.memory_usage > 95 ? 'critical' : 'high',
-          description: `Memory usage anomaly: ${currentMetrics.memory_usage.toFixed(2)}%`
-        });
-      }
-
-      // Error rate anomaly detection
-      if (this.detectErrorRateAnomaly(currentMetrics, historicalMetrics)) {
-        anomalies.push({
-          metric: 'error_rate',
-          current_value: currentMetrics.error_rate,
-          severity: currentMetrics.error_rate > 10 ? 'critical' : 'medium',
-          description: `Error rate spike: ${currentMetrics.error_rate.toFixed(2)}%`
-        });
-      }
-
-      // Store anomalies
-      if (anomalies.length > 0) {
-        await supabase
-          .from('deployment_anomalies')
-          .insert({
-            deployment_id: deploymentId,
-            anomalies: anomalies,
-            detected_at: new Date().toISOString(),
-            status: 'active'
-          });
-      }
-
-      return anomalies;
-    } catch (error) {
-      console.error('Anomaly detection failed:', error);
-      throw new Error('Failed to detect anomalies');
-    }
-  }
-
-  private static detectCPUAnomaly(current: any, historical: any[]): boolean {
-    if (!historical.length) return current.cpu_usage > 85;
-    
-    const avgCPU = historical.reduce((sum, record) => sum + record.metrics.cpu_usage, 0) / historical.length;
-    const threshold = avgCPU + (avgCPU * 0.5); // 50% increase threshold
-    
-    return current.cpu_usage > Math.max(threshold, 80);
-  }
-
-  private static detectMemoryAnomaly(current: any, historical: any[]): boolean {
-    if (!historical.length) return current.memory_usage > 90;
-    
-    const avgMemory = historical.reduce((sum, record) => sum + record.metrics.memory_usage, 0) / historical.length;
-    const threshold = avgMemory + (avgMemory * 0.4); // 40% increase threshold
-    
-    return current.memory_usage > Math.max(threshold, 85);
-  }
-
-  private static detectErrorRateAnomaly(current: any, historical: any[]): boolean {
-    if (!historical.length) return current.error_rate > 5;
-    
-    const avgErrorRate = historical.reduce((sum, record) => sum + record.metrics.error_rate, 0) / historical.length;
-    const threshold = avgErrorRate * 3; // 3x normal error rate
-    
-    return current.error_rate > Math.max(threshold, 2);
-  }
-}
-
-// Remediation Trigger Service
-class RemediationTriggerService {
-  static async triggerRemediation(deploymentId: string, action: string, severity: string, reason: string, autoExecute: boolean = false) {
-    try {
-      const remediationId = crypto.randomUUID();
-      
-      // Log remediation action
-      const { error: logError } = await supabase
-        .from('remediation_actions')
-        .insert({
-          id: remediationId,
-          deployment_id: deploymentId,
-          action: action,
-          severity: severity,
-          reason: reason,
-          status: autoExecute ? 'executing' : 'pending',
-          triggered_at: new Date().toISOString(),
-          auto_execute: autoExecute
-        });
-
-      if (logError) throw logError;
-
-      if (autoExecute) {
-        await this.executeRemediation(remediationId, deploymentId, action);
-      }
-
-      // Send alert notification
-      await this.sendAlert(deploymentId, action, severity, reason);
-
-      return { remediationId, status: autoExecute ? 'executing' : 'pending' };
-    } catch (error) {
-      console.error('Remediation trigger failed:', error);
-      throw new Error('Failed to trigger remediation');
-    }
-  }
-
-  private static async executeRemediation(remediationId: string, deploymentId: string, action: string) {
-    try {
-      let result = { success: false, message: 'Unknown action' };
-
-      switch (action) {
-        case 'restart':
-          result = await this.restartDeployment(deploymentId);
-          break;
-        case 'scale_up':
-          result = await this.scaleDeployment(deploymentId, 'up');
-          break;
-        case 'scale_down':
-          result = await this.scaleDeployment(deploymentId, 'down');
-          break;
-        case 'rollback':
-          result = await this.rollbackDeployment(deploymentId);
-          break;
-        default:
-          result = { success: false, message: `Unsupported action: ${action}` };
-      }
-
-      // Update remediation status
-      await supabase
-        .from('remediation_actions')
-        .update({
-          status: result.success ? 'completed' : 'failed',
-          result: result.message,
-          completed_at: new Date().toISOString()
-        })
-        .eq('id', remediationId);
-
-      return result;
-    } catch (error) {
-      await supabase
-        .from('remediation_actions')
-        .update({
-          status: 'failed',
-          result: error instanceof Error ? error.message : 'Unknown error',
-          completed_at: new Date().toISOString()
-        })
-        .eq('id', remediationId);
-      
-      throw error;
-    }
-  }
-
-  private static async restartDeployment(deploymentId: string) {
-    // Mock implementation - replace with actual deployment restart logic
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    return { success: true, message: 'Deployment restarted successfully' };
-  }
-
-  private static async scaleDeployment(deploymentId: string, direction: 'up' | 'down') {
-    // Mock implementation - replace with actual scaling logic
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    return { success: true, message: `Deployment scaled ${direction} successfully` };
-  }
-
-  private static async rollbackDeployment(deploymentId: string) {
-    // Mock implementation - replace with actual rollback logic
-    await new Promise(resolve => setTimeout(resolve, 5000));
-    return { success: true, message: 'Deployment rolled back successfully' };
-  }
-
-  private static async sendAlert(deploymentId: string, action: string, severity: string, reason: string) {
-    // Mock implementation - integrate with actual alerting services
-    console.log(`ALERT [${severity.toUpperCase()}]: Deployment ${deploymentId} - ${action} triggered. Reason: ${reason}`);
-  }
-}
-
-// Health Score Calculator
-class HealthScoreCalculator {
-  static calculateHealthScore(metrics: any, anomalies: any[]): number {
-    let score = 100;
-
-    // Deduct points based on metrics
-    if (metrics.cpu_usage > 80) score -= (metrics.cpu_usage - 80) * 2;
-    if (metrics.memory_usage > 85) score -= (metrics.memory_usage - 85) * 3;
-    if (metrics.error_rate > 1) score -= metrics.error_rate * 10;
-    if (metrics.response_time > 1000) score -= Math.min((metrics.response_time - 1000) / 100, 30);
-
-    // Deduct points based on anomalies
-    anomalies.forEach(anomaly => {
-      switch (anomaly.severity) {
-        case 'critical': score -= 40; break;
-        case 'high': score -= 25; break;
-        case 'medium': score -= 15; break;
-        case 'low': score -= 5; break;
-      }
-    });
-
-    return Math.max(0, Math.round(score));
-  }
-}
-
-// GET - Retrieve deployment health status
+// GET: Retrieve current health status with predictions
 export async function GET(request: NextRequest) {
   try {
-    const { success } = await ratelimit.limit('deployment-health-get');
-    if (!success) {
-      return NextResponse.json(
-        { error: 'Rate limit exceeded' },
-        { status: 429 }
-      );
+    const { searchParams } = new URL(request.url)
+    const rawParams = Object.fromEntries(searchParams)
+    
+    const { deployment_id, check_type, duration_hours } = healthCheckSchema.parse(rawParams)
+
+    const collector = new HealthMetricsCollector(supabase)
+    const calculator = new HealthScoreCalculator()
+    const analyzer = new PredictiveHealthAnalyzer(supabase)
+
+    const metrics: HealthMetrics = {
+      performance: await collector.collectPerformanceMetrics(deployment_id, duration_hours),
+      availability: await collector.collectAvailabilityMetrics(deployment_id, duration_hours),
+      satisfaction: await collector.collectSatisfactionMetrics(deployment_id, duration_hours)
     }
 
-    const { searchParams } = new URL(request.url);
-    const deploymentId = searchParams.get('deploymentId');
-    const environment = searchParams.get('environment');
-    const cloudProvider = searchParams.get('cloudProvider');
-    const includeMetrics = searchParams.get('includeMetrics') === 'true';
-    const anomalyDetection = searchParams.get('anomalyDetection') === 'true';
+    const healthScore = calculator.calculateCompositeScore(metrics)
+    const prediction = await analyzer.analyzePredictiveHealth(deployment_id, metrics)
 
-    if (!deploymentId) {
-      return NextResponse.json(
-        { error: 'Deployment ID is required' },
-        { status: 400 }
-      );
-    }
+    // Store health assessment
+    await supabase.from('deployments_health').insert({
+      deployment_id,
+      health_score: healthScore,
+      metrics,
+      prediction_data: prediction,
+      timestamp: new Date().toISOString()
+    })
 
-    // Validate UUID format
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(deploymentId)) {
-      return NextResponse.json(
-        { error: 'Invalid deployment ID format' },
-        { status: 400 }
-      );
-    }
+    const alertManager = new AlertManager(supabase)
+    await alertManager.processAlerts(deployment_id, healthScore, prediction)
 
-    // Get deployment info
-    const { data: deployment, error: deploymentError } = await supabase
-      .from('deployments')
-      .select('*')
-      .eq('id', deploymentId)
-      .single();
-
-    if (deploymentError || !deployment) {
-      return NextResponse.json(
-        { error: 'Deployment not found' },
-        { status: 404 }
-      );
-    }
-
-    let healthData: any = {
-      deploymentId,
-      status: deployment.status || 'unknown',
-      lastUpdated: new Date().toISOString()
-    };
-
-    if (includeMetrics) {
-      // Get latest metrics
-      const { data: latestMetrics } = await supabase
-        .from('deployment_metrics')
-        .select('*')
-        .eq('deployment_id', deploymentId)
-        .order('collected_at', { ascending: false })
-        .limit(1)
-        .single();
-
-      if (latestMetrics) {
-        healthData.metrics = latestMetrics.metrics;
-        healthData.metricsTimestamp = latestMetrics.collected_at;
-
-        // Calculate health score
-        const anomalies = anomalyDetection ? await AnomalyDetectionEngine.detectAnomalies(deploymentId, latestMetrics.metrics) : [];
-        healthData.healthScore = HealthScoreCalculator.calculateHealthScore(latestMetrics.metrics, anomalies);
-        
-        if (anomalyDetection) {
-          healthData.anomalies = anomalies;
-        }
+    return NextResponse.json({
+      success: true,
+      data: {
+        deployment_id,
+        health_score: healthScore,
+        status: healthScore >= 90 ? 'excellent' : healthScore >= 75 ? 'good' : healthScore >= 60 ? 'fair' : 'poor',
+        metrics,
+        prediction,
+        assessed_at: new Date().toISOString()
       }
-    }
-
-    // Get recent remediation actions
-    const { data: remediations } = await supabase
-      .from('remediation_actions')
-      .select('*')
-      .eq('deployment_id', deploymentId)
-      .order('triggered_at', { ascending: false })
-      .limit(5);
-
-    healthData.recentActions = remediations || [];
-
-    return NextResponse.json(healthData);
+    })
 
   } catch (error) {
-    console.error('Health check failed:', error);
+    console.error('Health assessment error:', error)
+    
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid request parameters', details: error.errors },
+        { status: 400 }
+      )
+    }
+
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { success: false, error: 'Health assessment failed' },
       { status: 500 }
-    );
+    )
   }
 }
 
-// POST - Submit health metrics or trigger remediation
+// POST: Trigger manual health check
 export async function POST(request: NextRequest) {
   try {
-    const { success } = await ratelimit.limit('deployment-health-post');
-    if (!success) {
-      return NextResponse.json(
-        { error: 'Rate limit exceeded' },
-        { status: 429 }
-      );
-    }
+    const body = await request.json()
+    const { deployment_id, priority, notify } = triggerCheckSchema.parse(body)
 
-    const body = await request.json().catch(() => null);
-    if (!body) {
-      return NextResponse.json(
-        { error: 'Invalid JSON payload' },
-        { status: 400 }
-      );
-    }
+    // Queue health check job
+    await supabase.from('health_check_queue').insert({
+      deployment_id,
+      priority,
+      notify,
+      status: 'queued',
+      created_at: new Date().toISOString()
+    })
 
-    const action = body.action;
+    // Trigger immediate check for high/critical priority
+    if (priority === 'high' || priority === 'critical') {
+      const collector = new HealthMetricsCollector(supabase)
+      const calculator = new HealthScoreCalculator()
+      const analyzer = new PredictiveHealthAnalyzer(supabase)
 
-    if (action === 'submit_metrics') {
-      const validation = metricsSubmissionSchema.safeParse(body);
-      if (!validation.success) {
-        return NextResponse.json(
-          { error: 'Invalid metrics data', details: validation.error.issues },
-          { status: 400 }
-        );
+      const metrics: HealthMetrics = {
+        performance: await collector.collectPerformanceMetrics(deployment_id, 1),
+        availability: await collector.collectAvailabilityMetrics(deployment_id, 1),
+        satisfaction: await collector.collectSatisfactionMetrics(deployment_id, 1)
       }
 
-      const { deploymentId, timestamp, metrics, cloudProvider, region, instanceId } = validation.data;
+      const healthScore = calculator.calculateCompositeScore(metrics)
+      const prediction = await analyzer.analyzePredictiveHealth(deployment_id, metrics)
 
-      // Store metrics
-      const { error: insertError } = await supabase
-        .from('deployment_metrics')
-        .insert({
-          deployment_id: deploymentId,
-          metrics: metrics,
-          collected_at: timestamp,
-          cloud_provider: cloudProvider,
-          region: region,
-          instance_id: instanceId
-        });
+      await supabase.from('deployments_health').insert({
+        deployment_id,
+        health_score: healthScore,
+        metrics,
+        prediction_data: prediction,
+        check_type: 'manual',
+        priority,
+        timestamp: new Date().toISOString()
+      })
 
-      if (insertError) {
-        console.error('Failed to store metrics:', insertError);
-        return NextResponse.json(
-          { error: 'Failed to store metrics' },
-          { status: 500 }
-        );
-      }
-
-      // Run anomaly detection
-      const anomalies = await AnomalyDetectionEngine.detectAnomalies(deploymentId, metrics);
-      
-      // Calculate health score
-      const healthScore = HealthScoreCalculator.calculateHealthScore(metrics, anomalies);
-
-      // Trigger automatic remediation if critical anomalies detected
-      const criticalAnomalies = anomalies.filter(a => a.severity === 'critical');
-      if (criticalAnomalies.length > 0) {
-        await RemediationTriggerService.triggerRemediation(
-          deploymentId,
-          'restart',
-          'critical',
-          `Critical anomalies detected: ${criticalAnomalies.map(a => a.description).join(', ')}`,
-          true
-        );
+      if (notify) {
+        const alertManager = new AlertManager(supabase)
+        await alertManager.processAlerts(deployment_id, healthScore, prediction)
       }
 
       return NextResponse.json({
         success: true,
-        healthScore,
-        anomalies: anomalies.length,
-        criticalAnomalies: criticalAnomalies.length,
-        autoRemediationTriggered: criticalAnomalies.length > 0
-      });
-
-    } else if (action === 'trigger_remediation') {
-      const validation = remediationTriggerSchema.safeParse(body);
-      if (!validation.success) {
-        return NextResponse.json(
-          { error: 'Invalid remediation request', details: validation.error.issues },
-          { status: 400 }
-        );
-      }
-
-      const { deploymentId, action: remediationAction, severity, reason, autoExecute } = validation.data;
-
-      const result = await RemediationTriggerService.triggerRemediation(
-        deploymentId,
-        remediationAction,
-        severity,
-        reason,
-        autoExecute
-      );
-
-      return NextResponse.json(result);
-
-    } else {
-      return NextResponse.json(
-        { error: 'Invalid action. Supported actions: submit_metrics, trigger_remediation' },
-        { status: 400 }
-      );
-    }
-
-  } catch (error) {
-    console.error('Health API error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
-  }
-}
-
-// PUT - Update deployment health configuration
-export async function PUT(request: NextRequest) {
-  try {
-    const { success } = await ratelimit.limit('deployment-health-put');
-    if (!success) {
-      return NextResponse.json(
-        { error: 'Rate limit exceeded' },
-        { status: 429 }
-      );
-    }
-
-    const body = await request.json().catch(() => null);
-    if (!body) {
-      return NextResponse.json(
-        { error: 'Invalid JSON payload' },
-        { status: 400 }
-      );
-    }
-
-    const { deploymentId, healthConfig } = body;
-
-    if (!deploymentId || !healthConfig) {
-      return NextResponse.json(
-        { error: 'Deployment ID and health configuration are required' },
-        { status: 400 }
-      );
-    }
-
-    // Update deployment health configuration
-    const { error } = await supabase
-      .from('deployments')
-      .update({ health_config: healthConfig })
-      .eq('id', deploymentId);
-
-    if (error) {
-      console.error('Failed to update health config:', error);
-      return NextResponse.json(
-        { error: 'Failed to update health configuration' },
-        { status: 500 }
-      );
+        data: {
+          check_id: deployment_id,
+          immediate_result: {
+            health_score: healthScore,
+            prediction,
+            status: 'completed'
+          }
+        }
+      })
     }
 
     return NextResponse.json({
       success: true,
-      message: 'Health configuration updated successfully'
-    });
+      data: {
+        check_id: deployment_id,
+        status: 'queued',
+        priority,
+        estimated_completion: new Date(Date.now() + (priority === 'medium' ? 5 : 15) * 60000)
+      }
+    })
 
   } catch (error) {
-    console.error('Health config update failed:', error);
+    console.error('Manual health check error:', error)
+    
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid request body', details: error.errors },
+        { status: 400 }
+      )
+    }
+
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { success: false, error: 'Health check trigger failed' },
       { status: 500 }
-    );
+    )
   }
 }
 
-// DELETE - Remove deployment health monitoring
-export async function DELETE(request: NextRequest) {
+// PUT: Update health thresholds
+export async function PUT(request: NextRequest) {
   try {
-    const { success } = await ratelimit.limit('deployment-health-delete');
-    if (!success) {
-      return NextResponse.json(
-        { error: 'Rate limit
+    const body = await request.json()
+    const { deployment_id, thresholds } = updateThresholdsSchema.parse(body)
+
+    await supabase.from('deployment_health_thresholds').upsert({
+      deployment_id,
+      ...thresholds,
+      updated_at: new Date().toISOString()
+    })
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        deployment_id,
+        thresholds,
+        updated_at: new Date().toISOString()
