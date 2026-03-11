@@ -358,19 +358,19 @@ export async function runModuleFactory(options?: {
 
         const taskId = `mf-${gap.capability.slice(0, 8)}-${gap.module_name.slice(0, 20).replace(/_/g, "-")}-${Date.now().toString(36)}`;
 
-        const task: Omit<ModuleTask, "id"> & { id: string } = {
+        const task = {
           id         : taskId,
           title      : taskTitle,
           description,
-          type       : "build_module",
           phase_id   : gap.capability,
           source     : "module_factory",
           status     : "pending",
           metadata   : {
+            type        : "build_module",
             module      : gap.module_name,
             capability  : gap.capability,
             dependencies: [],
-            factory_run: factoryRun,
+            factory_run : factoryRun,
           },
         };
 
