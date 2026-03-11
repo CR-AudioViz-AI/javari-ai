@@ -148,30 +148,23 @@ async function handleQuerySystem(message: string): Promise<{ reply: string; data
 
   // Task queue stats
   if (/tasks?|queue|pending|completed|roadmap|progress/.test(lower)) {
-    const { data: counts } = await client
-      .rpc("count_tasks_by_status")
-      .catch(() => ({ data: null })) as { data: Array<{ status: string; cnt: number }> | null };
-
-    if (counts) {
-      const map = Object.fromEntries(counts.map((r) => [r.status, r.cnt]));
-      const total     = Object.values(map).reduce((s, n) => s + (n as number), 0);
-      const completed = (map.completed ?? 0) as number;
-      const pending   = (map.pending ?? 0) as number;
+    try {
+      const [totalRes, completedRes, pendingRes] = await Promise.all([
+        client.from("roadmap_tasks").select("*", { count: "exact", head: true }),
+        client.from("roadmap_tasks").select("*", { count: "exact", head: true }).eq("status", "completed"),
+        client.from("roadmap_tasks").select("*", { count: "exact", head: true }).eq("status", "pending"),
+      ]);
+      const total     = totalRes.count     ?? 0;
+      const completed = completedRes.count ?? 0;
+      const pending   = pendingRes.count   ?? 0;
       const pct       = total > 0 ? ((completed / total) * 100).toFixed(1) : "0";
       return {
         reply: `📊 **Roadmap Status**\n- Total tasks: ${total.toLocaleString()}\n- Completed: ${completed.toLocaleString()} (${pct}%)\n- Pending: ${pending.toLocaleString()}\n- Other: ${(total - completed - pending).toLocaleString()}`,
-        data : map,
+        data : { total, completed, pending },
       };
+    } catch {
+      return { reply: "📊 Unable to fetch roadmap stats right now — check /api/javari/dashboard for full telemetry.", data: {} };
     }
-
-    // Fallback: direct count
-    const { count: total }     = await client.from("roadmap_tasks").select("*", { count: "exact", head: true });
-    const { count: completed } = await client.from("roadmap_tasks").select("*", { count: "exact", head: true }).eq("status", "completed");
-    const { count: pending }   = await client.from("roadmap_tasks").select("*", { count: "exact", head: true }).eq("status", "pending");
-    return {
-      reply: `📊 **Roadmap Status**\n- Total: ${total?.toLocaleString() ?? "?"}\n- Completed: ${completed?.toLocaleString() ?? "?"}\n- Pending: ${pending?.toLocaleString() ?? "?"}`,
-      data : { total, completed, pending },
-    };
   }
 
   // Build artifacts
