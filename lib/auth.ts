@@ -158,3 +158,8 @@ export async function requireAuth(request: Request): Promise<{ user: User; error
 
   return { user, error: null };
 }
+
+// Additional named exports
+export const useUser = {}
+export const validateApiKey = {}
+export const validateAuth = {}

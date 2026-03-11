@@ -266,3 +266,6 @@ export async function runModuleFactory(
     durationMs: Date.now() - t0,
   };
 }
+
+// Additional named exports
+export type FactoryOptions = Record<string, unknown>

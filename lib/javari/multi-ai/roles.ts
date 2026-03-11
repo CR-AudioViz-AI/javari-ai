@@ -138,3 +138,6 @@ export function determineAgentForTask(flags: TaskFlags): {
   // Default → engineer
   return { primaryRole: "engineer", supportRoles: [] };
 }
+
+// Additional named exports
+export type TaskFlags = Record<string, unknown>

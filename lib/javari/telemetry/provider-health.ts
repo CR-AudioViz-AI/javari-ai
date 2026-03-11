@@ -403,3 +403,6 @@ async function _rebuildFromLog(): Promise<number> {
     return rebuilt.size;
   } catch { return 0; }
 }
+
+// Additional named exports
+export type ProviderHealthState = Record<string, unknown>

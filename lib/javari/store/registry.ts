@@ -331,3 +331,6 @@ export function getStats() {
     categories:    getCategories().length,
   };
 }
+
+// Additional named exports
+export type ModuleRegistryEntry = Record<string, unknown>

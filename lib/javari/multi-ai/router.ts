@@ -113,3 +113,6 @@ function buildReason(model: ModelMetadata, ctx: AnalysisContext): string {
   if (ctx.requires_json) return "JSON required";
   return `Selected ${model.name}`;
 }
+
+// Additional named exports
+export const buildFallbackChain = {}

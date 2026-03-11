@@ -503,3 +503,6 @@ export async function runAutonomousPlanner(): Promise<PlannerResult> {
     canonicalContext: { docsRead: context.canonicalDocs.length, nodesRead: context.knowledgeNodes.length },
   };
 }
+
+// Additional named exports
+export type PlannerResult = Record<string, unknown>
