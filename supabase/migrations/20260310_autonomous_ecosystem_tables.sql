@@ -133,3 +133,29 @@ DROP POLICY IF EXISTS "Service role full access" ON knowledge_graph_edges;
 CREATE POLICY "Service role full access" ON knowledge_graph_edges
   FOR ALL TO service_role USING (true) WITH CHECK (true);
 
+
+-- ── ai_router_logs — telemetry for all AI calls through JavariRouter ─────────
+
+CREATE TABLE IF NOT EXISTS ai_router_logs (
+  id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_type   text        NOT NULL DEFAULT 'simple_task',
+  provider    text        NOT NULL,
+  model_used  text        NOT NULL,
+  tokens_in   integer     DEFAULT 0,
+  tokens_out  integer     DEFAULT 0,
+  cost_usd    numeric(10,6) DEFAULT 0,
+  latency_ms  integer     DEFAULT 0,
+  ok          boolean     DEFAULT true,
+  error       text,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ai_router_logs_created_at_idx ON ai_router_logs (created_at DESC);
+CREATE INDEX IF NOT EXISTS ai_router_logs_task_type_idx  ON ai_router_logs (task_type);
+CREATE INDEX IF NOT EXISTS ai_router_logs_provider_idx   ON ai_router_logs (provider);
+
+ALTER TABLE ai_router_logs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Service role full access" ON ai_router_logs;
+CREATE POLICY "Service role full access" ON ai_router_logs
+  FOR ALL TO service_role USING (true) WITH CHECK (true);

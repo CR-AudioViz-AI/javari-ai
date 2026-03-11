@@ -5,7 +5,7 @@
 //          Never blocks on parse failure — defaults to approved.
 // Date: 2026-03-10
 
-import { getSecret } from "@/lib/platform-secrets/getSecret";
+import { JavariRouter } from "@/lib/javari/router";
 import type { BuildSpec } from "./architect";
 
 export interface ValidationResult {
@@ -17,34 +17,16 @@ export interface ValidationResult {
   durationMs   : number;
 }
 
+// Route validator through JavariRouter — validation_task uses DIFFERENT model than engineer
 async function anthropicCall(system: string, user: string): Promise<string> {
-  const apiKey = await getSecret("ANTHROPIC_API_KEY").catch(() => "")
-    || process.env.ANTHROPIC_API_KEY || "";
-  if (!apiKey) throw new Error("[validator] ANTHROPIC_API_KEY unavailable");
-
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method : "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1000,
-      system,
-      messages: [{ role: "user", content: user }],
-    }),
-    signal: AbortSignal.timeout(45_000),
+  const result = await JavariRouter.generate({
+    taskType  : "validation_task",
+    prompt    : user,
+    system,
+    maxTokens : 2048,
   });
-
-  if (!res.ok) {
-    const t = await res.text();
-    throw new Error(`Anthropic ${res.status}: ${t.slice(0, 200)}`);
-  }
-
-  const d = await res.json() as { content: Array<{ type: string; text?: string }> };
-  return d.content.filter(b => b.type === "text").map(b => b.text ?? "").join("").trim();
+  if (!result.ok) throw new Error(`[validator] JavariRouter failed: ${result.error}`);
+  return result.content;
 }
 
 export async function runValidator(

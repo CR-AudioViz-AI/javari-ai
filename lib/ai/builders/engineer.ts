@@ -5,7 +5,7 @@
 //          Output: Complete file content ready to commit.
 // Date: 2026-03-10
 
-import { getSecret }  from "@/lib/platform-secrets/getSecret";
+import { JavariRouter } from "@/lib/javari/router";
 import type { BuildSpec } from "./architect";
 
 export interface EngineerOutput {
@@ -16,34 +16,16 @@ export interface EngineerOutput {
   durationMs : number;
 }
 
+// Route engineer calls through JavariRouter — code_task selects strongest coding model
 async function anthropicCall(system: string, user: string, maxTokens: number): Promise<string> {
-  const apiKey = await getSecret("ANTHROPIC_API_KEY").catch(() => "")
-    || process.env.ANTHROPIC_API_KEY || "";
-  if (!apiKey) throw new Error("[engineer] ANTHROPIC_API_KEY unavailable");
-
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method : "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: maxTokens,
-      system,
-      messages: [{ role: "user", content: user }],
-    }),
-    signal: AbortSignal.timeout(120_000),
+  const result = await JavariRouter.generate({
+    taskType  : "code_task",
+    prompt    : user,
+    system,
+    maxTokens,
   });
-
-  if (!res.ok) {
-    const t = await res.text();
-    throw new Error(`Anthropic ${res.status}: ${t.slice(0, 200)}`);
-  }
-
-  const d = await res.json() as { content: Array<{ type: string; text?: string }> };
-  return d.content.filter(b => b.type === "text").map(b => b.text ?? "").join("").trim();
+  if (!result.ok) throw new Error(`[engineer] JavariRouter failed: ${result.error}`);
+  return result.content;
 }
 
 const SYSTEM_PROMPTS: Record<string, string> = {

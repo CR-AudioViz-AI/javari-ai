@@ -4,7 +4,7 @@
 //          Output: BuildSpec used by engineer.ts to generate code.
 // Date: 2026-03-10
 
-import { getSecret } from "@/lib/platform-secrets/getSecret";
+import { JavariRouter } from "@/lib/javari/router";
 
 export interface ArchitectInput {
   taskId      : string;
@@ -34,46 +34,17 @@ export interface BuildSpec {
   durationMs      : number;
 }
 
+// Route architect calls through JavariRouter — reasoning_task for deep analysis
 async function anthropicCall(system: string, user: string): Promise<string> {
-  const apiKey = await getSecret("ANTHROPIC_API_KEY").catch(() => "")
-    || process.env.ANTHROPIC_API_KEY || "";
-  if (!apiKey) throw new Error("[architect] ANTHROPIC_API_KEY unavailable");
-
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method : "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 2500,
-      system,
-      messages: [{ role: "user", content: user }],
-    }),
-    signal: AbortSignal.timeout(60_000),
+  const result = await JavariRouter.generate({
+    taskType  : "reasoning_task",
+    prompt    : user,
+    system,
+    maxTokens : 4096,
   });
-
-  if (!res.ok) {
-    const t = await res.text();
-    throw new Error(`Anthropic ${res.status}: ${t.slice(0, 200)}`);
-  }
-
-  const d = await res.json() as { content: Array<{ type: string; text?: string }> };
-  return d.content.filter(b => b.type === "text").map(b => b.text ?? "").join("").trim();
+  if (!result.ok) throw new Error(`[architect] JavariRouter failed: ${result.error}`);
+  return result.content;
 }
-
-const FILE_PATH_MAP: Record<string, (id: string) => string> = {
-  build_module             : id => `lib/modules/generated/${id}/index.ts`,
-  generate_api             : id => `app/api/javari/generated/${id}/route.ts`,
-  create_service           : id => `lib/services/generated/${id}.ts`,
-  create_database_migration: id => `docs/migrations/${new Date().toISOString().slice(0,10)}-${id}.sql`,
-  deploy_microservice      : id => `app/api/javari/services/${id}/route.ts`,
-  generate_ui_component    : id => `components/generated/${id}.tsx`,
-  generate_documentation   : id => `docs/generated/${id}.md`,
-  generate_tests           : id => `__tests__/generated/${id}.test.ts`,
-};
 
 export async function runArchitect(input: ArchitectInput): Promise<BuildSpec> {
   const t0 = Date.now();

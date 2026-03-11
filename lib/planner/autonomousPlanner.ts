@@ -21,6 +21,7 @@
 //
 // Date: 2026-03-10
 
+import { JavariRouter } from "@/lib/javari/router";
 import { createClient } from "@supabase/supabase-js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -185,12 +186,6 @@ async function generateTasksViaAI(
   log        : (m: string) => void,
 ): Promise<AITaskDraft[]> {
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    log("[planner] ⚠️  ANTHROPIC_API_KEY not set — cannot call AI");
-    return [];
-  }
-
   const completedSample = context.completedTitles.slice(-60).join("\n");
   const pendingSample   = context.pendingTitles.slice(0, 20).join("\n");
 
@@ -261,43 +256,25 @@ Generate exactly ${targetCount} new artifact tasks as a JSON array. Return ONLY 
 
   let raw = "";
   try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method : "POST",
-      headers: {
-        "Content-Type"     : "application/json",
-        "x-api-key"        : apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model     : "claude-sonnet-4-20250514",
-        max_tokens: 8000,
-        system    : systemPrompt,
-        messages  : [{ role: "user", content: userPrompt }],
-      }),
-      signal: AbortSignal.timeout(90_000),
+    // Route planner through JavariRouter — reasoning_task for strategic planning
+    const routerResult = await JavariRouter.generate({
+      taskType  : "reasoning_task",
+      prompt    : userPrompt,
+      system    : systemPrompt,
+      maxTokens : 8000,
+      json      : true,
     });
 
-    if (!response.ok) {
-      const errText = await response.text();
-      log(`[planner] Anthropic API error ${response.status}: ${errText.slice(0, 200)}`);
+    if (!routerResult.ok) {
+      log(`[planner] JavariRouter failed: ${routerResult.error}`);
       return [];
     }
 
-    const data = await response.json() as {
-      content: Array<{ type: string; text?: string }>;
-      usage?: { input_tokens: number; output_tokens: number };
-    };
-
-    log(`[planner] API response — in=${data.usage?.input_tokens ?? "?"} out=${data.usage?.output_tokens ?? "?"} tokens`);
-
-    raw = data.content
-      .filter(b => b.type === "text")
-      .map(b => b.text ?? "")
-      .join("")
-      .trim();
+    log(`[planner] Router response — ${routerResult.provider}:${routerResult.model} in=${routerResult.tokensIn} out=${routerResult.tokensOut} $${routerResult.costUsd.toFixed(5)}`);
+    raw = routerResult.content.trim();
 
   } catch (err) {
-    log(`[planner] Anthropic fetch failed: ${err instanceof Error ? err.message : String(err)}`);
+    log(`[planner] JavariRouter threw: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
 

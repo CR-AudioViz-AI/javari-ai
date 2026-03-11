@@ -1,250 +1,45 @@
-/**
- * Replicate AI Provider Adapter
- * 
- * Supports free-tier models via Replicate's API
- * Auth: Optional (uses REPLICATE_API_TOKEN env var)
- * Endpoint: https://api.replicate.com/v1/predictions
- */
+// lib/javari/providers/replicate.ts
+// Purpose: Javari Replicate provider adapter.
+// Date: 2026-03-11
 
-interface ReplicateConfig {
-  apiKey?: string;
-  timeout?: number;
-  maxRetries?: number;
+import { getSecret } from "@/lib/platform-secrets/getSecret";
+
+async function apiKey(): Promise<string> {
+  const key = await getSecret("REPLICATE_API_TOKEN").catch(() => "") || process.env.REPLICATE_API_TOKEN || "";
+  if (!key) throw new Error("[replicate] REPLICATE_API_TOKEN unavailable");
+  return key;
 }
 
-interface ReplicateError extends Error {
-  status?: number;
-  type?: 'auth' | 'rate_limit' | 'timeout' | 'model_error' | 'network';
-}
-
-/**
- * Call a Replicate model
- * 
- * @param modelId - Full model version (e.g., "meta/llama-2-7b-chat:xxxxx")
- * @param input - Prompt text
- * @param config - Optional configuration
- * @returns Response text
- */
-export async function callReplicate(
-  modelId: string,
-  input: string,
-  config?: ReplicateConfig
-): Promise<string> {
-  const apiKey = config?.apiKey || process.env.REPLICATE_API_TOKEN;
-  const timeout = config?.timeout || 60000; // 60s for model cold starts
-  const maxRetries = config?.maxRetries || 2;
-
-  if (!apiKey) {
-    throw createReplicateError('REPLICATE_API_TOKEN not configured', 401, 'auth');
+async function call(version: string, prompt: string, maxTokens: number): Promise<string> {
+  const key = await apiKey();
+  const createRes = await fetch("https://api.replicate.com/v1/predictions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Token ${key}` },
+    body: JSON.stringify({ version, input: { prompt, max_new_tokens: maxTokens } }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!createRes.ok) { const t = await createRes.text(); throw new Error(`Replicate create ${createRes.status}: ${t.slice(0, 200)}`); }
+  const pred = await createRes.json() as { id: string; urls: { get: string } };
+  const pollUrl = pred.urls?.get ?? `https://api.replicate.com/v1/predictions/${pred.id}`;
+  for (let i = 0; i < 30; i++) {
+    await new Promise(r => setTimeout(r, 2000));
+    const p = await (await fetch(pollUrl, { headers: { "Authorization": `Token ${key}` } })).json() as { status: string; output?: string[] };
+    if (p.status === "succeeded") return (Array.isArray(p.output) ? p.output.join("") : String(p.output ?? "")).trim();
+    if (p.status === "failed" || p.status === "canceled") throw new Error(`Replicate ${p.status}`);
   }
-
-  let lastError: ReplicateError | null = null;
-
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-      // Start prediction
-      const predictionResponse = await fetch('https://api.replicate.com/v1/predictions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Token ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          version: modelId.split(':')[1] || modelId,
-          input: {
-            prompt: input,
-            max_new_tokens: 1000,
-          },
-        }),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!predictionResponse.ok) {
-        const errorText = await predictionResponse.text();
-        throw createReplicateError(
-          errorText || `Replicate API error: ${predictionResponse.status}`,
-          predictionResponse.status,
-          categorizeError(predictionResponse.status)
-        );
-      }
-
-      const prediction = await predictionResponse.json();
-
-      // Poll for completion
-      const result = await pollPrediction(prediction.id, apiKey, timeout);
-
-      if (result.status === 'succeeded') {
-        return extractOutput(result.output);
-      } else if (result.status === 'failed') {
-        throw createReplicateError(
-          result.error || 'Prediction failed',
-          500,
-          'model_error'
-        );
-      } else {
-        throw createReplicateError('Prediction timeout', 408, 'timeout');
-      }
-
-    } catch (error) {
-      lastError = error as ReplicateError;
-
-      // Don't retry auth errors
-      if (lastError.type === 'auth') {
-        throw lastError;
-      }
-
-      // Retry with exponential backoff for certain errors
-      if (attempt < maxRetries && shouldRetry(lastError)) {
-        const backoff = Math.pow(2, attempt) * 1000;
-        await new Promise(resolve => setTimeout(resolve, backoff));
-        continue;
-      }
-
-      throw lastError;
-    }
-  }
-
-  throw lastError || createReplicateError('Unknown error', 500, 'network');
+  throw new Error("Replicate timed out");
 }
 
-/**
- * Poll Replicate prediction until complete
- */
-async function pollPrediction(
-  predictionId: string,
-  apiKey: string,
-  maxWait: number
-): Promise<any> {
-  const startTime = Date.now();
-  const pollInterval = 1000; // 1 second
-
-  while (Date.now() - startTime < maxWait) {
-    const response = await fetch(
-      `https://api.replicate.com/v1/predictions/${predictionId}`,
-      {
-        headers: {
-          'Authorization': `Token ${apiKey}`,
-        },
-      }
-    );
-
-    if (!response.ok) {
-      throw createReplicateError(
-        `Poll failed: ${response.status}`,
-        response.status,
-        'network'
-      );
-    }
-
-    const prediction = await response.json();
-
-    if (prediction.status === 'succeeded' || prediction.status === 'failed') {
-      return prediction;
-    }
-
-    await new Promise(resolve => setTimeout(resolve, pollInterval));
-  }
-
-  throw createReplicateError('Polling timeout', 408, 'timeout');
+export async function generateText(prompt: string, options?: { model?: string; maxTokens?: number }): Promise<string> {
+  return call(options?.model ?? "meta/llama-2-70b-chat", prompt, options?.maxTokens ?? 2048);
 }
 
-/**
- * Extract output from Replicate response
- */
-function extractOutput(output: any): string {
-  if (typeof output === 'string') {
-    return output;
-  }
-
-  if (Array.isArray(output)) {
-    return output.join('');
-  }
-
-  if (output && typeof output === 'object') {
-    // Handle various output formats
-    if (output.text) return output.text;
-    if (output.output) return extractOutput(output.output);
-    if (output.response) return output.response;
-  }
-
-  return String(output || '');
+export async function generateJSON<T = unknown>(prompt: string, options?: { model?: string }): Promise<T> {
+  const raw = await call(options?.model ?? "meta/llama-2-70b-chat", `${prompt}\n\nReturn only JSON.`, 2048);
+  return JSON.parse(raw.replace(/^```json\s*/i, "").replace(/```$/i, "").trim()) as T;
 }
 
-/**
- * Test Replicate connection
- */
-export async function testReplicateConnection(apiKey?: string): Promise<boolean> {
-  try {
-    const token = apiKey || process.env.REPLICATE_API_TOKEN;
-    if (!token) return false;
-
-    const response = await fetch('https://api.replicate.com/v1/models', {
-      headers: {
-        'Authorization': `Token ${token}`,
-      },
-    });
-
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Check if model is available
- */
-export async function checkReplicateModel(
-  modelId: string,
-  apiKey?: string
-): Promise<boolean> {
-  try {
-    const token = apiKey || process.env.REPLICATE_API_TOKEN;
-    if (!token) return false;
-
-    const [owner, name] = modelId.split('/');
-    const response = await fetch(
-      `https://api.replicate.com/v1/models/${owner}/${name}`,
-      {
-        headers: {
-          'Authorization': `Token ${token}`,
-        },
-      }
-    );
-
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
-// Helper functions
-
-function createReplicateError(
-  message: string,
-  status?: number,
-  type?: ReplicateError['type']
-): ReplicateError {
-  const error = new Error(message) as ReplicateError;
-  error.status = status;
-  error.type = type || 'network';
-  return error;
-}
-
-function categorizeError(status: number): ReplicateError['type'] {
-  if (status === 401 || status === 403) return 'auth';
-  if (status === 429) return 'rate_limit';
-  if (status === 408 || status === 504) return 'timeout';
-  if (status >= 500) return 'model_error';
-  return 'network';
-}
-
-function shouldRetry(error: ReplicateError): boolean {
-  return error.type === 'rate_limit' || 
-         error.type === 'timeout' || 
-         error.type === 'network';
+export async function generateCode(prompt: string, options?: { model?: string; maxTokens?: number }): Promise<string> {
+  const raw = await call(options?.model ?? "meta/codellama-70b-instruct", prompt, options?.maxTokens ?? 4096);
+  return raw.replace(/^```[a-z]*\n?/i, "").replace(/\n?```$/i, "").trim();
 }
