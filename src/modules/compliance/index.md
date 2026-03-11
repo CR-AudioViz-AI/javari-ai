@@ -1,105 +1,86 @@
-# Build Automated Compliance Assessment Framework
+# Create Regulatory Compliance Monitoring Module
 
-```markdown
-# Automated Compliance Assessment Framework Documentation
+# Regulatory Compliance Monitoring Module
 
 ## Purpose
-The Automated Compliance Assessment Framework evaluates an organization's security posture against multiple compliance standards, including SOC 2, ISO 27001, and GDPR. It facilitates gap analysis and provides a structured remediation planning capability to ensure ongoing compliance.
+The Regulatory Compliance Monitoring Module is designed to help organizations ensure adherence to various compliance frameworks (e.g., GDPR, CCPA) by defining and evaluating compliance rules, tracking violations, and initiating remediation actions based on identified compliance issues.
 
 ## Usage
-This framework is designed to be integrated into an application that requires compliance monitoring and assessment. It supports the creation, validation, and management of compliance controls and evidence.
+To utilize this module, import necessary components from the module and define compliance rules specific to your organizational needs. Use the provided enums for compliance frameworks, violation types, severities, and remediation actions to standardize your compliance monitoring process.
 
-## Parameters/Props
+### Example:
+```typescript
+import { ComplianceFramework, ViolationSeverity, ComplianceRule } from './compliance';
 
-### Enums
-- **ComplianceStandard**
-  - SOC2
-  - ISO27001
-  - GDPR
+const sampleRule: ComplianceRule = {
+  id: '1',
+  framework: ComplianceFramework.GDPR,
+  name: 'Unauthorized Access Check',
+  description: 'Ensure unauthorized access is flagged as a violation.',
+  severity: ViolationSeverity.HIGH,
+  condition: (context) => context.userRole !== 'admin', // Example condition
+  remediation: [RemediationAction.REVOKE_ACCESS, RemediationAction.NOTIFY_ADMIN],
+  enabled: true,
+  metadata: { createdBy: 'admin', createdAt: new Date() },
+};
+```
 
-- **ControlStatus**
-  - IMPLEMENTED
-  - PARTIALLY_IMPLEMENTED
-  - NOT_IMPLEMENTED
-  - NOT_APPLICABLE
+## Parameters / Props
 
-- **RiskLevel**
-  - CRITICAL
-  - HIGH
-  - MEDIUM
-  - LOW
+### Enums:
+- **ComplianceFramework**: Identifiers for regulatory frameworks (e.g., GDPR, CCPA).
+- **ViolationSeverity**: Severity levels for violations (e.g., LOW, MEDIUM, HIGH, CRITICAL).
+- **ViolationType**: Types of compliance violations (e.g., DATA_BREACH, UNAUTHORIZED_ACCESS).
+- **RemediationAction**: Actions to take in response to a violation (e.g., REVOKE_ACCESS, NOTIFY_ADMIN).
 
-- **EvidenceType**
-  - DOCUMENT
-  - SCREENSHOT
-  - LOG_FILE
-  - CONFIGURATION
-  - CERTIFICATE
+### Interfaces:
+- **ComplianceRule**:
+  - `id`: Unique identifier for the rule.
+  - `framework`: Compliance framework the rule pertains to.
+  - `name`: Name of the compliance rule.
+  - `description`: Description of the rule's purpose.
+  - `severity`: Severity level of the violation.
+  - `condition`: Function to evaluate if the rule condition is met.
+  - `remediation`: Array of actions to take if the rule is violated.
+  - `enabled`: Flag indicating if the rule is active.
+  - `metadata`: Additional data related to the rule.
 
-- **TaskStatus**
-  - PENDING
-  - IN_PROGRESS
-  - COMPLETED
-  - BLOCKED
-
-### Schemas
-- **ControlSchema**
-  - `id` (string): Unique identifier for the control.
-  - `standard` (ComplianceStandard): The compliance standard related to the control.
-  - `category` (string): Category of the control.
-  - `title` (string): Title of the control.
-  - `description` (string): Detailed description of the control.
-  - `requirements` (array of strings): List of compliance requirements addressed by the control.
-  - `evidenceRequirements` (array of strings): List of evidence types required for validation.
-  - `riskLevel` (RiskLevel): The severity level associated with the control.
-  - `frequency` (string): Frequency of control assessment (e.g., CONTINUOUS, MONTHLY).
-
-- **EvidenceSchema**
-  - `id` (string): Unique identifier for the evidence.
-  - `controlId` (string): Identifier of the control this evidence relates to.
-  - `type` (EvidenceType): Type of evidence.
-  - `title` (string): Title of the evidence.
-  - `description` (string): Description of the evidence.
-  - `filePath` (string, optional): Path to any associated file.
-  - `content` (string, optional): Content of the evidence.
-  - `collectedAt` (date): Timestamp when the evidence was collected.
-  - `expiresAt` (date, optional): Expiration timestamp if applicable.
-  - `isValid` (boolean): Indicator of evidence validity.
-  - `validatedBy` (string, optional): Identifier of the validator.
-  - `validatedAt` (date, optional): Timestamp of validation.
+- **ComplianceContext**:
+  - `userId`: ID of the user involved in the operation.
+  - `sessionId`: ID of the user session.
+  - `operation`: Operation being performed (e.g., READ, WRITE).
+  - `resourceType`: Type of resource being accessed (e.g., document, database).
+  - `resourceId`: ID of the resource being accessed.
+  - `timestamp`: Date and time of the operation.
+  - `metadata`: Additional context data.
+  - `userRole`: Role of the user performing the operation.
+  - `dataClassification`: Classification of the data being accessed.
+  - `geolocation`: Optional geolocation data of the user (if applicable).
 
 ## Return Values
-The framework interacts with JSON objects representing compliance assessment data. Functions return these structured objects for further computations, analyses, or reporting.
+The ComplianceRule's `condition` function returns a boolean indicating whether the compliance condition is met. If the condition evaluates to `true`, the specified `remediation` actions are executed to handle the violation.
 
 ## Examples
-
-### Creating a Control
+### Compliance Rule Implementation:
 ```typescript
-const newControl = {
-  id: 'control-001',
-  standard: ComplianceStandard.SOC2,
-  category: 'Access Controls',
-  title: 'User Access Management',
-  description: 'Controls for managing user accounts and permissions.',
-  requirements: ['User accounts are unique', 'Access is logged'],
-  evidenceRequirements: ['Access logs', 'User audit records'],
-  riskLevel: RiskLevel.HIGH,
-  frequency: 'MONTHLY'
-};
-```
+const isValidAccess = sampleRule.condition({
+  userId: 'user123',
+  sessionId: 'session456',
+  operation: 'READ',
+  resourceType: 'document',
+  resourceId: 'doc789',
+  timestamp: new Date(),
+  metadata: {},
+  userRole: 'employee',
+  dataClassification: 'restricted',
+});
 
-### Adding Evidence
-```typescript
-const newEvidence = {
-  id: 'evidence-001',
-  controlId: 'control-001',
-  type: EvidenceType.DOCUMENT,
-  title: 'Access Audit Report',
-  description: 'Monthly report of user access.',
-  collectedAt: new Date(),
-  isValid: true
-};
-```
-
-This documentation provides a comprehensive overview of the Automated Compliance Assessment Framework features and usage.
+if (!isValidAccess) {
+  // Execute remediation actions
+  const actions = sampleRule.remediation;
+  actions.forEach(action => {
+    // Implement action execution logic here
+    console.log(`Executing action: ${action}`);
+  });
+}
 ```
