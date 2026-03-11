@@ -1,105 +1,104 @@
-# Build AI-Powered Mentorship Matching Platform
+# Create AI-Powered Mentorship Matching System
 
-# AI-Powered Mentorship Matching Platform Documentation
+# AI-Powered Mentorship Matching System Documentation
 
 ## Purpose
-The AI-Powered Mentorship Matching Platform offers an intelligent mentorship system that leverages machine learning to match mentors and mentees based on compatibility, track their progress, and provide structured learning paths. This system enhances the mentorship experience by ensuring effective pairing and continuous development.
+The AI-Powered Mentorship Matching System is designed to facilitate the connection of mentors and mentees based on their profiles, skills, availability, and goals. It uses structured data definitions to model the necessary components for effective mentorship matching, session scheduling, and feedback collection.
 
 ## Usage
-This module is primarily utilized within a React environment and includes various interfaces and functions to manage mentorship profiles, match users, create learning paths, and schedule sessions.
+This module serves to define the essential entities and their relationships within the mentorship program. It leverages TypeScript for type safety and ensures that the mentoring processes are both structured and easily manageable.
 
-## Core Functions
+### Key Components
+- **Skill Level Enum**: Defines proficiency levels of skills.
+- **Session Status Enum**: Represents the various states of mentorship sessions.
+- **Matching Status Enum**: Indicates the status of mentor-mentee matches.
+- **Data Interfaces**: Structures for defining time slots, skills, goals, user profiles, mentorship matches, and session records.
 
-### Profile Management
-- **createProfile**
-  - **Parameters:** `profile: Omit<MentorshipProfile, 'id' | 'createdAt' | 'updatedAt'>`
-  - **Return:** `Promise<MentorshipProfile>`
-  - **Description:** Creates a new mentorship profile.
+## Parameters/Props
 
-- **updateProfile**
-  - **Parameters:** 
-    - `id: string`
-    - `updates: Partial<MentorshipProfile>`
-  - **Return:** `Promise<MentorshipProfile>`
-  - **Description:** Updates an existing mentorship profile.
+### Enums
+- `SkillLevel`
+  - Values: `BEGINNER`, `INTERMEDIATE`, `ADVANCED`, `EXPERT`
 
-- **getProfile**
-  - **Parameters:** `userId: string`
-  - **Return:** `Promise<MentorshipProfile | null>`
-  - **Description:** Retrieves the mentorship profile of a specified user.
+- `SessionStatus`
+  - Values: `SCHEDULED`, `COMPLETED`, `CANCELLED`, `NO_SHOW`
 
-### Matching System
-- **findMatches**
-  - **Parameters:** 
-    - `userId: string`
-    - `criteria: MatchingCriteria`
-  - **Return:** `Promise<CompatibilityScore[]>`
-  - **Description:** Finds potential matches for a user based on specified criteria.
+- `MatchingStatus`
+  - Values: `PENDING`, `MATCHED`, `ACTIVE`, `COMPLETED`, `CANCELLED`
 
-- **calculateCompatibility**
-  - **Parameters:** 
-    - `mentorId: string`
-    - `menteeId: string`
-  - **Return:** `Promise<CompatibilityScore>`
-  - **Description:** Calculates the compatibility score between a mentor and a mentee.
+### Interfaces
+- `TimeSlot`
+  - **dayOfWeek**: number (0-6, where 0 = Sunday)
+  - **startTime**: string (ISO Format)
+  - **endTime**: string (ISO Format)
+  - **timezone**: string (e.g., 'UTC', 'America/New_York')
 
-- **createMentorshipPair**
-  - **Parameters:** 
-    - `mentorId: string`
-    - `menteeId: string`
-  - **Return:** `Promise<string>`
-  - **Description:** Creates a mentorship pairing between the specified mentor and mentee.
+- `Skill`
+  - **id**: string (unique identifier)
+  - **name**: string (skill name)
+  - **category**: string (skill category)
+  - **level**: `SkillLevel`
 
-### Learning Paths
-- **createLearningPath**
-  - **Parameters:** `path: Omit<LearningPath, 'id' | 'createdAt'>`
-  - **Return:** `Promise<LearningPath>`
-  - **Description:** Creates a new learning path.
+- `Goal`
+  - **id**: string (unique identifier)
+  - **title**: string (goal title)
+  - **description**: string (goal description)
+  - **targetDate**: Date (deadline for goal)
+  - **priority**: 'HIGH' | 'MEDIUM' | 'LOW'
+  - **completed**: boolean (status of goal completion)
 
-- **updateLearningPath**
-  - **Parameters:** 
-    - `id: string`
-    - `updates: Partial<LearningPath>`
-  - **Return:** `Promise<LearningPath>`
-  - **Description:** Updates an existing learning path.
+- `UserProfile`
+  - **id**: string (unique identifier)
+  - **userId**: string (user reference)
+  - **type**: 'MENTOR' | 'MENTEE' | 'BOTH'
+  - **bio**: string (user biography)
+  - **skills**: Skill[] (list of user skills)
+  - **availability**: TimeSlot[] (user availability)
+  - **timezone**: string (user's timezone)
+  - **preferredMeetingDuration**: number (in minutes)
+  - **maxMentees**: number (optional)
+  - **goals**: Goal[] (optional)
+  - **experience**: string (optional)
+  - **createdAt**: Date (timestamp of creation)
+  - **updatedAt**: Date (timestamp of last update)
 
-- **getLearningPath**
-  - **Parameters:** `id: string`
-  - **Return:** `Promise<LearningPath | null>`
-  - **Description:** Retrieves a specific learning path by its ID.
+- `MentorshipMatch`
+  - **id**: string (unique identifier)
+  - **mentorId**: string (mentor reference)
+  - **menteeId**: string (mentee reference)
+  - **compatibilityScore**: number (match quality score)
+  - **status**: `MatchingStatus`
+  - **matchedAt**: Date (timestamp of match)
+  - **activatedAt**: Date (optional)
+  - **completedAt**: Date (optional)
+  - **feedback**: `MatchFeedback` (optional)
 
-### Session Management
-- **scheduleSession**
-  - **Parameters:** `session: Omit<MentorshipSession, 'id' | 'createdAt'>`
-  - **Return:** `Promise<MentorshipSession>`
-  - **Description:** Schedules a new mentorship session.
+- `Session`
+  - **id**: string (unique identifier)
+  - **matchId**: string (reference to MentorshipMatch)
+  - **scheduledAt**: Date (session date and time)
+  - **duration**: number (duration in minutes)
+  - **status**: `SessionStatus`
+  - **notes**: string (optional)
+  - **mentorFeedback**: string (optional)
+  - **menteeFeedback**: string (optional)
+  - **createdAt**: Date (timestamp of creation)
 
 ## Examples
+```typescript
+const newTimeSlot: TimeSlot = {
+  dayOfWeek: 2, // Tuesday
+  startTime: "2023-10-10T10:00:00Z",
+  endTime: "2023-10-10T12:00:00Z",
+  timezone: "UTC"
+};
 
-### Creating a Profile
-```javascript
-const newProfile = await mentorshipPlatform.createProfile({
-  name: "John Doe",
-  expertise: "Software Development",
-  interests: ["AI", "Mentoring"]
-});
-```
-
-### Finding Matches
-```javascript
-const matches = await mentorshipPlatform.findMatches("userId123", {
-  skills: ["JavaScript", "React"],
-  goals: ["Career Advancement"]
-});
-```
-
-### Scheduling a Session
-```javascript
-const session = await mentorshipPlatform.scheduleSession({
-  mentorId: "mentorId123",
-  menteeId: "menteeId456",
-  scheduledTime: "2023-11-01T10:00:00Z"
-});
-```
-
-This documentation provides an overview of the core functionality available in the AI-Powered Mentorship Matching Platform and serves as a guide for integration and usage within applications.
+const userProfile: UserProfile = {
+  id: "123",
+  userId: "456",
+  type: "MENTOR",
+  bio: "Experienced developer",
+  skills: [],
+  availability: [newTimeSlot],
+  timezone: "UTC",
+  preferredMeeting
