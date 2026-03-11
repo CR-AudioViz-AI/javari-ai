@@ -159,3 +159,26 @@ ALTER TABLE ai_router_logs ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Service role full access" ON ai_router_logs;
 CREATE POLICY "Service role full access" ON ai_router_logs
   FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+-- ── chat_sessions — telemetry for all Javari chat interactions ───────────────
+
+CREATE TABLE IF NOT EXISTS chat_sessions (
+  id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     text        NOT NULL DEFAULT 'anonymous',
+  mode        text        NOT NULL DEFAULT 'single',
+  intent      text        NOT NULL DEFAULT 'chat',
+  messages    integer     NOT NULL DEFAULT 1,
+  models_used text[]      DEFAULT '{}',
+  cost_total  numeric(10,6) DEFAULT 0,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS chat_sessions_user_id_idx   ON chat_sessions (user_id);
+CREATE INDEX IF NOT EXISTS chat_sessions_created_at_idx ON chat_sessions (created_at DESC);
+CREATE INDEX IF NOT EXISTS chat_sessions_intent_idx    ON chat_sessions (intent);
+
+ALTER TABLE chat_sessions ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Service role full access" ON chat_sessions;
+CREATE POLICY "Service role full access" ON chat_sessions
+  FOR ALL TO service_role USING (true) WITH CHECK (true);

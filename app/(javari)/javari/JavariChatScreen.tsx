@@ -1,92 +1,45 @@
 "use client";
 // app/(javari)/javari/JavariChatScreen.tsx
-// Purpose: Javari avatar chat screen — handles user input, command classification,
-//          and response rendering.
-// Date: 2026-03-07 — v2.0: route ALL messages through /api/javari/execute.
-//   - classifyCommand() converts natural language to structured command payloads
-//   - normaliseReply() reads reply field from execute response shape
-//   - Removed broken /api/javari/chat call (that route requires userId + message,
-//     returns { ok, data: result } — incompatible with avatar screen expectations)
+// Purpose: Javari avatar chat screen — handles user input and response rendering.
+// Date: 2026-03-11 — v3.0: ALL messages route through /api/javari/chat (JavariChatController)
+//   - Intent classification (chat, plan_task, execute_task, generate_module, query_system)
+//   - Single and team modes supported
+//   - /api/javari/chat returns { ok, reply, intent, mode, provider, model, costUsd }
+//   - Legacy normaliseReply() kept for safety; primary field is `reply`
 
 import { useCallback } from "react";
-import { useJavariState } from "./state/useJavariState";
+import { useJavariState }    from "./state/useJavariState";
 import { useJavariSettings } from "./state/useJavariSettings";
 import MessageFeed from "./components/MessageFeed/MessageFeed";
-import ChatInput from "./components/Input/ChatInput";
-import VoiceInput from "./components/Input/VoiceInput";
-import UploadZone from "./components/Input/UploadZone";
+import ChatInput   from "./components/Input/ChatInput";
+import VoiceInput  from "./components/Input/VoiceInput";
+import UploadZone  from "./components/Input/UploadZone";
 import VoiceOutput from "./components/Input/VoiceOutput";
 import type { RealtimeClient } from "@/lib/javari/realtime/realtime-client";
 
-// ── Command classifier ──────────────────────────────────────────────────────
-// Maps natural language → structured /api/javari/execute payload.
-// Returns null when the input is plain conversation (not a command).
-function classifyCommand(
-  text: string
-): { mode: "command"; command: string } | null {
-  const t = text.toLowerCase().trim();
-
-  if (t.includes("run next") || t.includes("next task") || t.includes("run task"))
-    return { mode: "command", command: "run_next_task" };
-
-  if (
-    t.includes("start roadmap") ||
-    t.includes("begin roadmap") ||
-    t.includes("execute roadmap")
-  )
-    return { mode: "command", command: "start_roadmap" };
-
-  if (
-    t.includes("pause") &&
-    (t.includes("execut") || t.includes("roadmap") || t.includes("queue"))
-  )
-    return { mode: "command", command: "pause_execution" };
-
-  if (
-    t.includes("resume") &&
-    (t.includes("execut") || t.includes("roadmap") || t.includes("queue"))
-  )
-    return { mode: "command", command: "resume_execution" };
-
-  if (t.includes("memory") || t.includes("memoryos") || t.includes("knowledge"))
-    return { mode: "command", command: "memory_status" };
-
-  if (t.includes("queue") || t.includes("queue status") || t.includes("task status"))
-    return { mode: "command", command: "queue_status" };
-
-  return null; // plain chat
-}
-
-// ── Response normaliser ─────────────────────────────────────────────────────
-// /api/javari/execute returns { ok, mode, reply, model, cost, ... }
-// Handles every possible field that could carry the assistant text.
+// ── Response normaliser ──────────────────────────────────────────────────────
+// /api/javari/chat returns { ok, reply, output, answer, response, ... }
+// All aliased at the endpoint — this handles every shape for safety.
 function normaliseReply(data: Record<string, unknown>): string {
-  if (typeof data.reply === "string" && data.reply.trim())
-    return data.reply;
+  if (typeof data.reply    === "string" && data.reply.trim())    return data.reply;
+  if (typeof data.output   === "string" && data.output.trim())   return data.output;
+  if (typeof data.answer   === "string" && data.answer.trim())   return data.answer;
+  if (typeof data.response === "string" && data.response.trim()) return data.response;
 
-  // Fallback: data.data.output (gateway result object)
+  // Legacy: data.data.output from old gateway shape
   const inner = data.data as Record<string, unknown> | undefined;
   if (inner) {
-    if (typeof inner.output === "string" && inner.output.trim())
-      return inner.output;
-    if (typeof inner.answer === "string" && inner.answer.trim())
-      return inner.answer;
-    if (typeof inner.response === "string" && inner.response.trim())
-      return inner.response;
-    // Last resort: messages array from older chat routes
+    if (typeof inner.output   === "string" && inner.output.trim())   return inner.output;
+    if (typeof inner.answer   === "string" && inner.answer.trim())   return inner.answer;
+    if (typeof inner.response === "string" && inner.response.trim()) return inner.response;
     if (Array.isArray(inner.messages)) {
-      const asst = (
-        inner.messages as Array<{ role: string; content: string }>
-      ).find((m) => m.role === "assistant");
+      const asst = (inner.messages as Array<{ role: string; content: string }>)
+        .find((m) => m.role === "assistant");
       if (asst?.content) return asst.content;
     }
   }
 
-  if (typeof data.answer === "string" && data.answer.trim()) return data.answer;
-  if (typeof data.response === "string" && data.response.trim()) return data.response;
-  if (typeof data.output === "string" && data.output.trim()) return data.output;
   if (typeof data.error === "string") return `⚠️ ${data.error}`;
-
   return "No response received.";
 }
 
@@ -143,34 +96,22 @@ export default function JavariChatScreen() {
         return;
       }
 
-      // ── PATH B: /api/javari/execute — commands + chat ──────────────────
+      // ── PATH B: /api/javari/chat — JavariChatController ───────────────
+      // Intent classification, multi-provider routing, team mode all handled server-side.
       const assistantId = beginStreamingMessage();
 
       try {
-        // Classify: is this a system command or plain chat?
-        const classified = classifyCommand(content);
-
-        const payload: Record<string, unknown> = classified
-          ? {
-              // Structured command — { mode:"command", command:"memory_status" }
-              ...classified,
-              userId: "system",
-            }
-          : {
-              // Plain conversation
-              mode   : "chat",
-              message: content,
-              userId : "roy-henderson",
-            };
-
-        const res = await fetch("/api/javari/execute", {
+        const res = await fetch("/api/javari/chat", {
           method : "POST",
           headers: { "Content-Type": "application/json" },
-          body   : JSON.stringify(payload),
+          body   : JSON.stringify({
+            message: content,
+            mode   : "single",           // "team" for full build pipeline
+            userId : "roy-henderson",
+          }),
         });
 
         if (!res.ok) {
-          // HTTP error — surface status in message rather than generic error
           const errText = await res.text().catch(() => `HTTP ${res.status}`);
           setStreamingError(
             assistantId,
@@ -181,8 +122,6 @@ export default function JavariChatScreen() {
         }
 
         const data = (await res.json()) as Record<string, unknown>;
-
-        // Extract reply using normaliser — handles every known response shape
         const reply = normaliseReply(data);
 
         finalizeStreamingMessage(assistantId, reply);

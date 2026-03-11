@@ -27,6 +27,8 @@ const TABLES_TO_CHECK = [
   "canonical_docs",
   "knowledge_graph_nodes",
   "knowledge_graph_edges",
+  "ai_router_logs",
+  "chat_sessions",
 ];
 
 async function checkTables(): Promise<Record<string, boolean>> {
