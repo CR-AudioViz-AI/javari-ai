@@ -1,98 +1,55 @@
-# Deploy Advanced Physics Simulation Service
+# Implement Craiverse Physics Simulation Service
 
-# PhysicsSimulationService
+# Craiverse Physics Simulation Service
 
 ## Purpose
-
-Advanced physics simulation service for the CRAIverse platform that provides realistic physics simulation including rigid body dynamics, fluid simulation, soft body physics, and particle systems. Built on Bullet Physics WebAssembly integration with real-time synchronization and GPU acceleration support.
+The **Craiverse Physics Simulation Service** is designed to provide advanced physics simulation capabilities for Craiverse environments. Utilizing WebAssembly and GPU acceleration, it supports features like collision detection, particle systems, and realistic environmental interactions with real-time synchronization.
 
 ## Usage
+To utilize the Physics Simulation Service, you need to import and instantiate the service within your application. The service can be configured with various parameters for optimal performance depending on the specific requirements of your Craiverse environment.
 
+### Example
 ```typescript
-import { PhysicsSimulationService } from './services/craiverse/physics/PhysicsSimulationService';
+import { PhysicsSimulationService } from './src/services/craiverse/physics/PhysicsSimulationService';
 
-const physics = new PhysicsSimulationService(craiverse, config);
-await physics.initialize();
-physics.start();
-```
-
-## Configuration Parameters
-
-### PhysicsConfig
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `gravity` | `Vector3` | World gravity vector |
-| `timeStep` | `number` | Simulation time step in seconds |
-| `maxSubSteps` | `number` | Maximum substeps per frame |
-| `worldBounds` | `{min: Vector3, max: Vector3}` | Simulation world boundaries |
-| `enableSoftBodies` | `boolean` | Enable soft body physics |
-| `enableFluids` | `boolean` | Enable fluid dynamics |
-| `enableParticles` | `boolean` | Enable particle systems |
-| `workerThreads` | `number` | Number of worker threads |
-| `gpuAcceleration` | `boolean` | Enable GPU acceleration |
-
-## Key Methods
-
-### `initialize(): Promise<void>`
-Initializes the physics engine and loads WebAssembly modules.
-
-### `start(): void`
-Starts the physics simulation loop.
-
-### `createRigidBody(shape: CollisionShape, transform: Matrix4, mass: number): string`
-Creates a new rigid body and returns its ID.
-
-### `createSoftBody(vertices: Vector3[], indices: number[]): string`
-Creates a deformable soft body mesh.
-
-### `createParticleSystem(config: ParticleConfig): string`
-Creates a new particle system for effects.
-
-### `createFluidDomain(bounds: Vector3, resolution: number): string`
-Creates a fluid simulation domain.
-
-## Events
-
-| Event | Data | Description |
-|-------|------|-------------|
-| `collision` | `CollisionEvent` | Object collision detected |
-| `stateUpdate` | `SimulationState` | Simulation state changed |
-| `performance` | `PerformanceMetrics` | Performance statistics |
-
-## Example
-
-```typescript
-const config: PhysicsConfig = {
+const physicsService = new PhysicsSimulationService({
   gravity: { x: 0, y: -9.81, z: 0 },
-  timeStep: 1/60,
-  maxSubSteps: 3,
-  worldBounds: {
-    min: { x: -100, y: -10, z: -100 },
-    max: { x: 100, y: 100, z: 100 }
-  },
-  enableSoftBodies: true,
-  enableFluids: true,
-  enableParticles: true,
-  workerThreads: 4,
-  gpuAcceleration: true
-};
-
-const physics = new PhysicsSimulationService(craiverse, config);
-
-// Listen for collisions
-physics.on('collision', (event: CollisionEvent) => {
-  console.log(`Collision between ${event.objectA} and ${event.objectB}`);
+  timeStep: 0.016,
+  maxSubsteps: 8,
+  enableGPUAcceleration: true,
+  spatialPartitionSize: 10,
+  particleLimit: 1000,
+  enableDebugMode: false,
 });
 
-// Create physics objects
-const boxId = physics.createRigidBody(boxShape, transform, 1.0);
-const fluidId = physics.createFluidDomain({ x: 10, y: 10, z: 10 }, 32);
+// Initialize the physics world
+const worldId = physicsService.createWorld();
+// Add rigid bodies, update the simulation, handle collisions, etc.
 ```
 
-## Dependencies
+## Parameters/Props
+The service accepts the following configuration parameters:
 
-- Bullet Physics WebAssembly
-- CRAIverseCore
-- RealtimeSync
-- RenderEngine
+- `gravity: Vector3` - Represents the gravitational force applied to the simulation.
+- `timeStep: number` - Duration of each simulation step.
+- `maxSubsteps: number` - Maximum number of substeps to take in each frame.
+- `enableGPUAcceleration: boolean` - Flag to enable or disable GPU acceleration.
+- `spatialPartitionSize: number` - Size of the spatial partition grid for collision detection.
+- `particleLimit: number` - Maximum number of particles in the system.
+- `enableDebugMode: boolean` - Enable or disable debug mode for visualizing physics data.
+
+## Return Values
+The service returns several important values and objects:
+
+- `createWorld(config: PhysicsConfig): number` - Creates a new physics world and returns its unique identifier.
+- `addRigidBody(worldId: number, body: RigidBody): number` - Adds a rigid body to the specified world and returns its identifier.
+- `removeRigidBody(worldId: number, bodyId: number): boolean` - Removes a rigid body from the world.
+- `stepSimulation(worldId: number, deltaTime: number): void` - Advances the simulation by a specified time interval.
+- `getCollisions(worldId: number): CollisionEvent[]` - Returns an array of collisions detected in the current simulation step.
+- `updateBodyTransform(worldId: number, bodyId: number, transform: Float32Array): void` - Updates the transformation of a rigid body based on input data.
+- `cleanup(worldId: number): void` - Cleans up the resources associated with the specified physics world.
+
+## Notes
+- Ensure that WebAssembly and GPU resources are properly initialized before performing operations.
+- Handle collisions and updates in your game loop or simulation framework to maintain synchronization.
+- Regularly call `stepSimulation` and monitor collisions to keep the physics engine responsive and accurate.
