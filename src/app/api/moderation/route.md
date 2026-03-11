@@ -1,82 +1,74 @@
-# Generate AI-Powered Content Moderation API
+# Implement AI-Powered Content Moderation API
 
+```markdown
 # AI-Powered Content Moderation API
 
 ## Purpose
-The AI-Powered Content Moderation API enables automated content moderation for various types of user-generated content (text, images, videos, and audio). It leverages OpenAI's capabilities to analyze content for compliance with specified moderation rules and policies, ensuring a safer user environment.
+The AI-Powered Content Moderation API provides a service to analyze user-generated content for potential policy violations. It integrates with OpenAI's moderation tools to classify content and identify issues such as spam, harassment, hate speech, and more.
 
 ## Usage
-To utilize the moderation API, send a POST request to the moderation endpoint. The request must be formatted according to the specified schemas to be processed correctly.
-
-### Endpoint
-```
-POST /api/moderation
-```
+This API allows clients to submit various types of content (text, images, audio, or video) for moderation. Upon submission, the API evaluates the content according to predefined moderation policies and returns a result indicating the status and any violations detected.
 
 ## Parameters/Props
 
-### Request Body
-The API accepts a JSON object structured as follows:
+### `ModerationRequest`
+- `content` (string): The content to be moderated.
+- `type` (string): The type of content. Accepted values are `'text'`, `'image'`, `'audio'`, and `'video'`.
+- `metadata` (object, optional): Additional information for moderation context.
+  - `userId` (string, optional): Identifier for the user submitting the content.
+  - `contentId` (string, optional): Identifier for the content being moderated.
+  - `context` (string, optional): Any contextual information relevant to the moderation request.
+  - `priority` (string, optional): Priority level of the request; accepted values are `'low'`, `'medium'`, `'high'`, and `'urgent'`.
 
-#### Content Object
-- **content**: An object containing:
-  - **type**: (string) The type of content, options are `'text'`, `'image'`, `'video'`, `'audio'`.
-  - **data**: (string) The base64 encoded or plain text content which needs moderation. Must be between 1 and 50,000,000 characters.
-  - **metadata**: (object) Additional information including:
-    - **userId**: (string) UUID of the user submitting the content.
-    - **contentId**: (string) Optional UUID of the content being moderated.
-    - **source**: (string) Optional source information.
-    - **timestamp**: (string) Optional timestamp in ISO8601 format.
+### `ModerationResult`
+- `id` (string): Unique identifier for the moderation request.
+- `status` (string): Status of the moderation (`'approved'`, `'rejected'`, `'pending_review'`, or `'flagged'`).
+- `confidence` (number): Confidence score for the moderation decision, between 0 and 1.
+- `violations` (array): List of identified policy violations.
+  - Each violation is an object containing:
+    - `category` (string): Type of violation (e.g., spam, harassment).
+    - `severity` (number): Severity rating of the violation (1-3 scale).
+    - `description` (string): Detailed description of the violation.
+- `actionRequired` (boolean): Indicates whether immediate action is needed.
+- `reviewRequired` (boolean): Indicates if the result needs human review.
+- `estimatedReviewTime` (number, optional): Estimated time for manual review, if applicable.
 
-#### Options Object (optional)
-- **options**: An object containing moderation options:
-  - **strictMode**: (boolean) Whether to apply strict moderation rules. Defaults to `false`.
-  - **customRules**: (array of strings) Any custom rules to apply to moderation.
-  - **skipCache**: (boolean) If true, skips any cached moderation results. Defaults to `false`.
-
-### Response
-The API responds with a moderation result containing:
-- **id**: (string) Unique identifier for the moderation task.
-- **status**: (string) Current moderation status, options are `'approved'`, `'flagged'`, `'rejected'`, or `'pending_review'`.
-- **confidence**: (number) Confidence score of the moderation decision (0 to 100).
-- **categories**: (array of strings) Categories identified in the content.
-- **reason**: (string, optional) Reason for the decision if flagged or rejected.
+## Return Values
+The API returns a JSON object that includes the `ModerationResult`, providing insights into the moderation status and any detected violations.
 
 ## Examples
 
-### Successful Moderation Request
+### Example Request
 ```json
-POST /api/moderation
 {
-  "content": {
-    "type": "text",
-    "data": "This is a sample content to be moderated.",
-    "metadata": {
-      "userId": "123e4567-e89b-12d3-a456-426614174000",
-      "contentId": "223e4567-e89b-12d3-a456-426614174001"
-    }
-  },
-  "options": {
-    "strictMode": true
+  "content": "This is an example of hate speech.",
+  "type": "text",
+  "metadata": {
+    "userId": "12345",
+    "contentId": "abcde",
+    "priority": "high"
   }
 }
 ```
 
-### Successful Response
+### Example Response
 ```json
 {
-  "id": "456e4567-e89b-12d3-a456-426614174002",
-  "status": "approved",
-  "confidence": 95.0,
-  "categories": ["safe"]
+  "id": "67890",
+  "status": "flagged",
+  "confidence": 0.92,
+  "violations": [
+    {
+      "category": "hate_speech",
+      "severity": 3,
+      "description": "The content contains hate speech targeting a specific group."
+    }
+  ],
+  "actionRequired": true,
+  "reviewRequired": true,
+  "estimatedReviewTime": 30
 }
 ```
 
-### Error due to Missing Content Data
-```json
-{
-  "error": "Missing required field 'data' in content object."
-}
+This example shows how to send content for moderation and how the API communicates the result, including any action that must be taken.
 ```
-
-This documentation provides a comprehensive overview of the AI-Powered Content Moderation API, ensuring developers can integrate and utilize the API effectively to moderate content for their applications.
