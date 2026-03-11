@@ -1,443 +1,424 @@
 ```tsx
-import React, { useState, useEffect } from 'react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Progress } from '@/components/ui/progress'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Switch } from '@/components/ui/switch'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Separator } from '@/components/ui/separator'
+'use client';
+
+import React, { useState, useEffect, useMemo } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Progress } from '@/components/ui/progress';
+import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import {
-  Settings,
-  Users,
   Shield,
+  Users,
   Activity,
+  FileText,
+  Server,
+  Search,
+  Bell,
+  BarChart3,
+  Settings,
+  Download,
+  Eye,
+  Edit,
+  Trash2,
+  Plus,
+  RefreshCw,
   AlertTriangle,
   CheckCircle,
   XCircle,
   Clock,
-  Server,
+  TrendingUp,
   Database,
-  Network,
-  Cpu,
+  Lock,
+  Globe,
+  Filter,
+  Calendar,
+  Mail,
+  Phone,
+  MapPin,
+  ExternalLink,
+  Copy,
+  MoreHorizontal,
+  UserPlus,
+  UserMinus,
+  Key,
+  Monitor,
+  Wifi,
   HardDrive,
-  Bell,
-  Plus,
-  Edit,
-  Trash2,
-  Eye,
-  MoreVertical,
-  Upload,
-  Download,
-  RefreshCw
-} from 'lucide-react'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger
-} from '@/components/ui/dropdown-menu'
-import { supabase } from '@/lib/supabase'
-import { checkUserRole } from '@/lib/auth/rbac'
-import { toast } from 'sonner'
+  Cpu,
+  Memory,
+  Network,
+  Zap,
+  CloudUpload,
+  FileCheck,
+  AlertCircle,
+  Info
+} from 'lucide-react';
+
+// Types and Interfaces
+interface User {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  department?: string;
+  lastActive: Date;
+  status: 'active' | 'inactive' | 'suspended';
+  permissions: Permission[];
+  createdAt: Date;
+  lastLogin?: Date;
+  mfaEnabled: boolean;
+  ssoProvider?: string;
+}
 
 interface UserRole {
-  id: string
-  name: string
-  permissions: string[]
+  id: string;
+  name: string;
+  description: string;
+  permissions: Permission[];
+  level: number;
 }
 
-interface SystemMetrics {
-  cpu_usage: number
-  memory_usage: number
-  disk_usage: number
-  network_throughput: number
-  active_connections: number
-  response_time: number
-  error_rate: number
-  uptime: number
+interface Permission {
+  id: string;
+  name: string;
+  description: string;
+  resource: string;
+  action: string;
 }
 
-interface Integration {
-  id: string
-  name: string
-  type: string
-  status: 'active' | 'inactive' | 'error' | 'pending'
-  last_sync: string
-  error_message?: string
+interface SystemMetric {
+  id: string;
+  name: string;
+  value: number;
+  unit: string;
+  status: 'healthy' | 'warning' | 'critical';
+  threshold: {
+    warning: number;
+    critical: number;
+  };
+  timestamp: Date;
+  trend: 'up' | 'down' | 'stable';
 }
 
-interface UserProfile {
-  id: string
-  email: string
-  full_name: string
-  role: string
-  status: 'active' | 'inactive' | 'suspended'
-  last_login: string
-  created_at: string
+interface ComplianceReport {
+  id: string;
+  type: 'GDPR' | 'SOC2' | 'ISO27001' | 'HIPAA';
+  status: 'compliant' | 'non-compliant' | 'pending';
+  lastAudit: Date;
+  nextAudit: Date;
+  score: number;
+  findings: ComplianceFinding[];
+  generatedAt: Date;
 }
 
-interface SecurityPolicy {
-  id: string
-  name: string
-  description: string
-  enabled: boolean
-  policy_type: string
-  rules: Record<string, any>
-  created_at: string
-  updated_at: string
+interface ComplianceFinding {
+  id: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  category: string;
+  description: string;
+  remediation: string;
+  status: 'open' | 'in-progress' | 'resolved';
+  assignedTo?: string;
+  dueDate?: Date;
 }
 
-interface ActivityLog {
-  id: string
-  action: string
-  user_email: string
-  timestamp: string
-  resource_type: string
-  resource_id: string
-  details: Record<string, any>
+interface Deployment {
+  id: string;
+  name: string;
+  environment: 'production' | 'staging' | 'development';
+  region: string;
+  status: 'healthy' | 'degraded' | 'offline';
+  version: string;
+  lastDeployed: Date;
+  instances: number;
+  activeUsers: number;
+  resources: {
+    cpu: number;
+    memory: number;
+    storage: number;
+  };
 }
 
-interface AdminNotification {
-  id: string
-  type: 'info' | 'warning' | 'error' | 'success'
-  title: string
-  message: string
-  timestamp: string
-  read: boolean
+interface AuditLogEntry {
+  id: string;
+  timestamp: Date;
+  userId: string;
+  userName: string;
+  action: string;
+  resource: string;
+  details: Record<string, any>;
+  ipAddress: string;
+  userAgent: string;
+  status: 'success' | 'failure';
+  riskLevel: 'low' | 'medium' | 'high';
+}
+
+interface SecurityEvent {
+  id: string;
+  type: 'login_attempt' | 'permission_change' | 'data_access' | 'system_change' | 'threat_detected';
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  timestamp: Date;
+  userId?: string;
+  description: string;
+  source: string;
+  resolved: boolean;
+  investigator?: string;
+}
+
+interface Notification {
+  id: string;
+  type: 'system' | 'security' | 'compliance' | 'user' | 'deployment';
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  title: string;
+  message: string;
+  timestamp: Date;
+  read: boolean;
+  actionRequired: boolean;
+  relatedResource?: string;
 }
 
 interface EnterpriseAdminDashboardProps {
-  className?: string
+  userRole: UserRole;
+  permissions: Permission[];
+  onUserAction?: (action: string, userId: string) => void;
+  onSystemAction?: (action: string, data: any) => void;
+  onExportReport?: (type: string, format: string) => Promise<void>;
+  className?: string;
 }
 
-interface RoleBasedAccessWrapperProps {
-  children: React.ReactNode
-  requiredRole: string
-  userRole?: string
-  fallback?: React.ReactNode
-}
+// Role-based Access Control HOC
+const withRoleBasedAccess = <P extends object>(
+  Component: React.ComponentType<P>,
+  requiredPermissions: string[]
+) => {
+  return (props: P & { userPermissions: Permission[] }) => {
+    const { userPermissions, ...componentProps } = props;
+    
+    const hasAccess = requiredPermissions.every(permission =>
+      userPermissions.some(p => p.name === permission)
+    );
 
-const RoleBasedAccessWrapper: React.FC<RoleBasedAccessWrapperProps> = ({
-  children,
-  requiredRole,
-  userRole,
-  fallback
-}) => {
-  const [hasAccess, setHasAccess] = useState(false)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    const checkAccess = async () => {
-      try {
-        const hasPermission = await checkUserRole(requiredRole)
-        setHasAccess(hasPermission)
-      } catch (error) {
-        console.error('Error checking user role:', error)
-        setHasAccess(false)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    checkAccess()
-  }, [requiredRole])
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center p-8">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      </div>
-    )
-  }
-
-  if (!hasAccess) {
-    return (
-      fallback || (
-        <Alert>
-          <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>Access Denied</AlertTitle>
-          <AlertDescription>
-            You don't have permission to access this section.
-          </AlertDescription>
-        </Alert>
-      )
-    )
-  }
-
-  return <>{children}</>
-}
-
-const AdminMetricsCards: React.FC<{ metrics: SystemMetrics }> = ({ metrics }) => {
-  const metricCards = [
-    {
-      title: 'CPU Usage',
-      value: `${metrics.cpu_usage}%`,
-      icon: Cpu,
-      color: metrics.cpu_usage > 80 ? 'destructive' : metrics.cpu_usage > 60 ? 'warning' : 'default'
-    },
-    {
-      title: 'Memory Usage',
-      value: `${metrics.memory_usage}%`,
-      icon: HardDrive,
-      color: metrics.memory_usage > 80 ? 'destructive' : metrics.memory_usage > 60 ? 'warning' : 'default'
-    },
-    {
-      title: 'Active Connections',
-      value: metrics.active_connections.toLocaleString(),
-      icon: Network,
-      color: 'default'
-    },
-    {
-      title: 'Response Time',
-      value: `${metrics.response_time}ms`,
-      icon: Clock,
-      color: metrics.response_time > 1000 ? 'destructive' : metrics.response_time > 500 ? 'warning' : 'default'
-    }
-  ]
-
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-      {metricCards.map((metric, index) => (
-        <Card key={index}>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">
-                  {metric.title}
-                </p>
-                <p className="text-2xl font-bold">{metric.value}</p>
-              </div>
-              <metric.icon className="h-8 w-8 text-muted-foreground" />
-            </div>
-          </CardContent>
+    if (!hasAccess) {
+      return (
+        <Card className="p-6">
+          <div className="text-center">
+            <Lock className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+            <h3 className="text-lg font-medium mb-2">Access Restricted</h3>
+            <p className="text-muted-foreground">
+              You don't have permission to view this section.
+            </p>
+          </div>
         </Card>
-      ))}
-    </div>
-  )
-}
-
-const IntegrationsPanel: React.FC<{ integrations: Integration[] }> = ({ integrations }) => {
-  const getStatusBadge = (status: Integration['status']) => {
-    const variants = {
-      active: 'default',
-      inactive: 'secondary',
-      error: 'destructive',
-      pending: 'outline'
-    } as const
-
-    const icons = {
-      active: CheckCircle,
-      inactive: XCircle,
-      error: AlertTriangle,
-      pending: Clock
+      );
     }
 
-    const Icon = icons[status]
+    return <Component {...(componentProps as P)} />;
+  };
+};
 
-    return (
-      <Badge variant={variants[status]} className="flex items-center gap-1">
-        <Icon className="h-3 w-3" />
-        {status}
-      </Badge>
-    )
-  }
+// User Management Panel Component
+const UserManagementPanel: React.FC<{
+  users: User[];
+  roles: UserRole[];
+  onUserUpdate: (user: User) => void;
+  onUserDelete: (userId: string) => void;
+  onRoleCreate: (role: UserRole) => void;
+}> = ({ users, roles, onUserUpdate, onUserDelete, onRoleCreate }) => {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [roleFilter, setRoleFilter] = useState<string>('all');
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
+  const [isRoleDialogOpen, setIsRoleDialogOpen] = useState(false);
 
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold">Enterprise Integrations</h2>
-        <Button>
-          <Plus className="h-4 w-4 mr-2" />
-          Add Integration
-        </Button>
-      </div>
+  const filteredUsers = useMemo(() => {
+    return users.filter(user => {
+      const matchesSearch = user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                           user.email.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesStatus = statusFilter === 'all' || user.status === statusFilter;
+      const matchesRole = roleFilter === 'all' || user.role.id === roleFilter;
+      
+      return matchesSearch && matchesStatus && matchesRole;
+    });
+  }, [users, searchTerm, statusFilter, roleFilter]);
 
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Last Sync</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {integrations.map((integration) => (
-                <TableRow key={integration.id}>
-                  <TableCell className="font-medium">{integration.name}</TableCell>
-                  <TableCell>{integration.type}</TableCell>
-                  <TableCell>{getStatusBadge(integration.status)}</TableCell>
-                  <TableCell>
-                    {new Date(integration.last_sync).toLocaleDateString()}
-                  </TableCell>
-                  <TableCell>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" className="h-8 w-8 p-0">
-                          <MoreVertical className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                        <DropdownMenuItem>
-                          <Eye className="h-4 w-4 mr-2" />
-                          View Details
-                        </DropdownMenuItem>
-                        <DropdownMenuItem>
-                          <Edit className="h-4 w-4 mr-2" />
-                          Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuItem>
-                          <RefreshCw className="h-4 w-4 mr-2" />
-                          Sync Now
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem className="text-destructive">
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-    </div>
-  )
-}
-
-const UserProvisioningPanel: React.FC<{ users: UserProfile[] }> = ({ users }) => {
-  const [selectedRole, setSelectedRole] = useState<string>('')
-  const [bulkAction, setBulkAction] = useState<string>('')
-
-  const getStatusBadge = (status: UserProfile['status']) => {
+  const getStatusBadge = (status: User['status']) => {
     const variants = {
-      active: 'default',
-      inactive: 'secondary',
-      suspended: 'destructive'
-    } as const
-
-    return <Badge variant={variants[status]}>{status}</Badge>
-  }
+      active: { variant: 'default' as const, label: 'Active' },
+      inactive: { variant: 'secondary' as const, label: 'Inactive' },
+      suspended: { variant: 'destructive' as const, label: 'Suspended' }
+    };
+    
+    const config = variants[status];
+    return <Badge variant={config.variant}>{config.label}</Badge>;
+  };
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold">User Provisioning</h2>
+      {/* Header with Actions */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold">User Management</h2>
+          <p className="text-muted-foreground">Manage users, roles, and permissions</p>
+        </div>
         <div className="flex gap-2">
-          <Button variant="outline">
-            <Upload className="h-4 w-4 mr-2" />
-            Import Users
+          <Button onClick={() => setIsRoleDialogOpen(true)} variant="outline">
+            <Plus className="w-4 h-4 mr-2" />
+            Create Role
           </Button>
-          <Button>
-            <Plus className="h-4 w-4 mr-2" />
+          <Button onClick={() => setIsUserDialogOpen(true)}>
+            <UserPlus className="w-4 h-4 mr-2" />
             Add User
           </Button>
         </div>
       </div>
 
-      <div className="flex gap-4">
-        <Select value={selectedRole} onValueChange={setSelectedRole}>
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="Filter by role" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="admin">Admin</SelectItem>
-            <SelectItem value="manager">Manager</SelectItem>
-            <SelectItem value="user">User</SelectItem>
-            <SelectItem value="viewer">Viewer</SelectItem>
-          </SelectContent>
-        </Select>
-
-        <Select value={bulkAction} onValueChange={setBulkAction}>
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="Bulk actions" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="activate">Activate Users</SelectItem>
-            <SelectItem value="suspend">Suspend Users</SelectItem>
-            <SelectItem value="export">Export Users</SelectItem>
-            <SelectItem value="delete">Delete Users</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
+      {/* Filters */}
       <Card>
-        <CardContent className="p-0">
+        <CardContent className="p-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+              <Label htmlFor="search">Search Users</Label>
+              <div className="relative">
+                <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="search"
+                  placeholder="Search by name or email"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="status-filter">Status</Label>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger id="status-filter">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="inactive">Inactive</SelectItem>
+                  <SelectItem value="suspended">Suspended</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="role-filter">Role</Label>
+              <Select value={roleFilter} onValueChange={setRoleFilter}>
+                <SelectTrigger id="role-filter">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Roles</SelectItem>
+                  {roles.map(role => (
+                    <SelectItem key={role.id} value={role.id}>{role.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-end">
+              <Button variant="outline" onClick={() => {
+                setSearchTerm('');
+                setStatusFilter('all');
+                setRoleFilter('all');
+              }}>
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Clear Filters
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Users Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Users ({filteredUsers.length})</CardTitle>
+        </CardHeader>
+        <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-12">
-                  <input type="checkbox" className="rounded" />
-                </TableHead>
                 <TableHead>User</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Last Login</TableHead>
-                <TableHead>Created</TableHead>
+                <TableHead>Last Active</TableHead>
+                <TableHead>MFA</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {users.map((user) => (
+              {filteredUsers.map(user => (
                 <TableRow key={user.id}>
                   <TableCell>
-                    <input type="checkbox" className="rounded" />
-                  </TableCell>
-                  <TableCell>
                     <div>
-                      <div className="font-medium">{user.full_name}</div>
+                      <div className="font-medium">{user.name}</div>
                       <div className="text-sm text-muted-foreground">{user.email}</div>
+                      {user.department && (
+                        <div className="text-xs text-muted-foreground">{user.department}</div>
+                      )}
                     </div>
                   </TableCell>
-                  <TableCell>{user.role}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline">{user.role.name}</Badge>
+                  </TableCell>
                   <TableCell>{getStatusBadge(user.status)}</TableCell>
                   <TableCell>
-                    {new Date(user.last_login).toLocaleDateString()}
+                    <div className="text-sm">
+                      {user.lastActive.toLocaleDateString()}
+                    </div>
                   </TableCell>
                   <TableCell>
-                    {new Date(user.created_at).toLocaleDateString()}
+                    {user.mfaEnabled ? (
+                      <CheckCircle className="w-4 h-4 text-green-600" />
+                    ) : (
+                      <XCircle className="w-4 h-4 text-red-600" />
+                    )}
                   </TableCell>
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" className="h-8 w-8 p-0">
-                          <MoreVertical className="h-4 w-4" />
+                          <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                        <DropdownMenuItem>
-                          <Eye className="h-4 w-4 mr-2" />
-                          View Profile
+                        <DropdownMenuItem onClick={() => setSelectedUser(user)}>
+                          <Eye className="mr-2 h-4 w-4" />
+                          View Details
                         </DropdownMenuItem>
-                        <DropdownMenuItem>
-                          <Edit className="h-4 w-4 mr-2" />
+                        <DropdownMenuItem onClick={() => {
+                          setSelectedUser(user);
+                          setIsUserDialogOpen(true);
+                        }}>
+                          <Edit className="mr-2 h-4 w-4" />
                           Edit User
                         </DropdownMenuItem>
-                        <DropdownMenuItem>
-                          <Shield className="h-4 w-4 mr-2" />
-                          Manage Permissions
+                        <DropdownMenuItem onClick={() => onUserUpdate({ ...user, mfaEnabled: !user.mfaEnabled })}>
+                          <Key className="mr-2 h-4 w-4" />
+                          {user.mfaEnabled ? 'Disable' : 'Enable'} MFA
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem className="text-destructive">
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          Suspend User
+                        <DropdownMenuItem 
+                          onClick={() => onUserDelete(user.id)}
+                          className="text-red-600"
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Delete User
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -449,203 +430,173 @@ const UserProvisioningPanel: React.FC<{ users: UserProfile[] }> = ({ users }) =>
         </CardContent>
       </Card>
     </div>
-  )
-}
+  );
+};
 
-const SecurityPoliciesPanel: React.FC<{ policies: SecurityPolicy[] }> = ({ policies }) => {
-  const handleTogglePolicy = async (policyId: string, enabled: boolean) => {
-    try {
-      const { error } = await supabase
-        .from('security_policies')
-        .update({ enabled })
-        .eq('id', policyId)
+// System Health Monitor Component
+const SystemHealthMonitor: React.FC<{
+  metrics: SystemMetric[];
+  deployments: Deployment[];
+  onRefresh: () => void;
+}> = ({ metrics, deployments, onRefresh }) => {
+  const [selectedTimeRange, setSelectedTimeRange] = useState('1h');
 
-      if (error) throw error
-      toast.success('Policy updated successfully')
-    } catch (error) {
-      toast.error('Failed to update policy')
+  const getMetricStatusIcon = (status: SystemMetric['status']) => {
+    switch (status) {
+      case 'healthy':
+        return <CheckCircle className="w-4 h-4 text-green-600" />;
+      case 'warning':
+        return <AlertTriangle className="w-4 h-4 text-yellow-600" />;
+      case 'critical':
+        return <XCircle className="w-4 h-4 text-red-600" />;
     }
-  }
+  };
+
+  const getDeploymentStatusBadge = (status: Deployment['status']) => {
+    const variants = {
+      healthy: { variant: 'default' as const, label: 'Healthy' },
+      degraded: { variant: 'destructive' as const, label: 'Degraded' },
+      offline: { variant: 'secondary' as const, label: 'Offline' }
+    };
+    
+    const config = variants[status];
+    return <Badge variant={config.variant}>{config.label}</Badge>;
+  };
+
+  const overallHealth = useMemo(() => {
+    const criticalCount = metrics.filter(m => m.status === 'critical').length;
+    const warningCount = metrics.filter(m => m.status === 'warning').length;
+    
+    if (criticalCount > 0) return 'critical';
+    if (warningCount > 0) return 'warning';
+    return 'healthy';
+  }, [metrics]);
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold">Security Policies</h2>
-        <Button>
-          <Plus className="h-4 w-4 mr-2" />
-          Create Policy
-        </Button>
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold">System Health</h2>
+          <p className="text-muted-foreground">Real-time system monitoring and alerts</p>
+        </div>
+        <div className="flex gap-2">
+          <Select value={selectedTimeRange} onValueChange={setSelectedTimeRange}>
+            <SelectTrigger className="w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="1h">Last Hour</SelectItem>
+              <SelectItem value="6h">Last 6 Hours</SelectItem>
+              <SelectItem value="24h">Last 24 Hours</SelectItem>
+              <SelectItem value="7d">Last 7 Days</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button onClick={onRefresh} variant="outline">
+            <RefreshCw className="w-4 h-4 mr-2" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
-      <div className="grid gap-4">
-        {policies.map((policy) => (
-          <Card key={policy.id}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+      {/* Overall Health Status */}
+      <Card>
+        <CardContent className="p-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {getMetricStatusIcon(overallHealth)}
               <div>
-                <CardTitle className="text-base">{policy.name}</CardTitle>
-                <CardDescription>{policy.description}</CardDescription>
+                <h3 className="text-lg font-medium">Overall System Health</h3>
+                <p className="text-muted-foreground capitalize">{overallHealth}</p>
               </div>
-              <div className="flex items-center gap-2">
-                <Switch
-                  checked={policy.enabled}
-                  onCheckedChange={(enabled) => handleTogglePolicy(policy.id, enabled)}
-                />
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="sm">
-                      <MoreVertical className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem>
-                      <Eye className="h-4 w-4 mr-2" />
-                      View Details
-                    </DropdownMenuItem>
-                    <DropdownMenuItem>
-                      <Edit className="h-4 w-4 mr-2" />
-                      Edit Policy
-                    </DropdownMenuItem>
-                    <DropdownMenuItem>
-                      <Download className="h-4 w-4 mr-2" />
-                      Export
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem className="text-destructive">
-                      <Trash2 className="h-4 w-4 mr-2" />
-                      Delete
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+            </div>
+            <div className="text-right">
+              <div className="text-2xl font-bold">{deployments.filter(d => d.status === 'healthy').length}/{deployments.length}</div>
+              <div className="text-sm text-muted-foreground">Healthy Deployments</div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Metrics Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {metrics.map(metric => (
+          <Card key={metric.id}>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-sm font-medium">{metric.name}</div>
+                {getMetricStatusIcon(metric.status)}
               </div>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Type: {policy.policy_type}</span>
-                <span className="text-muted-foreground">
-                  Updated: {new Date(policy.updated_at).toLocaleDateString()}
-                </span>
+              <div className="text-2xl font-bold mb-1">
+                {metric.value.toFixed(1)}{metric.unit}
+              </div>
+              <Progress 
+                value={(metric.value / metric.threshold.critical) * 100} 
+                className="mb-2"
+              />
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Warning: {metric.threshold.warning}{metric.unit}</span>
+                <span>Critical: {metric.threshold.critical}{metric.unit}</span>
               </div>
             </CardContent>
           </Card>
         ))}
       </div>
-    </div>
-  )
-}
 
-const SystemMonitoringPanel: React.FC<{ metrics: SystemMetrics }> = ({ metrics }) => {
-  const [timeRange, setTimeRange] = useState('24h')
-
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold">System Monitoring</h2>
-        <Select value={timeRange} onValueChange={setTimeRange}>
-          <SelectTrigger className="w-32">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="1h">Last Hour</SelectItem>
-            <SelectItem value="24h">Last 24h</SelectItem>
-            <SelectItem value="7d">Last 7 days</SelectItem>
-            <SelectItem value="30d">Last 30 days</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>System Health</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <div className="flex justify-between text-sm">
-                <span>CPU Usage</span>
-                <span>{metrics.cpu_usage}%</span>
-              </div>
-              <Progress value={metrics.cpu_usage} className="mt-1" />
-            </div>
-            <div>
-              <div className="flex justify-between text-sm">
-                <span>Memory Usage</span>
-                <span>{metrics.memory_usage}%</span>
-              </div>
-              <Progress value={metrics.memory_usage} className="mt-1" />
-            </div>
-            <div>
-              <div className="flex justify-between text-sm">
-                <span>Disk Usage</span>
-                <span>{metrics.disk_usage}%</span>
-              </div>
-              <Progress value={metrics.disk_usage} className="mt-1" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Performance Metrics</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex justify-between">
-              <span className="text-sm text-muted-foreground">Network Throughput</span>
-              <span className="font-medium">{metrics.network_throughput} MB/s</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-sm text-muted-foreground">Error Rate</span>
-              <span className="font-medium">{metrics.error_rate}%</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-sm text-muted-foreground">Uptime</span>
-              <span className="font-medium">{metrics.uptime}%</span>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
+      {/* Deployments Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Real-time Activity</CardTitle>
+          <CardTitle>Deployment Status</CardTitle>
+          <CardDescription>Current status of all deployments across environments</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="text-center py-8 text-muted-foreground">
-            Real-time monitoring charts would be displayed here
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  )
-}
-
-const ActivityFeedWidget: React.FC<{ activities: ActivityLog[] }> = ({ activities }) => {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Recent Activity</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <ScrollArea className="h-80">
-          <div className="space-y-4">
-            {activities.map((activity) => (
-              <div key={activity.id} className="flex items-start space-x-3">
-                <div className="w-2 h-2 bg-primary rounded-full mt-2 flex-shrink-0" />
-                <div className="flex-1">
-                  <p className="text-sm font-medium">{activity.action}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {activity.user_email} • {new Date(activity.timestamp).toLocaleString()}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </ScrollArea>
-      </CardContent>
-    </Card>
-  )
-}
-
-const AdminNotifications: React.FC<{ notifications: AdminNotification[] }> = ({ notifications }) => {
-  const getNotificationIcon = (type: AdminNotification['type']) => {
-    const icons = {
-      info:
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Deployment</TableHead>
+                <TableHead>Environment</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Version</TableHead>
+                <TableHead>Instances</TableHead>
+                <TableHead>Active Users</TableHead>
+                <TableHead>Resource Usage</TableHead>
+                <TableHead>Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {deployments.map(deployment => (
+                <TableRow key={deployment.id}>
+                  <TableCell>
+                    <div>
+                      <div className="font-medium">{deployment.name}</div>
+                      <div className="text-sm text-muted-foreground">{deployment.region}</div>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="capitalize">
+                      {deployment.environment}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{getDeploymentStatusBadge(deployment.status)}</TableCell>
+                  <TableCell className="font-mono text-sm">{deployment.version}</TableCell>
+                  <TableCell>{deployment.instances}</TableCell>
+                  <TableCell>{deployment.activeUsers.toLocaleString()}</TableCell>
+                  <TableCell>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 text-xs">
+                        <Cpu className="w-3 h-3" />
+                        <span>CPU: {deployment.resources.cpu}%</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        <Memory className="w-3 h-3" />
+                        <span>RAM: {deployment.resources.memory}%</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        <HardDrive className="w-3 h-3" />
+                        <span>Storage: {deployment.resources.storage}%</span>
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <DropdownMenu>
+                      <DropdownMenuTrig
