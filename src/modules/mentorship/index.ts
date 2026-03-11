@@ -1,675 +1,737 @@
-```typescript
-/**
- * AI-Powered Mentorship Matching Platform
- * Intelligent mentorship system with ML-based matching, progress tracking, and structured learning paths
- */
-
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { toast } from 'sonner';
-import type { 
-  User, 
-  MentorshipProfile, 
-  MatchingCriteria, 
-  CompatibilityScore,
-  LearningPath,
-  MentorshipSession,
-  ProgressMetrics,
-  Goal,
-  Feedback
-} from './types/mentorship.types';
-
-// Core Services
-import { supabaseQueries } from '../../lib/supabase/mentorship-queries';
-import { matchingAlgorithm } from '../../lib/ai/matching-algorithm';
-import { compatibilityScoring } from '../../lib/ai/compatibility-scoring';
-import { profileService } from '../profiles/services/profile-service';
-import { notificationService } from '../notifications/services/notification-service';
-import { trackingService } from '../analytics/services/tracking-service';
-import { schedulingService } from '../../lib/calendar/scheduling-service';
+import { Supabase } from '@supabase/supabase-js';
+import { z } from 'zod';
+import { EventEmitter } from 'events';
 
 /**
- * Core Mentorship Platform Interface
+ * Skill proficiency levels
  */
-export interface MentorshipPlatform {
-  // Profile Management
-  createProfile(profile: Omit<MentorshipProfile, 'id' | 'createdAt' | 'updatedAt'>): Promise<MentorshipProfile>;
-  updateProfile(id: string, updates: Partial<MentorshipProfile>): Promise<MentorshipProfile>;
-  getProfile(userId: string): Promise<MentorshipProfile | null>;
-  
-  // Matching System
-  findMatches(userId: string, criteria: MatchingCriteria): Promise<CompatibilityScore[]>;
-  calculateCompatibility(mentorId: string, menteeId: string): Promise<CompatibilityScore>;
-  createMentorshipPair(mentorId: string, menteeId: string): Promise<string>;
-  
-  // Learning Paths
-  createLearningPath(path: Omit<LearningPath, 'id' | 'createdAt'>): Promise<LearningPath>;
-  updateLearningPath(id: string, updates: Partial<LearningPath>): Promise<LearningPath>;
-  getLearningPath(id: string): Promise<LearningPath | null>;
-  
-  // Session Management
-  scheduleSession(session: Omit<MentorshipSession, 'id' | 'createdAt'>): Promise<MentorshipSession>;
-  updateSession(id: string, updates: Partial<MentorshipSession>): Promise<MentorshipSession>;
-  getUserSessions(userId: string): Promise<MentorshipSession[]>;
-  
-  // Progress Tracking
-  updateProgress(userId: string, metrics: ProgressMetrics): Promise<void>;
-  getProgress(userId: string): Promise<ProgressMetrics>;
-  trackGoalProgress(goalId: string, progress: number): Promise<void>;
-  
-  // Goal Management
-  createGoal(goal: Omit<Goal, 'id' | 'createdAt'>): Promise<Goal>;
-  updateGoal(id: string, updates: Partial<Goal>): Promise<Goal>;
-  getUserGoals(userId: string): Promise<Goal[]>;
-  
-  // Feedback System
-  submitFeedback(feedback: Omit<Feedback, 'id' | 'createdAt'>): Promise<Feedback>;
-  getFeedback(sessionId: string): Promise<Feedback[]>;
-  
-  // Analytics
-  getMentorshipAnalytics(userId: string): Promise<any>;
-  getPlatformInsights(): Promise<any>;
+export enum SkillLevel {
+  BEGINNER = 'BEGINNER',
+  INTERMEDIATE = 'INTERMEDIATE',
+  ADVANCED = 'ADVANCED',
+  EXPERT = 'EXPERT'
 }
 
 /**
- * Main Mentorship Platform Implementation
+ * Mentorship session status
  */
-class MentorshipPlatformService implements MentorshipPlatform {
-  private cache = new Map<string, any>();
-  private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+export enum SessionStatus {
+  SCHEDULED = 'SCHEDULED',
+  COMPLETED = 'COMPLETED',
+  CANCELLED = 'CANCELLED',
+  NO_SHOW = 'NO_SHOW'
+}
 
+/**
+ * Matching status
+ */
+export enum MatchingStatus {
+  PENDING = 'PENDING',
+  MATCHED = 'MATCHED',
+  ACTIVE = 'ACTIVE',
+  COMPLETED = 'COMPLETED',
+  CANCELLED = 'CANCELLED'
+}
+
+/**
+ * Availability time slot
+ */
+export interface TimeSlot {
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+  timezone: string;
+}
+
+/**
+ * Skill with proficiency level
+ */
+export interface Skill {
+  id: string;
+  name: string;
+  category: string;
+  level: SkillLevel;
+}
+
+/**
+ * Mentorship goal
+ */
+export interface Goal {
+  id: string;
+  title: string;
+  description: string;
+  targetDate: Date;
+  priority: 'HIGH' | 'MEDIUM' | 'LOW';
+  completed: boolean;
+}
+
+/**
+ * User profile for mentorship
+ */
+export interface UserProfile {
+  id: string;
+  userId: string;
+  type: 'MENTOR' | 'MENTEE' | 'BOTH';
+  bio: string;
+  skills: Skill[];
+  availability: TimeSlot[];
+  timezone: string;
+  preferredMeetingDuration: number;
+  maxMentees?: number;
+  goals?: Goal[];
+  experience?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * Mentorship match
+ */
+export interface MentorshipMatch {
+  id: string;
+  mentorId: string;
+  menteeId: string;
+  compatibilityScore: number;
+  status: MatchingStatus;
+  matchedAt: Date;
+  activatedAt?: Date;
+  completedAt?: Date;
+  feedback?: MatchFeedback;
+}
+
+/**
+ * Session record
+ */
+export interface Session {
+  id: string;
+  matchId: string;
+  scheduledAt: Date;
+  duration: number;
+  status: SessionStatus;
+  notes?: string;
+  mentorFeedback?: string;
+  menteeFeedback?: string;
+  createdAt: Date;
+}
+
+/**
+ * Progress milestone
+ */
+export interface Milestone {
+  id: string;
+  matchId: string;
+  goalId: string;
+  title: string;
+  description: string;
+  targetDate: Date;
+  completedAt?: Date;
+  feedback?: string;
+}
+
+/**
+ * Match feedback
+ */
+export interface MatchFeedback {
+  mentorRating: number;
+  menteeRating: number;
+  mentorComments?: string;
+  menteeComments?: string;
+  wouldRecommend: boolean;
+  submittedAt: Date;
+}
+
+/**
+ * Matching criteria
+ */
+export interface MatchingCriteria {
+  requiredSkills: string[];
+  preferredSkillLevels: Record<string, SkillLevel>;
+  availabilityFlexibility: number;
+  maxTravelDistance?: number;
+  preferredMeetingType: 'VIRTUAL' | 'IN_PERSON' | 'BOTH';
+  goals: string[];
+}
+
+/**
+ * Compatibility metrics
+ */
+export interface CompatibilityMetrics {
+  skillOverlap: number;
+  availabilityOverlap: number;
+  goalAlignment: number;
+  experienceGap: number;
+  overallScore: number;
+}
+
+/**
+ * Validation schemas
+ */
+const skillSchema = z.object({
+  id: z.string(),
+  name: z.string().min(1),
+  category: z.string(),
+  level: z.nativeEnum(SkillLevel)
+});
+
+const timeSlotSchema = z.object({
+  dayOfWeek: z.number().min(0).max(6),
+  startTime: z.string().regex(/^\d{2}:\d{2}$/),
+  endTime: z.string().regex(/^\d{2}:\d{2}$/),
+  timezone: z.string()
+});
+
+const userProfileSchema = z.object({
+  userId: z.string(),
+  type: z.enum(['MENTOR', 'MENTEE', 'BOTH']),
+  bio: z.string().max(1000),
+  skills: z.array(skillSchema),
+  availability: z.array(timeSlotSchema),
+  timezone: z.string(),
+  preferredMeetingDuration: z.number().min(15).max(240),
+  maxMentees: z.number().optional(),
+  experience: z.string().optional()
+});
+
+/**
+ * Compatibility scoring algorithm
+ */
+class CompatibilityScorer {
   /**
-   * Create a new mentorship profile
+   * Calculate skill compatibility between mentor and mentee
    */
-  async createProfile(profileData: Omit<MentorshipProfile, 'id' | 'createdAt' | 'updatedAt'>): Promise<MentorshipProfile> {
-    try {
-      const profile = await supabaseQueries.mentorshipProfiles.create({
-        ...profileData,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      });
+  static calculateSkillCompatibility(mentorSkills: Skill[], menteeSkills: Skill[]): number {
+    if (menteeSkills.length === 0) return 0;
 
-      // Track profile creation
-      await trackingService.track('mentorship_profile_created', {
-        userId: profileData.userId,
-        role: profileData.role,
-        skills: profileData.skills
-      });
+    let totalScore = 0;
+    let matchedSkills = 0;
 
-      this.invalidateUserCache(profileData.userId);
-      return profile;
-    } catch (error) {
-      console.error('Error creating mentorship profile:', error);
-      throw new Error('Failed to create mentorship profile');
-    }
-  }
-
-  /**
-   * Update existing mentorship profile
-   */
-  async updateProfile(id: string, updates: Partial<MentorshipProfile>): Promise<MentorshipProfile> {
-    try {
-      const profile = await supabaseQueries.mentorshipProfiles.update(id, {
-        ...updates,
-        updatedAt: new Date().toISOString()
-      });
-
-      // Track profile update
-      await trackingService.track('mentorship_profile_updated', {
-        profileId: id,
-        updatedFields: Object.keys(updates)
-      });
-
-      this.invalidateCache(`profile_${id}`);
-      return profile;
-    } catch (error) {
-      console.error('Error updating mentorship profile:', error);
-      throw new Error('Failed to update mentorship profile');
-    }
-  }
-
-  /**
-   * Get mentorship profile by user ID
-   */
-  async getProfile(userId: string): Promise<MentorshipProfile | null> {
-    const cacheKey = `profile_${userId}`;
-    
-    if (this.cache.has(cacheKey)) {
-      const cached = this.cache.get(cacheKey);
-      if (Date.now() - cached.timestamp < this.CACHE_TTL) {
-        return cached.data;
-      }
-    }
-
-    try {
-      const profile = await supabaseQueries.mentorshipProfiles.getByUserId(userId);
+    for (const menteeSkill of menteeSkills) {
+      const mentorSkill = mentorSkills.find(s => s.name === menteeSkill.name);
       
-      this.cache.set(cacheKey, {
-        data: profile,
-        timestamp: Date.now()
-      });
+      if (mentorSkill) {
+        const levelDiff = this.getSkillLevelValue(mentorSkill.level) - this.getSkillLevelValue(menteeSkill.level);
+        if (levelDiff > 0) {
+          totalScore += Math.min(levelDiff, 3) / 3;
+          matchedSkills++;
+        }
+      }
+    }
 
-      return profile;
-    } catch (error) {
-      console.error('Error fetching mentorship profile:', error);
-      throw new Error('Failed to fetch mentorship profile');
+    return matchedSkills > 0 ? (totalScore / menteeSkills.length) : 0;
+  }
+
+  /**
+   * Calculate availability overlap
+   */
+  static calculateAvailabilityOverlap(mentorSlots: TimeSlot[], menteeSlots: TimeSlot[]): number {
+    let totalOverlap = 0;
+    let possibleOverlap = 0;
+
+    for (const menteeSlot of menteeSlots) {
+      possibleOverlap += this.getSlotDuration(menteeSlot);
+      
+      for (const mentorSlot of mentorSlots) {
+        if (mentorSlot.dayOfWeek === menteeSlot.dayOfWeek) {
+          const overlap = this.calculateTimeOverlap(mentorSlot, menteeSlot);
+          totalOverlap += overlap;
+        }
+      }
+    }
+
+    return possibleOverlap > 0 ? totalOverlap / possibleOverlap : 0;
+  }
+
+  /**
+   * Calculate goal alignment score
+   */
+  static calculateGoalAlignment(mentorSkills: Skill[], menteeGoals: Goal[]): number {
+    if (menteeGoals.length === 0) return 0;
+
+    let alignedGoals = 0;
+
+    for (const goal of menteeGoals) {
+      const hasRelevantSkill = mentorSkills.some(skill => 
+        goal.description.toLowerCase().includes(skill.name.toLowerCase()) ||
+        goal.title.toLowerCase().includes(skill.name.toLowerCase())
+      );
+      
+      if (hasRelevantSkill) {
+        alignedGoals++;
+      }
+    }
+
+    return alignedGoals / menteeGoals.length;
+  }
+
+  /**
+   * Get numeric value for skill level
+   */
+  private static getSkillLevelValue(level: SkillLevel): number {
+    switch (level) {
+      case SkillLevel.BEGINNER: return 1;
+      case SkillLevel.INTERMEDIATE: return 2;
+      case SkillLevel.ADVANCED: return 3;
+      case SkillLevel.EXPERT: return 4;
     }
   }
 
   /**
-   * Find potential mentorship matches using AI algorithm
+   * Calculate duration of time slot in minutes
    */
-  async findMatches(userId: string, criteria: MatchingCriteria): Promise<CompatibilityScore[]> {
-    try {
-      const userProfile = await this.getProfile(userId);
-      if (!userProfile) {
-        throw new Error('User profile not found');
+  private static getSlotDuration(slot: TimeSlot): number {
+    const start = this.timeStringToMinutes(slot.startTime);
+    const end = this.timeStringToMinutes(slot.endTime);
+    return end - start;
+  }
+
+  /**
+   * Calculate overlap between two time slots
+   */
+  private static calculateTimeOverlap(slot1: TimeSlot, slot2: TimeSlot): number {
+    const start1 = this.timeStringToMinutes(slot1.startTime);
+    const end1 = this.timeStringToMinutes(slot1.endTime);
+    const start2 = this.timeStringToMinutes(slot2.startTime);
+    const end2 = this.timeStringToMinutes(slot2.endTime);
+
+    const overlapStart = Math.max(start1, start2);
+    const overlapEnd = Math.min(end1, end2);
+
+    return Math.max(0, overlapEnd - overlapStart);
+  }
+
+  /**
+   * Convert time string to minutes
+   */
+  private static timeStringToMinutes(time: string): number {
+    const [hours, minutes] = time.split(':').map(Number);
+    return hours * 60 + minutes;
+  }
+}
+
+/**
+ * AI-powered mentorship matching algorithm
+ */
+class MentorshipMatcher {
+  private readonly weightSkills = 0.4;
+  private readonly weightAvailability = 0.3;
+  private readonly weightGoals = 0.3;
+
+  /**
+   * Find best mentor matches for a mentee
+   */
+  async findMatches(
+    menteeProfile: UserProfile,
+    availableMentors: UserProfile[],
+    criteria: MatchingCriteria
+  ): Promise<Array<{ mentor: UserProfile; compatibility: CompatibilityMetrics }>> {
+    const matches: Array<{ mentor: UserProfile; compatibility: CompatibilityMetrics }> = [];
+
+    for (const mentor of availableMentors) {
+      if (mentor.id === menteeProfile.id) continue;
+
+      const compatibility = this.calculateCompatibility(menteeProfile, mentor, criteria);
+      
+      if (compatibility.overallScore >= 0.3) {
+        matches.push({ mentor, compatibility });
       }
+    }
 
-      // Get potential matches based on criteria
-      const candidates = await supabaseQueries.mentorshipProfiles.findCandidates({
-        excludeUserId: userId,
-        role: userProfile.role === 'mentor' ? 'mentee' : 'mentor',
-        skills: criteria.requiredSkills,
-        availability: criteria.availability,
-        location: criteria.preferredLocation
-      });
+    return matches.sort((a, b) => b.compatibility.overallScore - a.compatibility.overallScore);
+  }
 
-      // Calculate compatibility scores using AI
-      const matches = await Promise.all(
-        candidates.map(async (candidate) => {
-          const compatibility = await this.calculateCompatibility(
-            userProfile.role === 'mentor' ? userProfile.userId : candidate.userId,
-            userProfile.role === 'mentee' ? userProfile.userId : candidate.userId
-          );
-          return compatibility;
+  /**
+   * Calculate overall compatibility between mentor and mentee
+   */
+  private calculateCompatibility(
+    mentee: UserProfile,
+    mentor: UserProfile,
+    criteria: MatchingCriteria
+  ): CompatibilityMetrics {
+    const skillOverlap = CompatibilityScorer.calculateSkillCompatibility(mentor.skills, mentee.skills);
+    const availabilityOverlap = CompatibilityScorer.calculateAvailabilityOverlap(
+      mentor.availability,
+      mentee.availability
+    );
+    const goalAlignment = CompatibilityScorer.calculateGoalAlignment(
+      mentor.skills,
+      mentee.goals || []
+    );
+
+    const overallScore = 
+      skillOverlap * this.weightSkills +
+      availabilityOverlap * this.weightAvailability +
+      goalAlignment * this.weightGoals;
+
+    return {
+      skillOverlap,
+      availabilityOverlap,
+      goalAlignment,
+      experienceGap: this.calculateExperienceGap(mentor, mentee),
+      overallScore: Math.min(1, overallScore)
+    };
+  }
+
+  /**
+   * Calculate experience gap between mentor and mentee
+   */
+  private calculateExperienceGap(mentor: UserProfile, mentee: UserProfile): number {
+    const mentorAvgLevel = this.getAverageSkillLevel(mentor.skills);
+    const menteeAvgLevel = this.getAverageSkillLevel(mentee.skills);
+    return Math.max(0, mentorAvgLevel - menteeAvgLevel) / 3;
+  }
+
+  /**
+   * Calculate average skill level
+   */
+  private getAverageSkillLevel(skills: Skill[]): number {
+    if (skills.length === 0) return 0;
+    
+    const total = skills.reduce((sum, skill) => {
+      switch (skill.level) {
+        case SkillLevel.BEGINNER: return sum + 1;
+        case SkillLevel.INTERMEDIATE: return sum + 2;
+        case SkillLevel.ADVANCED: return sum + 3;
+        case SkillLevel.EXPERT: return sum + 4;
+      }
+    }, 0);
+
+    return total / skills.length;
+  }
+}
+
+/**
+ * Progress tracking system
+ */
+class ProgressTracker {
+  /**
+   * Calculate progress completion percentage
+   */
+  static calculateProgress(goals: Goal[], milestones: Milestone[]): number {
+    if (goals.length === 0) return 0;
+
+    const completedGoals = goals.filter(goal => goal.completed).length;
+    const goalProgress = completedGoals / goals.length;
+
+    const completedMilestones = milestones.filter(milestone => milestone.completedAt).length;
+    const milestoneProgress = milestones.length > 0 ? completedMilestones / milestones.length : 0;
+
+    return (goalProgress + milestoneProgress) / 2;
+  }
+
+  /**
+   * Generate progress insights
+   */
+  static generateInsights(
+    goals: Goal[],
+    milestones: Milestone[],
+    sessions: Session[]
+  ): {
+    completionRate: number;
+    averageSessionRating: number;
+    upcomingDeadlines: Goal[];
+    recommendedActions: string[];
+  } {
+    const completionRate = this.calculateProgress(goals, milestones);
+    const completedSessions = sessions.filter(s => s.status === SessionStatus.COMPLETED);
+    
+    const averageSessionRating = completedSessions.length > 0 
+      ? completedSessions.reduce((sum, session) => {
+          // Assuming a default rating calculation based on feedback presence
+          return sum + (session.mentorFeedback && session.menteeFeedback ? 4 : 3);
+        }, 0) / completedSessions.length
+      : 0;
+
+    const upcomingDeadlines = goals.filter(goal => 
+      !goal.completed && 
+      new Date(goal.targetDate).getTime() - Date.now() < 7 * 24 * 60 * 60 * 1000
+    );
+
+    const recommendedActions: string[] = [];
+    
+    if (completionRate < 0.3) {
+      recommendedActions.push('Schedule more frequent sessions with your mentor');
+    }
+    
+    if (upcomingDeadlines.length > 0) {
+      recommendedActions.push('Focus on upcoming goal deadlines');
+    }
+    
+    if (averageSessionRating < 3) {
+      recommendedActions.push('Discuss session effectiveness with your mentor');
+    }
+
+    return {
+      completionRate,
+      averageSessionRating,
+      upcomingDeadlines,
+      recommendedActions
+    };
+  }
+}
+
+/**
+ * Main mentorship system class
+ */
+export class MentorshipSystem extends EventEmitter {
+  private supabase: any;
+  private matcher: MentorshipMatcher;
+
+  constructor(supabaseClient: any) {
+    super();
+    this.supabase = supabaseClient;
+    this.matcher = new MentorshipMatcher();
+  }
+
+  /**
+   * Create or update user mentorship profile
+   */
+  async createProfile(profileData: Partial<UserProfile>): Promise<UserProfile> {
+    try {
+      const validatedData = userProfileSchema.parse(profileData);
+      
+      const { data, error } = await this.supabase
+        .from('mentorship_profiles')
+        .upsert({
+          ...validatedData,
+          updated_at: new Date().toISOString()
         })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      const profile = this.mapDatabaseProfile(data);
+      this.emit('profileCreated', profile);
+      
+      return profile;
+    } catch (error) {
+      throw new Error(`Failed to create profile: ${error.message}`);
+    }
+  }
+
+  /**
+   * Find mentorship matches for a user
+   */
+  async findMatches(
+    userId: string,
+    criteria: MatchingCriteria
+  ): Promise<Array<{ mentor: UserProfile; compatibility: CompatibilityMetrics }>> {
+    try {
+      // Get user profile
+      const { data: userProfile, error: profileError } = await this.supabase
+        .from('mentorship_profiles')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+
+      if (profileError) throw profileError;
+
+      // Get available mentors
+      const { data: mentors, error: mentorsError } = await this.supabase
+        .from('mentorship_profiles')
+        .select('*')
+        .in('type', ['MENTOR', 'BOTH'])
+        .neq('user_id', userId);
+
+      if (mentorsError) throw mentorsError;
+
+      const mappedUserProfile = this.mapDatabaseProfile(userProfile);
+      const mappedMentors = mentors.map(mentor => this.mapDatabaseProfile(mentor));
+
+      const matches = await this.matcher.findMatches(
+        mappedUserProfile,
+        mappedMentors,
+        criteria
       );
 
-      // Sort by compatibility score
-      const sortedMatches = matches
-        .filter(match => match.overallScore >= criteria.minCompatibilityScore || 0.6)
-        .sort((a, b) => b.overallScore - a.overallScore)
-        .slice(0, criteria.maxResults || 10);
+      this.emit('matchesFound', { userId, matchCount: matches.length });
 
-      // Track matching request
-      await trackingService.track('mentorship_matches_requested', {
-        userId,
-        candidatesFound: sortedMatches.length,
-        criteria
-      });
-
-      return sortedMatches;
+      return matches;
     } catch (error) {
-      console.error('Error finding mentorship matches:', error);
-      throw new Error('Failed to find mentorship matches');
+      throw new Error(`Failed to find matches: ${error.message}`);
     }
   }
 
   /**
-   * Calculate compatibility score between mentor and mentee
+   * Create a mentorship match
    */
-  async calculateCompatibility(mentorId: string, menteeId: string): Promise<CompatibilityScore> {
+  async createMatch(mentorId: string, menteeId: string): Promise<MentorshipMatch> {
     try {
-      const [mentorProfile, menteeProfile] = await Promise.all([
-        this.getProfile(mentorId),
-        this.getProfile(menteeId)
-      ]);
+      // Calculate compatibility score
+      const { data: mentorData } = await this.supabase
+        .from('mentorship_profiles')
+        .select('*')
+        .eq('id', mentorId)
+        .single();
 
-      if (!mentorProfile || !menteeProfile) {
-        throw new Error('One or both profiles not found');
+      const { data: menteeData } = await this.supabase
+        .from('mentorship_profiles')
+        .select('*')
+        .eq('id', menteeId)
+        .single();
+
+      if (!mentorData || !menteeData) {
+        throw new Error('Mentor or mentee profile not found');
       }
 
-      const compatibility = await compatibilityScoring.calculate({
-        mentor: mentorProfile,
-        mentee: menteeProfile,
-        factors: {
-          skillsAlignment: 0.3,
-          personalityMatch: 0.2,
-          goalAlignment: 0.25,
-          availabilityMatch: 0.15,
-          communicationStyle: 0.1
-        }
-      });
-
-      return compatibility;
-    } catch (error) {
-      console.error('Error calculating compatibility:', error);
-      throw new Error('Failed to calculate compatibility');
-    }
-  }
-
-  /**
-   * Create a mentorship pair
-   */
-  async createMentorshipPair(mentorId: string, menteeId: string): Promise<string> {
-    try {
-      const compatibility = await this.calculateCompatibility(mentorId, menteeId);
+      const mentor = this.mapDatabaseProfile(mentorData);
+      const mentee = this.mapDatabaseProfile(menteeData);
       
-      const pairId = await supabaseQueries.mentorshipPairs.create({
-        mentorId,
-        menteeId,
-        compatibilityScore: compatibility.overallScore,
-        status: 'active',
-        startDate: new Date().toISOString(),
-        createdAt: new Date().toISOString()
-      });
+      const compatibility = CompatibilityScorer.calculateSkillCompatibility(
+        mentor.skills,
+        mentee.skills
+      );
 
-      // Send notifications
-      await Promise.all([
-        notificationService.send({
-          userId: mentorId,
-          type: 'mentorship_pair_created',
-          title: 'New Mentorship Match',
-          message: 'You have been matched with a mentee',
-          data: { pairId, menteeId }
-        }),
-        notificationService.send({
-          userId: menteeId,
-          type: 'mentorship_pair_created',
-          title: 'New Mentorship Match',
-          message: 'You have been matched with a mentor',
-          data: { pairId, mentorId }
+      const { data, error } = await this.supabase
+        .from('mentorship_matches')
+        .insert({
+          mentor_id: mentorId,
+          mentee_id: menteeId,
+          compatibility_score: compatibility,
+          status: MatchingStatus.MATCHED,
+          matched_at: new Date().toISOString()
         })
-      ]);
+        .select()
+        .single();
 
-      // Track pair creation
-      await trackingService.track('mentorship_pair_created', {
-        pairId,
-        mentorId,
-        menteeId,
-        compatibilityScore: compatibility.overallScore
-      });
+      if (error) throw error;
 
-      return pairId;
+      const match = this.mapDatabaseMatch(data);
+      this.emit('matchCreated', match);
+
+      return match;
     } catch (error) {
-      console.error('Error creating mentorship pair:', error);
-      throw new Error('Failed to create mentorship pair');
-    }
-  }
-
-  /**
-   * Create a structured learning path
-   */
-  async createLearningPath(pathData: Omit<LearningPath, 'id' | 'createdAt'>): Promise<LearningPath> {
-    try {
-      const path = await supabaseQueries.learningPaths.create({
-        ...pathData,
-        createdAt: new Date().toISOString()
-      });
-
-      // Track learning path creation
-      await trackingService.track('learning_path_created', {
-        pathId: path.id,
-        userId: pathData.userId,
-        milestoneCount: pathData.milestones.length
-      });
-
-      return path;
-    } catch (error) {
-      console.error('Error creating learning path:', error);
-      throw new Error('Failed to create learning path');
-    }
-  }
-
-  /**
-   * Update learning path
-   */
-  async updateLearningPath(id: string, updates: Partial<LearningPath>): Promise<LearningPath> {
-    try {
-      const path = await supabaseQueries.learningPaths.update(id, updates);
-
-      // Track learning path update
-      await trackingService.track('learning_path_updated', {
-        pathId: id,
-        updatedFields: Object.keys(updates)
-      });
-
-      this.invalidateCache(`learning_path_${id}`);
-      return path;
-    } catch (error) {
-      console.error('Error updating learning path:', error);
-      throw new Error('Failed to update learning path');
-    }
-  }
-
-  /**
-   * Get learning path by ID
-   */
-  async getLearningPath(id: string): Promise<LearningPath | null> {
-    const cacheKey = `learning_path_${id}`;
-    
-    if (this.cache.has(cacheKey)) {
-      const cached = this.cache.get(cacheKey);
-      if (Date.now() - cached.timestamp < this.CACHE_TTL) {
-        return cached.data;
-      }
-    }
-
-    try {
-      const path = await supabaseQueries.learningPaths.getById(id);
-      
-      this.cache.set(cacheKey, {
-        data: path,
-        timestamp: Date.now()
-      });
-
-      return path;
-    } catch (error) {
-      console.error('Error fetching learning path:', error);
-      throw new Error('Failed to fetch learning path');
+      throw new Error(`Failed to create match: ${error.message}`);
     }
   }
 
   /**
    * Schedule a mentorship session
    */
-  async scheduleSession(sessionData: Omit<MentorshipSession, 'id' | 'createdAt'>): Promise<MentorshipSession> {
+  async scheduleSession(
+    matchId: string,
+    scheduledAt: Date,
+    duration: number
+  ): Promise<Session> {
     try {
-      // Check availability
-      const isAvailable = await schedulingService.checkAvailability([
-        sessionData.mentorId,
-        sessionData.menteeId
-      ], sessionData.scheduledAt, sessionData.duration);
-
-      if (!isAvailable) {
-        throw new Error('One or more participants are not available at the selected time');
-      }
-
-      const session = await supabaseQueries.mentorshipSessions.create({
-        ...sessionData,
-        createdAt: new Date().toISOString()
-      });
-
-      // Create calendar events
-      await schedulingService.createEvent({
-        title: `Mentorship Session: ${sessionData.topic}`,
-        startTime: sessionData.scheduledAt,
-        duration: sessionData.duration,
-        attendees: [sessionData.mentorId, sessionData.menteeId],
-        description: sessionData.agenda
-      });
-
-      // Send notifications
-      await Promise.all([
-        notificationService.send({
-          userId: sessionData.mentorId,
-          type: 'session_scheduled',
-          title: 'Session Scheduled',
-          message: `Mentorship session scheduled for ${new Date(sessionData.scheduledAt).toLocaleString()}`,
-          data: { sessionId: session.id }
-        }),
-        notificationService.send({
-          userId: sessionData.menteeId,
-          type: 'session_scheduled',
-          title: 'Session Scheduled',
-          message: `Mentorship session scheduled for ${new Date(sessionData.scheduledAt).toLocaleString()}`,
-          data: { sessionId: session.id }
+      const { data, error } = await this.supabase
+        .from('mentorship_sessions')
+        .insert({
+          match_id: matchId,
+          scheduled_at: scheduledAt.toISOString(),
+          duration,
+          status: SessionStatus.SCHEDULED,
+          created_at: new Date().toISOString()
         })
-      ]);
+        .select()
+        .single();
 
-      // Track session scheduling
-      await trackingService.track('mentorship_session_scheduled', {
-        sessionId: session.id,
-        mentorId: sessionData.mentorId,
-        menteeId: sessionData.menteeId,
-        topic: sessionData.topic
-      });
+      if (error) throw error;
+
+      const session = this.mapDatabaseSession(data);
+      this.emit('sessionScheduled', session);
 
       return session;
     } catch (error) {
-      console.error('Error scheduling session:', error);
-      throw new Error('Failed to schedule mentorship session');
+      throw new Error(`Failed to schedule session: ${error.message}`);
     }
   }
 
   /**
-   * Update mentorship session
+   * Update session with feedback
    */
-  async updateSession(id: string, updates: Partial<MentorshipSession>): Promise<MentorshipSession> {
+  async updateSession(
+    sessionId: string,
+    updates: Partial<Session>
+  ): Promise<Session> {
     try {
-      const session = await supabaseQueries.mentorshipSessions.update(id, updates);
+      const { data, error } = await this.supabase
+        .from('mentorship_sessions')
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', sessionId)
+        .select()
+        .single();
 
-      // Track session update
-      await trackingService.track('mentorship_session_updated', {
-        sessionId: id,
-        updatedFields: Object.keys(updates)
-      });
+      if (error) throw error;
+
+      const session = this.mapDatabaseSession(data);
+      this.emit('sessionUpdated', session);
 
       return session;
     } catch (error) {
-      console.error('Error updating session:', error);
-      throw new Error('Failed to update mentorship session');
+      throw new Error(`Failed to update session: ${error.message}`);
     }
   }
 
   /**
-   * Get user's mentorship sessions
+   * Track progress milestone
    */
-  async getUserSessions(userId: string): Promise<MentorshipSession[]> {
+  async createMilestone(milestoneData: Omit<Milestone, 'id'>): Promise<Milestone> {
     try {
-      const sessions = await supabaseQueries.mentorshipSessions.getByUserId(userId);
-      return sessions.sort((a, b) => 
-        new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime()
-      );
+      const { data, error } = await this.supabase
+        .from('mentorship_milestones')
+        .insert({
+          match_id: milestoneData.matchId,
+          goal_id: milestoneData.goalId,
+          title: milestoneData.title,
+          description: milestoneData.description,
+          target_date: milestoneData.targetDate.toISOString(),
+          created_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      const milestone = this.mapDatabaseMilestone(data);
+      this.emit('milestoneCreated', milestone);
+
+      return milestone;
     } catch (error) {
-      console.error('Error fetching user sessions:', error);
-      throw new Error('Failed to fetch mentorship sessions');
+      throw new Error(`Failed to create milestone: ${error.message}`);
     }
   }
 
   /**
-   * Update progress metrics
+   * Complete a milestone
    */
-  async updateProgress(userId: string, metrics: ProgressMetrics): Promise<void> {
+  async completeMilestone(milestoneId: string, feedback?: string): Promise<Milestone> {
     try {
-      await supabaseQueries.progressMetrics.upsert({
-        userId,
-        ...metrics,
-        updatedAt: new Date().toISOString()
-      });
+      const { data, error } = await this.supabase
+        .from('mentorship_milestones')
+        .update({
+          completed_at: new Date().toISOString(),
+          feedback,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', milestoneId)
+        .select()
+        .single();
 
-      // Track progress update
-      await trackingService.track('progress_updated', {
-        userId,
-        skillsProgress: metrics.skillsProgress,
-        goalsCompleted: metrics.goalsCompleted
-      });
+      if (error) throw error;
 
-      this.invalidateCache(`progress_${userId}`);
+      const milestone = this.mapDatabaseMilestone(data);
+      this.emit('milestoneCompleted', milestone);
+
+      return milestone;
     } catch (error) {
-      console.error('Error updating progress:', error);
-      throw new Error('Failed to update progress');
+      throw new Error(`Failed to complete milestone: ${error.message}`);
     }
   }
 
   /**
-   * Get user's progress metrics
+   * Get progress insights for a match
    */
-  async getProgress(userId: string): Promise<ProgressMetrics> {
-    const cacheKey = `progress_${userId}`;
-    
-    if (this.cache.has(cacheKey)) {
-      const cached = this.cache.get(cacheKey);
-      if (Date.now() - cached.timestamp < this.CACHE_TTL) {
-        return cached.data;
-      }
-    }
-
+  async getProgressInsights(matchId: string): Promise<{
+    completionRate: number;
+    averageSessionRating: number;
+    upcomingDeadlines: Goal[];
+    recommendedActions: string[];
+  }> {
     try {
-      const progress = await supabaseQueries.progressMetrics.getByUserId(userId);
-      
-      this.cache.set(cacheKey, {
-        data: progress,
-        timestamp: Date.now()
-      });
-
-      return progress;
-    } catch (error) {
-      console.error('Error fetching progress:', error);
-      throw new Error('Failed to fetch progress metrics');
-    }
-  }
-
-  /**
-   * Track goal progress
-   */
-  async trackGoalProgress(goalId: string, progress: number): Promise<void> {
-    try {
-      await supabaseQueries.goals.updateProgress(goalId, progress);
-
-      // Track goal progress update
-      await trackingService.track('goal_progress_updated', {
-        goalId,
-        progress
-      });
-
-      this.invalidateCache(`goal_${goalId}`);
-    } catch (error) {
-      console.error('Error tracking goal progress:', error);
-      throw new Error('Failed to track goal progress');
-    }
-  }
-
-  /**
-   * Create a new goal
-   */
-  async createGoal(goalData: Omit<Goal, 'id' | 'createdAt'>): Promise<Goal> {
-    try {
-      const goal = await supabaseQueries.goals.create({
-        ...goalData,
-        createdAt: new Date().toISOString()
-      });
-
-      // Track goal creation
-      await trackingService.track('goal_created', {
-        goalId: goal.id,
-        userId: goalData.userId,
-        type: goalData.type
-      });
-
-      return goal;
-    } catch (error) {
-      console.error('Error creating goal:', error);
-      throw new Error('Failed to create goal');
-    }
-  }
-
-  /**
-   * Update goal
-   */
-  async updateGoal(id: string, updates: Partial<Goal>): Promise<Goal> {
-    try {
-      const goal = await supabaseQueries.goals.update(id, updates);
-
-      // Track goal update
-      await trackingService.track('goal_updated', {
-        goalId: id,
-        updatedFields: Object.keys(updates)
-      });
-
-      this.invalidateCache(`goal_${id}`);
-      return goal;
-    } catch (error) {
-      console.error('Error updating goal:', error);
-      throw new Error('Failed to update goal');
-    }
-  }
-
-  /**
-   * Get user's goals
-   */
-  async getUserGoals(userId: string): Promise<Goal[]> {
-    try {
-      return await supabaseQueries.goals.getByUserId(userId);
-    } catch (error) {
-      console.error('Error fetching user goals:', error);
-      throw new Error('Failed to fetch user goals');
-    }
-  }
-
-  /**
-   * Submit feedback for a session
-   */
-  async submitFeedback(feedbackData: Omit<Feedback, 'id' | 'createdAt'>): Promise<Feedback> {
-    try {
-      const feedback = await supabaseQueries.feedback.create({
-        ...feedbackData,
-        createdAt: new Date().toISOString()
-      });
-
-      // Track feedback submission
-      await trackingService.track('feedback_submitted', {
-        feedbackId: feedback.id,
-        sessionId: feedbackData.sessionId,
-        rating: feedbackData.rating
-      });
-
-      return feedback;
-    } catch (error) {
-      console.error('Error submitting feedback:', error);
-      throw new Error('Failed to submit feedback');
-    }
-  }
-
-  /**
-   * Get feedback for a session
-   */
-  async getFeedback(sessionId: string): Promise<Feedback[]> {
-    try {
-      return await supabaseQueries.feedback.getBySessionId(sessionId);
-    } catch (error) {
-      console.error('Error fetching feedback:', error);
-      throw new Error('Failed to fetch feedback');
-    }
-  }
-
-  /**
-   * Get mentorship analytics for user
-   */
-  async getMentorshipAnalytics(userId: string): Promise<any> {
-    try {
-      const [profile, sessions, progress, goals] = await Promise.all([
-        this.getProfile(userId),
-        this.getUserSessions(userId),
-        this.getProgress(userId),
-        this.getUserGoals(userId)
-      ]);
-
-      const completedSessions = sessions.filter(s => s.status === 'completed');
-      const upcomingSessions = sessions.filter(s => s.status === 'scheduled');
-      const completedGoals = goals.filter(g => g.status === 'completed');
-
-      return {
-        profile,
-        sessionStats: {
-          total: sessions.length,
-          completed: completedSessions.length,
-          upcoming: upcomingSessions.length,
-          averageRating: completedSessions.reduce((acc, s) => acc + (s.rating || 0), 0) / completedSessions.length || 0
-        },
-        progress,
-        goalStats: {
-          total: goals.length,
-          completed: completedGoals.length,
-          inProgress: goals.filter(g => g.status === 'in_progress').length,
-          completionRate: (completedGoals.length / goals.length) * 100 || 0
-        }
-      };
-    } catch (error) {
-      console.error('Error fetching mentorship analytics:', error);
-      throw new Error('Failed to fetch mentorship analytics');
-    }
-  }
-
-  /**
-   * Get platform insights and statistics
-   */
-  async getPlatformInsights(): Promise<any> {
-    try {
-      const insights = await supabaseQueries.analytics.getPlatformInsights();
-      return insights;
-    } catch (error) {
-      console.error('Error fetching platform insights:', error);
-      throw new Error('Failed to fetch platform insights');
-    }
-  }
+      const [goalsResult, milestonesResult, sessionsResult] = await Promise.all([
+        this.supabase.from('mentorship_goals').select('*').eq('match_id', matchId),
+        this.supabase.from('mentorship_milestones').select
