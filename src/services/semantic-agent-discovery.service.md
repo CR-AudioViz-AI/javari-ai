@@ -1,81 +1,64 @@
-# Build Semantic Agent Discovery Service
+# Implement Semantic Agent Discovery Service
 
+```markdown
 # Semantic Agent Discovery Service
 
 ## Purpose
-The `SemanticAgentDiscoveryService` provides an advanced semantic search capability for discovering AI agents. It leverages vector embeddings and contextual analysis to intelligently match agents based on user queries, capabilities, tags, and other criteria.
+The Semantic Agent Discovery Service enables intelligent agent discovery by leveraging semantic search capabilities, allowing users to find agents based on their capabilities and context. It utilizes vector embeddings for precision in querying and contextual recommendations based on user preferences and historical data.
 
 ## Usage
-To utilize the `SemanticAgentDiscoveryService` for discovering agents, you must first instantiate the service with the required configurations. The service can then be used to perform searches and retrieve relevant agent data.
+To utilize the Semantic Agent Discovery Service, instantiate the service and call the relevant methods to perform agent searches based on user-defined search contexts.
 
 ### Example
 ```typescript
-import { SemanticAgentDiscoveryService, SemanticSearchConfig } from './services/semantic-agent-discovery.service';
+import { SemanticAgentDiscoveryService } from './services/semantic-agent-discovery.service';
 
-// Configuration for the service
-const config: SemanticSearchConfig = {
-  openaiApiKey: 'YOUR_OPENAI_API_KEY',
-  supabaseUrl: 'YOUR_SUPABASE_URL',
-  supabaseKey: 'YOUR_SUPABASE_KEY',
-  vectorDimensions: 512,
-  similarityThreshold: 0.7,
-  maxResults: 10,
-  cacheTtl: 300,
+const sass = new SemanticAgentDiscoveryService();
+const searchContext = {
+  userId: 'user123',
+  sessionId: 'session456',
+  previousQueries: ['What can you do?', 'Help me with a project.'],
+  currentProject: 'AI Development',
+  userPreferences: { preferenceKey: 'preferenceValue' },
 };
 
-// Instantiate the service
-const agentDiscoveryService = new SemanticAgentDiscoveryService(config);
-
-// Perform a search
-const results = await agentDiscoveryService.search({
-  query: 'natural language processing',
-  userId: 'user123',
-});
+const results = await sass.discoverAgents(searchContext);
 console.log(results);
 ```
 
 ## Parameters/Props
 
-### `SemanticSearchConfig`
-The configuration object required to initialize the service:
-- **openaiApiKey**: string - The API key for OpenAI services.
-- **supabaseUrl**: string - The URL for Supabase service.
-- **supabaseKey**: string - The API key for Supabase service.
-- **vectorDimensions**: number - The dimensions of the vector embeddings used for searches.
-- **similarityThreshold**: number - The minimum similarity score for considered results.
-- **maxResults**: number - The maximum number of results to return.
-- **cacheTtl**: number - Time to live for cached results in seconds.
+### Configuration
+- **SemanticSearchConfig**
+  - `maxResults` (number): Maximum number of results to return (default: 10).
+  - `similarityThreshold` (number): Minimum similarity threshold (0-1) (default: 0.7).
+  - `useUsagePatterns` (boolean): Enable usage pattern weighting (default: true).
+  - `embeddingCacheTtl` (number): Cache TTL for embeddings in seconds (default: 3600).
+  - `enableContextualRecs` (boolean): Enable contextual recommendations (default: true).
 
-### `SearchQueryParams`
-Parameters for the search query:
-- **query**: string - The search query string.
-- **userId**: string (optional) - Identifier for the user making the request.
-- **capabilities**: string[] (optional) - List of specific capabilities to filter agents.
-- **tags**: string[] (optional) - Tags associated with the desired agents.
-- **maxResults**: number (optional) - Overrides the `maxResults` from config for this search.
-- **minSimilarity**: number (optional) - Overrides the `similarityThreshold` from config for this search.
-- **includeInactive**: boolean (optional) - Whether to include inactive agents in the results.
+### Search Context
+- **SearchContext**
+  - `userId` (string, optional): Unique identifier of the user.
+  - `sessionId` (string, optional): Unique identifier for the session.
+  - `previousQueries` (string[]): List of previous queries from the user.
+  - `currentProject` (string, optional): Current project context for the user.
+  - `userPreferences` (object): A map of user-defined preferences for tailored results.
 
 ## Return Values
-The `search` method will return an array of `AgentSearchResult` objects, each containing:
-- **agent**: Agent - The matched agent instance.
-- **similarity**: number - The calculated similarity score.
-- **capabilityMatch**: number - The degree of capability match.
-- **contextualScore**: number - The contextual relevance score.
-- **finalScore**: number - The overall score based on various metrics.
-- **matchedCapabilities**: string[] - List of matched capabilities for the agent.
-- **reasoning**: string - Explanation of why the agent was matched.
+- Returns an array of **AgentSearchResult** objects, each containing:
+  - `agent` (Agent): The agent object found during the search.
+  - `relevanceScore` (number): Overall score indicating the relevance of the agent.
+  - `similarityScore` (number): Measure of semantic similarity to the query.
+  - `usageScore` (number): Score based on historical usage patterns.
+  - `contextScore` (number): Score influenced by the search context.
+  - `matchedCapabilities` (AgentCapability[]): List of capabilities that matched the query.
+  - `reasoning` (string[]): Explanatory notes on how the results were derived.
 
-## Additional Interfaces
-### `AgentSearchResult`
-Describes the structure of search results with scoring details.
-
-### `SearchAnalytics`
-Captures analytics data relevant to the search execution.
-
-### `AgentMetadata`
-Contains metadata related to the agent, including capabilities and descriptions.
-
----
-
-This documentation should provide a comprehensive overview of the `SemanticAgentDiscoveryService`, including its purpose, how to use it, the required parameters, and the expected return values.
+## Example Search Result
+```typescript
+const searchResults: AgentSearchResult[] = await sass.discoverAgents(searchContext);
+searchResults.forEach(result => {
+  console.log(`Found agent: ${result.agent.name} with relevance score: ${result.relevanceScore}`);
+});
+```
+```
