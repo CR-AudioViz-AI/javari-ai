@@ -77,6 +77,8 @@ const ARTIFACT_TYPES = new Set([
   "generate_ui_component",
   "generate_documentation",
   "generate_tests",
+  // Default fallback — ALL tasks produce artifacts in ecosystem mode
+  "ai_task",
   // planner-generated artifact metadata tags
   "build_module_artifact",
   "generate_api_artifact",
@@ -113,8 +115,8 @@ function resolveTaskType(task: { type?: string; title: string; description: stri
   if (/documentation|readme|\.md|wiki/.test(combined))              return "generate_documentation";
   if (/microservice|deploy.service/.test(combined))                 return "deploy_microservice";
   if (/service|worker|daemon/.test(combined))                       return "create_service";
-  if (/build.module|module|feature|implement/.test(combined))       return "build_module";
-  return "ai_task";
+  if (/build|create|develop|design|implement|launch|establish|deploy|add|enable/.test(combined)) return "build_module";
+  return "build_module"; // Default: ALL ecosystem tasks produce a build_module artifact
 }
 
 // ── Routing: task type → model priority ──────────────────────────────────
