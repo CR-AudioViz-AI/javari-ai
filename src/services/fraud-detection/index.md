@@ -1,101 +1,73 @@
-# Deploy Advanced Payment Fraud Detection Service
+# Build ML-Powered Fraud Detection Service
 
-```markdown
-# Advanced Payment Fraud Detection Service
+# ML-Powered Fraud Detection Service
 
 ## Purpose
-The Advanced Payment Fraud Detection Service utilizes machine learning to analyze transaction patterns, device fingerprinting, and behavioral biometrics to detect and prevent fraudulent payments. This service aims to enhance security for online transactions by identifying potential fraud in real-time.
+The ML-Powered Fraud Detection Service provides an advanced solution for identifying and preventing fraudulent activities in real-time. Utilizing machine learning models trained on global transaction patterns, the service yields risk scores and automated blocking capabilities to enhance transaction security.
 
 ## Usage
-This service can be integrated into e-commerce platforms and financial applications where secure payment processing is essential. 
+This TypeScript module interfaces with various technologies, including TensorFlow for machine learning, Supabase for database interactions, Redis for caching, and WebSocket for real-time communications. It processes transaction data to assess risk levels and recommend actions.
 
-## Parameters / Props
+## Parameters/Props
 
 ### Transaction
-The main data structure for a transaction.
+The `Transaction` interface represents the structure of the data required for fraud detection.
 
-- `id` (string): Unique identifier for the transaction.
-- `userId` (string): Unique identifier for the user making the transaction.
-- `amount` (number): The transaction amount.
-- `currency` (string): The currency of the transaction.
-- `merchantId` (string): Unique identifier for the merchant.
-- `merchantCategory` (string): Category of the merchant.
-- `timestamp` (Date): The time the transaction occurred.
-- `paymentMethod` (PaymentMethod): Details about the payment method used.
-- `ipAddress` (string): IP address from which the transaction was made.
-- `userAgent` (string): User agent string from the client's device.
-- `geolocation` (Geolocation, optional): Geolocation data of the transaction.
-- `deviceFingerprint` (DeviceFingerprint, optional): Fingerprint data of the device used.
+| Field                   | Type                       | Description                                           |
+|-------------------------|----------------------------|-------------------------------------------------------|
+| `id`                    | `string`                   | Unique identifier for the transaction.                |
+| `userId`                | `string`                   | ID of the user making the transaction.                |
+| `amount`                | `number`                   | Transaction amount.                                   |
+| `currency`              | `string`                   | Currency of the transaction.                          |
+| `merchantId`            | `string`                   | ID of the merchant involved in the transaction.      |
+| `merchantCategory`      | `string`                   | Category of the merchant.                             |
+| `timestamp`             | `Date`                     | When the transaction occurred.                        |
+| `location`              | `object`                   | Geographic location of the transaction.               |
+| `paymentMethod`         | `'card' | 'bank' | 'digital_wallet' | 'crypto'` | Method of payment used.  |
+| `deviceFingerprint`     | `string`                   | Unique fingerprint for the user's device.            |
+| `ipAddress`             | `string`                   | IP address of the transaction origin.                 |
+| `userAgent`             | `string`                   | User agent string of the browser or app.             |
+| `previousTransactionMinutes` | `number` | Minutes since the user's last transaction.      |
+| `accountAge`            | `number`                   | Age of the user's account in days.                   |
+| `metadata`              | `object`                   | Additional metadata associated with the transaction.  |
 
-### PaymentMethod
-Details of the payment method.
+### FraudDetectionResult
+The `FraudDetectionResult` interface captures the outcome of the fraud detection process.
 
-- `type` (string): Payment method type (e.g., 'credit_card', 'debit_card').
-- `last4Digits` (string, optional): Last 4 digits of the card used.
-- `brand` (string, optional): Brand of the card.
-- `country` (string): Country of the payment method origin.
-- `isNewCard` (boolean): Indicates if the card is newly used.
+| Field                   | Type                       | Description                                           |
+|-------------------------|----------------------------|-------------------------------------------------------|
+| `transactionId`         | `string`                   | ID of the evaluated transaction.                      |
+| `riskScore`             | `number`                   | Risk score on a scale of 0 to 1.                     |
+| `riskLevel`             | `'low' | 'medium' | 'high' | 'critical'` | Assess the risk severity. |
+| `decision`              | `'approve' | 'review' | 'block'` | Recommended course of action.                        |
+| `flags`                 | `FraudFlag[]`             | List of identified fraud indicators.                  |
+| `modelVersion`          | `string`                   | Version of the machine learning model used.          |
+| `processingTime`        | `number`                   | Time taken to process the transaction in ms.         |
+| `confidence`            | `number`                   | Model confidence level in its prediction.            |
+| `recommendedAction`     | `string`                   | Suggested action based on risk assessment.           |
+| `metadata`              | `object`                   | Detailed breakdown of analysis features and outputs.  |
 
-### Geolocation
-Geolocation data structure.
+### FraudFlag
+The `FraudFlag` interface provides insights into specific risk factors detected during analysis.
 
-- `latitude` (number): Latitude of the transaction location.
-- `longitude` (number): Longitude of the transaction location.
-- `country` (string): Country of the transaction.
-- `region` (string): Region of the transaction.
-- `city` (string): City of the transaction.
-- `accuracy` (number): Accuracy of the geolocation data.
-
-### DeviceFingerprint
-Information about the device used for the transaction.
-
-- `visitorId` (string): Unique identifier for the browser session.
-- `browserName` (string): Name of the browser used.
-- `browserVersion` (string): Version of the browser.
-- `os` (string): Operating system of the device.
-- `device` (string): Type of device (e.g., 'desktop', 'mobile').
-- `screenResolution` (string): Screen resolution of the device.
-- `timezone` (string): Timezone of the user.
-- `language` (string): Language preference of the user.
-- `plugins` (string[]): List of browser plugins.
-- `canvas` (string): Canvas fingerprint.
-- `webgl` (string): WebGL fingerprint.
-- `confidence` (number): Confidence level of the fingerprint matching.
-
-### BehavioralBiometrics
-Data related to user behavior during transactions.
-
-- `userId` (string): Unique identifier for the user.
-- `sessionId` (string): Unique identifier for the session.
-- `keystrokeDynamics` (KeystrokeDynamics): Information regarding typing behavior.
-- `mouseDynamics` (MouseDynamics): Information regarding mouse movement.
-- `touchDynamics` (TouchDynamics, optional): Touchscreen behavior data.
-- `navigationPattern` (NavigationPattern): Patterns in user navigation.
-- `sessionDuration` (number): Duration of the session in seconds.
+| Field                   | Type                       | Description                                           |
+|-------------------------|----------------------------|-------------------------------------------------------|
+| `type`                  | `'velocity' | 'location' | 'amount' | 'pattern' | 'device' | 'behavioral'` | Category of risk.  |
+| `severity`              | `'low' | 'medium' | 'high'` | Severity of the identified risk.                     |
+| `description`           | `string`                   | Detailed description of the risk factor.             |
+| `confidence`            | `number`                   | Confidence level for the detected flag.              |
+| `value`                 | `string | number`          | Optional specific value related to the risk flag.    |
 
 ## Return Values
-The service returns a response indicating whether the transaction is likely to be fraudulent based on the analysis of the provided data.
+The service returns an instance of `FraudDetectionResult` containing the risk assessment and recommended action based on the provided transaction details.
 
 ## Examples
 ```typescript
 const transaction: Transaction = {
-  id: "txn_123456",
-  userId: "user_7890",
-  amount: 150.00,
+  id: "txn_1234",
+  userId: "user_5678",
+  amount: 250.00,
   currency: "USD",
   merchantId: "merchant_1",
-  merchantCategory: "ecommerce",
-  timestamp: new Date(),
-  paymentMethod: {
-    type: "credit_card",
-    last4Digits: "1234",
-    brand: "Visa",
-    country: "US",
-    isNewCard: false
-  },
-  ipAddress: "192.168.1.1",
-  userAgent: "Mozilla/5.0",
-};
-```
-This service can be invoked in a workflow that analyzes the provided `transaction` data for fraud detection.
-```
+  merchantCategory: "electronics",
+  timestamp: new
