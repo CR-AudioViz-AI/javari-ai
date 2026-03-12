@@ -1,107 +1,94 @@
-# Build Predictive Auto-Scaling API
+# Implement Predictive Auto-Scaling API
 
+```markdown
 # Predictive Auto-Scaling API Documentation
 
 ## Purpose
-The Predictive Auto-Scaling API provides functionality to analyze performance metrics, scale services based on forecasts, and configure auto-scaling settings. This API enables dynamic resource management in cloud applications, adapting to fluctuating workloads using predictive analytics.
+The Predictive Auto-Scaling API offers automated scaling capabilities based on historical performance metrics. It provides functionality to forecast resource requirements and adjust instances accordingly, ensuring efficient resource utilization while optimizing costs.
 
 ## Usage
-This API can be used to perform three main operations:
-1. **Analyze Metrics and Generate Forecasts**: Send service performance metrics for a specified time range to receive predictive insights.
-2. **Scale Services**: Trigger scaling actions (up or down) based on metrics and forecasts.
-3. **Configure Auto-Scaling Settings**: Set thresholds and parameters for automatic scaling behavior.
+The API allows users to send requests for forecasting, scaling actions, and updating scaling policies. It utilizes validation schemas to ensure the integrity of the data and prevent errors during processing.
 
-## Endpoints
-### 1. Analyze Metrics
-`POST /api/scaling/predictive/analyze`
+### Endpoints
+- **Forecasting**: `/api/scaling/predictive/forecast`
+- **Scaling Action**: `/api/scaling/predictive/scale`
+- **Policy Update**: `/api/scaling/predictive/update`
 
-**Parameters**:
-- `service_id` (string, UUID): Unique identifier for the service.
-- `time_range` (object): Contains:
-  - `start` (string, ISO 8601): Start time of the analysis.
-  - `end` (string, ISO 8601): End time of the analysis.
-- `metrics` (array of strings): List of performance metrics to analyze. Accepted values include:
-  - `cpu`
-  - `memory`
-  - `requests`
-  - `response_time`
-- `forecast_horizon` (number): Time frame for forecasting in hours (1 to 168).
+## Parameters/Props
 
-**Return Values**:
-- Forecasted performance values based on the provided metrics and time range.
+### Forecast Request
+- `metrics` (array of objects): Historical performance metrics, including:
+  - `timestamp` (string): Date and time of the metric.
+  - `cpu_usage` (number): CPU usage percentage.
+  - `memory_usage` (number): Memory usage percentage.
+  - `request_count` (number): Number of requests served.
+  - `response_time` (number): Average response time.
+  - `error_rate` (number): Error percentage.
+- `forecast_horizon` (number): Duration to forecast, in hours (1-168).
+- `service_id` (string): Unique identifier for the service (UUID format).
+- `environment` (string): Deployment environment (values: `production`, `staging`, `development`).
 
-### 2. Scale Services
-`POST /api/scaling/predictive/scale`
+### Scale Request
+- `service_id` (string): Unique identifier for the service (UUID format).
+- `scaling_action` (string): Action type (`scale_up`, `scale_down`, `auto`).
+- `target_instances` (number, optional): Desired number of instances (1-100).
+- `resource_limits` (object, optional): Limits on resources:
+  - `cpu_cores` (number, optional): Number of CPU cores (1-64).
+  - `memory_gb` (number, optional): Amount of memory in GB (1-512).
+  - `max_cost_per_hour` (number, optional): Max spending limit per hour.
+- `force` (boolean, default: `false`): Force scaling action regardless of current state.
 
-**Parameters**:
-- `service_id` (string, UUID): Unique identifier for the service.
-- `action` (string): Scaling action to perform. Accepted values:
-  - `scale_up`
-  - `scale_down`
-  - `auto`
-- `target_instances` (number, optional): Specific number of instances to scale to (1 to 100).
-- `trigger_reason` (string, optional): Explanation for the scaling action.
+### Policy Update Request
+- `service_id` (string): Unique identifier for the service (UUID format).
+- `policies` (object):
+  - `min_instances` (number): Minimum number of instances (1-10).
+  - `max_instances` (number): Maximum number of instances (1-100).
+  - `target_cpu` (number): Target CPU usage percentage (10-90).
+  - `target_memory` (number): Target memory usage percentage (10-90).
+  - `scale_up_threshold` (number): CPU threshold for scaling up (60-95).
+  - `scale_down_threshold` (number): CPU threshold for scaling down (10-50).
+  - `cooldown_minutes` (number): Cooldown period in minutes (1-60).
+  - `cost_optimization` (boolean): Enable cost optimization.
+  - `prediction_weight` (number): Weight for the prediction model (0-1).
 
-**Return Values**:
-- Confirmation of the scaling action taken, along with the new instance count.
-
-### 3. Configure Auto-Scaling
-`POST /api/scaling/predictive/configure`
-
-**Parameters**:
-- `service_id` (string, UUID): Unique identifier for the service.
-- `config` (object): Configuration settings for auto-scaling containing:
-  - `cpu_threshold_up` (number): Percent threshold to scale up.
-  - `cpu_threshold_down` (number): Percent threshold to scale down.
-  - `memory_threshold_up` (number): Memory usage threshold to scale up.
-  - `memory_threshold_down` (number): Memory usage threshold to scale down.
-  - `min_instances` (number): Minimum number of instances (1 to 10).
-  - `max_instances` (number): Maximum number of instances (1 to 100).
-  - `cooldown_period` (number): Time in seconds to wait before another scaling action (60 to 3600).
-  - `prediction_confidence` (number): Confidence level for predictions (0.5 to 1.0).
-  - `enable_predictive` (boolean): Flag to enable or disable predictive scaling.
-
-**Return Values**:
-- Confirmation of the configuration changes applied.
+## Return Values
+The API responds with the following:
+- **Forecasting**: Object containing forecasted metrics for the specified horizon.
+- **Scaling Action**: Confirmation of the scaling action, including current and updated instance counts.
+- **Policy Update**: Confirmation of policy updates, along with current configurations.
 
 ## Examples
-### Analyze Metrics Example
+
+### Forecasting Example
 ```json
+POST /api/scaling/predictive/forecast
 {
-  "service_id": "550e8400-e29b-41d4-a716-446655440000",
-  "time_range": {
-    "start": "2023-10-01T00:00:00Z",
-    "end": "2023-10-02T00:00:00Z"
-  },
-  "metrics": ["cpu", "memory"],
-  "forecast_horizon": 24
+  "metrics": [
+    {"timestamp": "2023-10-01T00:00:00Z", "cpu_usage": 55, "memory_usage": 70, "request_count": 2000, "response_time": 120, "error_rate": 2}
+  ],
+  "forecast_horizon": 24,
+  "service_id": "123e4567-e89b-12d3-a456-426614174000",
+  "environment": "production"
 }
 ```
 
-### Scale Services Example
+### Scaling Action Example
 ```json
+POST /api/scaling/predictive/scale
 {
-  "service_id": "550e8400-e29b-41d4-a716-446655440000",
-  "action": "scale_up",
-  "target_instances": 5,
-  "trigger_reason": "High CPU usage"
+  "service_id": "123e4567-e89b-12d3-a456-426614174000",
+  "scaling_action": "scale_up",
+  "target_instances": 5
 }
 ```
 
-### Configure Auto-Scaling Example
+### Policy Update Example
 ```json
+POST /api/scaling/predictive/update
 {
-  "service_id": "550e8400-e29b-41d4-a716-446655440000",
-  "config": {
-    "cpu_threshold_up": 75,
-    "cpu_threshold_down": 25,
-    "memory_threshold_up": 80,
-    "memory_threshold_down": 30,
-    "min_instances": 1,
+  "service_id": "123e4567-e89b-12d3-a456-426614174000",
+  "policies": {
+    "min_instances": 2,
     "max_instances": 10,
-    "cooldown_period": 300,
-    "prediction_confidence": 0.9,
-    "enable_predictive": true
-  }
-}
-```
+    "target_cpu": 75,
+    "target_memory": 80,
