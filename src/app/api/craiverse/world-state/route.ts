@@ -1,674 +1,524 @@
+```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { Redis } from '@upstash/redis';
-import { Ratelimit } from '@upstash/ratelimit';
-import { headers } from 'next/headers';
 import { z } from 'zod';
-import * as Sentry from '@sentry/nextjs';
+import { Redis } from 'ioredis';
+import { rateLimit } from '@/lib/rate-limit';
+import { validateAuth } from '@/lib/auth';
 
-// Environment validation
+// Types and schemas
+const WorldEntitySchema = z.object({
+  id: z.string().uuid(),
+  type: z.enum(['object', 'terrain', 'structure', 'audio', 'visual']),
+  position: z.object({
+    x: z.number(),
+    y: z.number(),
+    z: z.number()
+  }),
+  rotation: z.object({
+    x: z.number(),
+    y: z.number(), 
+    z: z.number()
+  }),
+  scale: z.object({
+    x: z.number(),
+    y: z.number(),
+    z: z.number()
+  }),
+  properties: z.record(z.any()),
+  metadata: z.object({
+    created_by: z.string().uuid(),
+    created_at: z.string(),
+    modified_by: z.string().uuid(),
+    modified_at: z.string(),
+    version: z.number(),
+    locked_by: z.string().uuid().optional(),
+    locked_until: z.string().optional()
+  })
+});
+
+const WorldStateRequestSchema = z.object({
+  space_id: z.string().uuid(),
+  chunk_coords: z.array(z.object({
+    x: z.number(),
+    y: z.number()
+  })).optional(),
+  include_locked: z.boolean().default(false)
+});
+
+const StateModificationSchema = z.object({
+  space_id: z.string().uuid(),
+  operation: z.enum(['create', 'update', 'delete', 'move']),
+  entities: z.array(WorldEntitySchema.partial()),
+  version_base: z.number(),
+  conflict_resolution: z.enum(['merge', 'overwrite', 'branch']).default('merge')
+});
+
+interface WorldEntity {
+  id: string;
+  type: 'object' | 'terrain' | 'structure' | 'audio' | 'visual';
+  position: { x: number; y: number; z: number };
+  rotation: { x: number; y: number; z: number };
+  scale: { x: number; y: number; z: number };
+  properties: Record<string, any>;
+  metadata: {
+    created_by: string;
+    created_at: string;
+    modified_by: string;
+    modified_at: string;
+    version: number;
+    locked_by?: string;
+    locked_until?: string;
+  };
+}
+
+interface SharedSpace {
+  id: string;
+  name: string;
+  owner_id: string;
+  collaborators: string[];
+  permissions: Record<string, string[]>;
+  world_version: number;
+  last_modified: string;
+  settings: {
+    max_entities: number;
+    allow_public_view: boolean;
+    collaboration_mode: 'open' | 'restricted' | 'private';
+  };
+}
+
+// Initialize clients
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const redis = Redis.fromEnv();
-const ratelimit = new Ratelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(100, '1 m'),
-});
-
-// Validation schemas
-const Vector3Schema = z.object({
-  x: z.number().min(-10000).max(10000),
-  y: z.number().min(-10000).max(10000),
-  z: z.number().min(-10000).max(10000)
-});
-
-const QuaternionSchema = z.object({
-  x: z.number().min(-1).max(1),
-  y: z.number().min(-1).max(1),
-  z: z.number().min(-1).max(1),
-  w: z.number().min(-1).max(1)
-});
-
-const WorldObjectSchema = z.object({
-  id: z.string().uuid(),
-  type: z.enum(['mesh', 'light', 'camera', 'audio_source', 'trigger_zone']),
-  position: Vector3Schema,
-  rotation: QuaternionSchema,
-  scale: Vector3Schema.optional(),
-  properties: z.record(z.unknown()).optional(),
-  metadata: z.object({
-    created_by: z.string().uuid(),
-    created_at: z.string().datetime(),
-    modified_by: z.string().uuid().optional(),
-    modified_at: z.string().datetime().optional(),
-    version: z.number().int().min(0)
-  })
-});
-
-const EnvironmentStateSchema = z.object({
-  lighting: z.object({
-    ambient_intensity: z.number().min(0).max(2),
-    sun_position: Vector3Schema,
-    sun_intensity: z.number().min(0).max(5),
-    fog_density: z.number().min(0).max(1)
-  }),
-  weather: z.object({
-    type: z.enum(['clear', 'cloudy', 'rain', 'snow', 'storm']),
-    intensity: z.number().min(0).max(1),
-    wind_direction: Vector3Schema,
-    wind_strength: z.number().min(0).max(10)
-  }),
-  physics: z.object({
-    gravity: Vector3Schema,
-    air_resistance: z.number().min(0).max(1),
-    collision_enabled: z.boolean()
-  })
-});
-
-const WorldStateSchema = z.object({
-  world_id: z.string().uuid(),
-  region_id: z.string().uuid(),
-  objects: z.array(WorldObjectSchema),
-  environment: EnvironmentStateSchema,
-  version: z.number().int().min(0),
-  last_modified: z.string().datetime()
-});
-
-const StateModificationSchema = z.object({
-  action: z.enum(['create', 'update', 'delete', 'move', 'transform']),
-  target_id: z.string().uuid().optional(),
-  data: z.record(z.unknown()),
-  user_id: z.string().uuid(),
-  session_id: z.string().uuid(),
-  timestamp: z.string().datetime()
-});
-
-interface WorldState {
-  world_id: string;
-  region_id: string;
-  objects: any[];
-  environment: any;
-  version: number;
-  last_modified: string;
-  created_by: string;
-}
-
-interface StateModification {
-  action: string;
-  target_id?: string;
-  data: Record<string, unknown>;
-  user_id: string;
-  session_id: string;
-  timestamp: string;
-}
+const redis = new Redis(process.env.REDIS_URL!);
 
 class WorldStateManager {
-  private async getWorldState(worldId: string, regionId: string): Promise<WorldState | null> {
-    try {
-      // Try cache first
-      const cacheKey = `world_state:${worldId}:${regionId}`;
-      const cached = await redis.get(cacheKey);
-      if (cached) {
-        return cached as WorldState;
-      }
+  async getWorldState(spaceId: string, userId: string, chunkCoords?: Array<{x: number, y: number}>) {
+    // Check permissions
+    const { data: space, error } = await supabase
+      .from('shared_spaces')
+      .select('*')
+      .eq('id', spaceId)
+      .single();
 
-      // Fetch from database
-      const { data, error } = await supabase
-        .from('world_states')
-        .select('*')
-        .eq('world_id', worldId)
-        .eq('region_id', regionId)
-        .single();
-
-      if (error && error.code !== 'PGRST116') {
-        throw error;
-      }
-
-      if (data) {
-        // Cache for 5 minutes
-        await redis.setex(cacheKey, 300, data);
-        return data;
-      }
-
-      return null;
-    } catch (error) {
-      Sentry.captureException(error);
-      throw new Error('Failed to retrieve world state');
+    if (error || !space) {
+      throw new Error('Space not found or access denied');
     }
+
+    if (!this.hasReadAccess(space, userId)) {
+      throw new Error('Insufficient permissions');
+    }
+
+    // Try cache first
+    const cacheKey = `world_state:${spaceId}:${chunkCoords?.map(c => `${c.x}_${c.y}`).join(',') || 'full'}`;
+    const cached = await redis.get(cacheKey);
+    
+    if (cached) {
+      return JSON.parse(cached);
+    }
+
+    // Build spatial query
+    let query = supabase
+      .from('world_entities')
+      .select('*')
+      .eq('space_id', spaceId);
+
+    if (chunkCoords) {
+      const chunkFilters = chunkCoords.map(coord => 
+        `position->>'x' >= ${coord.x * 100} AND position->>'x' < ${(coord.x + 1) * 100} AND position->>'y' >= ${coord.y * 100} AND position->>'y' < ${(coord.y + 1) * 100}`
+      );
+      query = query.or(chunkFilters.join(','));
+    }
+
+    const { data: entities, error: entitiesError } = await query;
+
+    if (entitiesError) {
+      throw new Error('Failed to fetch world entities');
+    }
+
+    const worldState = {
+      space_id: spaceId,
+      version: space.world_version,
+      entities: entities || [],
+      timestamp: new Date().toISOString(),
+      chunks: chunkCoords || []
+    };
+
+    // Cache for 5 minutes
+    await redis.setex(cacheKey, 300, JSON.stringify(worldState));
+
+    return worldState;
   }
 
-  private async saveWorldState(state: WorldState): Promise<void> {
-    try {
-      const { error } = await supabase
-        .from('world_states')
-        .upsert(state, { onConflict: 'world_id,region_id' });
+  async modifyWorldState(
+    spaceId: string, 
+    userId: string, 
+    modifications: StateModificationSchema['_type']
+  ) {
+    // Validate permissions
+    const { data: space } = await supabase
+      .from('shared_spaces')
+      .select('*')
+      .eq('id', spaceId)
+      .single();
 
-      if (error) throw error;
-
-      // Update cache
-      const cacheKey = `world_state:${state.world_id}:${state.region_id}`;
-      await redis.setex(cacheKey, 300, state);
-
-      // Broadcast change
-      await this.broadcastStateChange(state);
-    } catch (error) {
-      Sentry.captureException(error);
-      throw new Error('Failed to save world state');
+    if (!space || !this.hasWriteAccess(space, userId)) {
+      throw new Error('Insufficient permissions');
     }
+
+    // Check for conflicts
+    if (modifications.version_base !== space.world_version) {
+      return await this.resolveConflicts(spaceId, userId, modifications);
+    }
+
+    // Process modifications atomically
+    const { data: result, error } = await supabase.rpc('modify_world_state', {
+      p_space_id: spaceId,
+      p_user_id: userId,
+      p_operations: modifications.entities,
+      p_operation_type: modifications.operation
+    });
+
+    if (error) {
+      throw new Error('Failed to apply modifications');
+    }
+
+    // Invalidate cache
+    await this.invalidateWorldCache(spaceId);
+
+    // Broadcast changes via WebSocket
+    await this.broadcastChanges(spaceId, {
+      type: 'world_state_change',
+      operation: modifications.operation,
+      entities: result.modified_entities,
+      user_id: userId,
+      version: result.new_version
+    });
+
+    return {
+      success: true,
+      version: result.new_version,
+      modified_entities: result.modified_entities,
+      conflicts: []
+    };
   }
 
-  private async broadcastStateChange(state: WorldState): Promise<void> {
-    try {
-      // Send to Supabase realtime
-      await supabase
-        .channel(`world_state_${state.world_id}_${state.region_id}`)
-        .send({
-          type: 'broadcast',
-          event: 'state_updated',
-          payload: {
-            world_id: state.world_id,
-            region_id: state.region_id,
-            version: state.version,
-            timestamp: state.last_modified
-          }
+  private async resolveConflicts(
+    spaceId: string,
+    userId: string,
+    modifications: StateModificationSchema['_type']
+  ) {
+    // Get current state
+    const currentState = await this.getWorldState(spaceId, userId);
+    const conflicts = [];
+
+    // Operational Transform for conflict resolution
+    for (const entity of modifications.entities) {
+      const currentEntity = currentState.entities.find((e: WorldEntity) => e.id === entity.id);
+      
+      if (currentEntity && entity.metadata?.version !== currentEntity.metadata.version) {
+        const resolved = await this.transformOperation(entity, currentEntity, modifications.conflict_resolution);
+        conflicts.push({
+          entity_id: entity.id,
+          resolution: modifications.conflict_resolution,
+          resolved_entity: resolved
         });
-    } catch (error) {
-      Sentry.captureException(error);
-      // Don't throw - broadcast failure shouldn't fail the operation
+      }
     }
-  }
-}
 
-class ConflictResolver {
-  async resolveConflict(
-    currentState: WorldState,
-    incomingModification: StateModification
-  ): Promise<{ resolved: boolean; state?: WorldState; error?: string }> {
-    try {
-      // Check if modification is based on current version
-      const expectedVersion = parseInt(incomingModification.data.expected_version as string) || 0;
+    // Apply resolved modifications
+    const resolvedModifications = {
+      ...modifications,
+      entities: modifications.entities.map(entity => {
+        const conflict = conflicts.find(c => c.entity_id === entity.id);
+        return conflict ? conflict.resolved_entity : entity;
+      })
+    };
+
+    return await this.modifyWorldState(spaceId, userId, resolvedModifications);
+  }
+
+  private async transformOperation(
+    localEntity: Partial<WorldEntity>,
+    remoteEntity: WorldEntity,
+    strategy: 'merge' | 'overwrite' | 'branch'
+  ): Promise<Partial<WorldEntity>> {
+    switch (strategy) {
+      case 'overwrite':
+        return localEntity;
       
-      if (expectedVersion < currentState.version) {
+      case 'branch':
+        // Create new entity with modified ID
         return {
-          resolved: false,
-          error: 'Modification based on outdated state version'
+          ...localEntity,
+          id: `${localEntity.id}_branch_${Date.now()}`
         };
-      }
-
-      // Apply conflict resolution strategy based on action type
-      switch (incomingModification.action) {
-        case 'create':
-          return this.resolveCreateConflict(currentState, incomingModification);
-        case 'update':
-          return this.resolveUpdateConflict(currentState, incomingModification);
-        case 'delete':
-          return this.resolveDeleteConflict(currentState, incomingModification);
-        case 'move':
-        case 'transform':
-          return this.resolveTransformConflict(currentState, incomingModification);
-        default:
-          return { resolved: false, error: 'Unknown modification action' };
-      }
-    } catch (error) {
-      Sentry.captureException(error);
-      return { resolved: false, error: 'Conflict resolution failed' };
-    }
-  }
-
-  private async resolveCreateConflict(
-    state: WorldState,
-    modification: StateModification
-  ): Promise<{ resolved: boolean; state?: WorldState; error?: string }> {
-    const objectId = modification.data.id as string;
-    const existingObject = state.objects.find(obj => obj.id === objectId);
-    
-    if (existingObject) {
-      // Object already exists, generate new ID
-      const newId = crypto.randomUUID();
-      const newObject = { ...modification.data, id: newId };
       
-      return {
-        resolved: true,
-        state: {
-          ...state,
-          objects: [...state.objects, newObject],
-          version: state.version + 1,
-          last_modified: new Date().toISOString()
-        }
-      };
+      case 'merge':
+      default:
+        // Merge properties intelligently
+        return {
+          ...remoteEntity,
+          ...localEntity,
+          properties: {
+            ...remoteEntity.properties,
+            ...localEntity.properties
+          },
+          metadata: {
+            ...remoteEntity.metadata,
+            modified_by: localEntity.metadata?.modified_by || remoteEntity.metadata.modified_by,
+            modified_at: new Date().toISOString(),
+            version: remoteEntity.metadata.version + 1
+          }
+        };
     }
-
-    return {
-      resolved: true,
-      state: {
-        ...state,
-        objects: [...state.objects, modification.data],
-        version: state.version + 1,
-        last_modified: new Date().toISOString()
-      }
-    };
   }
 
-  private async resolveUpdateConflict(
-    state: WorldState,
-    modification: StateModification
-  ): Promise<{ resolved: boolean; state?: WorldState; error?: string }> {
-    const targetId = modification.target_id;
-    const objectIndex = state.objects.findIndex(obj => obj.id === targetId);
-    
-    if (objectIndex === -1) {
-      return { resolved: false, error: 'Target object not found' };
-    }
-
-    const updatedObjects = [...state.objects];
-    updatedObjects[objectIndex] = {
-      ...updatedObjects[objectIndex],
-      ...modification.data,
-      metadata: {
-        ...updatedObjects[objectIndex].metadata,
-        modified_by: modification.user_id,
-        modified_at: modification.timestamp,
-        version: updatedObjects[objectIndex].metadata.version + 1
-      }
-    };
-
-    return {
-      resolved: true,
-      state: {
-        ...state,
-        objects: updatedObjects,
-        version: state.version + 1,
-        last_modified: new Date().toISOString()
-      }
-    };
+  private hasReadAccess(space: SharedSpace, userId: string): boolean {
+    return space.owner_id === userId || 
+           space.collaborators.includes(userId) ||
+           space.settings.allow_public_view;
   }
 
-  private async resolveDeleteConflict(
-    state: WorldState,
-    modification: StateModification
-  ): Promise<{ resolved: boolean; state?: WorldState; error?: string }> {
-    const targetId = modification.target_id;
-    const filteredObjects = state.objects.filter(obj => obj.id !== targetId);
-    
-    return {
-      resolved: true,
-      state: {
-        ...state,
-        objects: filteredObjects,
-        version: state.version + 1,
-        last_modified: new Date().toISOString()
-      }
-    };
+  private hasWriteAccess(space: SharedSpace, userId: string): boolean {
+    return space.owner_id === userId || 
+           (space.collaborators.includes(userId) && 
+            space.settings.collaboration_mode !== 'private');
   }
 
-  private async resolveTransformConflict(
-    state: WorldState,
-    modification: StateModification
-  ): Promise<{ resolved: boolean; state?: WorldState; error?: string }> {
-    const targetId = modification.target_id;
-    const objectIndex = state.objects.findIndex(obj => obj.id === targetId);
-    
-    if (objectIndex === -1) {
-      return { resolved: false, error: 'Target object not found' };
+  private async invalidateWorldCache(spaceId: string) {
+    const keys = await redis.keys(`world_state:${spaceId}:*`);
+    if (keys.length > 0) {
+      await redis.del(...keys);
     }
+  }
 
-    const updatedObjects = [...state.objects];
-    const currentObject = updatedObjects[objectIndex];
-    
-    // Apply transform data
-    if (modification.data.position) {
-      currentObject.position = modification.data.position;
-    }
-    if (modification.data.rotation) {
-      currentObject.rotation = modification.data.rotation;
-    }
-    if (modification.data.scale) {
-      currentObject.scale = modification.data.scale;
-    }
-
-    currentObject.metadata.modified_by = modification.user_id;
-    currentObject.metadata.modified_at = modification.timestamp;
-    currentObject.metadata.version++;
-
-    return {
-      resolved: true,
-      state: {
-        ...state,
-        objects: updatedObjects,
-        version: state.version + 1,
-        last_modified: new Date().toISOString()
-      }
-    };
+  private async broadcastChanges(spaceId: string, change: any) {
+    // Publish to Redis for WebSocket distribution
+    await redis.publish(`world_changes:${spaceId}`, JSON.stringify(change));
   }
 }
 
-class StateValidator {
-  validateModification(modification: StateModification): { valid: boolean; errors: string[] } {
-    const errors: string[] = [];
+const worldStateManager = new WorldStateManager();
 
-    try {
-      StateModificationSchema.parse(modification);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        errors.push(...error.errors.map(e => `${e.path.join('.')}: ${e.message}`));
-      } else {
-        errors.push('Invalid modification format');
-      }
-    }
-
-    return { valid: errors.length === 0, errors };
-  }
-
-  validateWorldState(state: WorldState): { valid: boolean; errors: string[] } {
-    const errors: string[] = [];
-
-    try {
-      WorldStateSchema.parse(state);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        errors.push(...error.errors.map(e => `${e.path.join('.')}: ${e.message}`));
-      } else {
-        errors.push('Invalid world state format');
-      }
-    }
-
-    return { valid: errors.length === 0, errors };
-  }
-}
-
-// GET: Retrieve world state
+// GET - Retrieve world state
 export async function GET(request: NextRequest) {
   try {
-    const headersList = headers();
-    const ip = headersList.get('x-forwarded-for') || 'unknown';
-    const { success } = await ratelimit.limit(ip);
-
-    if (!success) {
+    // Rate limiting
+    const rateLimitResult = await rateLimit(request, { limit: 100, window: 60000 });
+    if (!rateLimitResult.success) {
       return NextResponse.json(
         { error: 'Rate limit exceeded' },
         { status: 429 }
+      );
+    }
+
+    // Validate authentication
+    const authResult = await validateAuth(request);
+    if (!authResult.success) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
       );
     }
 
     const { searchParams } = new URL(request.url);
-    const worldId = searchParams.get('world_id');
-    const regionId = searchParams.get('region_id');
+    const requestData = {
+      space_id: searchParams.get('space_id'),
+      chunk_coords: searchParams.get('chunks') ? 
+        JSON.parse(searchParams.get('chunks')!) : undefined,
+      include_locked: searchParams.get('include_locked') === 'true'
+    };
 
-    if (!worldId || !regionId) {
-      return NextResponse.json(
-        { error: 'world_id and region_id are required' },
-        { status: 400 }
-      );
-    }
-
-    const worldStateManager = new WorldStateManager();
-    const state = await worldStateManager['getWorldState'](worldId, regionId);
-
-    if (!state) {
-      // Create default state
-      const defaultState: WorldState = {
-        world_id: worldId,
-        region_id: regionId,
-        objects: [],
-        environment: {
-          lighting: {
-            ambient_intensity: 0.3,
-            sun_position: { x: 0, y: 1000, z: 0 },
-            sun_intensity: 1.0,
-            fog_density: 0.0
-          },
-          weather: {
-            type: 'clear',
-            intensity: 0.0,
-            wind_direction: { x: 1, y: 0, z: 0 },
-            wind_strength: 0.0
-          },
-          physics: {
-            gravity: { x: 0, y: -9.81, z: 0 },
-            air_resistance: 0.01,
-            collision_enabled: true
-          }
-        },
-        version: 0,
-        last_modified: new Date().toISOString(),
-        created_by: 'system'
-      };
-
-      await worldStateManager['saveWorldState'](defaultState);
-      return NextResponse.json(defaultState);
-    }
-
-    return NextResponse.json(state);
-  } catch (error) {
-    Sentry.captureException(error);
-    return NextResponse.json(
-      { error: 'Failed to retrieve world state' },
-      { status: 500 }
+    const validatedData = WorldStateRequestSchema.parse(requestData);
+    
+    const worldState = await worldStateManager.getWorldState(
+      validatedData.space_id,
+      authResult.user.id,
+      validatedData.chunk_coords
     );
-  }
-}
-
-// POST: Apply state modifications
-export async function POST(request: NextRequest) {
-  try {
-    const headersList = headers();
-    const ip = headersList.get('x-forwarded-for') || 'unknown';
-    const { success } = await ratelimit.limit(ip);
-
-    if (!success) {
-      return NextResponse.json(
-        { error: 'Rate limit exceeded' },
-        { status: 429 }
-      );
-    }
-
-    const body = await request.json();
-    const { world_id, region_id, modification } = body;
-
-    if (!world_id || !region_id || !modification) {
-      return NextResponse.json(
-        { error: 'world_id, region_id, and modification are required' },
-        { status: 400 }
-      );
-    }
-
-    // Validate modification
-    const validator = new StateValidator();
-    const validation = validator.validateModification(modification);
-    if (!validation.valid) {
-      return NextResponse.json(
-        { error: 'Invalid modification', details: validation.errors },
-        { status: 400 }
-      );
-    }
-
-    // Get current state
-    const worldStateManager = new WorldStateManager();
-    const currentState = await worldStateManager['getWorldState'](world_id, region_id);
-
-    if (!currentState) {
-      return NextResponse.json(
-        { error: 'World state not found' },
-        { status: 404 }
-      );
-    }
-
-    // Resolve conflicts
-    const conflictResolver = new ConflictResolver();
-    const resolution = await conflictResolver.resolveConflict(currentState, modification);
-
-    if (!resolution.resolved || !resolution.state) {
-      return NextResponse.json(
-        { error: 'Conflict resolution failed', details: resolution.error },
-        { status: 409 }
-      );
-    }
-
-    // Validate final state
-    const stateValidation = validator.validateWorldState(resolution.state);
-    if (!stateValidation.valid) {
-      return NextResponse.json(
-        { error: 'Resulting state is invalid', details: stateValidation.errors },
-        { status: 400 }
-      );
-    }
-
-    // Save state
-    await worldStateManager['saveWorldState'](resolution.state);
-
-    // Log modification
-    await supabase
-      .from('world_state_modifications')
-      .insert({
-        world_id,
-        region_id,
-        modification: modification,
-        applied_at: new Date().toISOString(),
-        resulting_version: resolution.state.version
-      });
 
     return NextResponse.json({
       success: true,
-      state: resolution.state,
-      version: resolution.state.version
+      data: worldState
     });
+
   } catch (error) {
-    Sentry.captureException(error);
+    console.error('World state GET error:', error);
+    
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: 'Invalid request parameters', details: error.errors },
+        { status: 400 }
+      );
+    }
+
     return NextResponse.json(
-      { error: 'Failed to apply modification' },
-      { status: 500 }
+      { error: error instanceof Error ? error.message : 'Internal server error' },
+      { status: error instanceof Error && error.message.includes('permissions') ? 403 : 500 }
     );
   }
 }
 
-// PUT: Full state replacement (admin only)
-export async function PUT(request: NextRequest) {
+// POST - Create new entities or spaces
+export async function POST(request: NextRequest) {
   try {
-    const headersList = headers();
-    const ip = headersList.get('x-forwarded-for') || 'unknown';
-    const { success } = await ratelimit.limit(ip);
-
-    if (!success) {
+    const rateLimitResult = await rateLimit(request, { limit: 50, window: 60000 });
+    if (!rateLimitResult.success) {
       return NextResponse.json(
         { error: 'Rate limit exceeded' },
         { status: 429 }
+      );
+    }
+
+    const authResult = await validateAuth(request);
+    if (!authResult.success) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
       );
     }
 
     const body = await request.json();
-    const { state, user_id } = body;
-
-    if (!state || !user_id) {
-      return NextResponse.json(
-        { error: 'state and user_id are required' },
-        { status: 400 }
-      );
-    }
-
-    // Verify user has admin permissions
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('role')
-      .eq('user_id', user_id)
-      .single();
-
-    if (!profile || profile.role !== 'admin') {
-      return NextResponse.json(
-        { error: 'Insufficient permissions' },
-        { status: 403 }
-      );
-    }
-
-    // Validate state
-    const validator = new StateValidator();
-    const validation = validator.validateWorldState(state);
-    if (!validation.valid) {
-      return NextResponse.json(
-        { error: 'Invalid world state', details: validation.errors },
-        { status: 400 }
-      );
-    }
-
-    // Save state
-    const worldStateManager = new WorldStateManager();
-    await worldStateManager['saveWorldState']({
-      ...state,
-      version: (state.version || 0) + 1,
-      last_modified: new Date().toISOString()
+    const validatedData = StateModificationSchema.parse({
+      ...body,
+      operation: 'create'
     });
 
-    return NextResponse.json({ success: true });
+    const result = await worldStateManager.modifyWorldState(
+      validatedData.space_id,
+      authResult.user.id,
+      validatedData
+    );
+
+    return NextResponse.json({
+      success: true,
+      data: result
+    }, { status: 201 });
+
   } catch (error) {
-    Sentry.captureException(error);
+    console.error('World state POST error:', error);
+    
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: 'Invalid request data', details: error.errors },
+        { status: 400 }
+      );
+    }
+
     return NextResponse.json(
-      { error: 'Failed to replace world state' },
-      { status: 500 }
+      { error: error instanceof Error ? error.message : 'Internal server error' },
+      { status: error instanceof Error && error.message.includes('permissions') ? 403 : 500 }
     );
   }
 }
 
-// DELETE: Reset world state
-export async function DELETE(request: NextRequest) {
+// PUT - Update existing entities
+export async function PUT(request: NextRequest) {
   try {
-    const headersList = headers();
-    const ip = headersList.get('x-forwarded-for') || 'unknown';
-    const { success } = await ratelimit.limit(ip);
-
-    if (!success) {
+    const rateLimitResult = await rateLimit(request, { limit: 100, window: 60000 });
+    if (!rateLimitResult.success) {
       return NextResponse.json(
         { error: 'Rate limit exceeded' },
         { status: 429 }
       );
     }
 
-    const { searchParams } = new URL(request.url);
-    const worldId = searchParams.get('world_id');
-    const regionId = searchParams.get('region_id');
-    const userId = searchParams.get('user_id');
-
-    if (!worldId || !regionId || !userId) {
+    const authResult = await validateAuth(request);
+    if (!authResult.success) {
       return NextResponse.json(
-        { error: 'world_id, region_id, and user_id are required' },
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
+
+    const body = await request.json();
+    const validatedData = StateModificationSchema.parse({
+      ...body,
+      operation: body.operation || 'update'
+    });
+
+    const result = await worldStateManager.modifyWorldState(
+      validatedData.space_id,
+      authResult.user.id,
+      validatedData
+    );
+
+    return NextResponse.json({
+      success: true,
+      data: result
+    });
+
+  } catch (error) {
+    console.error('World state PUT error:', error);
+    
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: 'Invalid request data', details: error.errors },
         { status: 400 }
       );
     }
 
-    // Verify permissions
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('role')
-      .eq('user_id', userId)
-      .single();
-
-    if (!profile || !['admin', 'moderator'].includes(profile.role)) {
-      return NextResponse.json(
-        { error: 'Insufficient permissions' },
-        { status: 403 }
-      );
-    }
-
-    // Delete from database
-    const { error } = await supabase
-      .from('world_states')
-      .delete()
-      .eq('world_id', worldId)
-      .eq('region_id', regionId);
-
-    if (error) throw error;
-
-    // Clear cache
-    const cacheKey = `world_state:${worldId}:${regionId}`;
-    await redis.del(cacheKey);
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    Sentry.captureException(error);
     return NextResponse.json(
-      { error: 'Failed to reset world state' },
-      { status: 500 }
+      { error: error instanceof Error ? error.message : 'Internal server error' },
+      { status: error instanceof Error && error.message.includes('permissions') ? 403 : 500 }
     );
   }
 }
+
+// DELETE - Remove entities
+export async function DELETE(request: NextRequest) {
+  try {
+    const rateLimitResult = await rateLimit(request, { limit: 20, window: 60000 });
+    if (!rateLimitResult.success) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded' },
+        { status: 429 }
+      );
+    }
+
+    const authResult = await validateAuth(request);
+    if (!authResult.success) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
+
+    const body = await request.json();
+    const validatedData = StateModificationSchema.parse({
+      ...body,
+      operation: 'delete'
+    });
+
+    const result = await worldStateManager.modifyWorldState(
+      validatedData.space_id,
+      authResult.user.id,
+      validatedData
+    );
+
+    return NextResponse.json({
+      success: true,
+      data: result
+    });
+
+  } catch (error) {
+    console.error('World state DELETE error:', error);
+    
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: 'Invalid request data', details: error.errors },
+        { status: 400 }
+      );
+    }
+
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Internal server error' },
+      { status: error instanceof Error && error.message.includes('permissions') ? 403 : 500 }
+    );
+  }
+}
+```
