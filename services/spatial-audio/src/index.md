@@ -1,93 +1,68 @@
-# Deploy Spatial Audio Processing Service
+# Deploy CRAIverse Spatial Audio Service
 
-# CR AudioViz AI Spatial Audio Processing Service
+# CRAIverse Spatial Audio Service
 
 ## Purpose
-The Spatial Audio Processing Service is a real-time microservice designed for 3D spatial audio processing within CRAIverse environments. It supports dynamic acoustics, sound occlusion, and multisource audio channel management.
+The CRAIverse Spatial Audio Service provides 3D spatial audio processing tailored for virtual environments. It facilitates real-time voice chat, environmental audio simulation, and AI agent voice positioning, enabling immersive audio experiences.
 
 ## Usage
-To deploy the Spatial Audio Processing Service, ensure that Node.js and the required dependencies are installed. The service listens for WebSocket and HTTP requests on a defined port, enabling real-time audio processing and communication with other services.
+This service can be deployed as an Express-based application, integrated with WebSocket functionality for real-time audio communication. Follow the deployment instructions to set up the server and begin processing spatial audio.
 
-### Starting the Service
-```bash
-npm install
-npm start
-```
+## Parameters/Props
+The `CRAIverseSpatialAudioService` class constructor accepts an optional configuration object:
 
-## Parameters / Props
-
-### `ServiceConfig`
-This interface defines the configuration parameters for the service.
-
-- `port: number` — The port on which the service will listen.
-- `redisUrl: string` — Redis server URL for caching and state management.
-- `natsUrl: string` — NATS server URL for messaging.
-- `supabaseUrl: string` — Supabase URL for database management.
-- `supabaseKey: string` — Supabase API key for authentication.
-- `corsOrigins: string[]` — Allowed CORS origins for API requests.
-- `metricsPort: number` — Port for exposing Prometheus metrics.
-- `maxConnections: number` — Maximum number of concurrent connections.
-- `audioSampleRate: number` — Sample rate for audio processing.
-- `audioBufferSize: number` — Size of audio buffer for processing.
-
-### `ServiceMetrics`
-This interface tracks service performance metrics.
-
-- `activeConnections: Gauge<string>` — Gauge for current active connections.
-- `audioProcessingLatency: Histogram<string>` — Histogram for latency in audio processing.
-- `messagesProcessed: Counter<string>` — Counter for processed messages.
-- `errorsTotal: Counter<string>` — Counter for total errors encountered.
-- `spatialCalculations: Counter<string>` — Counter for spatial calculations performed.
-- `voiceChatSessions: Gauge<string>` — Gauge for active voice chat sessions.
-
-### `HealthStatus`
-This interface represents the health status of the service.
-
-- `status: 'healthy' | 'unhealthy'` — Current health status.
-- `timestamp: number` — Timestamp of the health check.
-- `services: { redis: boolean; nats: boolean; supabase: boolean; webrtc: boolean; }` — Status of dependent services.
-- `metrics: { activeConnections: number; averageLatency: number; uptime: number; }` — Various metrics for monitoring the service's performance.
+### Configuration Object: `SpatialAudioConfig`
+- **audioQuality** (string): Defines the quality of audio processing (e.g., "high", "medium", "low").
+- **maxConnections** (number): The maximum number of simultaneous connections allowed.
+- **redisConfig** (object): Configuration for connecting to Redis, including host and port.
+- **supabaseUrl** (string): The URL for connecting to Supabase.
+- **supabaseKey** (string): The API key for Supabase access.
 
 ## Return Values
-The service provides system health checks and metrics through its API endpoints, responding with details about connectivity and performance.
+Upon being instantiated, the CRAIverse Spatial Audio Service provides:
+- An Express application instance for managing HTTP requests.
+- A WebSocket server for real-time audio communication.
+- Methods to process voice chat, environmental audio, and AI agent voice data.
 
 ## Examples
 
-### Health Check Endpoint
-To check the service health:
-```
-GET /health
-```
-Returns:
-```json
-{
-  "status": "healthy",
-  "timestamp": 1616148785,
-  "services": {
-    "redis": true,
-    "nats": true,
-    "supabase": true,
-    "webrtc": true
-  },
-  "metrics": {
-    "activeConnections": 42,
-    "averageLatency": 120.5,
-    "uptime": 3600
-  }
-}
+### Example 1: Initializing the Service
+```typescript
+import { CRAIverseSpatialAudioService } from './services/spatial-audio/src';
+
+const config = {
+  audioQuality: 'high',
+  maxConnections: 100,
+  redisConfig: { host: 'localhost', port: 6379 },
+  supabaseUrl: process.env.SUPABASE_URL,
+  supabaseKey: process.env.SUPABASE_KEY,
+};
+
+const spatialAudioService = new CRAIverseSpatialAudioService(config);
 ```
 
-### Metrics Endpoint
-To retrieve metrics:
-```
-GET /metrics
-```
-Exposes metrics in Prometheus format.
+### Example 2: Starting the Server
+Once you have initialized the service, you can start the server:
+```typescript
+const httpServer = createServer(spatialAudioService.getApp());
+const port = process.env.PORT || 3000;
 
-### WebSocket Connection
-Establish a WebSocket connection to the service:
-```javascript
-const socket = new WebSocket('ws://localhost:PORT');
+httpServer.listen(port, () => {
+  console.log(`CRAIverse Spatial Audio Service is running on port ${port}`);
+});
 ```
 
-This service is a key component for developers looking to integrate advanced audio functionalities into their applications, particularly in interactive 3D environments.
+### Example 3: Using WebSocket for Audio Communication
+To implement WebSocket functionality within your application for audio processing:
+```typescript
+const wsServer = new SpatialAudioWebSocketServer(httpServer);
+wsServer.on('connection', (ws) => {
+  console.log('A new client connected');
+  
+  ws.on('message', (data) => {
+    // Process incoming audio data
+  });
+});
+```
+
+This structure will help you effectively implement and utilize the CRAIverse Spatial Audio Service within your applications, enabling enhanced audio capabilities for immersive virtual environments.
