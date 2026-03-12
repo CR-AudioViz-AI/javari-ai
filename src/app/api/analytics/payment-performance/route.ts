@@ -1,597 +1,549 @@
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
+import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { Redis } from 'ioredis';
 
-// Types
-interface PaymentMetrics {
-  successRate: number;
-  totalTransactions: number;
-  successfulTransactions: number;
-  failedTransactions: number;
-  averageProcessingTime: number;
-  processingTimePercentiles: {
-    p50: number;
-    p90: number;
-    p95: number;
-    p99: number;
-  };
-  totalVolume: number;
-  averageTransactionValue: number;
+// Input validation schema
+const paymentAnalyticsQuerySchema = z.object({
+  dateRange: z.object({
+    start: z.string().datetime(),
+    end: z.string().datetime()
+  }).optional(),
+  region: z.array(z.string()).optional(),
+  paymentMethod: z.array(z.string()).optional(),
+  merchantId: z.string().uuid().optional(),
+  granularity: z.enum(['hour', 'day', 'week', 'month']).default('day')
+});
+
+// Response types
+interface SuccessRateMetrics {
+  overall: number;
+  byMethod: Record<string, number>;
+  byRegion: Record<string, number>;
+  trend: Array<{ period: string; rate: number; volume: number }>;
+  confidenceInterval: [number, number];
+}
+
+interface ProcessingTimeMetrics {
+  average: number;
+  median: number;
+  p95: number;
+  p99: number;
+  byMethod: Record<string, number>;
+  byRegion: Record<string, number>;
 }
 
 interface FeeAnalysis {
-  totalFees: number;
+  totalFeesCollected: number;
   averageFeePercentage: number;
-  feesByMethod: Record<string, number>;
-  feesByRegion: Record<string, number>;
-  processingCosts: number;
-  netRevenue: number;
+  revenueImpact: number;
+  feesByMethod: Record<string, { total: number; average: number; percentage: number }>;
+  profitabilityScore: number;
 }
 
-interface FraudMetrics {
-  fraudAttempts: number;
-  fraudDetectionRate: number;
-  falsePositiveRate: number;
-  blockedTransactions: number;
-  fraudLoss: number;
-  preventedFraudLoss: number;
-  riskScoreDistribution: Record<string, number>;
-}
-
-interface ChargebackAnalysis {
-  totalChargebacks: number;
-  chargebackRate: number;
-  chargebacksByReason: Record<string, number>;
-  chargebacksByMethod: Record<string, number>;
-  averageChargebackAmount: number;
-  chargebackTrends: Array<{
-    date: string;
-    count: number;
-    amount: number;
-  }>;
-}
-
-interface RegionalPerformance {
-  region: string;
-  country: string;
-  successRate: number;
-  averageProcessingTime: number;
-  totalVolume: number;
-  fraudRate: number;
-  chargebackRate: number;
-  preferredMethods: string[];
-}
-
-interface PaymentPerformanceAnalytics {
-  overview: PaymentMetrics;
-  feeAnalysis: FeeAnalysis;
-  fraudMetrics: FraudMetrics;
-  chargebackAnalysis: ChargebackAnalysis;
-  regionalPerformance: RegionalPerformance[];
-  methodPerformance: Record<string, PaymentMetrics>;
-  timeSeriesData: Array<{
-    timestamp: string;
-    successRate: number;
+interface RegionalBreakdown {
+  [region: string]: {
     volume: number;
-    fraudRate: number;
-  }>;
-  benchmarks: {
-    industryAverageSuccessRate: number;
-    industryAverageProcessingTime: number;
-    industryAverageFraudRate: number;
+    successRate: number;
+    averageProcessingTime: number;
+    totalFees: number;
+    topPaymentMethods: Array<{ method: string; usage: number }>;
+    marketShare: number;
   };
 }
 
-// Validation schemas
-const querySchema = z.object({
-  timeRange: z.enum(['1h', '24h', '7d', '30d', '90d', '1y']).default('24h'),
-  region: z.string().optional(),
-  method: z.string().optional(),
-  currency: z.string().optional(),
-  includeDetails: z.enum(['true', 'false']).default('false'),
-  granularity: z.enum(['hour', 'day', 'week', 'month']).default('hour')
-});
+interface BusinessInsight {
+  type: 'success_rate' | 'processing_time' | 'fee_optimization' | 'regional_opportunity' | 'method_performance';
+  severity: 'info' | 'warning' | 'critical';
+  title: string;
+  description: string;
+  recommendation: string;
+  impact: 'low' | 'medium' | 'high';
+  metrics: Record<string, number>;
+}
 
-// Services
+interface PaymentAnalyticsResponse {
+  successRates: SuccessRateMetrics;
+  processingTimes: ProcessingTimeMetrics;
+  feeAnalysis: FeeAnalysis;
+  regionalBreakdown: RegionalBreakdown;
+  insights: BusinessInsight[];
+  metadata: {
+    totalTransactions: number;
+    totalVolume: number;
+    analysisDateRange: { start: string; end: string };
+    cacheExpiry: string;
+  };
+}
+
 class PaymentAnalyticsService {
-  constructor(
-    private supabase: any,
-    private redis: Redis
-  ) {}
+  private supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
 
-  async getPaymentMetrics(filters: any): Promise<PaymentMetrics> {
-    const cacheKey = `payment_metrics:${JSON.stringify(filters)}`;
-    const cached = await this.redis.get(cacheKey);
+  async getPaymentAnalytics(params: z.infer<typeof paymentAnalyticsQuerySchema>): Promise<PaymentAnalyticsResponse> {
+    const { dateRange, region, paymentMethod, merchantId, granularity } = params;
     
-    if (cached) {
-      return JSON.parse(cached);
+    // Set default date range if not provided
+    const endDate = dateRange?.end || new Date().toISOString();
+    const startDate = dateRange?.start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    // Build base query with proper joins and filters
+    let query = this.supabase
+      .from('payment_transactions')
+      .select(`
+        *,
+        payment_methods(*),
+        merchant_profiles(*)
+      `)
+      .gte('created_at', startDate)
+      .lte('created_at', endDate);
+
+    if (region?.length) {
+      query = query.in('region', region);
+    }
+    if (paymentMethod?.length) {
+      query = query.in('payment_method_type', paymentMethod);
+    }
+    if (merchantId) {
+      query = query.eq('merchant_id', merchantId);
     }
 
-    const { data: payments, error } = await this.supabase
-      .from('payments')
-      .select(`
-        id,
-        amount,
-        status,
-        processing_time,
-        created_at,
-        payment_method,
-        currency,
-        region,
-        country
-      `)
-      .gte('created_at', filters.startDate)
-      .lte('created_at', filters.endDate)
-      .eq(filters.region ? 'region' : 'id', filters.region || undefined)
-      .eq(filters.method ? 'payment_method' : 'id', filters.method || undefined);
+    const { data: transactions, error } = await query;
 
-    if (error) throw error;
+    if (error) {
+      throw new Error(`Database error: ${error.message}`);
+    }
 
-    const totalTransactions = payments.length;
-    const successfulTransactions = payments.filter((p: any) => p.status === 'completed').length;
-    const failedTransactions = totalTransactions - successfulTransactions;
-    const successRate = totalTransactions > 0 ? (successfulTransactions / totalTransactions) * 100 : 0;
+    if (!transactions) {
+      throw new Error('No transaction data available');
+    }
 
-    const processingTimes = payments
-      .filter((p: any) => p.processing_time)
-      .map((p: any) => p.processing_time)
-      .sort((a: number, b: number) => a - b);
-
-    const processingTimePercentiles = {
-      p50: this.calculatePercentile(processingTimes, 50),
-      p90: this.calculatePercentile(processingTimes, 90),
-      p95: this.calculatePercentile(processingTimes, 95),
-      p99: this.calculatePercentile(processingTimes, 99)
-    };
-
-    const totalVolume = payments
-      .filter((p: any) => p.status === 'completed')
-      .reduce((sum: number, p: any) => sum + p.amount, 0);
-
-    const averageTransactionValue = successfulTransactions > 0 ? totalVolume / successfulTransactions : 0;
-    const averageProcessingTime = processingTimes.length > 0 
-      ? processingTimes.reduce((sum, time) => sum + time, 0) / processingTimes.length 
-      : 0;
-
-    const metrics: PaymentMetrics = {
-      successRate,
-      totalTransactions,
-      successfulTransactions,
-      failedTransactions,
-      averageProcessingTime,
-      processingTimePercentiles,
-      totalVolume,
-      averageTransactionValue
-    };
-
-    await this.redis.setex(cacheKey, 300, JSON.stringify(metrics));
-    return metrics;
-  }
-
-  async getFeeAnalysis(filters: any): Promise<FeeAnalysis> {
-    const { data: feeData, error } = await this.supabase
-      .from('payment_fees')
-      .select(`
-        payment_id,
-        fee_amount,
-        fee_percentage,
-        processing_cost,
-        payment_method,
-        region,
-        payments!inner(amount, status, created_at)
-      `)
-      .gte('payments.created_at', filters.startDate)
-      .lte('payments.created_at', filters.endDate)
-      .eq('payments.status', 'completed');
-
-    if (error) throw error;
-
-    const totalFees = feeData.reduce((sum: number, fee: any) => sum + fee.fee_amount, 0);
-    const totalVolume = feeData.reduce((sum: number, fee: any) => sum + fee.payments.amount, 0);
-    const averageFeePercentage = totalVolume > 0 ? (totalFees / totalVolume) * 100 : 0;
-
-    const feesByMethod = feeData.reduce((acc: Record<string, number>, fee: any) => {
-      acc[fee.payment_method] = (acc[fee.payment_method] || 0) + fee.fee_amount;
-      return acc;
-    }, {});
-
-    const feesByRegion = feeData.reduce((acc: Record<string, number>, fee: any) => {
-      acc[fee.region] = (acc[fee.region] || 0) + fee.fee_amount;
-      return acc;
-    }, {});
-
-    const processingCosts = feeData.reduce((sum: number, fee: any) => sum + (fee.processing_cost || 0), 0);
-    const netRevenue = totalVolume - totalFees - processingCosts;
+    // Process analytics
+    const successRates = this.calculateSuccessRates(transactions, granularity);
+    const processingTimes = this.calculateProcessingTimes(transactions);
+    const feeAnalysis = this.calculateFeeAnalysis(transactions);
+    const regionalBreakdown = this.calculateRegionalBreakdown(transactions);
+    const insights = this.generateInsights(transactions, {
+      successRates,
+      processingTimes,
+      feeAnalysis,
+      regionalBreakdown
+    });
 
     return {
-      totalFees,
-      averageFeePercentage,
-      feesByMethod,
-      feesByRegion,
-      processingCosts,
-      netRevenue
+      successRates,
+      processingTimes,
+      feeAnalysis,
+      regionalBreakdown,
+      insights,
+      metadata: {
+        totalTransactions: transactions.length,
+        totalVolume: transactions.reduce((sum, t) => sum + (t.amount || 0), 0),
+        analysisDateRange: { start: startDate, end: endDate },
+        cacheExpiry: new Date(Date.now() + 15 * 60 * 1000).toISOString()
+      }
     };
   }
 
-  async getFraudMetrics(filters: any): Promise<FraudMetrics> {
-    const { data: fraudData, error } = await this.supabase
-      .from('fraud_alerts')
-      .select(`
-        id,
-        payment_id,
-        risk_score,
-        fraud_type,
-        action_taken,
-        amount,
-        is_confirmed_fraud,
-        created_at
-      `)
-      .gte('created_at', filters.startDate)
-      .lte('created_at', filters.endDate);
+  private calculateSuccessRates(transactions: any[], granularity: string): SuccessRateMetrics {
+    const successful = transactions.filter(t => t.status === 'completed').length;
+    const overall = successful / transactions.length;
 
-    if (error) throw error;
+    // Calculate confidence interval (95%)
+    const z = 1.96; // 95% confidence
+    const n = transactions.length;
+    const se = Math.sqrt((overall * (1 - overall)) / n);
+    const margin = z * se;
+    const confidenceInterval: [number, number] = [
+      Math.max(0, overall - margin),
+      Math.min(1, overall + margin)
+    ];
 
-    const fraudAttempts = fraudData.length;
-    const confirmedFraud = fraudData.filter((f: any) => f.is_confirmed_fraud).length;
-    const blockedTransactions = fraudData.filter((f: any) => f.action_taken === 'block').length;
+    // Group by method
+    const byMethod: Record<string, number> = {};
+    const methodGroups = this.groupBy(transactions, 'payment_method_type');
+    Object.entries(methodGroups).forEach(([method, txns]) => {
+      const methodSuccessful = txns.filter(t => t.status === 'completed').length;
+      byMethod[method] = methodSuccessful / txns.length;
+    });
+
+    // Group by region
+    const byRegion: Record<string, number> = {};
+    const regionGroups = this.groupBy(transactions, 'region');
+    Object.entries(regionGroups).forEach(([region, txns]) => {
+      const regionSuccessful = txns.filter(t => t.status === 'completed').length;
+      byRegion[region] = regionSuccessful / txns.length;
+    });
+
+    // Calculate trend over time
+    const trend = this.calculateTimeTrend(transactions, granularity, 'success_rate');
+
+    return {
+      overall,
+      byMethod,
+      byRegion,
+      trend,
+      confidenceInterval
+    };
+  }
+
+  private calculateProcessingTimes(transactions: any[]): ProcessingTimeMetrics {
+    const completedTransactions = transactions.filter(t => 
+      t.status === 'completed' && t.processing_time_ms
+    );
+
+    if (completedTransactions.length === 0) {
+      return {
+        average: 0,
+        median: 0,
+        p95: 0,
+        p99: 0,
+        byMethod: {},
+        byRegion: {}
+      };
+    }
+
+    const times = completedTransactions.map(t => t.processing_time_ms).sort((a, b) => a - b);
     
-    const fraudDetectionRate = fraudAttempts > 0 ? (confirmedFraud / fraudAttempts) * 100 : 0;
-    const falsePositiveRate = fraudAttempts > 0 ? ((fraudAttempts - confirmedFraud) / fraudAttempts) * 100 : 0;
+    const average = times.reduce((sum, time) => sum + time, 0) / times.length;
+    const median = this.percentile(times, 50);
+    const p95 = this.percentile(times, 95);
+    const p99 = this.percentile(times, 99);
 
-    const fraudLoss = fraudData
-      .filter((f: any) => f.is_confirmed_fraud && f.action_taken !== 'block')
-      .reduce((sum: number, f: any) => sum + f.amount, 0);
+    // By method
+    const byMethod: Record<string, number> = {};
+    const methodGroups = this.groupBy(completedTransactions, 'payment_method_type');
+    Object.entries(methodGroups).forEach(([method, txns]) => {
+      const methodTimes = txns.map(t => t.processing_time_ms);
+      byMethod[method] = methodTimes.reduce((sum, time) => sum + time, 0) / methodTimes.length;
+    });
 
-    const preventedFraudLoss = fraudData
-      .filter((f: any) => f.is_confirmed_fraud && f.action_taken === 'block')
-      .reduce((sum: number, f: any) => sum + f.amount, 0);
+    // By region
+    const byRegion: Record<string, number> = {};
+    const regionGroups = this.groupBy(completedTransactions, 'region');
+    Object.entries(regionGroups).forEach(([region, txns]) => {
+      const regionTimes = txns.map(t => t.processing_time_ms);
+      byRegion[region] = regionTimes.reduce((sum, time) => sum + time, 0) / regionTimes.length;
+    });
 
-    const riskScoreDistribution = fraudData.reduce((acc: Record<string, number>, f: any) => {
-      const bucket = this.getRiskScoreBucket(f.risk_score);
-      acc[bucket] = (acc[bucket] || 0) + 1;
-      return acc;
-    }, {});
+    return { average, median, p95, p99, byMethod, byRegion };
+  }
+
+  private calculateFeeAnalysis(transactions: any[]): FeeAnalysis {
+    const completedTransactions = transactions.filter(t => t.status === 'completed');
+    
+    const totalFeesCollected = completedTransactions.reduce((sum, t) => sum + (t.fee_amount || 0), 0);
+    const totalVolume = completedTransactions.reduce((sum, t) => sum + (t.amount || 0), 0);
+    const averageFeePercentage = totalVolume > 0 ? (totalFeesCollected / totalVolume) * 100 : 0;
+
+    // Calculate revenue impact (assumption: 30% of fees is profit)
+    const revenueImpact = totalFeesCollected * 0.3;
+
+    const feesByMethod: Record<string, { total: number; average: number; percentage: number }> = {};
+    const methodGroups = this.groupBy(completedTransactions, 'payment_method_type');
+    
+    Object.entries(methodGroups).forEach(([method, txns]) => {
+      const methodFees = txns.reduce((sum, t) => sum + (t.fee_amount || 0), 0);
+      const methodVolume = txns.reduce((sum, t) => sum + (t.amount || 0), 0);
+      const methodAverage = methodFees / txns.length;
+      const methodPercentage = methodVolume > 0 ? (methodFees / methodVolume) * 100 : 0;
+      
+      feesByMethod[method] = {
+        total: methodFees,
+        average: methodAverage,
+        percentage: methodPercentage
+      };
+    });
+
+    // Profitability score (0-100, higher is better)
+    const profitabilityScore = Math.min(100, (revenueImpact / totalVolume) * 10000);
 
     return {
-      fraudAttempts,
-      fraudDetectionRate,
-      falsePositiveRate,
-      blockedTransactions,
-      fraudLoss,
-      preventedFraudLoss,
-      riskScoreDistribution
+      totalFeesCollected,
+      averageFeePercentage,
+      revenueImpact,
+      feesByMethod,
+      profitabilityScore
     };
   }
 
-  async getChargebackAnalysis(filters: any): Promise<ChargebackAnalysis> {
-    const { data: chargebackData, error } = await this.supabase
-      .from('chargebacks')
-      .select(`
-        id,
-        payment_id,
-        amount,
-        reason,
-        reason_code,
-        created_at,
-        status,
-        payments!inner(payment_method, created_at)
-      `)
-      .gte('created_at', filters.startDate)
-      .lte('created_at', filters.endDate);
+  private calculateRegionalBreakdown(transactions: any[]): RegionalBreakdown {
+    const regionGroups = this.groupBy(transactions, 'region');
+    const totalVolume = transactions.reduce((sum, t) => sum + (t.amount || 0), 0);
+    const breakdown: RegionalBreakdown = {};
 
-    if (error) throw error;
-
-    const totalChargebacks = chargebackData.length;
-    const totalChargebackAmount = chargebackData.reduce((sum: number, cb: any) => sum + cb.amount, 0);
-    const averageChargebackAmount = totalChargebacks > 0 ? totalChargebackAmount / totalChargebacks : 0;
-
-    // Get total transactions for chargeback rate calculation
-    const { data: totalTransactions } = await this.supabase
-      .from('payments')
-      .select('id', { count: 'exact' })
-      .gte('created_at', filters.startDate)
-      .lte('created_at', filters.endDate)
-      .eq('status', 'completed');
-
-    const chargebackRate = totalTransactions?.length > 0 
-      ? (totalChargebacks / totalTransactions.length) * 100 
-      : 0;
-
-    const chargebacksByReason = chargebackData.reduce((acc: Record<string, number>, cb: any) => {
-      acc[cb.reason] = (acc[cb.reason] || 0) + 1;
-      return acc;
-    }, {});
-
-    const chargebacksByMethod = chargebackData.reduce((acc: Record<string, number>, cb: any) => {
-      const method = cb.payments?.payment_method || 'unknown';
-      acc[method] = (acc[method] || 0) + 1;
-      return acc;
-    }, {});
-
-    const chargebackTrends = await this.getChargebackTrends(filters);
-
-    return {
-      totalChargebacks,
-      chargebackRate,
-      chargebacksByReason,
-      chargebacksByMethod,
-      averageChargebackAmount,
-      chargebackTrends
-    };
-  }
-
-  async getRegionalPerformance(filters: any): Promise<RegionalPerformance[]> {
-    const { data: regionalData, error } = await this.supabase
-      .from('payments')
-      .select(`
-        region,
-        country,
-        status,
-        processing_time,
-        amount,
-        payment_method,
-        created_at
-      `)
-      .gte('created_at', filters.startDate)
-      .lte('created_at', filters.endDate);
-
-    if (error) throw error;
-
-    const regionGroups = regionalData.reduce((acc: Record<string, any[]>, payment: any) => {
-      const key = `${payment.region}_${payment.country}`;
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(payment);
-      return acc;
-    }, {});
-
-    const regionalPerformance: RegionalPerformance[] = [];
-
-    for (const [key, payments] of Object.entries(regionGroups)) {
-      const [region, country] = key.split('_');
-      const successful = payments.filter((p: any) => p.status === 'completed');
-      const successRate = (successful.length / payments.length) * 100;
+    Object.entries(regionGroups).forEach(([region, txns]) => {
+      const successful = txns.filter(t => t.status === 'completed');
+      const successRate = successful.length / txns.length;
+      const volume = txns.reduce((sum, t) => sum + (t.amount || 0), 0);
+      const marketShare = totalVolume > 0 ? (volume / totalVolume) * 100 : 0;
       
-      const processingTimes = payments
-        .filter((p: any) => p.processing_time)
-        .map((p: any) => p.processing_time);
-      
-      const averageProcessingTime = processingTimes.length > 0
+      const processingTimes = successful
+        .filter(t => t.processing_time_ms)
+        .map(t => t.processing_time_ms);
+      const averageProcessingTime = processingTimes.length > 0 
         ? processingTimes.reduce((sum, time) => sum + time, 0) / processingTimes.length
         : 0;
 
-      const totalVolume = successful.reduce((sum: number, p: any) => sum + p.amount, 0);
+      const totalFees = successful.reduce((sum, t) => sum + (t.fee_amount || 0), 0);
 
-      // Get fraud and chargeback data for this region
-      const fraudRate = await this.getRegionalFraudRate(region, country, filters);
-      const chargebackRate = await this.getRegionalChargebackRate(region, country, filters);
+      // Top payment methods by usage
+      const methodCounts = this.groupBy(txns, 'payment_method_type');
+      const topPaymentMethods = Object.entries(methodCounts)
+        .map(([method, methodTxns]) => ({
+          method,
+          usage: (methodTxns.length / txns.length) * 100
+        }))
+        .sort((a, b) => b.usage - a.usage)
+        .slice(0, 5);
 
-      const methodCounts = payments.reduce((acc: Record<string, number>, p: any) => {
-        acc[p.payment_method] = (acc[p.payment_method] || 0) + 1;
-        return acc;
-      }, {});
-
-      const preferredMethods = Object.entries(methodCounts)
-        .sort(([, a], [, b]) => (b as number) - (a as number))
-        .slice(0, 3)
-        .map(([method]) => method);
-
-      regionalPerformance.push({
-        region,
-        country,
+      breakdown[region] = {
+        volume,
         successRate,
         averageProcessingTime,
-        totalVolume,
-        fraudRate,
-        chargebackRate,
-        preferredMethods
+        totalFees,
+        topPaymentMethods,
+        marketShare
+      };
+    });
+
+    return breakdown;
+  }
+
+  private generateInsights(
+    transactions: any[], 
+    analytics: Partial<PaymentAnalyticsResponse>
+  ): BusinessInsight[] {
+    const insights: BusinessInsight[] = [];
+
+    // Success rate insights
+    if (analytics.successRates) {
+      if (analytics.successRates.overall < 0.95) {
+        insights.push({
+          type: 'success_rate',
+          severity: analytics.successRates.overall < 0.90 ? 'critical' : 'warning',
+          title: 'Low Success Rate Detected',
+          description: `Overall success rate is ${(analytics.successRates.overall * 100).toFixed(1)}%, below optimal threshold of 95%`,
+          recommendation: 'Review failed transactions, optimize payment flows, and consider adding retry mechanisms',
+          impact: analytics.successRates.overall < 0.90 ? 'high' : 'medium',
+          metrics: { current_rate: analytics.successRates.overall, target_rate: 0.95 }
+        });
+      }
+
+      // Method-specific insights
+      Object.entries(analytics.successRates.byMethod).forEach(([method, rate]) => {
+        if (rate < 0.90) {
+          insights.push({
+            type: 'method_performance',
+            severity: rate < 0.85 ? 'critical' : 'warning',
+            title: `${method} Payment Method Underperforming`,
+            description: `${method} has a success rate of ${(rate * 100).toFixed(1)}%`,
+            recommendation: `Investigate ${method} integration issues or consider alternative providers`,
+            impact: 'medium',
+            metrics: { method_rate: rate, benchmark: 0.90 }
+          });
+        }
       });
     }
 
-    return regionalPerformance.sort((a, b) => b.totalVolume - a.totalVolume);
+    // Processing time insights
+    if (analytics.processingTimes) {
+      if (analytics.processingTimes.average > 5000) { // 5 seconds
+        insights.push({
+          type: 'processing_time',
+          severity: analytics.processingTimes.average > 10000 ? 'critical' : 'warning',
+          title: 'Slow Payment Processing',
+          description: `Average processing time is ${(analytics.processingTimes.average / 1000).toFixed(2)} seconds`,
+          recommendation: 'Optimize payment processor configuration and consider load balancing',
+          impact: 'medium',
+          metrics: { 
+            average_time: analytics.processingTimes.average,
+            target_time: 3000 
+          }
+        });
+      }
+    }
+
+    // Fee optimization insights
+    if (analytics.feeAnalysis) {
+      if (analytics.feeAnalysis.profitabilityScore < 50) {
+        insights.push({
+          type: 'fee_optimization',
+          severity: 'warning',
+          title: 'Fee Structure Optimization Opportunity',
+          description: `Current profitability score is ${analytics.feeAnalysis.profitabilityScore.toFixed(1)}/100`,
+          recommendation: 'Review fee structure and negotiate better rates with payment processors',
+          impact: 'high',
+          metrics: { 
+            profitability_score: analytics.feeAnalysis.profitabilityScore,
+            revenue_impact: analytics.feeAnalysis.revenueImpact 
+          }
+        });
+      }
+    }
+
+    // Regional opportunities
+    if (analytics.regionalBreakdown) {
+      const regions = Object.entries(analytics.regionalBreakdown)
+        .sort(([,a], [,b]) => b.volume - a.volume);
+
+      // Find underperforming regions
+      regions.forEach(([region, data]) => {
+        if (data.successRate < 0.90 && data.marketShare > 10) {
+          insights.push({
+            type: 'regional_opportunity',
+            severity: 'warning',
+            title: `${region} Market Underperformance`,
+            description: `${region} has ${data.marketShare.toFixed(1)}% market share but ${(data.successRate * 100).toFixed(1)}% success rate`,
+            recommendation: `Focus on improving payment infrastructure in ${region} to capture growth opportunity`,
+            impact: 'high',
+            metrics: { 
+              success_rate: data.successRate,
+              market_share: data.marketShare 
+            }
+          });
+        }
+      });
+    }
+
+    return insights.slice(0, 10); // Limit to top 10 insights
   }
 
-  private calculatePercentile(sortedArray: number[], percentile: number): number {
-    if (sortedArray.length === 0) return 0;
+  private groupBy<T>(array: T[], key: keyof T): Record<string, T[]> {
+    return array.reduce((groups, item) => {
+      const group = String(item[key]);
+      if (!groups[group]) {
+        groups[group] = [];
+      }
+      groups[group].push(item);
+      return groups;
+    }, {} as Record<string, T[]>);
+  }
+
+  private percentile(sortedArray: number[], percentile: number): number {
     const index = (percentile / 100) * (sortedArray.length - 1);
     const lower = Math.floor(index);
     const upper = Math.ceil(index);
-    const weight = index % 1;
+    const weight = index - lower;
     
     if (upper >= sortedArray.length) return sortedArray[sortedArray.length - 1];
     return sortedArray[lower] * (1 - weight) + sortedArray[upper] * weight;
   }
 
-  private getRiskScoreBucket(score: number): string {
-    if (score < 20) return 'low';
-    if (score < 50) return 'medium';
-    if (score < 80) return 'high';
-    return 'critical';
+  private calculateTimeTrend(transactions: any[], granularity: string, metric: string): Array<{ period: string; rate: number; volume: number }> {
+    const periods = this.groupByTimePeriod(transactions, granularity);
+    
+    return Object.entries(periods).map(([period, txns]) => {
+      const volume = txns.length;
+      let rate = 0;
+      
+      if (metric === 'success_rate') {
+        const successful = txns.filter(t => t.status === 'completed').length;
+        rate = volume > 0 ? successful / volume : 0;
+      }
+      
+      return { period, rate, volume };
+    }).sort((a, b) => a.period.localeCompare(b.period));
   }
 
-  private async getChargebackTrends(filters: any): Promise<Array<{date: string; count: number; amount: number}>> {
-    const { data, error } = await this.supabase
-      .from('chargebacks')
-      .select('amount, created_at')
-      .gte('created_at', filters.startDate)
-      .lte('created_at', filters.endDate)
-      .order('created_at');
-
-    if (error) return [];
-
-    // Group by day
-    const trends = data.reduce((acc: Record<string, {count: number; amount: number}>, cb: any) => {
-      const date = cb.created_at.split('T')[0];
-      if (!acc[date]) acc[date] = { count: 0, amount: 0 };
-      acc[date].count += 1;
-      acc[date].amount += cb.amount;
-      return acc;
-    }, {});
-
-    return Object.entries(trends).map(([date, data]) => ({
-      date,
-      count: data.count,
-      amount: data.amount
-    }));
-  }
-
-  private async getRegionalFraudRate(region: string, country: string, filters: any): Promise<number> {
-    const { data: fraudData } = await this.supabase
-      .from('fraud_alerts')
-      .select('id', { count: 'exact' })
-      .gte('created_at', filters.startDate)
-      .lte('created_at', filters.endDate)
-      .eq('region', region)
-      .eq('country', country);
-
-    const { data: totalPayments } = await this.supabase
-      .from('payments')
-      .select('id', { count: 'exact' })
-      .gte('created_at', filters.startDate)
-      .lte('created_at', filters.endDate)
-      .eq('region', region)
-      .eq('country', country);
-
-    if (!fraudData || !totalPayments || totalPayments.length === 0) return 0;
-    return (fraudData.length / totalPayments.length) * 100;
-  }
-
-  private async getRegionalChargebackRate(region: string, country: string, filters: any): Promise<number> {
-    const { data: chargebackData } = await this.supabase
-      .from('chargebacks')
-      .select('id', { count: 'exact' })
-      .gte('created_at', filters.startDate)
-      .lte('created_at', filters.endDate)
-      .eq('region', region)
-      .eq('country', country);
-
-    const { data: totalPayments } = await this.supabase
-      .from('payments')
-      .select('id', { count: 'exact' })
-      .gte('created_at', filters.startDate)
-      .lte('created_at', filters.endDate)
-      .eq('region', region)
-      .eq('country', country)
-      .eq('status', 'completed');
-
-    if (!chargebackData || !totalPayments || totalPayments.length === 0) return 0;
-    return (chargebackData.length / totalPayments.length) * 100;
+  private groupByTimePeriod(transactions: any[], granularity: string): Record<string, any[]> {
+    return transactions.reduce((groups, txn) => {
+      const date = new Date(txn.created_at);
+      let periodKey: string;
+      
+      switch (granularity) {
+        case 'hour':
+          periodKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:00`;
+          break;
+        case 'day':
+          periodKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+          break;
+        case 'week':
+          const weekStart = new Date(date);
+          weekStart.setDate(date.getDate() - date.getDay());
+          periodKey = `${weekStart.getFullYear()}-W${String(Math.ceil((weekStart.getDate()) / 7)).padStart(2, '0')}`;
+          break;
+        case 'month':
+          periodKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+          break;
+        default:
+          periodKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      }
+      
+      if (!groups[periodKey]) {
+        groups[periodKey] = [];
+      }
+      groups[periodKey].push(txn);
+      return groups;
+    }, {} as Record<string, any[]>);
   }
 }
 
-// Initialize Redis
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
-
-export async function GET(request: NextRequest) {
+export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
     const { searchParams } = new URL(request.url);
-    const query = querySchema.parse({
-      timeRange: searchParams.get('timeRange') || '24h',
-      region: searchParams.get('region') || undefined,
-      method: searchParams.get('method') || undefined,
-      currency: searchParams.get('currency') || undefined,
-      includeDetails: searchParams.get('includeDetails') || 'false',
-      granularity: searchParams.get('granularity') || 'hour'
-    });
-
-    const supabase = createRouteHandlerClient({ cookies });
-    const analyticsService = new PaymentAnalyticsService(supabase, redis);
-
-    // Calculate date range
-    const endDate = new Date();
-    const startDate = new Date();
     
-    switch (query.timeRange) {
-      case '1h':
-        startDate.setHours(startDate.getHours() - 1);
-        break;
-      case '24h':
-        startDate.setDate(startDate.getDate() - 1);
-        break;
-      case '7d':
-        startDate.setDate(startDate.getDate() - 7);
-        break;
-      case '30d':
-        startDate.setDate(startDate.getDate() - 30);
-        break;
-      case '90d':
-        startDate.setDate(startDate.getDate() - 90);
-        break;
-      case '1y':
-        startDate.setFullYear(startDate.getFullYear() - 1);
-        break;
-    }
-
-    const filters = {
-      startDate: startDate.toISOString(),
-      endDate: endDate.toISOString(),
-      region: query.region,
-      method: query.method,
-      currency: query.currency
+    // Parse query parameters
+    const queryParams = {
+      dateRange: searchParams.get('startDate') && searchParams.get('endDate') 
+        ? { 
+            start: searchParams.get('startDate')!,
+            end: searchParams.get('endDate')!
+          }
+        : undefined,
+      region: searchParams.getAll('region'),
+      paymentMethod: searchParams.getAll('paymentMethod'),
+      merchantId: searchParams.get('merchantId') || undefined,
+      granularity: (searchParams.get('granularity') as 'hour' | 'day' | 'week' | 'month') || 'day'
     };
 
-    // Get all analytics data
-    const [
-      overview,
-      feeAnalysis,
-      fraudMetrics,
-      chargebackAnalysis,
-      regionalPerformance
-    ] = await Promise.all([
-      analyticsService.getPaymentMetrics(filters),
-      analyticsService.getFeeAnalysis(filters),
-      analyticsService.getFraudMetrics(filters),
-      analyticsService.getChargebackAnalysis(filters),
-      analyticsService.getRegionalPerformance(filters)
-    ]);
+    // Validate input
+    const validatedParams = paymentAnalyticsQuerySchema.parse(queryParams);
 
-    // Get method performance
-    const uniqueMethods = ['credit_card', 'debit_card', 'paypal', 'apple_pay', 'google_pay', 'bank_transfer'];
-    const methodPerformance: Record<string, PaymentMetrics> = {};
-    
-    for (const method of uniqueMethods) {
-      const methodFilters = { ...filters, method };
-      methodPerformance[method] = await analyticsService.getPaymentMetrics(methodFilters);
-    }
+    // Check cache first
+    const cacheKey = `payment_analytics_${JSON.stringify(validatedParams)}`;
+    // Note: In production, implement Redis or similar caching
 
-    // Industry benchmarks (mock data - replace with real benchmarks)
-    const benchmarks = {
-      industryAverageSuccessRate: 95.5,
-      industryAverageProcessingTime: 2.3,
-      industryAverageFraudRate: 0.8
-    };
+    const service = new PaymentAnalyticsService();
+    const analytics = await service.getPaymentAnalytics(validatedParams);
 
-    // Generate time series data
-    const timeSeriesData = await this.generateTimeSeriesData(supabase, filters, query.granularity);
-
-    const analytics: PaymentPerformanceAnalytics = {
-      overview,
-      feeAnalysis,
-      fraudMetrics,
-      chargebackAnalysis,
-      regionalPerformance,
-      methodPerformance,
-      timeSeriesData,
-      benchmarks
-    };
-
-    return NextResponse.json({
-      success: true,
-      data: analytics,
-      metadata: {
-        timeRange: query.timeRange,
-        region: query.region,
-        method: query.method,
-        generatedAt: new Date().toISOString(),
-        dataPoints: {
-          transactions: overview.totalTransactions,
-          regions: regionalPerformance.length,
-          methods: Object.keys(methodPerformance).length
-        }
+    return NextResponse.json(analytics, {
+      headers: {
+        'Cache-Control': 'private, max-age=900', // 15 minutes
+        'Content-Type': 'application/json'
       }
     });
 
   } catch (error) {
-    console.error('Payment analytics error:',
+    console.error('Payment analytics error:', error);
+
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { 
+          error: 'Invalid query parameters',
+          details: error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
+        },
+        { status: 400 }
+      );
+    }
+
+    return NextResponse.json(
+      { error: 'Internal server error', message: 'Failed to generate payment analytics' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function OPTIONS(): Promise<NextResponse> {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Allow': 'GET, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    },
+  });
+}
+```
