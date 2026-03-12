@@ -1,80 +1,93 @@
-# Deploy Intelligent Deployment Orchestrator
+# Deploy Zero-Downtime Deployment Orchestrator
 
 ```markdown
-# Intelligent Deployment Orchestrator
+# Zero-Downtime Deployment Orchestrator
 
 ## Purpose
-
-The Intelligent Deployment Orchestrator is an AI-powered service that facilitates advanced deployment strategies across multi-environment setups. It supports predictive scaling, canary releases, and automated rollback decisions to enhance the reliability and efficiency of software deployments in development, staging, and production environments.
+The Zero-Downtime Deployment Orchestrator is a comprehensive service designed to manage complex multi-service deployments. It employs blue-green deployment strategies, canary releases, and has automatic rollback capabilities suitable for mission-critical applications. The orchestrator ensures minimal disruption during updates by facilitating health monitoring, traffic splitting, and automated recovery mechanisms.
 
 ## Usage
+To implement the orchestrator, you need to define the deployment configuration that outlines the services, strategies, and health checks.
 
-To utilize the Intelligent Deployment Orchestrator, developers need to set up deployment configurations and environments. The orchestrator will then manage the deployments based on the specified strategies, monitor the deployment metrics in real-time, and make decisions based on the health statuses of the applications.
-
-### Importing
-
+### Example Initialization
 ```typescript
-import { DeploymentEnvironment, DeploymentConfig, DeploymentMetrics, CanaryRelease } from './src/services/deployment-orchestrator';
+import { DeploymentConfig } from './src/services/deployment-orchestrator/index';
+
+// Example deployment configuration
+const deploymentConfig: DeploymentConfig = {
+    id: "deployment-1",
+    name: "MyApp",
+    version: "1.0.0",
+    strategy: "blue-green", // Deployment strategy can be blue-green or canary
+    services: [
+        {
+            name: "service-1",
+            image: "myapp/service-1",
+            tag: "latest",
+            replicas: 3,
+            resources: {
+                cpu: "500m",
+                memory: "256Mi"
+            },
+            healthCheck: {
+                type: "http",
+                path: "/health",
+                port: 8080,
+                interval: 30,
+                timeout: 5,
+                retries: 3,
+                initialDelay: 10,
+                successThreshold: 1,
+                failureThreshold: 3
+            },
+            dependencies: ["service-2"],
+            ports: [{
+                containerPort: 8080,
+                protocol: "TCP",
+                name: "http"
+            }]
+        }
+    ],
+    environment: "production",
+    rollbackConfig: {
+        enabled: true,
+        automaticTriggers: [
+            {
+                type: "health_check",
+                threshold: 200,
+                window: 60,
+                severity: "critical"
+            }
+        ],
+        maxRollbackTime: 300,
+        preserveData: false
+    },
+    healthChecks: [],
+    notifications: [],
+    metadata: {}
+};
 ```
 
 ## Parameters/Props
+- **DeploymentConfig**: Main configuration object for deployment.
+  - `id`: Unique identifier for the deployment.
+  - `name`: Name of the application.
+  - `version`: Version of the application being deployed.
+  - `strategy`: Deployment strategy (e.g., `blue-green`, `canary`).
+  - `services`: Array of `ServiceConfig` objects defining services involved in the deployment.
+  - `environment`: Environment for the deployment (e.g., `production`, `staging`).
+  - `rollbackConfig`: Configuration for rollbacks of the deployment.
+  - `healthChecks`: Array containing health check configurations.
+  - `notifications`: Array of notification configurations for deployment events.
+  - `metadata`: Additional custom metadata.
 
-### DeploymentEnvironment
+- **ServiceConfig**: Defines the configuration for individual services.
+- **HealthCheckConfig**: Specifies how to check the health of the services.
+- **RollbackConfig**: Controls the rollback behavior in case of failures.
 
-- **id**: `string` - Unique identifier for the deployment environment.
-- **name**: `string` - Human-readable name of the environment.
-- **type**: `'development' | 'staging' | 'production'` - Type of the deployment environment.
-- **cluster**: `object` - Cluster configuration for deployment.
-  - **provider**: `'kubernetes' | 'docker' | 'aws-ecs'` - The cloud service provider.
-  - **endpoint**: `string` - Endpoint URL for the cluster.
-  - **credentials**: `Record<string, any>` - Authentication details for accessing the cluster.
-- **resources**: `object` - Resource specifications.
-  - **cpu**: `number` - CPU allocation.
-  - **memory**: `number` - Memory allocation.
-  - **storage**: `number` - Storage allocation.
-  - **replicas**: `number` - Number of replicas.
-- **healthChecks**: `object` - Health check configurations.
-  - **endpoint**: `string` - Health check endpoint.
-  - **interval**: `number` - Check interval in seconds.
-  - **timeout**: `number` - Timeout for health checks in seconds.
-  - **retries**: `number` - Number of retries before marking as unhealthy.
+## Return Values
+The orchestrator does not return values directly; instead, it performs deployment actions based on the provided configurations. Users can monitor deployment progress and health through the configured notifications and health checks.
 
-### DeploymentConfig
-
-- **id**: `string` - Unique identifier for the deployment configuration.
-- **applicationId**: `string` - Identifier of the application being deployed.
-- **version**: `string` - Version of the application.
-- **image**: `string` - Container image reference.
-- **targetEnvironments**: `string[]` - List of target environments for deployment.
-- **strategy**: `'blue-green' | 'canary' | 'rolling' | 'recreate'` - Deployment strategy.
-- **canaryConfig**: `object` - (Optional) Configuration for canary releases.
-  - **trafficPercent**: `number` - Percentage of traffic to direct to the canary release.
-  - **duration**: `number` - Duration of the canary release in seconds.
-  - **successThreshold**: `number` - Minimum successful metrics needed to promote.
-  - **failureThreshold**: `number` - Maximum failures allowed before a rollback.
-- **resources**: `object` - Resource requests and limits.
-  - **requests**: `{ cpu: string; memory: string }` - Minimum resource requests.
-  - **limits**: `{ cpu: string; memory: string }` - Maximum resource limits.
-- **environmentVariables**: `Record<string, string>` - Environment variables for the deployment.
-- **secrets**: `Record<string, string>` - Secrets required for deployment.
-
-### DeploymentMetrics
-
-- **timestamp**: `number` - Timestamp of the metrics.
-- **deploymentId**: `string` - Identifier of the deployment.
-- **environment**: `string` - Environment of the deployment.
-- **metrics**: `object` - Metrics collected during the deployment.
-  - **cpu**: `number` - CPU usage.
-  - **memory**: `number` - Memory usage.
-  - **responseTime**: `number` - Average response time in milliseconds.
-  - **errorRate**: `number` - Percentage of requests resulting in errors.
-  - **throughput**: `number` - Number of requests processed per unit time.
-  - **availability**: `number` - Availability percentage.
-- **healthStatus**: `'healthy' | 'degraded' | 'unhealthy'` - Current health status of the deployment.
-
-### CanaryRelease
-
-- **id**: `string` - Unique identifier for the canary release.
-- **deploymentId**: `string` - Identifier for the related deployment.
-- **environment**: `string` - The environment where the canary is deployed.
-- **startTime**: `number` - Timestamp indicating when the canary release started
+## Examples
+Refer to the initialization example above. Once the configuration is set up, you can call relevant orchestrator methods to start deployments, manage traffic, and handle rollbacks as defined in the configuration.
+```
