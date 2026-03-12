@@ -1,115 +1,152 @@
-import express, { Application, Request, Response } from 'express';
-import { createServer, Server } from 'http';
-import { Server as SocketIOServer } from 'socket.io';
+```typescript
+/**
+ * CRAIverse Spatial Audio Service
+ * Provides 3D spatial audio processing for virtual environments
+ * Handles real-time voice chat, environmental audio, and AI agent voice positioning
+ */
+
+import express from 'express';
+import { createServer } from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
-import { createClient } from 'redis';
-import { connect, NatsConnection } from 'nats';
-import { createClient as createSupabaseClient, SupabaseClient } from '@supabase/supabase-js';
-import { register, collectDefaultMetrics, Counter, Histogram, Gauge } from 'prom-client';
+import { WebSocketServer } from 'ws';
+import Redis from 'ioredis';
+import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
+
 import { SpatialAudioEngine } from './core/SpatialAudioEngine';
-import { WebSocketHandler } from './handlers/WebSocketHandler';
-import { WebRTCHandler } from './handlers/WebRTCHandler';
-import { AudioScene } from './models/AudioScene';
-import { Logger } from './utils/Logger';
+import { VoiceChatProcessor } from './processors/VoiceChatProcessor';
+import { EnvironmentalAudioProcessor } from './processors/EnvironmentalAudioProcessor';
+import { AIAgentVoiceProcessor } from './processors/AIAgentVoiceProcessor';
+import { SpatialAudioWebSocketServer } from './websocket/SpatialAudioWebSocketServer';
+import spatialAudioRoutes from './api/routes/spatial-audio';
+import {
+  SpatialAudioConfig,
+  ServiceHealth,
+  AudioSession,
+  SpatialAudioError
+} from './types/spatial-audio.types';
+
+dotenv.config();
 
 /**
- * Configuration interface for the Spatial Audio Service
+ * CRAIverse Spatial Audio Service
+ * Main service class orchestrating 3D spatial audio processing
  */
-interface ServiceConfig {
-  port: number;
-  redisUrl: string;
-  natsUrl: string;
-  supabaseUrl: string;
-  supabaseKey: string;
-  corsOrigins: string[];
-  metricsPort: number;
-  maxConnections: number;
-  audioSampleRate: number;
-  audioBufferSize: number;
-}
+export class CRAIverseSpatialAudioService {
+  private app: express.Application;
+  private server: any;
+  private wsServer: WebSocketServer;
+  private spatialAudioEngine: SpatialAudioEngine;
+  private voiceChatProcessor: VoiceChatProcessor;
+  private environmentalAudioProcessor: EnvironmentalAudioProcessor;
+  private aiAgentVoiceProcessor: AIAgentVoiceProcessor;
+  private spatialAudioWS: SpatialAudioWebSocketServer;
+  private redis: Redis;
+  private supabase: any;
+  private config: SpatialAudioConfig;
+  private activeSessions: Map<string, AudioSession>;
+  private isShuttingDown: boolean = false;
 
-/**
- * Metrics collection for monitoring
- */
-interface ServiceMetrics {
-  activeConnections: Gauge<string>;
-  audioProcessingLatency: Histogram<string>;
-  messagesProcessed: Counter<string>;
-  errorsTotal: Counter<string>;
-  spatialCalculations: Counter<string>;
-  voiceChatSessions: Gauge<string>;
-}
-
-/**
- * Health check status
- */
-interface HealthStatus {
-  status: 'healthy' | 'unhealthy';
-  timestamp: number;
-  services: {
-    redis: boolean;
-    nats: boolean;
-    supabase: boolean;
-    webrtc: boolean;
-  };
-  metrics: {
-    activeConnections: number;
-    averageLatency: number;
-    uptime: number;
-  };
-}
-
-/**
- * CR AudioViz AI Spatial Audio Processing Service
- * 
- * Real-time 3D spatial audio processing microservice for CRAIverse environments
- * with dynamic acoustics, sound occlusion, and multi-user voice chat optimization.
- */
-class SpatialAudioService {
-  private app: Application;
-  private server: Server;
-  private io: SocketIOServer;
-  private config: ServiceConfig;
-  private logger: Logger;
-  private spatialEngine: SpatialAudioEngine;
-  private wsHandler: WebSocketHandler;
-  private webRTCHandler: WebRTCHandler;
-  private redisClient: any;
-  private natsConnection: NatsConnection | null = null;
-  private supabaseClient: SupabaseClient;
-  private metrics: ServiceMetrics;
-  private activeScenes: Map<string, AudioScene> = new Map();
-  private startTime: number;
-
-  constructor(config: ServiceConfig) {
-    this.config = config;
-    this.startTime = Date.now();
-    this.logger = new Logger('SpatialAudioService');
-    
-    this.initializeApp();
-    this.initializeMetrics();
-    this.initializeServices();
+  constructor(config?: Partial<SpatialAudioConfig>) {
+    this.config = this.initializeConfig(config);
+    this.activeSessions = new Map();
+    this.initializeComponents();
   }
 
   /**
-   * Initialize Express application with middleware
+   * Initialize service configuration
    */
-  private initializeApp(): void {
+  private initializeConfig(config?: Partial<SpatialAudioConfig>): SpatialAudioConfig {
+    return {
+      port: config?.port || parseInt(process.env.PORT || '3005'),
+      wsPort: config?.wsPort || parseInt(process.env.WS_PORT || '3006'),
+      redisUrl: config?.redisUrl || process.env.REDIS_URL || 'redis://localhost:6379',
+      supabaseUrl: config?.supabaseUrl || process.env.SUPABASE_URL!,
+      supabaseKey: config?.supabaseKey || process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      maxConcurrentSessions: config?.maxConcurrentSessions || 1000,
+      audioSampleRate: config?.audioSampleRate || 48000,
+      audioBufferSize: config?.audioBufferSize || 1024,
+      maxDistance: config?.maxDistance || 100.0,
+      minDistance: config?.minDistance || 1.0,
+      hrtfCacheSize: config?.hrtfCacheSize || 10000,
+      enableEnvironmentalAudio: config?.enableEnvironmentalAudio ?? true,
+      enableAIAgentVoices: config?.enableAIAgentVoices ?? true,
+      enableVoiceChat: config?.enableVoiceChat ?? true,
+      compressionEnabled: config?.compressionEnabled ?? true,
+      rateLimitEnabled: config?.rateLimitEnabled ?? true,
+      corsOrigins: config?.corsOrigins || ['http://localhost:3000'],
+      ...config
+    };
+  }
+
+  /**
+   * Initialize service components
+   */
+  private initializeComponents(): void {
+    // Initialize Express app
     this.app = express();
     this.server = createServer(this.app);
-    
+
+    // Initialize Redis
+    this.redis = new Redis(this.config.redisUrl, {
+      retryDelayOnFailover: 100,
+      enableReadyCheck: true,
+      maxRetriesPerRequest: 3
+    });
+
+    // Initialize Supabase
+    this.supabase = createClient(
+      this.config.supabaseUrl,
+      this.config.supabaseKey
+    );
+
+    // Initialize core spatial audio engine
+    this.spatialAudioEngine = new SpatialAudioEngine(this.config, this.redis);
+
+    // Initialize processors
+    this.voiceChatProcessor = new VoiceChatProcessor(
+      this.spatialAudioEngine,
+      this.redis,
+      this.config
+    );
+
+    this.environmentalAudioProcessor = new EnvironmentalAudioProcessor(
+      this.spatialAudioEngine,
+      this.redis,
+      this.config
+    );
+
+    this.aiAgentVoiceProcessor = new AIAgentVoiceProcessor(
+      this.spatialAudioEngine,
+      this.redis,
+      this.config
+    );
+
+    // Initialize WebSocket server
+    this.wsServer = new WebSocketServer({ 
+      server: this.server,
+      path: '/spatial-audio-ws'
+    });
+
+    this.spatialAudioWS = new SpatialAudioWebSocketServer(
+      this.wsServer,
+      this.spatialAudioEngine,
+      this.redis,
+      this.config
+    );
+  }
+
+  /**
+   * Configure Express middleware
+   */
+  private configureMiddleware(): void {
     // Security middleware
     this.app.use(helmet({
-      contentSecurityPolicy: {
-        directives: {
-          defaultSrc: ["'self'"],
-          connectSrc: ["'self'", "wss:", "ws:"],
-          scriptSrc: ["'self'", "'unsafe-inline'"],
-        },
-      },
+      contentSecurityPolicy: false,
+      crossOriginEmbedderPolicy: false
     }));
 
     // CORS configuration
@@ -117,539 +154,191 @@ class SpatialAudioService {
       origin: this.config.corsOrigins,
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
     }));
 
-    // General middleware
-    this.app.use(compression());
+    // Compression
+    if (this.config.compressionEnabled) {
+      this.app.use(compression());
+    }
+
+    // Rate limiting
+    if (this.config.rateLimitEnabled) {
+      const limiter = rateLimit({
+        windowMs: 15 * 60 * 1000, // 15 minutes
+        max: 1000, // Limit each IP to 1000 requests per windowMs
+        message: 'Too many requests from this IP',
+        standardHeaders: true,
+        legacyHeaders: false
+      });
+      this.app.use(limiter);
+    }
+
+    // Body parsing
     this.app.use(express.json({ limit: '10mb' }));
     this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-    // Rate limiting
-    const limiter = rateLimit({
-      windowMs: 15 * 60 * 1000, // 15 minutes
-      max: 100, // limit each IP to 100 requests per windowMs
-      message: 'Too many requests from this IP',
+    // Request logging
+    this.app.use((req, res, next) => {
+      console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+      next();
     });
-    this.app.use(limiter);
-
-    // Socket.IO initialization
-    this.io = new SocketIOServer(this.server, {
-      cors: {
-        origin: this.config.corsOrigins,
-        methods: ['GET', 'POST'],
-        credentials: true,
-      },
-      transports: ['websocket', 'polling'],
-      pingTimeout: 60000,
-      pingInterval: 25000,
-    });
-
-    this.setupRoutes();
   }
 
   /**
-   * Initialize Prometheus metrics
+   * Configure API routes
    */
-  private initializeMetrics(): void {
-    collectDefaultMetrics();
+  private configureRoutes(): void {
+    // Health check
+    this.app.get('/health', this.handleHealthCheck.bind(this));
 
-    this.metrics = {
-      activeConnections: new Gauge({
-        name: 'spatial_audio_active_connections',
-        help: 'Number of active WebSocket connections',
-        labelNames: ['type'],
-      }),
-      audioProcessingLatency: new Histogram({
-        name: 'spatial_audio_processing_latency_ms',
-        help: 'Audio processing latency in milliseconds',
-        labelNames: ['operation'],
-        buckets: [1, 5, 10, 25, 50, 100, 250, 500, 1000],
-      }),
-      messagesProcessed: new Counter({
-        name: 'spatial_audio_messages_total',
-        help: 'Total number of messages processed',
-        labelNames: ['type'],
-      }),
-      errorsTotal: new Counter({
-        name: 'spatial_audio_errors_total',
-        help: 'Total number of errors',
-        labelNames: ['type'],
-      }),
-      spatialCalculations: new Counter({
-        name: 'spatial_audio_calculations_total',
-        help: 'Total number of spatial audio calculations',
-        labelNames: ['type'],
-      }),
-      voiceChatSessions: new Gauge({
-        name: 'spatial_audio_voice_sessions',
-        help: 'Number of active voice chat sessions',
-      }),
-    };
-  }
+    // Service info
+    this.app.get('/info', this.handleServiceInfo.bind(this));
 
-  /**
-   * Initialize external services and handlers
-   */
-  private async initializeServices(): Promise<void> {
-    try {
-      // Initialize Redis client
-      this.redisClient = createClient({
-        url: this.config.redisUrl,
-        retry_delay_on_failure: 100,
-      });
-
-      this.redisClient.on('error', (err: Error) => {
-        this.logger.error('Redis connection error:', err);
-        this.metrics.errorsTotal.labels('redis').inc();
-      });
-
-      await this.redisClient.connect();
-      this.logger.info('Connected to Redis');
-
-      // Initialize NATS connection
-      this.natsConnection = await connect({
-        servers: [this.config.natsUrl],
-        reconnect: true,
-        maxReconnectAttempts: -1,
-        reconnectTimeWait: 2000,
-      });
-
-      this.logger.info('Connected to NATS');
-
-      // Initialize Supabase client
-      this.supabaseClient = createSupabaseClient(
-        this.config.supabaseUrl,
-        this.config.supabaseKey
-      );
-
-      // Initialize spatial audio engine
-      this.spatialEngine = new SpatialAudioEngine({
-        sampleRate: this.config.audioSampleRate,
-        bufferSize: this.config.audioBufferSize,
-        maxSources: this.config.maxConnections,
-      });
-
-      // Initialize handlers
-      this.wsHandler = new WebSocketHandler({
-        io: this.io,
-        spatialEngine: this.spatialEngine,
-        redisClient: this.redisClient,
-        metrics: this.metrics,
-        logger: this.logger,
-      });
-
-      this.webRTCHandler = new WebRTCHandler({
-        spatialEngine: this.spatialEngine,
-        redisClient: this.redisClient,
-        metrics: this.metrics,
-        logger: this.logger,
-      });
-
-      await this.setupMessageSubscriptions();
-
-    } catch (error) {
-      this.logger.error('Failed to initialize services:', error);
-      this.metrics.errorsTotal.labels('initialization').inc();
-      throw error;
-    }
-  }
-
-  /**
-   * Setup Express routes
-   */
-  private setupRoutes(): void {
-    // Health check endpoint
-    this.app.get('/health', async (req: Request, res: Response) => {
-      try {
-        const healthStatus = await this.getHealthStatus();
-        const statusCode = healthStatus.status === 'healthy' ? 200 : 503;
-        res.status(statusCode).json(healthStatus);
-      } catch (error) {
-        this.logger.error('Health check failed:', error);
-        res.status(503).json({
-          status: 'unhealthy',
-          error: 'Health check failed',
-        });
-      }
-    });
-
-    // Metrics endpoint
-    this.app.get('/metrics', async (req: Request, res: Response) => {
-      try {
-        res.set('Content-Type', register.contentType);
-        res.end(await register.metrics());
-      } catch (error) {
-        this.logger.error('Metrics collection failed:', error);
-        res.status(500).json({ error: 'Metrics collection failed' });
-      }
-    });
-
-    // Scene management endpoints
-    this.app.post('/scenes', this.createScene.bind(this));
-    this.app.get('/scenes/:sceneId', this.getScene.bind(this));
-    this.app.put('/scenes/:sceneId', this.updateScene.bind(this));
-    this.app.delete('/scenes/:sceneId', this.deleteScene.bind(this));
-
-    // Audio source management
-    this.app.post('/scenes/:sceneId/sources', this.addAudioSource.bind(this));
-    this.app.put('/scenes/:sceneId/sources/:sourceId', this.updateAudioSource.bind(this));
-    this.app.delete('/scenes/:sceneId/sources/:sourceId', this.removeAudioSource.bind(this));
-
-    // WebRTC signaling endpoints
-    this.app.post('/webrtc/offer', this.webRTCHandler.handleOffer.bind(this.webRTCHandler));
-    this.app.post('/webrtc/answer', this.webRTCHandler.handleAnswer.bind(this.webRTCHandler));
-    this.app.post('/webrtc/ice-candidate', this.webRTCHandler.handleIceCandidate.bind(this.webRTCHandler));
+    // Spatial audio routes
+    this.app.use('/api/spatial-audio', spatialAudioRoutes);
 
     // Error handling middleware
-    this.app.use((error: Error, req: Request, res: Response, next: any) => {
-      this.logger.error('Unhandled error:', error);
-      this.metrics.errorsTotal.labels('unhandled').inc();
-      res.status(500).json({
-        error: 'Internal server error',
-        message: error.message,
+    this.app.use(this.handleError.bind(this));
+
+    // 404 handler
+    this.app.use('*', (req, res) => {
+      res.status(404).json({
+        success: false,
+        error: 'Endpoint not found',
+        timestamp: new Date().toISOString()
       });
     });
   }
 
   /**
-   * Setup NATS message subscriptions
+   * Handle health check requests
    */
-  private async setupMessageSubscriptions(): Promise<void> {
-    if (!this.natsConnection) {
-      throw new Error('NATS connection not established');
-    }
+  private async handleHealthCheck(req: express.Request, res: express.Response): Promise<void> {
+    try {
+      const health: ServiceHealth = {
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        version: process.env.npm_package_version || '1.0.0',
+        environment: process.env.NODE_ENV || 'development',
+        components: {
+          spatialAudioEngine: await this.spatialAudioEngine.healthCheck(),
+          redis: this.redis.status === 'ready',
+          supabase: await this.checkSupabaseHealth(),
+          websocket: this.wsServer.readyState === 1,
+          processors: {
+            voiceChat: this.voiceChatProcessor.isHealthy(),
+            environmental: this.environmentalAudioProcessor.isHealthy(),
+            aiAgent: this.aiAgentVoiceProcessor.isHealthy()
+          }
+        },
+        metrics: {
+          activeSessions: this.activeSessions.size,
+          connectedClients: this.spatialAudioWS.getConnectedClientCount(),
+          memoryUsage: process.memoryUsage(),
+          cpuUsage: process.cpuUsage()
+        }
+      };
 
-    // Subscribe to user position updates
-    const positionSub = this.natsConnection.subscribe('user.position.update');
-    (async () => {
-      for await (const msg of positionSub) {
-        try {
-          const data = JSON.parse(msg.string());
-          await this.handleUserPositionUpdate(data);
-          this.metrics.messagesProcessed.labels('position_update').inc();
-        } catch (error) {
-          this.logger.error('Error processing position update:', error);
-          this.metrics.errorsTotal.labels('position_update').inc();
+      const allHealthy = Object.values(health.components).every(component => 
+        typeof component === 'boolean' ? component : Object.values(component).every(Boolean)
+      );
+
+      if (!allHealthy) {
+        health.status = 'degraded';
+      }
+
+      res.status(allHealthy ? 200 : 503).json(health);
+    } catch (error) {
+      console.error('Health check failed:', error);
+      res.status(503).json({
+        status: 'unhealthy',
+        timestamp: new Date().toISOString(),
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+
+  /**
+   * Check Supabase connection health
+   */
+  private async checkSupabaseHealth(): Promise<boolean> {
+    try {
+      const { data, error } = await this.supabase
+        .from('users')
+        .select('count')
+        .limit(1);
+      
+      return !error;
+    } catch (error) {
+      console.error('Supabase health check failed:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Handle service info requests
+   */
+  private handleServiceInfo(req: express.Request, res: express.Response): void {
+    res.json({
+      name: 'CRAIverse Spatial Audio Service',
+      version: process.env.npm_package_version || '1.0.0',
+      description: '3D spatial audio processing for virtual environments',
+      features: [
+        'Real-time voice chat with 3D positioning',
+        'Environmental audio processing',
+        'AI agent voice spatialization',
+        'HRTF-based binaural audio',
+        'Distance-based audio attenuation',
+        'WebRTC integration',
+        'Low-latency WebSocket communication'
+      ],
+      endpoints: {
+        health: '/health',
+        info: '/info',
+        api: '/api/spatial-audio',
+        websocket: '/spatial-audio-ws'
+      },
+      config: {
+        maxConcurrentSessions: this.config.maxConcurrentSessions,
+        audioSampleRate: this.config.audioSampleRate,
+        maxDistance: this.config.maxDistance,
+        enabledFeatures: {
+          voiceChat: this.config.enableVoiceChat,
+          environmentalAudio: this.config.enableEnvironmentalAudio,
+          aiAgentVoices: this.config.enableAIAgentVoices
         }
       }
-    })();
-
-    // Subscribe to scene events
-    const sceneSub = this.natsConnection.subscribe('scene.event.*');
-    (async () => {
-      for await (const msg of sceneSub) {
-        try {
-          const data = JSON.parse(msg.string());
-          await this.handleSceneEvent(msg.subject, data);
-          this.metrics.messagesProcessed.labels('scene_event').inc();
-        } catch (error) {
-          this.logger.error('Error processing scene event:', error);
-          this.metrics.errorsTotal.labels('scene_event').inc();
-        }
-      }
-    })();
-
-    this.logger.info('Message subscriptions established');
+    });
   }
 
   /**
-   * Handle user position updates
+   * Global error handling middleware
    */
-  private async handleUserPositionUpdate(data: any): Promise<void> {
-    const { userId, sceneId, position, rotation } = data;
-    
-    const scene = this.activeScenes.get(sceneId);
-    if (scene) {
-      await this.spatialEngine.updateListenerPosition(userId, position, rotation);
-      
-      // Broadcast position update to other users in the scene
-      this.io.to(`scene:${sceneId}`).emit('user:position', {
-        userId,
-        position,
-        rotation,
-      });
-    }
-  }
+  private handleError(
+    error: Error,
+    req: express.Request,
+    res: express.Response,
+    next: express.NextFunction
+  ): void {
+    console.error('Service error:', error);
 
-  /**
-   * Handle scene events
-   */
-  private async handleSceneEvent(subject: string, data: any): Promise<void> {
-    const eventType = subject.split('.').pop();
-    
-    switch (eventType) {
-      case 'created':
-        await this.handleSceneCreated(data);
-        break;
-      case 'updated':
-        await this.handleSceneUpdated(data);
-        break;
-      case 'deleted':
-        await this.handleSceneDeleted(data);
-        break;
-      default:
-        this.logger.warn(`Unknown scene event type: ${eventType}`);
-    }
-  }
-
-  /**
-   * Create a new audio scene
-   */
-  private async createScene(req: Request, res: Response): Promise<void> {
-    try {
-      const { sceneId, acousticProperties, spatialConfig } = req.body;
-
-      const scene = new AudioScene({
-        id: sceneId,
-        acousticProperties,
-        spatialConfig,
-      });
-
-      this.activeScenes.set(sceneId, scene);
-      await this.spatialEngine.createScene(scene);
-
-      // Cache scene in Redis
-      await this.redisClient.setEx(`scene:${sceneId}`, 3600, JSON.stringify(scene.toJSON()));
-
-      this.logger.info(`Created audio scene: ${sceneId}`);
-      res.status(201).json({ success: true, sceneId });
-
-    } catch (error) {
-      this.logger.error('Failed to create scene:', error);
-      this.metrics.errorsTotal.labels('scene_creation').inc();
-      res.status(500).json({ error: 'Failed to create scene' });
-    }
-  }
-
-  /**
-   * Get scene information
-   */
-  private async getScene(req: Request, res: Response): Promise<void> {
-    try {
-      const { sceneId } = req.params;
-      const scene = this.activeScenes.get(sceneId);
-
-      if (!scene) {
-        res.status(404).json({ error: 'Scene not found' });
-        return;
-      }
-
-      res.json(scene.toJSON());
-
-    } catch (error) {
-      this.logger.error('Failed to get scene:', error);
-      res.status(500).json({ error: 'Failed to get scene' });
-    }
-  }
-
-  /**
-   * Update scene configuration
-   */
-  private async updateScene(req: Request, res: Response): Promise<void> {
-    try {
-      const { sceneId } = req.params;
-      const updates = req.body;
-
-      const scene = this.activeScenes.get(sceneId);
-      if (!scene) {
-        res.status(404).json({ error: 'Scene not found' });
-        return;
-      }
-
-      scene.update(updates);
-      await this.spatialEngine.updateScene(scene);
-
-      // Update cache
-      await this.redisClient.setEx(`scene:${sceneId}`, 3600, JSON.stringify(scene.toJSON()));
-
-      res.json({ success: true });
-
-    } catch (error) {
-      this.logger.error('Failed to update scene:', error);
-      this.metrics.errorsTotal.labels('scene_update').inc();
-      res.status(500).json({ error: 'Failed to update scene' });
-    }
-  }
-
-  /**
-   * Delete an audio scene
-   */
-  private async deleteScene(req: Request, res: Response): Promise<void> {
-    try {
-      const { sceneId } = req.params;
-
-      this.activeScenes.delete(sceneId);
-      await this.spatialEngine.destroyScene(sceneId);
-
-      // Remove from cache
-      await this.redisClient.del(`scene:${sceneId}`);
-
-      this.logger.info(`Deleted audio scene: ${sceneId}`);
-      res.json({ success: true });
-
-    } catch (error) {
-      this.logger.error('Failed to delete scene:', error);
-      this.metrics.errorsTotal.labels('scene_deletion').inc();
-      res.status(500).json({ error: 'Failed to delete scene' });
-    }
-  }
-
-  /**
-   * Add audio source to scene
-   */
-  private async addAudioSource(req: Request, res: Response): Promise<void> {
-    try {
-      const { sceneId } = req.params;
-      const sourceData = req.body;
-
-      const scene = this.activeScenes.get(sceneId);
-      if (!scene) {
-        res.status(404).json({ error: 'Scene not found' });
-        return;
-      }
-
-      const sourceId = await this.spatialEngine.addAudioSource(sceneId, sourceData);
-      res.status(201).json({ success: true, sourceId });
-
-    } catch (error) {
-      this.logger.error('Failed to add audio source:', error);
-      this.metrics.errorsTotal.labels('source_addition').inc();
-      res.status(500).json({ error: 'Failed to add audio source' });
-    }
-  }
-
-  /**
-   * Update audio source
-   */
-  private async updateAudioSource(req: Request, res: Response): Promise<void> {
-    try {
-      const { sceneId, sourceId } = req.params;
-      const updates = req.body;
-
-      await this.spatialEngine.updateAudioSource(sceneId, sourceId, updates);
-      res.json({ success: true });
-
-    } catch (error) {
-      this.logger.error('Failed to update audio source:', error);
-      this.metrics.errorsTotal.labels('source_update').inc();
-      res.status(500).json({ error: 'Failed to update audio source' });
-    }
-  }
-
-  /**
-   * Remove audio source from scene
-   */
-  private async removeAudioSource(req: Request, res: Response): Promise<void> {
-    try {
-      const { sceneId, sourceId } = req.params;
-
-      await this.spatialEngine.removeAudioSource(sceneId, sourceId);
-      res.json({ success: true });
-
-    } catch (error) {
-      this.logger.error('Failed to remove audio source:', error);
-      this.metrics.errorsTotal.labels('source_removal').inc();
-      res.status(500).json({ error: 'Failed to remove audio source' });
-    }
-  }
-
-  /**
-   * Handle scene creation event
-   */
-  private async handleSceneCreated(data: any): Promise<void> {
-    const { sceneId, config } = data;
-    
-    if (!this.activeScenes.has(sceneId)) {
-      const scene = new AudioScene({
-        id: sceneId,
-        ...config,
-      });
-      
-      this.activeScenes.set(sceneId, scene);
-      await this.spatialEngine.createScene(scene);
-      
-      this.logger.info(`Scene created from event: ${sceneId}`);
-    }
-  }
-
-  /**
-   * Handle scene update event
-   */
-  private async handleSceneUpdated(data: any): Promise<void> {
-    const { sceneId, updates } = data;
-    
-    const scene = this.activeScenes.get(sceneId);
-    if (scene) {
-      scene.update(updates);
-      await this.spatialEngine.updateScene(scene);
-      
-      this.logger.info(`Scene updated from event: ${sceneId}`);
-    }
-  }
-
-  /**
-   * Handle scene deletion event
-   */
-  private async handleSceneDeleted(data: any): Promise<void> {
-    const { sceneId } = data;
-    
-    this.activeScenes.delete(sceneId);
-    await this.spatialEngine.destroyScene(sceneId);
-    
-    this.logger.info(`Scene deleted from event: ${sceneId}`);
-  }
-
-  /**
-   * Get service health status
-   */
-  private async getHealthStatus(): Promise<HealthStatus> {
-    const status: HealthStatus = {
-      status: 'healthy',
-      timestamp: Date.now(),
-      services: {
-        redis: false,
-        nats: false,
-        supabase: false,
-        webrtc: false,
-      },
-      metrics: {
-        activeConnections: this.io.sockets.sockets.size,
-        averageLatency: 0,
-        uptime: Date.now() - this.startTime,
-      },
+    const spatialAudioError: SpatialAudioError = {
+      code: 'INTERNAL_SERVER_ERROR',
+      message: error.message || 'Internal server error',
+      timestamp: new Date().toISOString(),
+      requestId: req.headers['x-request-id'] as string || undefined,
+      details: process.env.NODE_ENV === 'development' ? {
+        stack: error.stack,
+        name: error.name
+      } : undefined
     };
 
-    try {
-      // Check Redis
-      await this.redisClient.ping();
-      status.services.redis = true;
-    } catch (error) {
-      this.logger.warn('Redis health check failed:', error);
-    }
-
-    try {
-      // Check NATS
-      status.services.nats = this.natsConnection?.isClosed() === false;
-    } catch (error) {
-      this.logger.warn('NATS health check failed:', error);
-    }
-
-    try {
-      // Check Supabase
-      const { error } = await this.supabaseClient.from('health_check').select('*').limit(1);
-      status.services.supabase = !error;
-    } catch (error) {
-      this.logger.warn('Supabase health check failed:', error);
-    }
-
-    // Check WebRTC handler
-    status.services.webrtc = this.webRTCHandler.isHealthy();
-
-    // Overall health status
-    const allServicesHealthy = Object.values(status.services).every(Boolean);
-    status.status = allServicesHealthy ? 'healthy' : 'unhealthy';
-
-    return status;
+    res.status(500).json({
+      success: false,
+      error: spatialAudioError
+    });
   }
 
   /**
@@ -657,30 +346,127 @@ class SpatialAudioService {
    */
   public async start(): Promise<void> {
     try {
-      await this.initializeServices();
-      
-      this.server.listen(this.config.port, () => {
-        this.logger.info(`Spatial Audio Service listening on port ${this.config.port}`);
+      console.log('Starting CRAIverse Spatial Audio Service...');
+
+      // Configure middleware and routes
+      this.configureMiddleware();
+      this.configureRoutes();
+
+      // Initialize components
+      await this.spatialAudioEngine.initialize();
+      await this.voiceChatProcessor.initialize();
+      await this.environmentalAudioProcessor.initialize();
+      await this.aiAgentVoiceProcessor.initialize();
+
+      // Start WebSocket server
+      await this.spatialAudioWS.initialize();
+
+      // Start HTTP server
+      await new Promise<void>((resolve, reject) => {
+        this.server.listen(this.config.port, (error?: Error) => {
+          if (error) {
+            reject(error);
+          } else {
+            resolve();
+          }
+        });
       });
 
-      // Graceful shutdown handling
-      process.on('SIGTERM', this.shutdown.bind(this));
-      process.on('SIGINT', this.shutdown.bind(this));
+      console.log(`🎵 CRAIverse Spatial Audio Service started successfully`);
+      console.log(`📡 HTTP Server: http://localhost:${this.config.port}`);
+      console.log(`🔌 WebSocket Server: ws://localhost:${this.config.port}/spatial-audio-ws`);
+      console.log(`🗄️ Redis: ${this.config.redisUrl}`);
+      console.log(`📊 Max Sessions: ${this.config.maxConcurrentSessions}`);
 
     } catch (error) {
-      this.logger.error('Failed to start service:', error);
+      console.error('Failed to start CRAIverse Spatial Audio Service:', error);
+      await this.shutdown();
       process.exit(1);
     }
   }
 
   /**
-   * Graceful shutdown
+   * Gracefully shutdown the service
    */
-  private async shutdown(): Promise<void> {
-    this.logger.info('Starting graceful shutdown...');
+  public async shutdown(): Promise<void> {
+    if (this.isShuttingDown) {
+      return;
+    }
+
+    this.isShuttingDown = true;
+    console.log('Shutting down CRAIverse Spatial Audio Service...');
 
     try {
-      // Close server
-      this.server.close();
+      // Stop accepting new connections
+      this.server?.close();
 
-      // Close Socket.IO
+      // Close WebSocket connections
+      await this.spatialAudioWS?.shutdown();
+
+      // Cleanup processors
+      await this.voiceChatProcessor?.cleanup();
+      await this.environmentalAudioProcessor?.cleanup();
+      await this.aiAgentVoiceProcessor?.cleanup();
+
+      // Cleanup spatial audio engine
+      await this.spatialAudioEngine?.cleanup();
+
+      // Close database connections
+      this.redis?.disconnect();
+
+      console.log('✅ CRAIverse Spatial Audio Service shut down successfully');
+    } catch (error) {
+      console.error('Error during shutdown:', error);
+    }
+  }
+
+  /**
+   * Get service metrics
+   */
+  public getMetrics() {
+    return {
+      activeSessions: this.activeSessions.size,
+      connectedClients: this.spatialAudioWS?.getConnectedClientCount() || 0,
+      uptime: process.uptime(),
+      memoryUsage: process.memoryUsage(),
+      cpuUsage: process.cpuUsage()
+    };
+  }
+}
+
+// Create and export service instance
+const spatialAudioService = new CRAIverseSpatialAudioService();
+
+// Handle process signals for graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM received, shutting down gracefully...');
+  await spatialAudioService.shutdown();
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log('SIGINT received, shutting down gracefully...');
+  await spatialAudioService.shutdown();
+  process.exit(0);
+});
+
+process.on('uncaughtException', async (error) => {
+  console.error('Uncaught Exception:', error);
+  await spatialAudioService.shutdown();
+  process.exit(1);
+});
+
+process.on('unhandledRejection', async (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  await spatialAudioService.shutdown();
+  process.exit(1);
+});
+
+// Start service if this file is run directly
+if (require.main === module) {
+  spatialAudioService.start().catch(console.error);
+}
+
+export default spatialAudioService;
+export { CRAIverseSpatialAudioService };
+```
