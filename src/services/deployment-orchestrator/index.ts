@@ -1,732 +1,702 @@
+```typescript
 /**
- * @fileoverview Intelligent Deployment Orchestrator
- * AI-powered deployment orchestrator that manages multi-environment deployments
- * with predictive scaling, canary releases, and automated rollback decisions.
+ * Zero-Downtime Deployment Orchestrator
  * 
- * @version 1.0.0
- * @author CR AudioViz AI
+ * Manages complex multi-service deployments with blue-green strategies,
+ * canary releases, and automatic rollback capabilities for mission-critical applications.
+ * 
+ * @fileoverview Complete deployment orchestration service with health monitoring,
+ * traffic splitting, and automated recovery mechanisms.
  */
 
 import { EventEmitter } from 'events';
-import * as tf from '@tensorflow/tfjs-node';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import Redis from 'ioredis';
 
-/**
- * Deployment environment configuration
- */
-export interface DeploymentEnvironment {
-  id: string;
-  name: string;
-  type: 'development' | 'staging' | 'production';
-  cluster: {
-    provider: 'kubernetes' | 'docker' | 'aws-ecs';
-    endpoint: string;
-    credentials: Record<string, any>;
-  };
-  resources: {
-    cpu: number;
-    memory: number;
-    storage: number;
-    replicas: number;
-  };
-  healthChecks: {
-    endpoint: string;
-    interval: number;
-    timeout: number;
-    retries: number;
-  };
-}
-
-/**
- * Deployment configuration
- */
+// Core Interfaces
 export interface DeploymentConfig {
   id: string;
-  applicationId: string;
+  name: string;
   version: string;
+  strategy: DeploymentStrategy;
+  services: ServiceConfig[];
+  environment: Environment;
+  rollbackConfig: RollbackConfig;
+  healthChecks: HealthCheckConfig[];
+  notifications: NotificationConfig[];
+  metadata: Record<string, any>;
+}
+
+export interface ServiceConfig {
+  name: string;
   image: string;
-  targetEnvironments: string[];
-  strategy: 'blue-green' | 'canary' | 'rolling' | 'recreate';
-  canaryConfig?: {
-    trafficPercent: number;
-    duration: number;
-    successThreshold: number;
-    failureThreshold: number;
-  };
-  resources: {
-    requests: { cpu: string; memory: string };
-    limits: { cpu: string; memory: string };
-  };
-  environmentVariables: Record<string, string>;
-  secrets: Record<string, string>;
+  tag: string;
+  replicas: number;
+  resources: ResourceConfig;
+  healthCheck: HealthCheckConfig;
+  dependencies: string[];
+  ports: PortConfig[];
 }
 
-/**
- * Deployment metrics for monitoring
- */
-export interface DeploymentMetrics {
-  timestamp: number;
-  deploymentId: string;
-  environment: string;
-  metrics: {
-    cpu: number;
-    memory: number;
-    responseTime: number;
-    errorRate: number;
-    throughput: number;
-    availability: number;
-  };
-  healthStatus: 'healthy' | 'degraded' | 'unhealthy';
+export interface ResourceConfig {
+  cpu: string;
+  memory: string;
+  storage?: string;
 }
 
-/**
- * Canary release status
- */
-export interface CanaryRelease {
+export interface PortConfig {
+  containerPort: number;
+  protocol: 'TCP' | 'UDP';
+  name?: string;
+}
+
+export interface HealthCheckConfig {
+  type: 'http' | 'tcp' | 'command';
+  path?: string;
+  port?: number;
+  command?: string[];
+  interval: number;
+  timeout: number;
+  retries: number;
+  initialDelay: number;
+  successThreshold: number;
+  failureThreshold: number;
+}
+
+export interface RollbackConfig {
+  enabled: boolean;
+  automaticTriggers: RollbackTrigger[];
+  maxRollbackTime: number;
+  preserveData: boolean;
+}
+
+export interface RollbackTrigger {
+  type: 'health_check' | 'error_rate' | 'response_time' | 'custom_metric';
+  threshold: number;
+  window: number;
+  severity: 'warning' | 'critical';
+}
+
+export interface NotificationConfig {
+  type: 'slack' | 'discord' | 'email' | 'webhook';
+  endpoint: string;
+  events: DeploymentEvent[];
+  template?: string;
+}
+
+export interface DeploymentStatus {
   id: string;
-  deploymentId: string;
-  environment: string;
-  startTime: number;
-  duration: number;
-  currentTraffic: number;
-  targetTraffic: number;
-  status: 'initializing' | 'running' | 'promoting' | 'rolling-back' | 'completed';
-  metrics: {
-    baseline: DeploymentMetrics;
-    canary: DeploymentMetrics;
-    comparison: {
-      performanceDelta: number;
-      errorRateDelta: number;
-      confidenceScore: number;
-    };
-  };
+  phase: DeploymentPhase;
+  strategy: DeploymentStrategy;
+  progress: number;
+  startTime: Date;
+  estimatedCompletion?: Date;
+  services: ServiceDeploymentStatus[];
+  metrics: DeploymentMetrics;
+  errors: DeploymentError[];
+  canRollback: boolean;
+}
+
+export interface ServiceDeploymentStatus {
+  name: string;
+  phase: DeploymentPhase;
+  currentReplicas: number;
+  targetReplicas: number;
+  healthyReplicas: number;
+  lastHealthCheck: Date;
+  errors: string[];
+}
+
+export interface DeploymentMetrics {
+  cpuUsage: number;
+  memoryUsage: number;
+  networkLatency: number;
+  errorRate: number;
+  requestRate: number;
+  responseTime: number;
+  availability: number;
+  throughput: number;
+}
+
+export interface TrafficSplit {
+  bluePercentage: number;
+  greenPercentage: number;
+  canaryPercentage?: number;
+  timestamp: Date;
+}
+
+// Enums
+export enum DeploymentStrategy {
+  BLUE_GREEN = 'blue_green',
+  CANARY = 'canary',
+  ROLLING = 'rolling',
+  RECREATE = 'recreate'
+}
+
+export enum DeploymentPhase {
+  PENDING = 'pending',
+  INITIALIZING = 'initializing',
+  VALIDATING = 'validating',
+  DEPLOYING = 'deploying',
+  MONITORING = 'monitoring',
+  COMPLETED = 'completed',
+  FAILED = 'failed',
+  ROLLING_BACK = 'rolling_back',
+  ROLLED_BACK = 'rolled_back'
+}
+
+export enum Environment {
+  DEVELOPMENT = 'development',
+  STAGING = 'staging',
+  PRODUCTION = 'production',
+  CANARY = 'canary'
+}
+
+export enum DeploymentEvent {
+  STARTED = 'deployment.started',
+  PROGRESS = 'deployment.progress',
+  COMPLETED = 'deployment.completed',
+  FAILED = 'deployment.failed',
+  ROLLBACK_STARTED = 'rollback.started',
+  ROLLBACK_COMPLETED = 'rollback.completed',
+  HEALTH_CHECK_FAILED = 'health_check.failed',
+  TRAFFIC_SHIFTED = 'traffic.shifted'
+}
+
+export interface DeploymentError {
+  code: string;
+  message: string;
+  service?: string;
+  timestamp: Date;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  stackTrace?: string;
 }
 
 /**
- * Rollback decision factors
+ * Health Check Monitor
+ * Continuously monitors service health during deployments
  */
-export interface RollbackDecision {
-  deploymentId: string;
-  timestamp: number;
-  decision: 'continue' | 'rollback';
-  confidence: number;
-  reasons: string[];
-  factors: {
-    errorRateIncrease: number;
-    latencyIncrease: number;
-    throughputDecrease: number;
-    resourceExhaustion: boolean;
-    healthCheckFailures: number;
-  };
-}
-
-/**
- * Predictive scaling recommendation
- */
-export interface ScalingPrediction {
-  timestamp: number;
-  environment: string;
-  prediction: {
-    recommendedReplicas: number;
-    confidence: number;
-    timeHorizon: number;
-    reasoning: string[];
-  };
-  currentLoad: {
-    cpu: number;
-    memory: number;
-    requests: number;
-  };
-  predictedLoad: {
-    cpu: number;
-    memory: number;
-    requests: number;
-  };
-}
-
-/**
- * Deployment orchestrator configuration
- */
-export interface OrchestratorConfig {
-  environments: DeploymentEnvironment[];
-  monitoring: {
-    metricsInterval: number;
-    healthCheckInterval: number;
-    alertThresholds: {
-      errorRate: number;
-      responseTime: number;
-      availability: number;
-    };
-  };
-  ai: {
-    modelPath: string;
-    predictionInterval: number;
-    trainingDataRetention: number;
-  };
-  notifications: {
-    slack?: { webhook: string };
-    discord?: { webhook: string };
-    email?: { smtp: string };
-  };
-}
-
-/**
- * Predictive scaler using machine learning
- */
-export class PredictiveScaler {
-  private model: tf.LayersModel | null = null;
-  private trainingData: number[][] = [];
-  private labels: number[] = [];
+class HealthCheckMonitor extends EventEmitter {
+  private checks: Map<string, NodeJS.Timer> = new Map();
+  private healthStatus: Map<string, boolean> = new Map();
 
   /**
-   * Initialize the predictive scaler
-   * @param modelPath - Path to pre-trained model
+   * Start monitoring a service
    */
-  constructor(private modelPath?: string) {}
-
-  /**
-   * Load or create ML model for scaling predictions
-   */
-  public async initialize(): Promise<void> {
-    try {
-      if (this.modelPath) {
-        this.model = await tf.loadLayersModel(this.modelPath);
-      } else {
-        this.model = this.createModel();
-      }
-    } catch (error) {
-      console.warn('Failed to load model, creating new one:', error);
-      this.model = this.createModel();
-    }
-  }
-
-  /**
-   * Create a new neural network model
-   */
-  private createModel(): tf.LayersModel {
-    const model = tf.sequential({
-      layers: [
-        tf.layers.dense({ inputShape: [6], units: 64, activation: 'relu' }),
-        tf.layers.dropout({ rate: 0.2 }),
-        tf.layers.dense({ units: 32, activation: 'relu' }),
-        tf.layers.dropout({ rate: 0.2 }),
-        tf.layers.dense({ units: 16, activation: 'relu' }),
-        tf.layers.dense({ units: 1, activation: 'linear' })
-      ]
-    });
-
-    model.compile({
-      optimizer: 'adam',
-      loss: 'meanSquaredError',
-      metrics: ['mae']
-    });
-
-    return model;
-  }
-
-  /**
-   * Add training data point
-   */
-  public addTrainingData(metrics: DeploymentMetrics, actualReplicas: number): void {
-    const features = [
-      metrics.metrics.cpu,
-      metrics.metrics.memory,
-      metrics.metrics.responseTime,
-      metrics.metrics.throughput,
-      metrics.metrics.errorRate,
-      new Date().getHours() / 24 // Time of day feature
-    ];
-
-    this.trainingData.push(features);
-    this.labels.push(actualReplicas);
-
-    // Keep only recent data
-    if (this.trainingData.length > 10000) {
-      this.trainingData.shift();
-      this.labels.shift();
-    }
-  }
-
-  /**
-   * Train the model with collected data
-   */
-  public async trainModel(): Promise<void> {
-    if (!this.model || this.trainingData.length < 100) {
-      return;
-    }
-
-    const xs = tf.tensor2d(this.trainingData);
-    const ys = tf.tensor1d(this.labels);
-
-    await this.model.fit(xs, ys, {
-      epochs: 50,
-      batchSize: 32,
-      validationSplit: 0.2,
-      verbose: 0
-    });
-
-    xs.dispose();
-    ys.dispose();
-  }
-
-  /**
-   * Predict optimal replica count
-   */
-  public async predictReplicas(metrics: DeploymentMetrics): Promise<ScalingPrediction> {
-    if (!this.model) {
-      throw new Error('Model not initialized');
-    }
-
-    const features = tf.tensor2d([[
-      metrics.metrics.cpu,
-      metrics.metrics.memory,
-      metrics.metrics.responseTime,
-      metrics.metrics.throughput,
-      metrics.metrics.errorRate,
-      new Date().getHours() / 24
-    ]]);
-
-    const prediction = this.model.predict(features) as tf.Tensor;
-    const recommendedReplicas = Math.max(1, Math.round(await prediction.data()[0]));
-
-    features.dispose();
-    prediction.dispose();
-
-    return {
-      timestamp: Date.now(),
-      environment: 'default',
-      prediction: {
-        recommendedReplicas,
-        confidence: this.calculateConfidence(metrics),
-        timeHorizon: 300, // 5 minutes
-        reasoning: this.generateReasoning(metrics, recommendedReplicas)
-      },
-      currentLoad: {
-        cpu: metrics.metrics.cpu,
-        memory: metrics.metrics.memory,
-        requests: metrics.metrics.throughput
-      },
-      predictedLoad: {
-        cpu: metrics.metrics.cpu * 1.1,
-        memory: metrics.metrics.memory * 1.05,
-        requests: metrics.metrics.throughput * 1.2
-      }
-    };
-  }
-
-  /**
-   * Calculate prediction confidence
-   */
-  private calculateConfidence(metrics: DeploymentMetrics): number {
-    // Simple confidence calculation based on metric stability
-    const stability = 1 - Math.abs(metrics.metrics.errorRate - 0.01) / 0.1;
-    return Math.max(0.5, Math.min(0.95, stability));
-  }
-
-  /**
-   * Generate reasoning for scaling decision
-   */
-  private generateReasoning(metrics: DeploymentMetrics, replicas: number): string[] {
-    const reasons: string[] = [];
-
-    if (metrics.metrics.cpu > 0.8) {
-      reasons.push('High CPU utilization detected');
-    }
-    if (metrics.metrics.memory > 0.8) {
-      reasons.push('High memory usage detected');
-    }
-    if (metrics.metrics.responseTime > 1000) {
-      reasons.push('Response time degradation');
-    }
-    if (metrics.metrics.errorRate > 0.05) {
-      reasons.push('Elevated error rate');
-    }
-
-    return reasons.length > 0 ? reasons : ['Normal load patterns'];
-  }
-}
-
-/**
- * Canary release manager
- */
-export class CanaryReleaseManager extends EventEmitter {
-  private activeCanaries = new Map<string, CanaryRelease>();
-
-  /**
-   * Start a canary release
-   */
-  public async startCanary(
-    deploymentId: string,
-    config: DeploymentConfig,
-    environment: DeploymentEnvironment
-  ): Promise<CanaryRelease> {
-    if (!config.canaryConfig) {
-      throw new Error('Canary configuration required');
-    }
-
-    const canary: CanaryRelease = {
-      id: `canary-${deploymentId}-${Date.now()}`,
-      deploymentId,
-      environment: environment.id,
-      startTime: Date.now(),
-      duration: config.canaryConfig.duration,
-      currentTraffic: 0,
-      targetTraffic: config.canaryConfig.trafficPercent,
-      status: 'initializing',
-      metrics: {
-        baseline: this.createEmptyMetrics(deploymentId, environment.id),
-        canary: this.createEmptyMetrics(deploymentId, environment.id),
-        comparison: {
-          performanceDelta: 0,
-          errorRateDelta: 0,
-          confidenceScore: 0
-        }
-      }
-    };
-
-    this.activeCanaries.set(canary.id, canary);
-    this.emit('canary:started', canary);
-
-    // Start traffic routing
-    await this.routeTraffic(canary.id, 5); // Start with 5% traffic
-
-    return canary;
-  }
-
-  /**
-   * Update canary metrics and make routing decisions
-   */
-  public async updateCanaryMetrics(
-    canaryId: string,
-    baselineMetrics: DeploymentMetrics,
-    canaryMetrics: DeploymentMetrics
-  ): Promise<void> {
-    const canary = this.activeCanaries.get(canaryId);
-    if (!canary) return;
-
-    canary.metrics.baseline = baselineMetrics;
-    canary.metrics.canary = canaryMetrics;
-    canary.metrics.comparison = this.compareMetrics(baselineMetrics, canaryMetrics);
-
-    // Make routing decision based on metrics
-    const decision = this.makeRoutingDecision(canary);
-    
-    if (decision === 'promote') {
-      await this.promoteCanary(canaryId);
-    } else if (decision === 'rollback') {
-      await this.rollbackCanary(canaryId);
-    } else if (decision === 'continue') {
-      await this.increaseTraffic(canaryId);
-    }
-
-    this.emit('canary:updated', canary);
-  }
-
-  /**
-   * Compare baseline and canary metrics
-   */
-  private compareMetrics(baseline: DeploymentMetrics, canary: DeploymentMetrics) {
-    const performanceDelta = (canary.metrics.responseTime - baseline.metrics.responseTime) / baseline.metrics.responseTime;
-    const errorRateDelta = canary.metrics.errorRate - baseline.metrics.errorRate;
-    
-    // Calculate confidence score
-    const confidenceScore = this.calculateMetricConfidence(baseline, canary);
-
-    return {
-      performanceDelta,
-      errorRateDelta,
-      confidenceScore
-    };
-  }
-
-  /**
-   * Calculate confidence in metric comparison
-   */
-  private calculateMetricConfidence(baseline: DeploymentMetrics, canary: DeploymentMetrics): number {
-    // Simple confidence calculation based on metric differences
-    const performanceChange = Math.abs(canary.metrics.responseTime - baseline.metrics.responseTime);
-    const errorChange = Math.abs(canary.metrics.errorRate - baseline.metrics.errorRate);
-    
-    return Math.max(0.1, 1 - (performanceChange / 1000 + errorChange * 10));
-  }
-
-  /**
-   * Make routing decision based on canary performance
-   */
-  private makeRoutingDecision(canary: CanaryRelease): 'continue' | 'promote' | 'rollback' {
-    const { comparison } = canary.metrics;
-
-    // Rollback conditions
-    if (comparison.errorRateDelta > 0.02 || comparison.performanceDelta > 0.3) {
-      return 'rollback';
-    }
-
-    // Promotion conditions
-    if (canary.currentTraffic >= canary.targetTraffic && 
-        comparison.errorRateDelta < 0.01 && 
-        comparison.performanceDelta < 0.1) {
-      return 'promote';
-    }
-
-    return 'continue';
-  }
-
-  /**
-   * Route traffic to canary version
-   */
-  private async routeTraffic(canaryId: string, trafficPercent: number): Promise<void> {
-    const canary = this.activeCanaries.get(canaryId);
-    if (!canary) return;
-
-    canary.currentTraffic = trafficPercent;
-    canary.status = 'running';
-
-    // TODO: Implement actual traffic routing logic
-    console.log(`Routing ${trafficPercent}% traffic to canary ${canaryId}`);
-  }
-
-  /**
-   * Increase traffic to canary version
-   */
-  private async increaseTraffic(canaryId: string): Promise<void> {
-    const canary = this.activeCanaries.get(canaryId);
-    if (!canary) return;
-
-    const newTraffic = Math.min(canary.targetTraffic, canary.currentTraffic + 10);
-    await this.routeTraffic(canaryId, newTraffic);
-  }
-
-  /**
-   * Promote canary to full deployment
-   */
-  public async promoteCanary(canaryId: string): Promise<void> {
-    const canary = this.activeCanaries.get(canaryId);
-    if (!canary) return;
-
-    canary.status = 'promoting';
-    await this.routeTraffic(canaryId, 100);
-    
-    canary.status = 'completed';
-    this.activeCanaries.delete(canaryId);
-    this.emit('canary:promoted', canary);
-  }
-
-  /**
-   * Rollback canary deployment
-   */
-  public async rollbackCanary(canaryId: string): Promise<void> {
-    const canary = this.activeCanaries.get(canaryId);
-    if (!canary) return;
-
-    canary.status = 'rolling-back';
-    await this.routeTraffic(canaryId, 0);
-    
-    this.activeCanaries.delete(canaryId);
-    this.emit('canary:rolledback', canary);
-  }
-
-  /**
-   * Create empty metrics for initialization
-   */
-  private createEmptyMetrics(deploymentId: string, environment: string): DeploymentMetrics {
-    return {
-      timestamp: Date.now(),
-      deploymentId,
-      environment,
-      metrics: {
-        cpu: 0,
-        memory: 0,
-        responseTime: 0,
-        errorRate: 0,
-        throughput: 0,
-        availability: 0
-      },
-      healthStatus: 'healthy'
-    };
-  }
-}
-
-/**
- * Automated rollback decision engine
- */
-export class AutoRollbackDecisionEngine {
-  private rollbackThresholds = {
-    errorRateThreshold: 0.05,
-    latencyThreshold: 2000,
-    throughputDecreaseThreshold: 0.3,
-    availabilityThreshold: 0.95
-  };
-
-  /**
-   * Analyze metrics and make rollback decision
-   */
-  public async analyzeForRollback(
-    deploymentId: string,
-    currentMetrics: DeploymentMetrics,
-    baselineMetrics: DeploymentMetrics
-  ): Promise<RollbackDecision> {
-    const factors = this.calculateRollbackFactors(currentMetrics, baselineMetrics);
-    const decision = this.makeRollbackDecision(factors);
-
-    return {
-      deploymentId,
-      timestamp: Date.now(),
-      decision: decision.shouldRollback ? 'rollback' : 'continue',
-      confidence: decision.confidence,
-      reasons: decision.reasons,
-      factors
-    };
-  }
-
-  /**
-   * Calculate rollback decision factors
-   */
-  private calculateRollbackFactors(
-    current: DeploymentMetrics,
-    baseline: DeploymentMetrics
-  ) {
-    return {
-      errorRateIncrease: current.metrics.errorRate - baseline.metrics.errorRate,
-      latencyIncrease: current.metrics.responseTime - baseline.metrics.responseTime,
-      throughputDecrease: (baseline.metrics.throughput - current.metrics.throughput) / baseline.metrics.throughput,
-      resourceExhaustion: current.metrics.cpu > 0.95 || current.metrics.memory > 0.95,
-      healthCheckFailures: current.healthStatus === 'unhealthy' ? 1 : 0
-    };
-  }
-
-  /**
-   * Make rollback decision based on factors
-   */
-  private makeRollbackDecision(factors: any) {
-    const reasons: string[] = [];
-    let riskScore = 0;
-
-    if (factors.errorRateIncrease > this.rollbackThresholds.errorRateThreshold) {
-      reasons.push('Error rate exceeded threshold');
-      riskScore += 0.4;
-    }
-
-    if (factors.latencyIncrease > this.rollbackThresholds.latencyThreshold) {
-      reasons.push('Response time degraded significantly');
-      riskScore += 0.3;
-    }
-
-    if (factors.throughputDecrease > this.rollbackThresholds.throughputDecreaseThreshold) {
-      reasons.push('Throughput decreased significantly');
-      riskScore += 0.2;
-    }
-
-    if (factors.resourceExhaustion) {
-      reasons.push('Resource exhaustion detected');
-      riskScore += 0.3;
-    }
-
-    if (factors.healthCheckFailures > 0) {
-      reasons.push('Health check failures detected');
-      riskScore += 0.2;
-    }
-
-    const shouldRollback = riskScore > 0.5;
-    const confidence = Math.min(0.95, riskScore);
-
-    return {
-      shouldRollback,
-      confidence,
-      reasons: reasons.length > 0 ? reasons : ['All metrics within normal range']
-    };
-  }
-}
-
-/**
- * Main deployment orchestrator service
- */
-export class DeploymentOrchestrator extends EventEmitter {
-  private environments = new Map<string, DeploymentEnvironment>();
-  private activeDeployments = new Map<string, DeploymentConfig>();
-  private predictiveScaler: PredictiveScaler;
-  private canaryManager: CanaryReleaseManager;
-  private rollbackEngine: AutoRollbackDecisionEngine;
-  private metricsCollector: NodeJS.Timeout | null = null;
-
-  /**
-   * Initialize the deployment orchestrator
-   */
-  constructor(private config: OrchestratorConfig) {
-    super();
-    
-    // Initialize components
-    this.predictiveScaler = new PredictiveScaler(config.ai.modelPath);
-    this.canaryManager = new CanaryReleaseManager();
-    this.rollbackEngine = new AutoRollbackDecisionEngine();
-
-    // Register environments
-    config.environments.forEach(env => {
-      this.environments.set(env.id, env);
-    });
-
-    // Set up event listeners
-    this.setupEventListeners();
-  }
-
-  /**
-   * Initialize the orchestrator
-   */
-  public async initialize(): Promise<void> {
-    await this.predictiveScaler.initialize();
-    this.startMetricsCollection();
-    this.emit('orchestrator:initialized');
-  }
-
-  /**
-   * Deploy application to specified environments
-   */
-  public async deploy(deploymentConfig: DeploymentConfig): Promise<void> {
-    try {
-      this.activeDeployments.set(deploymentConfig.id, deploymentConfig);
-      this.emit('deployment:started', deploymentConfig);
-
-      for (const envId of deploymentConfig.targetEnvironments) {
-        const environment = this.environments.get(envId);
-        if (!environment) {
-          throw new Error(`Environment ${envId} not found`);
+  async startMonitoring(serviceId: string, config: HealthCheckConfig): Promise<void> {
+    this.stopMonitoring(serviceId);
+
+    const timer = setInterval(async () => {
+      try {
+        const isHealthy = await this.performHealthCheck(serviceId, config);
+        const wasHealthy = this.healthStatus.get(serviceId);
+
+        this.healthStatus.set(serviceId, isHealthy);
+
+        if (wasHealthy !== isHealthy) {
+          this.emit('health_status_changed', {
+            serviceId,
+            isHealthy,
+            timestamp: new Date()
+          });
         }
 
-        await this.deployToEnvironment(deploymentConfig, environment);
+        if (!isHealthy) {
+          this.emit('health_check_failed', {
+            serviceId,
+            config,
+            timestamp: new Date()
+          });
+        }
+      } catch (error) {
+        this.emit('health_check_error', {
+          serviceId,
+          error: error instanceof Error ? error.message : 'Unknown error',
+          timestamp: new Date()
+        });
       }
+    }, config.interval);
 
-      this.emit('deployment:completed', deploymentConfig);
+    this.checks.set(serviceId, timer);
+  }
+
+  /**
+   * Stop monitoring a service
+   */
+  stopMonitoring(serviceId: string): void {
+    const timer = this.checks.get(serviceId);
+    if (timer) {
+      clearInterval(timer);
+      this.checks.delete(serviceId);
+    }
+  }
+
+  /**
+   * Get current health status
+   */
+  getHealthStatus(serviceId: string): boolean {
+    return this.healthStatus.get(serviceId) ?? false;
+  }
+
+  /**
+   * Perform individual health check
+   */
+  private async performHealthCheck(serviceId: string, config: HealthCheckConfig): Promise<boolean> {
+    switch (config.type) {
+      case 'http':
+        return this.performHttpHealthCheck(serviceId, config);
+      case 'tcp':
+        return this.performTcpHealthCheck(serviceId, config);
+      case 'command':
+        return this.performCommandHealthCheck(serviceId, config);
+      default:
+        throw new Error(`Unsupported health check type: ${config.type}`);
+    }
+  }
+
+  private async performHttpHealthCheck(serviceId: string, config: HealthCheckConfig): Promise<boolean> {
+    if (!config.path || !config.port) {
+      throw new Error('HTTP health check requires path and port');
+    }
+
+    try {
+      const response = await fetch(`http://localhost:${config.port}${config.path}`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(config.timeout)
+      });
+      return response.ok;
     } catch (error) {
-      this.emit('deployment:failed', { deploymentConfig, error });
+      return false;
+    }
+  }
+
+  private async performTcpHealthCheck(serviceId: string, config: HealthCheckConfig): Promise<boolean> {
+    // Implementation would use net.Socket to check TCP connectivity
+    return new Promise((resolve) => {
+      const net = require('net');
+      const socket = new net.Socket();
+      
+      socket.setTimeout(config.timeout);
+      socket.on('connect', () => {
+        socket.destroy();
+        resolve(true);
+      });
+      
+      socket.on('timeout', () => {
+        socket.destroy();
+        resolve(false);
+      });
+      
+      socket.on('error', () => {
+        resolve(false);
+      });
+      
+      socket.connect(config.port || 80, 'localhost');
+    });
+  }
+
+  private async performCommandHealthCheck(serviceId: string, config: HealthCheckConfig): Promise<boolean> {
+    if (!config.command || config.command.length === 0) {
+      throw new Error('Command health check requires command array');
+    }
+
+    try {
+      const { spawn } = require('child_process');
+      const process = spawn(config.command[0], config.command.slice(1), {
+        timeout: config.timeout
+      });
+
+      return new Promise((resolve) => {
+        process.on('exit', (code: number) => {
+          resolve(code === 0);
+        });
+
+        process.on('error', () => {
+          resolve(false);
+        });
+      });
+    } catch (error) {
+      return false;
+    }
+  }
+}
+
+/**
+ * Traffic Splitter
+ * Manages traffic routing between different service versions
+ */
+class TrafficSplitter extends EventEmitter {
+  private currentSplit: Map<string, TrafficSplit> = new Map();
+
+  /**
+   * Update traffic split for a service
+   */
+  async updateTrafficSplit(serviceId: string, split: TrafficSplit): Promise<void> {
+    try {
+      await this.applyTrafficSplit(serviceId, split);
+      this.currentSplit.set(serviceId, split);
+      
+      this.emit('traffic_split_updated', {
+        serviceId,
+        split,
+        timestamp: new Date()
+      });
+    } catch (error) {
+      this.emit('traffic_split_error', {
+        serviceId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: new Date()
+      });
       throw error;
     }
   }
 
   /**
-   * Deploy to specific environment
+   * Get current traffic split
    */
-  private async deployToEnvironment(
-    config: DeploymentConfig,
-    environment: DeploymentEnvironment
-  ): Promise<void> {
-    console.log(`Deploying ${config.applicationId}:${config.version} to ${environment.name}`);
-
-    switch (config.strategy) {
-      case 'canary':
-        await this.canaryManager.startCanary(config.id, config, environment);
-        break;
-      case 'blue-green':
-        await this.deployBlueGreen(config, environment);
-        break;
-      case 'rolling':
-        await this.deployRolling(config, environment);
-        break;
-      default:
-        await this.deployRecreate(config, environment);
-    }
+  getCurrentSplit(serviceId: string): TrafficSplit | undefined {
+    return this.currentSplit.get(serviceId);
   }
 
   /**
-   * Implement blue-green deployment
+   * Apply traffic split configuration
    */
-  private async deployBlueGreen(config: DeploymentConfig, environment: DeploymentEnvironment): Promise<void> {
-    console.log(`Executing blue-green deployment for ${config.applicationId}`);
-    // TODO:
+  private async applyTrafficSplit(serviceId: string, split: TrafficSplit): Promise<void> {
+    // Implementation would integrate with load balancer API (e.g., HAProxy, NGINX, AWS ALB)
+    console.log(`Applying traffic split for ${serviceId}:`, split);
+    
+    // Simulate API call to load balancer
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+
+  /**
+   * Route all traffic to specific version
+   */
+  async routeAllTraffic(serviceId: string, version: 'blue' | 'green'): Promise<void> {
+    const split: TrafficSplit = {
+      bluePercentage: version === 'blue' ? 100 : 0,
+      greenPercentage: version === 'green' ? 100 : 0,
+      timestamp: new Date()
+    };
+
+    await this.updateTrafficSplit(serviceId, split);
+  }
+}
+
+/**
+ * Blue-Green Deployment Strategy
+ */
+class BlueGreenDeploymentStrategy extends EventEmitter {
+  constructor(
+    private healthMonitor: HealthCheckMonitor,
+    private trafficSplitter: TrafficSplitter
+  ) {
+    super();
+  }
+
+  /**
+   * Execute blue-green deployment
+   */
+  async execute(config: DeploymentConfig): Promise<void> {
+    this.emit('deployment_started', { deploymentId: config.id });
+
+    try {
+      // Step 1: Deploy to green environment
+      await this.deployToGreen(config);
+
+      // Step 2: Health check green environment
+      await this.validateGreenEnvironment(config);
+
+      // Step 3: Switch traffic to green
+      await this.switchTrafficToGreen(config);
+
+      // Step 4: Monitor and validate
+      await this.monitorPostSwitch(config);
+
+      // Step 5: Cleanup blue environment
+      await this.cleanupBlueEnvironment(config);
+
+      this.emit('deployment_completed', { deploymentId: config.id });
+    } catch (error) {
+      this.emit('deployment_failed', {
+        deploymentId: config.id,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      throw error;
+    }
+  }
+
+  private async deployToGreen(config: DeploymentConfig): Promise<void> {
+    this.emit('phase_started', { phase: 'green_deployment', deploymentId: config.id });
+    
+    for (const service of config.services) {
+      await this.deployService(service, 'green');
+      this.emit('service_deployed', { 
+        serviceName: service.name, 
+        environment: 'green',
+        deploymentId: config.id 
+      });
+    }
+  }
+
+  private async validateGreenEnvironment(config: DeploymentConfig): Promise<void> {
+    this.emit('phase_started', { phase: 'validation', deploymentId: config.id });
+
+    for (const service of config.services) {
+      const serviceId = `${service.name}-green`;
+      this.healthMonitor.startMonitoring(serviceId, service.healthCheck);
+      
+      // Wait for health checks to pass
+      await this.waitForHealthy(serviceId, service.healthCheck);
+    }
+  }
+
+  private async switchTrafficToGreen(config: DeploymentConfig): Promise<void> {
+    this.emit('phase_started', { phase: 'traffic_switch', deploymentId: config.id });
+
+    for (const service of config.services) {
+      await this.trafficSplitter.routeAllTraffic(service.name, 'green');
+    }
+  }
+
+  private async monitorPostSwitch(config: DeploymentConfig): Promise<void> {
+    this.emit('phase_started', { phase: 'post_switch_monitoring', deploymentId: config.id });
+
+    // Monitor for configurable period (e.g., 5 minutes)
+    const monitoringPeriod = 5 * 60 * 1000; // 5 minutes
+    await new Promise(resolve => setTimeout(resolve, monitoringPeriod));
+
+    // Check if all services are still healthy
+    for (const service of config.services) {
+      const serviceId = `${service.name}-green`;
+      if (!this.healthMonitor.getHealthStatus(serviceId)) {
+        throw new Error(`Service ${service.name} failed health check after traffic switch`);
+      }
+    }
+  }
+
+  private async cleanupBlueEnvironment(config: DeploymentConfig): Promise<void> {
+    this.emit('phase_started', { phase: 'cleanup', deploymentId: config.id });
+
+    for (const service of config.services) {
+      await this.cleanupService(service, 'blue');
+      this.healthMonitor.stopMonitoring(`${service.name}-blue`);
+    }
+  }
+
+  private async deployService(service: ServiceConfig, environment: string): Promise<void> {
+    // Implementation would integrate with container orchestration platform
+    console.log(`Deploying ${service.name} to ${environment} environment`);
+    await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate deployment time
+  }
+
+  private async cleanupService(service: ServiceConfig, environment: string): Promise<void> {
+    console.log(`Cleaning up ${service.name} from ${environment} environment`);
+    await new Promise(resolve => setTimeout(resolve, 500)); // Simulate cleanup time
+  }
+
+  private async waitForHealthy(serviceId: string, config: HealthCheckConfig): Promise<void> {
+    const maxWait = 5 * 60 * 1000; // 5 minutes
+    const checkInterval = 1000; // 1 second
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < maxWait) {
+      if (this.healthMonitor.getHealthStatus(serviceId)) {
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, checkInterval));
+    }
+
+    throw new Error(`Service ${serviceId} failed to become healthy within timeout`);
+  }
+}
+
+/**
+ * Canary Deployment Strategy
+ */
+class CanaryDeploymentStrategy extends EventEmitter {
+  constructor(
+    private healthMonitor: HealthCheckMonitor,
+    private trafficSplitter: TrafficSplitter
+  ) {
+    super();
+  }
+
+  /**
+   * Execute canary deployment
+   */
+  async execute(config: DeploymentConfig): Promise<void> {
+    this.emit('deployment_started', { deploymentId: config.id });
+
+    try {
+      // Step 1: Deploy canary version with minimal traffic
+      await this.deployCanaryVersion(config);
+
+      // Step 2: Gradually increase canary traffic
+      await this.graduallySplitTraffic(config);
+
+      // Step 3: Complete deployment
+      await this.completeCanaryDeployment(config);
+
+      this.emit('deployment_completed', { deploymentId: config.id });
+    } catch (error) {
+      this.emit('deployment_failed', {
+        deploymentId: config.id,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      
+      // Automatic rollback on failure
+      await this.rollbackCanary(config);
+      throw error;
+    }
+  }
+
+  private async deployCanaryVersion(config: DeploymentConfig): Promise<void> {
+    this.emit('phase_started', { phase: 'canary_deployment', deploymentId: config.id });
+
+    for (const service of config.services) {
+      await this.deployService(service, 'canary');
+      
+      // Start with 5% traffic to canary
+      await this.trafficSplitter.updateTrafficSplit(service.name, {
+        bluePercentage: 95,
+        greenPercentage: 0,
+        canaryPercentage: 5,
+        timestamp: new Date()
+      });
+
+      const serviceId = `${service.name}-canary`;
+      this.healthMonitor.startMonitoring(serviceId, service.healthCheck);
+    }
+  }
+
+  private async graduallySplitTraffic(config: DeploymentConfig): Promise<void> {
+    const trafficSteps = [10, 25, 50, 75, 100];
+    const stepDuration = 2 * 60 * 1000; // 2 minutes per step
+
+    for (const percentage of trafficSteps) {
+      this.emit('traffic_step', { 
+        percentage, 
+        deploymentId: config.id 
+      });
+
+      for (const service of config.services) {
+        await this.trafficSplitter.updateTrafficSplit(service.name, {
+          bluePercentage: 100 - percentage,
+          greenPercentage: 0,
+          canaryPercentage: percentage,
+          timestamp: new Date()
+        });
+
+        // Monitor health during traffic increase
+        const serviceId = `${service.name}-canary`;
+        if (!this.healthMonitor.getHealthStatus(serviceId)) {
+          throw new Error(`Canary version of ${service.name} failed health check`);
+        }
+      }
+
+      // Wait before next traffic increase
+      if (percentage < 100) {
+        await new Promise(resolve => setTimeout(resolve, stepDuration));
+      }
+    }
+  }
+
+  private async completeCanaryDeployment(config: DeploymentConfig): Promise<void> {
+    this.emit('phase_started', { phase: 'completion', deploymentId: config.id });
+
+    for (const service of config.services) {
+      // Promote canary to production
+      await this.promoteCanaryToProduction(service);
+      
+      // Clean up old version
+      await this.cleanupService(service, 'blue');
+      
+      // Route all traffic to new version
+      await this.trafficSplitter.routeAllTraffic(service.name, 'green');
+    }
+  }
+
+  private async rollbackCanary(config: DeploymentConfig): Promise<void> {
+    this.emit('rollback_started', { deploymentId: config.id });
+
+    for (const service of config.services) {
+      // Route all traffic back to stable version
+      await this.trafficSplitter.routeAllTraffic(service.name, 'blue');
+      
+      // Clean up canary version
+      await this.cleanupService(service, 'canary');
+      
+      // Stop monitoring canary
+      this.healthMonitor.stopMonitoring(`${service.name}-canary`);
+    }
+
+    this.emit('rollback_completed', { deploymentId: config.id });
+  }
+
+  private async deployService(service: ServiceConfig, environment: string): Promise<void> {
+    console.log(`Deploying ${service.name} to ${environment} environment`);
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+
+  private async promoteCanaryToProduction(service: ServiceConfig): Promise<void> {
+    console.log(`Promoting canary version of ${service.name} to production`);
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+
+  private async cleanupService(service: ServiceConfig, environment: string): Promise<void> {
+    console.log(`Cleaning up ${service.name} from ${environment} environment`);
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+}
+
+/**
+ * Rolling Deployment Strategy
+ */
+class RollingDeploymentStrategy extends EventEmitter {
+  constructor(private healthMonitor: HealthCheckMonitor) {
+    super();
+  }
+
+  /**
+   * Execute rolling deployment
+   */
+  async execute(config: DeploymentConfig): Promise<void> {
+    this.emit('deployment_started', { deploymentId: config.id });
+
+    try {
+      for (const service of config.services) {
+        await this.rollingUpdateService(service, config.id);
+      }
+
+      this.emit('deployment_completed', { deploymentId: config.id });
+    } catch (error) {
+      this.emit('deployment_failed', {
+        deploymentId: config.id,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      throw error;
+    }
+  }
+
+  private async rollingUpdateService(service: ServiceConfig, deploymentId: string): Promise<void> {
+    this.emit('service_update_started', { 
+      serviceName: service.name, 
+      deploymentId 
+    });
+
+    const maxUnavailable = Math.floor(service.replicas * 0.25); // 25% max unavailable
+    const maxSurge = Math.ceil(service.replicas * 0.25); // 25% max surge
+
+    // Update replicas one by one
+    for (let i = 0; i < service.replicas; i++) {
+      // Deploy new replica
+      await this.deployReplica(service, i);
+      
+      // Health check new replica
+      const replicaId = `${service.name}-replica-${i}`;
+      this.healthMonitor.startMonitoring(replicaId, service.healthCheck);
+      
+      await this.waitForHealthy(replicaId, service.healthCheck);
+      
+      // Terminate old replica if we
