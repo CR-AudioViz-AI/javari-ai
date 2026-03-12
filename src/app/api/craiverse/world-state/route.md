@@ -1,91 +1,73 @@
-# Build CRAIverse World State Synchronization API
+# Implement CRAIverse World State API
 
-# CRAIverse World State Synchronization API
+# CRAIverse World State API Documentation
 
 ## Purpose
-The CRAIverse World State Synchronization API facilitates the synchronization of world state data for virtual environments. It enables the management of various world objects and environmental states, including physics, lighting, and weather attributes, while ensuring data integrity and rate limiting.
+The CRAIverse World State API provides endpoints to manage and query the state of entities within a shared virtual environment. It supports creating, updating, deleting, and moving world entities, adhering to strict data validation and conflict resolution mechanisms.
 
 ## Usage
-The API is designed to be used within a Next.js application, leveraging Supabase for data handling, Redis for caching, and Upstash's ratelimit for managing request frequencies.
-
-### Example Endpoint
-```typescript
-// Example usage of the API in a Next.js route
-import { NextRequest, NextResponse } from 'next/server';
-// Additional imports as needed...
-
-export async function POST(request: NextRequest) {
-    // Handle the incoming request to synchronize world state...
-}
-```
+This API can be integrated into applications utilizing the CRAIverse for managing dynamic environments, such as games or collaborative simulations. It requires a valid authentication token and utilizes rate limiting to ensure fair usage.
 
 ## Parameters/Props
-- **WorldObject**: Represents an object in the world state.
-  - `id` (string): UUID of the object.
-  - `type` (string): Type of the object (`'mesh' | 'light' | 'camera' | 'audio_source' | 'trigger_zone'`).
-  - `position` (Vector3): 3D position represented by x, y, z coordinates.
-  - `rotation` (Quaternion): Rotational orientation represented as a quaternion.
-  - `scale` (Vector3, optional): Scaling factor for the object.
-  - `properties` (object, optional): Additional properties related to the object.
-  - `metadata` (object): Metadata, including creator and timestamps.
 
-- **EnvironmentState**: Represents the state of the environment.
-  - `lighting`: Lighting properties including ambient intensity, sun position, and fog density.
-  - `weather`: Weather properties including type, intensity, and wind characteristics.
-  - `physics`: Physical attributes such as gravity and air resistance.
+### World Entity Schema
+- **id**: `string` (UUID) - Unique identifier for the entity.
+- **type**: `string` - Entity type (`object`, `terrain`, `structure`, `audio`, `visual`).
+- **position**: `object` - Contains `x`, `y`, `z` coordinates.
+- **rotation**: `object` - Contains `x`, `y`, `z` rotation values.
+- **scale**: `object` - Scaling factors in `x`, `y`, `z`.
+- **properties**: `object` - A key-value pair for additional custom properties.
+- **metadata**: `object` - Metadata about the entity, including creation and modification info.
 
-### Validation
-Schemas are defined using the `zod` library to validate incoming data formats. Incorrect formats lead to validation errors.
+### World State Request Schema
+- **space_id**: `string` (UUID) - Identifier for the shared space.
+- **chunk_coords**: `array` (optional) - Coordinates of the chunks to be loaded.
+- **include_locked**: `boolean` (default: `false`) - Whether to include locked entities.
+
+### State Modification Schema
+- **space_id**: `string` (UUID) - Identifier for the shared space.
+- **operation**: `string` - Operation type (`create`, `update`, `delete`, `move`).
+- **entities**: `array` - List of World Entities to be modified.
+- **version_base**: `number` - The version number for conflict resolution.
+- **conflict_resolution**: `string` (default: `merge`) - Strategy for handling conflicts.
 
 ## Return Values
-- On successful synchronization, the API typically responds with a `200 OK` status along with a confirmation message.
-- If validation fails or conditions are not met (e.g., exceeding rate limits), appropriate error messages are returned (e.g., `400 Bad Request` or `429 Too Many Requests`).
+The API returns JSON responses indicating the success or failure of the requested operations. Successful operations will include modified entities and their updated metadata.
 
 ## Examples
-### POST Request to Synchronize World Object
+
+### Example of Creating a New World Entity
 ```typescript
-const response = await fetch('/api/craiverse/world-state', {
-    method: 'POST',
-    headers: {
-        'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-        objects: [
-            {
-                id: 'd96aad12-67e6-4f51-b2b9-2aae58e831c5',
-                type: 'mesh',
-                position: { x: 0, y: 1, z: 0 },
-                rotation: { x: 0, y: 0, z: 0, w: 1 },
-                properties: {},
-                metadata: {
-                    created_by: 'e89e1d3a-7cc2-4d71-a84e-e5f38f470a66',
-                    created_at: new Date().toISOString(),
-                    version: 1,
-                }
-            }
-        ],
-        environment: {
-            lighting: {
-                ambient_intensity: 1,
-                sun_position: { x: 1, y: 1, z: -1 },
-                sun_intensity: 2,
-                fog_density: 0.1
-            },
-            weather: {
-                type: 'clear',
-                intensity: 0,
-                wind_direction: { x: 0, y: 0, z: 1 },
-                wind_strength: 5
-            },
-            physics: {
-                gravity: { x: 0, y: -9.81, z: 0 },
-                air_resistance: 0.1
-            }
+const createEntityRequest = {
+    space_id: "123e4567-e89b-12d3-a456-426614174000",
+    operation: "create",
+    entities: [{
+        id: "d2d2d2d2-d2d2-d2d2-d2d2-d2d2d2d2d2d",
+        type: "object",
+        position: { x: 10, y: 20, z: 30 },
+        rotation: { x: 0, y: 90, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+        properties: {},
+        metadata: {
+            created_by: "a1b2c3d4-e5f6-7g8h-9i10-j11k12l13m14",
+            created_at: new Date().toISOString(),
+            modified_by: "a1b2c3d4-e5f6-7g8h-9i10-j11k12l13m14",
+            modified_at: new Date().toISOString(),
+            version: 1
         }
-    }),
-});
-const data = await response.json();
-console.log(data);
+    }],
+    version_base: 1,
+    conflict_resolution: "merge"
+};
 ```
 
-This is a concise API documentation representation for the CRAIverse World State Synchronization service.
+### Example of Querying World State
+```typescript
+const queryWorldStateRequest = {
+    space_id: "123e4567-e89b-12d3-a456-426614174000",
+    chunk_coords: [{ x: 0, y: 0 }],
+    include_locked: false
+};
+```
+
+This API forms the backbone for state management in a virtual environment, ensuring robust and conflict-free interactions with world entities.
