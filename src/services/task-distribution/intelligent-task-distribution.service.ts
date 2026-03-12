@@ -1,657 +1,722 @@
 ```typescript
-/**
- * Intelligent Task Distribution Service
- * ML-powered service for optimal task assignment based on agent capabilities,
- * workload analysis, and performance history with continuous learning optimization
- */
-
-import { createClient } from '@supabase/supabase-js';
-import type {
-  Agent,
-  AgentCapability,
-  AgentStatus,
-  AgentWorkload,
-  AgentPerformanceMetrics
-} from '../../types/agents';
-import type {
-  Task,
-  TaskPriority,
-  TaskStatus,
-  TaskRequirement,
-  TaskAssignment,
-  TaskMetrics
-} from '../../types/tasks';
+import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
+import { Redis } from 'ioredis';
+import { WebSocket } from 'ws';
+import { EventEmitter } from 'events';
 
 /**
- * Configuration for task distribution algorithm
+ * Represents a task to be distributed
  */
-export interface TaskDistributionConfig {
+export interface Task {
+  id: string;
+  title: string;
+  description: string;
+  requiredSkills: string[];
+  complexity: number;
+  priority: 'low' | 'medium' | 'high' | 'critical';
+  estimatedDuration: number;
+  deadline?: Date;
+  metadata: Record<string, unknown>;
+  createdAt: Date;
+}
+
+/**
+ * Represents an agent in the system
+ */
+export interface Agent {
+  id: string;
+  name: string;
+  email: string;
+  skills: AgentSkill[];
+  currentWorkload: number;
+  maxCapacity: number;
+  availability: AgentAvailability;
+  performanceMetrics: PerformanceMetrics;
+  preferences: AgentPreferences;
+  timezone: string;
+  status: 'available' | 'busy' | 'offline';
+  lastActiveAt: Date;
+}
+
+/**
+ * Agent skill with proficiency level
+ */
+export interface AgentSkill {
+  skill: string;
+  proficiency: number; // 0-100
+  experience: number; // years
+  lastUsed: Date;
+}
+
+/**
+ * Agent availability schedule
+ */
+export interface AgentAvailability {
+  workingHours: {
+    start: string; // HH:mm
+    end: string; // HH:mm
+  };
+  workingDays: number[]; // 0-6 (Sunday-Saturday)
+  breakHours: Array<{
+    start: string;
+    end: string;
+  }>;
+  vacationDays: Date[];
+}
+
+/**
+ * Agent performance metrics
+ */
+export interface PerformanceMetrics {
+  completionRate: number; // 0-100
+  averageTaskTime: number; // hours
+  qualityScore: number; // 0-100
+  onTimeDelivery: number; // 0-100
+  collaborationScore: number; // 0-100
+  taskCount30Days: number;
+  lastUpdated: Date;
+}
+
+/**
+ * Agent preferences for task assignment
+ */
+export interface AgentPreferences {
+  preferredTaskTypes: string[];
+  avoidTaskTypes: string[];
+  workloadPreference: 'light' | 'moderate' | 'heavy';
+  collaborationPreference: 'solo' | 'team' | 'both';
+  complexityPreference: 'simple' | 'moderate' | 'complex' | 'mixed';
+}
+
+/**
+ * Task assignment result
+ */
+export interface TaskAssignment {
+  taskId: string;
+  agentId: string;
+  assignedAt: Date;
+  estimatedCompletion: Date;
+  confidenceScore: number; // 0-100
+  reasoning: string[];
+  fallbackAgents: string[];
+}
+
+/**
+ * Distribution configuration
+ */
+export interface DistributionConfig {
   maxTasksPerAgent: number;
-  capabilityThreshold: number;
+  skillMatchWeight: number;
   workloadWeight: number;
   performanceWeight: number;
-  capabilityWeight: number;
-  reassignmentThreshold: number;
-  learningRate: number;
-  explorationRate: number;
+  availabilityWeight: number;
+  preferenceWeight: number;
+  deadlineWeight: number;
+  rebalanceInterval: number; // minutes
+  enablePredictiveAssignment: boolean;
 }
 
 /**
- * Task distribution decision with reasoning
+ * Task complexity assessment result
  */
-export interface DistributionDecision {
+export interface ComplexityAssessment {
   taskId: string;
-  assignedAgentId: string;
-  confidenceScore: number;
-  reasoning: {
-    capabilityMatch: number;
-    workloadScore: number;
-    performanceScore: number;
-    alternativeAgents: Array<{
-      agentId: string;
-      score: number;
-      reason: string;
-    }>;
+  complexityScore: number; // 0-100
+  factors: {
+    technicalComplexity: number;
+    businessComplexity: number;
+    riskLevel: number;
+    dependencyCount: number;
   };
-  estimatedCompletionTime: number;
-  priority: TaskPriority;
+  requiredExperience: number; // years
+  estimatedEffort: number; // hours
 }
 
 /**
- * Distribution metrics and analytics
+ * Workload balance metrics
  */
-export interface DistributionMetrics {
-  totalTasksDistributed: number;
-  averageAssignmentTime: number;
-  successfulAssignments: number;
-  reassignments: number;
-  agentUtilization: Record<string, number>;
-  capabilityMatchAccuracy: number;
-  performanceImprovement: number;
-  queueWaitTime: number;
+export interface WorkloadBalance {
+  agentId: string;
+  currentTasks: number;
+  totalEffort: number; // hours
+  utilizationRate: number; // 0-100
+  projectedCapacity: number; // next 7 days
+  burnoutRisk: number; // 0-100
 }
 
 /**
- * ML optimization model state
+ * Distribution optimization result
  */
-export interface OptimizationModel {
-  weights: {
-    capability: number;
-    workload: number;
-    performance: number;
-    historical: number;
-  };
-  patterns: Record<string, number>;
-  lastTraining: Date;
-  accuracy: number;
-  iterationCount: number;
+export interface OptimizationResult {
+  assignments: TaskAssignment[];
+  balanceScore: number; // 0-100
+  efficiencyGain: number; // percentage
+  riskAssessment: string[];
+  alternativeOptions: TaskAssignment[][];
 }
 
 /**
- * Task queue item with metadata
+ * Real-time agent status update
  */
-export interface QueuedTask {
-  task: Task;
-  queuedAt: Date;
-  priority: TaskPriority;
-  attempts: number;
-  requirements: TaskRequirement[];
-  deadline?: Date;
+export interface AgentStatusUpdate {
+  agentId: string;
+  status: Agent['status'];
+  workload: number;
+  availability: Partial<AgentAvailability>;
+  timestamp: Date;
 }
 
 /**
- * Agent pool with real-time status
+ * Task distribution event types
  */
-export interface AgentPoolEntry {
-  agent: Agent;
-  status: AgentStatus;
-  currentWorkload: AgentWorkload;
-  capabilities: AgentCapability[];
-  performance: AgentPerformanceMetrics;
-  lastAssignment: Date;
-  availability: number; // 0-1 scale
+export interface TaskDistributionEvents {
+  'task-assigned': TaskAssignment;
+  'task-reassigned': { from: string; to: string; taskId: string };
+  'agent-overloaded': { agentId: string; workload: number };
+  'distribution-optimized': OptimizationResult;
+  'agent-status-changed': AgentStatusUpdate;
+  'task-queue-updated': { queueLength: number; pendingTasks: string[] };
+}
+
+/**
+ * Service configuration options
+ */
+export interface IntelligentTaskDistributionConfig {
+  supabaseUrl: string;
+  supabaseKey: string;
+  redisUrl: string;
+  websocketPort: number;
+  distributionConfig: DistributionConfig;
+  enableRealtimeUpdates: boolean;
+  enableAnalytics: boolean;
+  debugMode: boolean;
 }
 
 /**
  * Intelligent Task Distribution Service
+ * 
+ * Automatically distributes tasks among team agents based on their capabilities,
+ * current workload, and historical performance to optimize team efficiency.
  */
-export class IntelligentTaskDistributionService {
-  private supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
+export class IntelligentTaskDistributionService extends EventEmitter {
+  private readonly supabase: SupabaseClient;
+  private readonly redis: Redis;
+  private readonly config: IntelligentTaskDistributionConfig;
+  private realtimeChannel?: RealtimeChannel;
+  private websocketServer?: WebSocket.Server;
+  private distributionInterval?: NodeJS.Timeout;
+  private isInitialized = false;
 
-  private config: TaskDistributionConfig = {
-    maxTasksPerAgent: 10,
-    capabilityThreshold: 0.7,
-    workloadWeight: 0.3,
-    performanceWeight: 0.4,
-    capabilityWeight: 0.5,
-    reassignmentThreshold: 0.2,
-    learningRate: 0.01,
-    explorationRate: 0.1
-  };
-
-  private taskQueue: Map<string, QueuedTask> = new Map();
-  private agentPool: Map<string, AgentPoolEntry> = new Map();
-  private optimizationModel: OptimizationModel = {
-    weights: {
-      capability: 0.5,
-      workload: 0.3,
-      performance: 0.4,
-      historical: 0.2
-    },
-    patterns: {},
-    lastTraining: new Date(),
-    accuracy: 0.0,
-    iterationCount: 0
-  };
-
-  private metrics: DistributionMetrics = {
-    totalTasksDistributed: 0,
-    averageAssignmentTime: 0,
-    successfulAssignments: 0,
-    reassignments: 0,
-    agentUtilization: {},
-    capabilityMatchAccuracy: 0,
-    performanceImprovement: 0,
-    queueWaitTime: 0
-  };
+  constructor(config: IntelligentTaskDistributionConfig) {
+    super();
+    this.config = config;
+    this.supabase = createClient(config.supabaseUrl, config.supabaseKey);
+    this.redis = new Redis(config.redisUrl);
+  }
 
   /**
    * Initialize the task distribution service
    */
   async initialize(): Promise<void> {
     try {
-      await this.loadAgentPool();
-      await this.loadOptimizationModel();
-      await this.startDistributionEngine();
+      await this.setupRealtimeSubscriptions();
+      await this.setupWebSocketServer();
+      await this.startDistributionLoop();
       
-      console.log('Task distribution service initialized');
+      this.isInitialized = true;
+      console.log('Intelligent Task Distribution Service initialized successfully');
     } catch (error) {
       console.error('Failed to initialize task distribution service:', error);
-      throw new Error(`Initialization failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw error;
     }
   }
 
   /**
-   * Distribute a task to the most suitable agent
+   * Shutdown the service gracefully
    */
-  async distributeTask(task: Task): Promise<DistributionDecision> {
+  async shutdown(): Promise<void> {
     try {
-      const startTime = Date.now();
+      if (this.distributionInterval) {
+        clearInterval(this.distributionInterval);
+      }
+
+      if (this.realtimeChannel) {
+        await this.supabase.removeChannel(this.realtimeChannel);
+      }
+
+      if (this.websocketServer) {
+        this.websocketServer.close();
+      }
+
+      await this.redis.quit();
+      this.isInitialized = false;
       
-      // Add task to queue
-      const queuedTask: QueuedTask = {
+      console.log('Task distribution service shutdown complete');
+    } catch (error) {
+      console.error('Error during service shutdown:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Distribute a single task to the most suitable agent
+   */
+  async distributeTask(task: Task): Promise<TaskAssignment> {
+    try {
+      this.validateInitialization();
+
+      // Assess task complexity
+      const complexity = await this.assessTaskComplexity(task);
+      
+      // Get available agents
+      const agents = await this.getAvailableAgents();
+      
+      // Analyze agent capabilities
+      const capabilityScores = await this.analyzeAgentCapabilities(task, agents);
+      
+      // Calculate workload balance
+      const workloadBalances = await this.calculateWorkloadBalance(agents);
+      
+      // Get performance metrics
+      const performanceMetrics = await this.collectPerformanceMetrics(agents.map(a => a.id));
+      
+      // Optimize assignment
+      const assignment = await this.optimizeAssignment(
         task,
-        queuedAt: new Date(),
-        priority: task.priority,
-        attempts: 0,
-        requirements: task.requirements || []
-      };
+        complexity,
+        agents,
+        capabilityScores,
+        workloadBalances,
+        performanceMetrics
+      );
+
+      // Queue assignment
+      await this.queueTaskAssignment(assignment);
       
-      this.taskQueue.set(task.id, queuedTask);
+      // Notify stakeholders
+      await this.notifyAssignment(assignment);
       
-      // Find optimal agent assignment
-      const decision = await this.findOptimalAssignment(queuedTask);
+      this.emit('task-assigned', assignment);
       
-      if (decision) {
-        await this.assignTaskToAgent(decision);
-        this.taskQueue.delete(task.id);
+      return assignment;
+    } catch (error) {
+      console.error('Failed to distribute task:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Distribute multiple tasks in batch
+   */
+  async distributeTasks(tasks: Task[]): Promise<TaskAssignment[]> {
+    try {
+      this.validateInitialization();
+
+      const assignments: TaskAssignment[] = [];
+      
+      // Sort tasks by priority and deadline
+      const sortedTasks = this.prioritizeTasks(tasks);
+      
+      for (const task of sortedTasks) {
+        const assignment = await this.distributeTask(task);
+        assignments.push(assignment);
         
-        // Update metrics
-        this.updateDistributionMetrics(decision, Date.now() - startTime);
-        
-        return decision;
+        // Brief pause to allow system updates
+        await this.delay(100);
       }
       
-      throw new Error('No suitable agent found for task assignment');
+      return assignments;
     } catch (error) {
-      console.error('Task distribution failed:', error);
-      throw new Error(`Distribution failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error('Failed to distribute tasks in batch:', error);
+      throw error;
     }
   }
 
   /**
-   * Find optimal agent assignment using ML optimization
+   * Rebalance workload across all agents
    */
-  private async findOptimalAssignment(queuedTask: QueuedTask): Promise<DistributionDecision | null> {
-    const candidates = await this.identifyEligibleAgents(queuedTask);
-    
-    if (candidates.length === 0) {
+  async rebalanceWorkload(): Promise<OptimizationResult> {
+    try {
+      this.validateInitialization();
+
+      const agents = await this.getAvailableAgents();
+      const workloadBalances = await this.calculateWorkloadBalance(agents);
+      
+      // Identify overloaded and underutilized agents
+      const overloadedAgents = workloadBalances.filter(wb => wb.utilizationRate > 85);
+      const underutilizedAgents = workloadBalances.filter(wb => wb.utilizationRate < 60);
+      
+      const reassignments: TaskAssignment[] = [];
+      
+      for (const overloaded of overloadedAgents) {
+        const tasks = await this.getAgentTasks(overloaded.agentId);
+        const reassignableTasks = tasks.filter(t => this.isTaskReassignable(t));
+        
+        for (const task of reassignableTasks) {
+          const suitableAgent = this.findBestReassignmentAgent(
+            task,
+            underutilizedAgents,
+            agents
+          );
+          
+          if (suitableAgent) {
+            const reassignment = await this.reassignTask(task.id, suitableAgent.agentId);
+            reassignments.push(reassignment);
+            
+            this.emit('task-reassigned', {
+              from: overloaded.agentId,
+              to: suitableAgent.agentId,
+              taskId: task.id
+            });
+            
+            // Update utilization rates
+            const overloadedIndex = underutilizedAgents.findIndex(
+              ua => ua.agentId === suitableAgent.agentId
+            );
+            if (overloadedIndex >= 0) {
+              underutilizedAgents[overloadedIndex].utilizationRate += 
+                (task.estimatedDuration / suitableAgent.maxCapacity) * 100;
+            }
+            
+            if (underutilizedAgents[overloadedIndex]?.utilizationRate > 75) {
+              underutilizedAgents.splice(overloadedIndex, 1);
+            }
+          }
+        }
+      }
+      
+      const optimizationResult: OptimizationResult = {
+        assignments: reassignments,
+        balanceScore: await this.calculateBalanceScore(agents),
+        efficiencyGain: this.calculateEfficiencyGain(reassignments),
+        riskAssessment: this.assessRebalanceRisks(reassignments),
+        alternativeOptions: []
+      };
+      
+      this.emit('distribution-optimized', optimizationResult);
+      
+      return optimizationResult;
+    } catch (error) {
+      console.error('Failed to rebalance workload:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get agent availability in real-time
+   */
+  async getAgentAvailability(agentId: string): Promise<AgentAvailability | null> {
+    try {
+      const cached = await this.redis.get(`agent_availability:${agentId}`);
+      if (cached) {
+        return JSON.parse(cached);
+      }
+      
+      const { data, error } = await this.supabase
+        .from('agents')
+        .select('availability')
+        .eq('id', agentId)
+        .single();
+      
+      if (error) throw error;
+      
+      if (data?.availability) {
+        await this.redis.setex(
+          `agent_availability:${agentId}`,
+          300, // 5 minutes cache
+          JSON.stringify(data.availability)
+        );
+      }
+      
+      return data?.availability || null;
+    } catch (error) {
+      console.error('Failed to get agent availability:', error);
       return null;
     }
-    
-    const scoredCandidates = await Promise.all(
-      candidates.map(agent => this.calculateAssignmentScore(queuedTask, agent))
-    );
-    
-    // Sort by score descending
-    scoredCandidates.sort((a, b) => b.score - a.score);
-    
-    const bestCandidate = scoredCandidates[0];
-    const alternatives = scoredCandidates.slice(1, 4).map(candidate => ({
-      agentId: candidate.agentId,
-      score: candidate.score,
-      reason: candidate.reasoning
-    }));
-    
-    return {
-      taskId: queuedTask.task.id,
-      assignedAgentId: bestCandidate.agentId,
-      confidenceScore: bestCandidate.score,
-      reasoning: {
-        capabilityMatch: bestCandidate.capabilityScore,
-        workloadScore: bestCandidate.workloadScore,
-        performanceScore: bestCandidate.performanceScore,
-        alternativeAgents: alternatives
-      },
-      estimatedCompletionTime: bestCandidate.estimatedTime,
-      priority: queuedTask.priority
-    };
   }
 
   /**
-   * Calculate assignment score for agent-task pair
+   * Update agent status
    */
-  private async calculateAssignmentScore(
-    queuedTask: QueuedTask,
-    agent: AgentPoolEntry
-  ): Promise<{
-    agentId: string;
-    score: number;
-    capabilityScore: number;
-    workloadScore: number;
-    performanceScore: number;
-    estimatedTime: number;
-    reasoning: string;
-  }> {
-    // Calculate capability match using cosine similarity
-    const capabilityScore = this.calculateCapabilityMatch(
-      queuedTask.requirements,
-      agent.capabilities
-    );
-    
-    // Calculate workload score (inverse of current load)
-    const workloadScore = this.calculateWorkloadScore(agent.currentWorkload);
-    
-    // Calculate performance score based on historical data
-    const performanceScore = this.calculatePerformanceScore(
-      agent.performance,
-      queuedTask.task.type
-    );
-    
-    // Apply ML model weights
-    const weightedScore = 
-      (capabilityScore * this.optimizationModel.weights.capability) +
-      (workloadScore * this.optimizationModel.weights.workload) +
-      (performanceScore * this.optimizationModel.weights.performance);
-    
-    // Apply exploration factor for learning
-    const explorationBonus = Math.random() < this.config.explorationRate ? 0.1 : 0;
-    const finalScore = weightedScore + explorationBonus;
-    
-    // Estimate completion time
-    const estimatedTime = this.estimateCompletionTime(
-      queuedTask.task,
-      agent.performance
-    );
-    
-    return {
-      agentId: agent.agent.id,
-      score: finalScore,
-      capabilityScore,
-      workloadScore,
-      performanceScore,
-      estimatedTime,
-      reasoning: `Capability: ${capabilityScore.toFixed(2)}, Workload: ${workloadScore.toFixed(2)}, Performance: ${performanceScore.toFixed(2)}`
-    };
-  }
-
-  /**
-   * Calculate capability match using cosine similarity
-   */
-  private calculateCapabilityMatch(
-    requirements: TaskRequirement[],
-    capabilities: AgentCapability[]
-  ): number {
-    if (requirements.length === 0 || capabilities.length === 0) {
-      return 0;
+  async updateAgentStatus(agentId: string, status: Agent['status']): Promise<void> {
+    try {
+      const { error } = await this.supabase
+        .from('agents')
+        .update({ 
+          status, 
+          last_active_at: new Date().toISOString() 
+        })
+        .eq('id', agentId);
+      
+      if (error) throw error;
+      
+      await this.redis.setex(`agent_status:${agentId}`, 3600, status);
+      
+      const statusUpdate: AgentStatusUpdate = {
+        agentId,
+        status,
+        workload: await this.getAgentWorkload(agentId),
+        availability: await this.getAgentAvailability(agentId) || {} as AgentAvailability,
+        timestamp: new Date()
+      };
+      
+      this.emit('agent-status-changed', statusUpdate);
+    } catch (error) {
+      console.error('Failed to update agent status:', error);
+      throw error;
     }
-    
-    const reqVector = this.createCapabilityVector(requirements);
-    const capVector = this.createCapabilityVector(capabilities);
-    
-    return this.cosineSimilarity(reqVector, capVector);
   }
 
   /**
-   * Create capability vector for similarity calculation
+   * Get task distribution analytics
    */
-  private createCapabilityVector(items: (TaskRequirement | AgentCapability)[]): number[] {
-    const skillMap = new Map<string, number>();
+  async getDistributionAnalytics(timeRange: { start: Date; end: Date }): Promise<any> {
+    try {
+      const { data: assignments, error } = await this.supabase
+        .from('task_assignments')
+        .select(`
+          *,
+          tasks(*),
+          agents(*)
+        `)
+        .gte('assigned_at', timeRange.start.toISOString())
+        .lte('assigned_at', timeRange.end.toISOString());
+      
+      if (error) throw error;
+      
+      const analytics = {
+        totalAssignments: assignments?.length || 0,
+        averageAssignmentTime: this.calculateAverageAssignmentTime(assignments || []),
+        distributionEfficiency: this.calculateDistributionEfficiency(assignments || []),
+        agentUtilization: await this.calculateAgentUtilization(assignments || []),
+        taskComplexityDistribution: this.analyzeComplexityDistribution(assignments || []),
+        performanceTrends: this.analyzePerformanceTrends(assignments || [])
+      };
+      
+      return analytics;
+    } catch (error) {
+      console.error('Failed to get distribution analytics:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Setup real-time subscriptions for agent updates
+   */
+  private async setupRealtimeSubscriptions(): Promise<void> {
+    if (!this.config.enableRealtimeUpdates) return;
     
-    items.forEach(item => {
-      if ('skill' in item) {
-        skillMap.set(item.skill, item.level || 1);
-      } else {
-        skillMap.set(item.name, item.proficiency || 1);
-      }
+    this.realtimeChannel = this.supabase
+      .channel('task-distribution')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'agents'
+        },
+        (payload) => {
+          this.handleAgentUpdate(payload);
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'tasks'
+        },
+        (payload) => {
+          this.handleTaskUpdate(payload);
+        }
+      )
+      .subscribe();
+  }
+
+  /**
+   * Setup WebSocket server for real-time notifications
+   */
+  private async setupWebSocketServer(): Promise<void> {
+    this.websocketServer = new WebSocket.Server({ 
+      port: this.config.websocketPort 
     });
     
-    const allSkills = Array.from(skillMap.keys()).sort();
-    return allSkills.map(skill => skillMap.get(skill) || 0);
-  }
-
-  /**
-   * Calculate cosine similarity between two vectors
-   */
-  private cosineSimilarity(vectorA: number[], vectorB: number[]): number {
-    const maxLength = Math.max(vectorA.length, vectorB.length);
-    const a = [...vectorA, ...Array(maxLength - vectorA.length).fill(0)];
-    const b = [...vectorB, ...Array(maxLength - vectorB.length).fill(0)];
-    
-    const dotProduct = a.reduce((sum, val, i) => sum + val * b[i], 0);
-    const magnitudeA = Math.sqrt(a.reduce((sum, val) => sum + val * val, 0));
-    const magnitudeB = Math.sqrt(b.reduce((sum, val) => sum + val * val, 0));
-    
-    if (magnitudeA === 0 || magnitudeB === 0) return 0;
-    return dotProduct / (magnitudeA * magnitudeB);
-  }
-
-  /**
-   * Calculate workload score with exponential backoff
-   */
-  private calculateWorkloadScore(workload: AgentWorkload): number {
-    const utilizationRate = workload.activeTasks / this.config.maxTasksPerAgent;
-    
-    // Exponential backoff for overloaded agents
-    if (utilizationRate > 0.8) {
-      return Math.exp(-5 * (utilizationRate - 0.8));
-    }
-    
-    return 1 - utilizationRate;
-  }
-
-  /**
-   * Calculate performance score based on historical metrics
-   */
-  private calculatePerformanceScore(
-    performance: AgentPerformanceMetrics,
-    taskType: string
-  ): number {
-    const typeSpecificPerformance = performance.taskTypePerformance?.[taskType];
-    
-    if (typeSpecificPerformance) {
-      return (
-        typeSpecificPerformance.successRate * 0.4 +
-        (1 - typeSpecificPerformance.averageTime / typeSpecificPerformance.expectedTime) * 0.3 +
-        typeSpecificPerformance.qualityScore * 0.3
-      );
-    }
-    
-    return (
-      performance.overallSuccessRate * 0.5 +
-      performance.averageQualityScore * 0.3 +
-      (performance.taskCompletionRate || 0.5) * 0.2
-    );
-  }
-
-  /**
-   * Estimate task completion time
-   */
-  private estimateCompletionTime(task: Task, performance: AgentPerformanceMetrics): number {
-    const baseEstimate = task.estimatedDuration || 3600; // 1 hour default
-    const performanceFactor = performance.averageCompletionTime / baseEstimate || 1;
-    
-    return Math.max(baseEstimate * performanceFactor, 300); // Minimum 5 minutes
-  }
-
-  /**
-   * Identify agents eligible for task assignment
-   */
-  private async identifyEligibleAgents(queuedTask: QueuedTask): Promise<AgentPoolEntry[]> {
-    const eligibleAgents: AgentPoolEntry[] = [];
-    
-    for (const [agentId, agentEntry] of this.agentPool) {
-      if (
-        agentEntry.status === 'available' &&
-        agentEntry.currentWorkload.activeTasks < this.config.maxTasksPerAgent &&
-        agentEntry.availability > 0.1
-      ) {
-        const capabilityMatch = this.calculateCapabilityMatch(
-          queuedTask.requirements,
-          agentEntry.capabilities
-        );
-        
-        if (capabilityMatch >= this.config.capabilityThreshold) {
-          eligibleAgents.push(agentEntry);
+    this.websocketServer.on('connection', (ws: WebSocket) => {
+      ws.on('message', (message: string) => {
+        try {
+          const data = JSON.parse(message);
+          this.handleWebSocketMessage(ws, data);
+        } catch (error) {
+          console.error('Invalid WebSocket message:', error);
         }
-      }
-    }
-    
-    return eligibleAgents;
-  }
-
-  /**
-   * Assign task to selected agent
-   */
-  private async assignTaskToAgent(decision: DistributionDecision): Promise<void> {
-    const assignment: TaskAssignment = {
-      id: `assignment_${decision.taskId}_${decision.assignedAgentId}`,
-      taskId: decision.taskId,
-      agentId: decision.assignedAgentId,
-      assignedAt: new Date(),
-      status: 'assigned',
-      confidence: decision.confidenceScore,
-      estimatedCompletion: new Date(Date.now() + decision.estimatedCompletionTime * 1000)
-    };
-    
-    // Update database
-    const { error: assignmentError } = await this.supabase
-      .from('task_assignments')
-      .insert(assignment);
-    
-    if (assignmentError) {
-      throw new Error(`Failed to create assignment: ${assignmentError.message}`);
-    }
-    
-    // Update task status
-    const { error: taskError } = await this.supabase
-      .from('tasks')
-      .update({
-        status: 'assigned',
-        assigned_agent_id: decision.assignedAgentId,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', decision.taskId);
-    
-    if (taskError) {
-      throw new Error(`Failed to update task: ${taskError.message}`);
-    }
-    
-    // Update agent workload
-    const agent = this.agentPool.get(decision.assignedAgentId);
-    if (agent) {
-      agent.currentWorkload.activeTasks++;
-      agent.lastAssignment = new Date();
-    }
-  }
-
-  /**
-   * Load agent pool from database
-   */
-  private async loadAgentPool(): Promise<void> {
-    const { data: agents, error } = await this.supabase
-      .from('agents')
-      .select(`
-        *,
-        agent_capabilities(*),
-        agent_workload(*),
-        agent_performance_metrics(*)
-      `)
-      .eq('status', 'active');
-    
-    if (error) {
-      throw new Error(`Failed to load agents: ${error.message}`);
-    }
-    
-    for (const agent of agents || []) {
-      const poolEntry: AgentPoolEntry = {
-        agent: agent as Agent,
-        status: agent.current_status || 'available',
-        currentWorkload: agent.agent_workload?.[0] || { activeTasks: 0, queuedTasks: 0 },
-        capabilities: agent.agent_capabilities || [],
-        performance: agent.agent_performance_metrics?.[0] || {
-          overallSuccessRate: 0.5,
-          averageQualityScore: 0.5,
-          averageCompletionTime: 3600
-        },
-        lastAssignment: new Date(0),
-        availability: 1.0
-      };
-      
-      this.agentPool.set(agent.id, poolEntry);
-    }
-  }
-
-  /**
-   * Load ML optimization model
-   */
-  private async loadOptimizationModel(): Promise<void> {
-    const { data: model } = await this.supabase
-      .from('ml_optimization_models')
-      .select('*')
-      .eq('model_type', 'task_distribution')
-      .single();
-    
-    if (model) {
-      this.optimizationModel = {
-        weights: model.weights || this.optimizationModel.weights,
-        patterns: model.patterns || {},
-        lastTraining: new Date(model.last_training),
-        accuracy: model.accuracy || 0,
-        iterationCount: model.iteration_count || 0
-      };
-    }
-  }
-
-  /**
-   * Update distribution metrics
-   */
-  private updateDistributionMetrics(decision: DistributionDecision, assignmentTime: number): void {
-    this.metrics.totalTasksDistributed++;
-    this.metrics.successfulAssignments++;
-    this.metrics.averageAssignmentTime = 
-      (this.metrics.averageAssignmentTime * (this.metrics.totalTasksDistributed - 1) + assignmentTime) /
-      this.metrics.totalTasksDistributed;
-    
-    if (!this.metrics.agentUtilization[decision.assignedAgentId]) {
-      this.metrics.agentUtilization[decision.assignedAgentId] = 0;
-    }
-    this.metrics.agentUtilization[decision.assignedAgentId]++;
-  }
-
-  /**
-   * Start the distribution engine loop
-   */
-  private async startDistributionEngine(): Promise<void> {
-    setInterval(async () => {
-      await this.processTaskQueue();
-      await this.optimizeDistribution();
-    }, 5000); // Process every 5 seconds
-  }
-
-  /**
-   * Process queued tasks
-   */
-  private async processTaskQueue(): Promise<void> {
-    const queuedTasks = Array.from(this.taskQueue.values())
-      .sort((a, b) => {
-        // Priority first, then queue time
-        if (a.priority !== b.priority) {
-          const priorityOrder = { high: 3, medium: 2, low: 1 };
-          return priorityOrder[b.priority] - priorityOrder[a.priority];
-        }
-        return a.queuedAt.getTime() - b.queuedAt.getTime();
       });
-    
-    for (const queuedTask of queuedTasks.slice(0, 5)) { // Process up to 5 at a time
+    });
+  }
+
+  /**
+   * Start the continuous distribution optimization loop
+   */
+  private async startDistributionLoop(): Promise<void> {
+    this.distributionInterval = setInterval(async () => {
       try {
-        const decision = await this.findOptimalAssignment(queuedTask);
-        if (decision) {
-          await this.assignTaskToAgent(decision);
-          this.taskQueue.delete(queuedTask.task.id);
+        await this.processTaskQueue();
+        
+        if (Math.random() < 0.1) { // 10% chance to rebalance
+          await this.rebalanceWorkload();
         }
       } catch (error) {
-        console.error(`Failed to process queued task ${queuedTask.task.id}:`, error);
-        queuedTask.attempts++;
-        
-        if (queuedTask.attempts >= 3) {
-          this.taskQueue.delete(queuedTask.task.id);
-          console.warn(`Removed task ${queuedTask.task.id} after 3 failed attempts`);
-        }
+        console.error('Error in distribution loop:', error);
       }
-    }
+    }, this.config.distributionConfig.rebalanceInterval * 60 * 1000);
   }
 
   /**
-   * Optimize distribution using ML feedback
+   * Assess task complexity using multiple factors
    */
-  private async optimizeDistribution(): Promise<void> {
-    if (this.metrics.totalTasksDistributed % 100 === 0 && this.metrics.totalTasksDistributed > 0) {
-      // Update model weights based on performance
-      const performanceFeedback = await this.collectPerformanceFeedback();
-      this.updateOptimizationWeights(performanceFeedback);
+  private async assessTaskComplexity(task: Task): Promise<ComplexityAssessment> {
+    const factors = {
+      technicalComplexity: this.assessTechnicalComplexity(task),
+      businessComplexity: this.assessBusinessComplexity(task),
+      riskLevel: this.assessRiskLevel(task),
+      dependencyCount: await this.countTaskDependencies(task.id)
+    };
+    
+    const complexityScore = (
+      factors.technicalComplexity * 0.3 +
+      factors.businessComplexity * 0.2 +
+      factors.riskLevel * 0.3 +
+      Math.min(factors.dependencyCount * 10, 100) * 0.2
+    );
+    
+    return {
+      taskId: task.id,
+      complexityScore: Math.min(Math.max(complexityScore, 0), 100),
+      factors,
+      requiredExperience: this.calculateRequiredExperience(complexityScore),
+      estimatedEffort: task.estimatedDuration
+    };
+  }
+
+  /**
+   * Get all available agents
+   */
+  private async getAvailableAgents(): Promise<Agent[]> {
+    const { data, error } = await this.supabase
+      .from('agents')
+      .select('*')
+      .in('status', ['available', 'busy']);
+    
+    if (error) throw error;
+    
+    return data || [];
+  }
+
+  /**
+   * Analyze agent capabilities for a specific task
+   */
+  private async analyzeAgentCapabilities(
+    task: Task, 
+    agents: Agent[]
+  ): Promise<Record<string, number>> {
+    const capabilityScores: Record<string, number> = {};
+    
+    for (const agent of agents) {
+      let score = 0;
+      let totalWeight = 0;
       
-      // Save updated model
-      await this.saveOptimizationModel();
+      for (const requiredSkill of task.requiredSkills) {
+        const agentSkill = agent.skills.find(s => s.skill === requiredSkill);
+        const weight = this.getSkillWeight(requiredSkill);
+        
+        if (agentSkill) {
+          const proficiencyScore = agentSkill.proficiency;
+          const experienceScore = Math.min(agentSkill.experience * 10, 100);
+          const recencyScore = this.calculateRecencyScore(agentSkill.lastUsed);
+          
+          const skillScore = (proficiencyScore * 0.5 + experienceScore * 0.3 + recencyScore * 0.2);
+          score += skillScore * weight;
+        }
+        
+        totalWeight += weight;
+      }
+      
+      capabilityScores[agent.id] = totalWeight > 0 ? score / totalWeight : 0;
     }
+    
+    return capabilityScores;
   }
 
   /**
-   * Collect performance feedback for model optimization
+   * Calculate workload balance for agents
    */
-  private async collectPerformanceFeedback(): Promise<Record<string, number>> {
-    const { data: completedTasks } = await this.supabase
-      .from('tasks')
-      .select('*, task_assignments(*)')
-      .eq('status', 'completed')
-      .gte('completed_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+  private async calculateWorkloadBalance(agents: Agent[]): Promise<WorkloadBalance[]> {
+    const balances: WorkloadBalance[] = [];
     
-    const feedback: Record<string, number> = {};
+    for (const agent of agents) {
+      const currentTasks = await this.getAgentTaskCount(agent.id);
+      const totalEffort = await this.getAgentTotalEffort(agent.id);
+      const utilizationRate = (agent.currentWorkload / agent.maxCapacity) * 100;
+      const projectedCapacity = await this.calculateProjectedCapacity(agent.id);
+      const burnoutRisk = this.calculateBurnoutRisk(agent);
+      
+      balances.push({
+        agentId: agent.id,
+        currentTasks,
+        totalEffort,
+        utilizationRate,
+        projectedCapacity,
+        burnoutRisk
+      });
+    }
     
-    for (const task of completedTasks || []) {
-      const assignment = task.task_assignments?.[0];
-      if (assignment) {
-        const actualTime = new Date(task.completed_at).getTime() - new Date(assignment.assigned_at).getTime();
-        const estimatedTime = assignment.estimated_completion ? 
-          new Date(assignment.estimated_completion).getTime() - new Date(assignment.assigned_at).getTime() : actualTime;
+    return balances;
+  }
+
+  /**
+   * Collect performance metrics for agents
+   */
+  private async collectPerformanceMetrics(agentIds: string[]): Promise<Record<string, PerformanceMetrics>> {
+    const metrics: Record<string, PerformanceMetrics> = {};
+    
+    for (const agentId of agentIds) {
+      const cached = await this.redis.get(`performance_metrics:${agentId}`);
+      
+      if (cached) {
+        metrics[agentId] = JSON.parse(cached);
+      } else {
+        const calculated = await this.calculatePerformanceMetrics(agentId);
+        metrics[agentId] = calculated;
         
-        const timeAccuracy = Math.min(estimatedTime / actualTime, 2); // Cap at 2x
-        feedback[`time_accuracy_${assignment.agent_id}`] = timeAccuracy;
-        
-        if (task.quality_score) {
-          feedback[`quality_${assignment.agent_id}`] = task.quality_score;
-        }
+        await this.redis.setex(
+          `performance_metrics:${agentId}`,
+          3600, // 1 hour cache
+          JSON.stringify(calculated)
+        );
       }
     }
     
-    return feedback;
+    return metrics;
   }
 
   /**
-   * Update optimization model weights
+   * Optimize task assignment using weighted scoring
    */
-  private updateOptimizationWeights(feedback: Record<string, number>): void {
-    const learningRate = this.config.learningRate;
+  private async optimizeAssignment(
+    task: Task,
+    complexity: ComplexityAssessment,
+    agents: Agent[],
+    capabilityScores: Record<string, number>,
+    workloadBalances: WorkloadBalance[],
+    performanceMetrics: Record<string, PerformanceMetrics>
+  ): Promise<TaskAssignment> {
+    const config = this.config.distributionConfig;
+    const scores: Array<{ agentId: string; score: number; reasoning: string[] }> = [];
     
-    // Simple gradient descent-like update
-    const avgQuality = Object.values(feedback)
-      .filter((_, i) => Object.keys(feedback)[i].startsWith('quality'))
-      .reduce((sum, val) => sum + val, 0) / Object.keys(feedback).length || 0.5;
-    
-    if (avgQuality > 0.7) {
-      // Good performance, increase capability weight
-      this.optimizationModel.weights.capability *= (1 + learningRate);
-    } else if (avgQuality < 0.3
+    for (const agent of agents) {
+      const reasoning: string[] = [];
+      let totalScore = 0;
+      
+      // Capability score
+      const capabilityScore = capabilityScores[agent.id] || 0;
+      totalScore += capabilityScore * config.skillMatchWeight;
+      reasoning.push(`Skill match: ${capabilityScore.toFixed(1)}/100`);
