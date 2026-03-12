@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
 import type { JavariWorkLog, UpdateWorkLogInput } from '@/lib/types/javari-types';

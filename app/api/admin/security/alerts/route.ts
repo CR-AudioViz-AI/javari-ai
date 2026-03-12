@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 /**
  * JAVARI AI - SECURITY ALERTS API
  * Manage security alerts for Roy

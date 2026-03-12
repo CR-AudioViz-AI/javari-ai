@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 /**
  * Javari AI - Settings Page
  * SPEC 08 — First Real Application Pages

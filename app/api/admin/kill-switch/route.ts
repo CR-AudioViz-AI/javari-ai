@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 /**
  * HENDERSON OVERRIDE PROTOCOL - Kill Switch API
  * 

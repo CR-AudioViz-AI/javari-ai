@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 /**
  * JAVARI AI - KILL COMMAND API ENDPOINT
  * Roy-Only Emergency System Control

@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 // app/api/billing/credits/route.ts
 // Javari Billing — Credits API
 // 2026-02-20 — STEP 5 implementation

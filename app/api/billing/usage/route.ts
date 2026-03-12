@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 // app/api/billing/usage/route.ts
 // Javari Billing — Usage API
 // 2026-02-20 — STEP 5 implementation

@@ -1,4 +1,5 @@
 'use client'
+export const dynamic = 'force-dynamic'
 
 import { UserProfileProvider } from '@/components/user-profile/user-profile-context'
 import { SplitScreenProvider } from '@/components/split-screen/split-screen-context'

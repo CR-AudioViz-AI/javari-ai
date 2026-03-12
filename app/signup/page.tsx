@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 // app/signup/page.tsx
 // Javari AI — Sign Up Page
 // Purpose: New user registration via Supabase Auth. Redirects to /javari on success.

@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 import { TopNav, MobileNav } from '@/components/navigation'
 
 export default function SiteLayout({
