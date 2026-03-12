@@ -1,5 +1,6 @@
-// Stub: Governance page - original truncated by autonomous commit
 'use client'
+export const dynamic = 'force-dynamic'
+// Stub: Governance page - original truncated by autonomous commit
 import React from 'react'
 
 export default function GovernancePage() {

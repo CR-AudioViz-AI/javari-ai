@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 // Stub: CRM sync route - original truncated by autonomous commit
 import { NextRequest, NextResponse } from 'next/server'
 

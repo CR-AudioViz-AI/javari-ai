@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 // /app/api/env-check/route.ts
 // Environment variable diagnostic endpoint
 // Created: 2025-02-02 23:57 EST

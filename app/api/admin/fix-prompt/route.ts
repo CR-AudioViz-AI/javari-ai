@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 // app/api/admin/fix-prompt/route.ts
 // Emergency fix: Remove document upload instructions from system prompt
 // The UI already has drag-drop and + button - don't ask users to upload

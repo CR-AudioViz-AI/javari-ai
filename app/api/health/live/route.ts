@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 // app/api/health/live/route.ts
 // CR AudioViz AI — Liveness Probe
 // 2026-02-20 — STEP 7 Production Hardening

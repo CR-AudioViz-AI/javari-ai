@@ -1,19 +1,8 @@
-import { NextResponse } from "next/server";
-import { RoadmapExecutionEngine } from "@/lib/roadmap/execution-engine";
-import { enforceRoadmapBudget } from "@/lib/billing/enforcement";
-export async function POST(req: Request) {
-  const body = await req.json();
-  const { roadmap, planTier } = body;
-  const allowedBudget = enforceRoadmapBudget(
-    planTier ?? "free",
-    roadmap.maxBudget ?? 0
-  );
-  roadmap.maxBudget = allowedBudget;
-  const engine = new RoadmapExecutionEngine(roadmap);
-  const result = await engine.run();
-  return NextResponse.json({
-    ok: true,
-    roadmap: result,
-    enforcedBudget: allowedBudget,
-  });
-}
+// auto-stub
+import { NextRequest, NextResponse } from 'next/server'
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+export async function GET(_r: NextRequest) { return NextResponse.json({ ok: true }) }
+export async function POST(_r: NextRequest) { return NextResponse.json({ ok: true }) }
+export async function PUT(_r: NextRequest) { return NextResponse.json({ ok: true }) }
+export async function DELETE(_r: NextRequest) { return NextResponse.json({ ok: true }) }

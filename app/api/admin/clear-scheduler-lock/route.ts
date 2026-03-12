@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 // app/api/admin/clear-scheduler-lock/route.ts
 // Purpose: ONE-TIME admin tool — clears stuck javari_scheduler_lock row.
 // Safe: only deletes the lock row, touches nothing else.

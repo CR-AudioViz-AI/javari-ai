@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 // app/api/credits/transactions/route.ts
 // Javari AI — Credit Transactions History
 // Purpose: Returns paginated credit transaction history for the user.

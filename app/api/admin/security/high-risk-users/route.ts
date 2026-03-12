@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 /**
  * JAVARI AI - HIGH RISK USERS API
  * View users with multiple violations or suspensions

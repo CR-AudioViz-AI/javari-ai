@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 // Stub: Avatar customization route - original truncated by autonomous commit
 import { NextRequest, NextResponse } from 'next/server'
 

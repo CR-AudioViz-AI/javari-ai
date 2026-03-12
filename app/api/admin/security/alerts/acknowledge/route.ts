@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 /**
  * JAVARI AI - ACKNOWLEDGE ALERTS API
  * Mark security alerts as acknowledged

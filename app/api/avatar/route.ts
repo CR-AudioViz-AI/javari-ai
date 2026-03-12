@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 // app/api/avatar/route.ts
 // Javari AI — Avatar System API
 // Purpose: Create, read, and update user avatars. Part of CRAIverse identity system.

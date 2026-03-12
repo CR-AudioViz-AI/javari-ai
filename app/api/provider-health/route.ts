@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 // app/api/provider-health/route.ts
 // Provider health status endpoint — read-only, no auth required
 // Created: 2026-03-01

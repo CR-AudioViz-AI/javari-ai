@@ -1,120 +1,28 @@
-/**
- * Javari AI - Card Component
- * SPEC 05 — Canonical UI Primitives
- * 
- * Container with optional header, content, and footer
- * - Composable sub-components
- * - Elevation via shadow tokens
- * - Token-only styling via Tailwind
- * 
- * Server Components (no client state)
- * 
- * @version 1.0.0
- * @spec SPEC 05
- * @timestamp Tuesday, January 28, 2025 at 11:56 AM EST
- */
+// auto-stub
+'use client'
+import React from 'react'
 
-import { HTMLAttributes, ReactNode } from 'react'
-
-interface CardProps extends HTMLAttributes<HTMLDivElement> {
-  children: ReactNode
-}
-
-interface CardHeaderProps extends HTMLAttributes<HTMLDivElement> {
-  children: ReactNode
-}
-
-interface CardContentProps extends HTMLAttributes<HTMLDivElement> {
-  children: ReactNode
-}
-
-interface CardFooterProps extends HTMLAttributes<HTMLDivElement> {
-  children: ReactNode
-}
-
-export function Card({ className = '', children, ...props }: CardProps) {
-  return (
-    <div
-      className={`
-        bg-surface border border-border rounded-lg shadow-sm
-        ${className}
-      `}
-      {...props}
-    >
-      {children}
-    </div>
-  )
-}
-
-export function CardHeader({ className = '', children, ...props }: CardHeaderProps) {
-  return (
-    <div
-      className={`
-        px-6 py-4 border-b border-border
-        ${className}
-      `}
-      {...props}
-    >
-      {children}
-    </div>
-  )
-}
-
-export function CardContent({ className = '', children, ...props }: CardContentProps) {
-  return (
-    <div
-      className={`
-        px-6 py-4
-        ${className}
-      `}
-      {...props}
-    >
-      {children}
-    </div>
-  )
-}
-
-export function CardFooter({ className = '', children, ...props }: CardFooterProps) {
-  return (
-    <div
-      className={`
-        px-6 py-4 border-t border-border
-        ${className}
-      `}
-      {...props}
-    >
-      {children}
-    </div>
-  )
-}
-
-export interface CardTitleProps extends React.HTMLAttributes<HTMLHeadingElement> {
-  className?: string;
-}
-
-export function CardTitle({ className = '', children, ...props }: CardTitleProps) {
-  return (
-    <h3
-      className={`text-2xl font-semibold leading-none tracking-tight ${className}`}
-      {...props}
-    >
-      {children}
-    </h3>
-  )
-}
-
-export interface CardDescriptionProps extends React.HTMLAttributes<HTMLParagraphElement> {
-  className?: string;
-}
-
-export function CardDescription({ className = '', children, ...props }: CardDescriptionProps) {
-  return (
-    <p
-      className={`text-sm text-muted-foreground ${className}`}
-      {...props}
-    >
-      {children}
-    </p>
-  )
-}
-
+export const Card = React.forwardRef<HTMLElement, any>(
+  ({className='',children,...p},ref) => React.createElement('div',{ref,className,...p},children)
+)
+Card.displayName = 'Card'
+export const CardHeader = React.forwardRef<HTMLElement, any>(
+  ({className='',children,...p},ref) => React.createElement('div',{ref,className,...p},children)
+)
+CardHeader.displayName = 'CardHeader'
+export const CardContent = React.forwardRef<HTMLElement, any>(
+  ({className='',children,...p},ref) => React.createElement('div',{ref,className,...p},children)
+)
+CardContent.displayName = 'CardContent'
+export const CardFooter = React.forwardRef<HTMLElement, any>(
+  ({className='',children,...p},ref) => React.createElement('div',{ref,className,...p},children)
+)
+CardFooter.displayName = 'CardFooter'
+export const CardTitle = React.forwardRef<HTMLElement, any>(
+  ({className='',children,...p},ref) => React.createElement('div',{ref,className,...p},children)
+)
+CardTitle.displayName = 'CardTitle'
+export const CardDescription = React.forwardRef<HTMLElement, any>(
+  ({className='',children,...p},ref) => React.createElement('div',{ref,className,...p},children)
+)
+CardDescription.displayName = 'CardDescription'

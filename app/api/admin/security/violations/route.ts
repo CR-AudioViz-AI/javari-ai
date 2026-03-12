@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 /**
  * JAVARI AI - SECURITY VIOLATIONS API
  * Roy-Only Access to Security Audit Logs

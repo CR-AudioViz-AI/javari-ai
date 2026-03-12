@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 // app/api/billing/route.ts
 // Javari Billing — System Health & Tier Overview
 // 2026-02-20 — STEP 5 (public endpoint, no auth required)

@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 /**
  * JAVARI AI - SECURITY STATS API
  * Real-time security statistics for dashboard

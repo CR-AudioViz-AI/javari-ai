@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 // app/api/billing/usage/preview/route.ts
 // Javari Billing — Usage Forecast Preview
 // 2026-02-20 — STEP 6 Productization

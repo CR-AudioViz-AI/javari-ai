@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 // app/api/billing/portal/route.ts
 // Javari Billing — Customer Portal Redirect
 // 2026-02-20 — STEP 6 Productization

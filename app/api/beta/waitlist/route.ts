@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 // app/api/beta/waitlist/route.ts
 // CR AudioViz AI — Beta Waitlist Signup Endpoint
 // 2026-02-21 — STEP 8 Go-Live

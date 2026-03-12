@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 // app/api/credits/balance/route.ts
 // Javari AI — Credit Balance Endpoint
 // Purpose: Returns authenticated user's current credit balance.

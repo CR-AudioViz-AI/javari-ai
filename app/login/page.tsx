@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 // app/login/page.tsx
 // Javari AI — Login Page
 // Purpose: Email/password sign-in via Supabase Auth. Redirects to /javari on success.
