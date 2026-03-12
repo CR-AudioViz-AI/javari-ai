@@ -1,684 +1,661 @@
+```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { cookies } from 'next/headers';
 import { z } from 'zod';
 import crypto from 'crypto';
 
-// Types and Interfaces
-interface ComplianceRule {
-  id: string;
-  standard: 'SOC2' | 'GDPR' | 'HIPAA';
-  category: string;
-  rule_name: string;
-  description: string;
-  check_type: 'automated' | 'manual' | 'hybrid';
-  severity: 'low' | 'medium' | 'high' | 'critical';
-  frequency: 'realtime' | 'hourly' | 'daily' | 'weekly';
-  validator_config: Record<string, any>;
-  is_active: boolean;
-}
-
-interface ComplianceReport {
-  id: string;
-  standard: string;
-  report_type: 'scheduled' | 'on_demand' | 'incident';
-  status: 'compliant' | 'non_compliant' | 'partial' | 'unknown';
-  score: number;
-  findings: ComplianceFinding[];
-  recommendations: string[];
-  generated_at: string;
-  generated_by: string;
-}
-
-interface ComplianceFinding {
-  rule_id: string;
-  status: 'pass' | 'fail' | 'warning' | 'not_applicable';
-  evidence: Record<string, any>;
-  risk_level: string;
-  remediation_steps: string[];
-}
-
-interface ComplianceAlert {
-  id: string;
-  rule_id: string;
-  severity: string;
-  message: string;
-  details: Record<string, any>;
-  status: 'open' | 'acknowledged' | 'resolved';
-  created_at: string;
-  resolved_at?: string;
-}
-
-// Validation Schemas
-const monitorRequestSchema = z.object({
-  action: z.enum(['start_monitoring', 'stop_monitoring', 'check_compliance', 'generate_report', 'get_status']),
-  standards: z.array(z.enum(['SOC2', 'GDPR', 'HIPAA'])).optional(),
-  rule_ids: z.array(z.string()).optional(),
-  report_type: z.enum(['scheduled', 'on_demand', 'incident']).optional(),
-  notification_settings: z.object({
-    email: z.boolean().optional(),
-    slack: z.boolean().optional(),
-    webhook_url: z.string().url().optional()
+// Validation schemas
+const MonitoringRequestSchema = z.object({
+  framework: z.enum(['gdpr', 'ccpa', 'sox', 'hipaa', 'pci_dss', 'iso27001', 'nist']),
+  scope: z.array(z.string()).min(1),
+  priority: z.enum(['low', 'medium', 'high', 'critical']).default('medium'),
+  realtime: z.boolean().default(true),
+  notifications: z.object({
+    email: z.array(z.string().email()).optional(),
+    webhook: z.string().url().optional(),
+    slack_channel: z.string().optional()
   }).optional()
 });
 
-// Compliance Monitor Class
-class ComplianceMonitor {
-  private supabase: any;
-  private standardsChecker: StandardsChecker;
-  private alertManager: AlertManager;
-  private auditLogger: AuditLogger;
+const ActivityEventSchema = z.object({
+  event_id: z.string(),
+  timestamp: z.string().datetime(),
+  source: z.string(),
+  user_id: z.string(),
+  activity_type: z.string(),
+  data_involved: z.object({
+    type: z.string(),
+    classification: z.enum(['public', 'internal', 'confidential', 'restricted']),
+    location: z.string(),
+    size: z.number().optional()
+  }),
+  metadata: z.record(z.any()).optional()
+});
 
-  constructor(supabaseClient: any) {
-    this.supabase = supabaseClient;
-    this.standardsChecker = new StandardsChecker();
-    this.alertManager = new AlertManager(supabaseClient);
-    this.auditLogger = new AuditLogger(supabaseClient);
-  }
-
-  async startMonitoring(standards: string[], userId: string): Promise<{ success: boolean; message: string }> {
-    try {
-      // Get active rules for specified standards
-      const { data: rules, error } = await this.supabase
-        .from('compliance_rules')
-        .select('*')
-        .in('standard', standards)
-        .eq('is_active', true);
-
-      if (error) throw error;
-
-      // Initialize monitoring sessions
-      const monitoringSessions = rules.map(rule => ({
-        rule_id: rule.id,
-        status: 'active',
-        started_at: new Date().toISOString(),
-        started_by: userId,
-        last_check: null,
-        next_check: this.calculateNextCheck(rule.frequency)
-      }));
-
-      const { error: insertError } = await this.supabase
-        .from('compliance_monitoring_sessions')
-        .insert(monitoringSessions);
-
-      if (insertError) throw insertError;
-
-      await this.auditLogger.log('monitoring_started', {
-        standards,
-        rule_count: rules.length,
-        user_id: userId
-      });
-
-      // Start background monitoring
-      this.scheduleComplianceChecks(rules);
-
-      return { success: true, message: `Started monitoring ${standards.join(', ')} compliance` };
-    } catch (error) {
-      throw new Error(`Failed to start monitoring: ${error}`);
+// Compliance frameworks configuration
+const REGULATORY_FRAMEWORKS = {
+  gdpr: {
+    name: 'General Data Protection Regulation',
+    rules: {
+      data_retention: { max_days: 2555 }, // 7 years
+      consent_required: ['personal_data', 'sensitive_data'],
+      breach_notification: { hours: 72 },
+      right_to_be_forgotten: true,
+      data_portability: true
+    },
+    risk_weights: {
+      personal_data_access: 0.8,
+      cross_border_transfer: 0.9,
+      automated_processing: 0.7,
+      consent_withdrawal: 0.6
+    }
+  },
+  ccpa: {
+    name: 'California Consumer Privacy Act',
+    rules: {
+      disclosure_requirement: true,
+      opt_out_right: true,
+      deletion_right: true,
+      non_discrimination: true
+    },
+    risk_weights: {
+      personal_info_sale: 0.9,
+      data_collection: 0.6,
+      third_party_sharing: 0.8,
+      consumer_request: 0.7
+    }
+  },
+  sox: {
+    name: 'Sarbanes-Oxley Act',
+    rules: {
+      financial_controls: true,
+      audit_trail_required: true,
+      executive_certification: true,
+      whistleblower_protection: true
+    },
+    risk_weights: {
+      financial_reporting: 0.95,
+      internal_controls: 0.8,
+      audit_interference: 0.9,
+      document_destruction: 0.85
     }
   }
+};
 
-  async checkCompliance(ruleIds?: string[]): Promise<ComplianceReport[]> {
-    try {
-      let query = this.supabase.from('compliance_rules').select('*').eq('is_active', true);
-      
-      if (ruleIds && ruleIds.length > 0) {
-        query = query.in('id', ruleIds);
-      }
+class ComplianceEngine {
+  private supabase;
+  private violations: Map<string, any> = new Map();
+  private activeMonitors: Set<string> = new Set();
 
-      const { data: rules, error } = await query;
-      if (error) throw error;
-
-      const reports: ComplianceReport[] = [];
-
-      // Group rules by standard
-      const rulesByStandard = rules.reduce((acc, rule) => {
-        if (!acc[rule.standard]) acc[rule.standard] = [];
-        acc[rule.standard].push(rule);
-        return acc;
-      }, {} as Record<string, ComplianceRule[]>);
-
-      // Check compliance for each standard
-      for (const [standard, standardRules] of Object.entries(rulesByStandard)) {
-        const findings: ComplianceFinding[] = [];
-        
-        for (const rule of standardRules) {
-          const finding = await this.standardsChecker.validateRule(rule);
-          findings.push(finding);
-
-          // Generate alert if non-compliant
-          if (finding.status === 'fail' && rule.severity !== 'low') {
-            await this.alertManager.createAlert(rule, finding);
-          }
-        }
-
-        const report = await this.generateComplianceReport(standard, findings);
-        reports.push(report);
-
-        // Store report
-        await this.storeComplianceReport(report);
-      }
-
-      return reports;
-    } catch (error) {
-      throw new Error(`Compliance check failed: ${error}`);
-    }
+  constructor(supabase: any) {
+    this.supabase = supabase;
   }
 
-  private async generateComplianceReport(standard: string, findings: ComplianceFinding[]): Promise<ComplianceReport> {
-    const totalChecks = findings.length;
-    const passedChecks = findings.filter(f => f.status === 'pass').length;
-    const failedChecks = findings.filter(f => f.status === 'fail').length;
+  async startMonitoring(framework: string, scope: string[], config: any): Promise<string> {
+    const monitorId = crypto.randomUUID();
     
-    const score = totalChecks > 0 ? Math.round((passedChecks / totalChecks) * 100) : 0;
-    
-    let status: 'compliant' | 'non_compliant' | 'partial' | 'unknown' = 'unknown';
-    if (failedChecks === 0) status = 'compliant';
-    else if (passedChecks === 0) status = 'non_compliant';
-    else status = 'partial';
-
-    const recommendations = this.generateRecommendations(findings);
-
-    return {
-      id: crypto.randomUUID(),
-      standard,
-      report_type: 'on_demand',
-      status,
-      score,
-      findings,
-      recommendations,
-      generated_at: new Date().toISOString(),
-      generated_by: 'system'
-    };
-  }
-
-  private generateRecommendations(findings: ComplianceFinding[]): string[] {
-    const recommendations: string[] = [];
-    const failedFindings = findings.filter(f => f.status === 'fail');
-    
-    failedFindings.forEach(finding => {
-      recommendations.push(...finding.remediation_steps);
-    });
-
-    return [...new Set(recommendations)]; // Remove duplicates
-  }
-
-  private async storeComplianceReport(report: ComplianceReport): Promise<void> {
-    const { error } = await this.supabase
-      .from('compliance_reports')
+    // Create monitoring session
+    const { error: sessionError } = await this.supabase
+      .from('compliance_monitoring_sessions')
       .insert({
-        id: report.id,
-        standard: report.standard,
-        report_type: report.report_type,
-        status: report.status,
-        score: report.score,
-        findings: report.findings,
-        recommendations: report.recommendations,
-        generated_at: report.generated_at,
-        generated_by: report.generated_by
+        monitor_id: monitorId,
+        framework,
+        scope,
+        config,
+        status: 'active',
+        created_at: new Date().toISOString()
+      });
+
+    if (sessionError) throw sessionError;
+
+    // Set up real-time subscription for activities
+    if (config.realtime) {
+      await this.setupRealtimeMonitoring(monitorId, framework, scope);
+    }
+
+    this.activeMonitors.add(monitorId);
+    return monitorId;
+  }
+
+  private async setupRealtimeMonitoring(monitorId: string, framework: string, scope: string[]) {
+    const channel = this.supabase
+      .channel(`compliance_${monitorId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'activity_events',
+          filter: `scope=in.(${scope.join(',')})`
+        },
+        (payload: any) => {
+          this.processActivityEvent(monitorId, framework, payload.new);
+        }
+      )
+      .subscribe();
+
+    return channel;
+  }
+
+  async processActivityEvent(monitorId: string, framework: string, event: any): Promise<void> {
+    const frameworkConfig = REGULATORY_FRAMEWORKS[framework as keyof typeof REGULATORY_FRAMEWORKS];
+    if (!frameworkConfig) return;
+
+    // Classify and assess risk
+    const riskScore = this.calculateRiskScore(event, frameworkConfig);
+    const violations = await this.detectViolations(event, frameworkConfig);
+
+    if (violations.length > 0 || riskScore > 0.7) {
+      await this.handleComplianceEvent(monitorId, {
+        event,
+        framework,
+        risk_score: riskScore,
+        violations,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Update audit trail
+    await this.updateAuditTrail(monitorId, event, riskScore, violations);
+  }
+
+  private calculateRiskScore(event: any, frameworkConfig: any): number {
+    let score = 0;
+    const weights = frameworkConfig.risk_weights;
+
+    // Check activity type risk
+    for (const [riskType, weight] of Object.entries(weights)) {
+      if (event.activity_type?.includes(riskType) || 
+          event.data_involved?.type?.includes(riskType)) {
+        score = Math.max(score, weight as number);
+      }
+    }
+
+    // Adjust based on data classification
+    const classificationMultiplier = {
+      'public': 0.1,
+      'internal': 0.3,
+      'confidential': 0.7,
+      'restricted': 1.0
+    };
+
+    const classification = event.data_involved?.classification || 'internal';
+    score *= classificationMultiplier[classification as keyof typeof classificationMultiplier];
+
+    return Math.min(score, 1.0);
+  }
+
+  private async detectViolations(event: any, frameworkConfig: any): Promise<any[]> {
+    const violations = [];
+    const rules = frameworkConfig.rules;
+
+    // Check consent requirements
+    if (rules.consent_required && 
+        rules.consent_required.includes(event.data_involved?.type) &&
+        !event.metadata?.consent_given) {
+      violations.push({
+        type: 'missing_consent',
+        severity: 'high',
+        rule: 'consent_required',
+        description: 'Activity performed without required consent'
+      });
+    }
+
+    // Check data retention limits
+    if (rules.data_retention && event.metadata?.data_age) {
+      const dataAgeMs = Date.now() - new Date(event.metadata.data_creation).getTime();
+      const dataAgeDays = dataAgeMs / (1000 * 60 * 60 * 24);
+      
+      if (dataAgeDays > rules.data_retention.max_days) {
+        violations.push({
+          type: 'retention_violation',
+          severity: 'medium',
+          rule: 'data_retention',
+          description: `Data retained beyond ${rules.data_retention.max_days} days limit`
+        });
+      }
+    }
+
+    // Check cross-border transfers (GDPR)
+    if (rules.data_portability && 
+        event.activity_type === 'data_transfer' &&
+        event.metadata?.destination_country &&
+        !this.isAdequateCountry(event.metadata.destination_country)) {
+      violations.push({
+        type: 'inadequate_transfer',
+        severity: 'critical',
+        rule: 'cross_border_transfer',
+        description: 'Data transfer to country without adequate protection'
+      });
+    }
+
+    return violations;
+  }
+
+  private isAdequateCountry(country: string): boolean {
+    const adequateCountries = [
+      'US', 'CA', 'GB', 'JP', 'AU', 'NZ', 'CH', 'IL', 'KR', 'AR', 'UY'
+    ];
+    return adequateCountries.includes(country);
+  }
+
+  private async handleComplianceEvent(monitorId: string, complianceEvent: any): Promise<void> {
+    const eventId = crypto.randomUUID();
+    
+    // Store compliance event
+    const { error } = await this.supabase
+      .from('compliance_events')
+      .insert({
+        event_id: eventId,
+        monitor_id: monitorId,
+        ...complianceEvent,
+        status: 'detected',
+        created_at: new Date().toISOString()
       });
 
     if (error) throw error;
-  }
 
-  private calculateNextCheck(frequency: string): string {
-    const now = new Date();
-    switch (frequency) {
-      case 'realtime':
-        return new Date(now.getTime() + 60000).toISOString(); // 1 minute
-      case 'hourly':
-        return new Date(now.getTime() + 3600000).toISOString(); // 1 hour
-      case 'daily':
-        return new Date(now.getTime() + 86400000).toISOString(); // 1 day
-      case 'weekly':
-        return new Date(now.getTime() + 604800000).toISOString(); // 1 week
-      default:
-        return new Date(now.getTime() + 86400000).toISOString(); // Default to daily
+    // Trigger automated remediation if applicable
+    if (complianceEvent.violations.some((v: any) => v.severity === 'critical')) {
+      await this.initiateRemediation(eventId, complianceEvent);
     }
-  }
-
-  private scheduleComplianceChecks(rules: ComplianceRule[]): void {
-    // This would integrate with a job scheduler like node-cron or external service
-    console.log(`Scheduled compliance checks for ${rules.length} rules`);
-  }
-}
-
-// Standards Checker Class
-class StandardsChecker {
-  async validateRule(rule: ComplianceRule): Promise<ComplianceFinding> {
-    try {
-      switch (rule.standard) {
-        case 'SOC2':
-          return await this.validateSOC2Rule(rule);
-        case 'GDPR':
-          return await this.validateGDPRRule(rule);
-        case 'HIPAA':
-          return await this.validateHIPAARule(rule);
-        default:
-          throw new Error(`Unsupported standard: ${rule.standard}`);
-      }
-    } catch (error) {
-      return {
-        rule_id: rule.id,
-        status: 'fail',
-        evidence: { error: error.message },
-        risk_level: 'high',
-        remediation_steps: ['Review rule configuration', 'Contact compliance team']
-      };
-    }
-  }
-
-  private async validateSOC2Rule(rule: ComplianceRule): Promise<ComplianceFinding> {
-    // SOC2 specific validation logic
-    const checks = {
-      'access_control': () => this.checkAccessControls(),
-      'data_encryption': () => this.checkEncryption(),
-      'system_monitoring': () => this.checkMonitoring(),
-      'incident_response': () => this.checkIncidentResponse()
-    };
-
-    const validator = checks[rule.category as keyof typeof checks];
-    if (!validator) {
-      return {
-        rule_id: rule.id,
-        status: 'not_applicable',
-        evidence: { reason: 'No validator for category' },
-        risk_level: 'low',
-        remediation_steps: []
-      };
-    }
-
-    const result = await validator();
-    return {
-      rule_id: rule.id,
-      status: result.compliant ? 'pass' : 'fail',
-      evidence: result.evidence,
-      risk_level: result.compliant ? 'low' : rule.severity,
-      remediation_steps: result.remediation_steps || []
-    };
-  }
-
-  private async validateGDPRRule(rule: ComplianceRule): Promise<ComplianceFinding> {
-    // GDPR specific validation logic
-    const checks = {
-      'data_processing': () => this.checkDataProcessing(),
-      'consent_management': () => this.checkConsent(),
-      'data_subject_rights': () => this.checkSubjectRights(),
-      'privacy_by_design': () => this.checkPrivacyByDesign()
-    };
-
-    const validator = checks[rule.category as keyof typeof checks];
-    if (!validator) {
-      return {
-        rule_id: rule.id,
-        status: 'not_applicable',
-        evidence: { reason: 'No validator for category' },
-        risk_level: 'low',
-        remediation_steps: []
-      };
-    }
-
-    const result = await validator();
-    return {
-      rule_id: rule.id,
-      status: result.compliant ? 'pass' : 'fail',
-      evidence: result.evidence,
-      risk_level: result.compliant ? 'low' : rule.severity,
-      remediation_steps: result.remediation_steps || []
-    };
-  }
-
-  private async validateHIPAARule(rule: ComplianceRule): Promise<ComplianceFinding> {
-    // HIPAA specific validation logic
-    const checks = {
-      'phi_protection': () => this.checkPHIProtection(),
-      'access_logs': () => this.checkAccessLogs(),
-      'data_backup': () => this.checkDataBackup(),
-      'workforce_training': () => this.checkTraining()
-    };
-
-    const validator = checks[rule.category as keyof typeof checks];
-    if (!validator) {
-      return {
-        rule_id: rule.id,
-        status: 'not_applicable',
-        evidence: { reason: 'No validator for category' },
-        risk_level: 'low',
-        remediation_steps: []
-      };
-    }
-
-    const result = await validator();
-    return {
-      rule_id: rule.id,
-      status: result.compliant ? 'pass' : 'fail',
-      evidence: result.evidence,
-      risk_level: result.compliant ? 'low' : rule.severity,
-      remediation_steps: result.remediation_steps || []
-    };
-  }
-
-  // Mock validation methods (replace with actual implementations)
-  private async checkAccessControls(): Promise<any> {
-    return { compliant: true, evidence: { mfa_enabled: true }, remediation_steps: [] };
-  }
-
-  private async checkEncryption(): Promise<any> {
-    return { compliant: true, evidence: { encryption_at_rest: true }, remediation_steps: [] };
-  }
-
-  private async checkMonitoring(): Promise<any> {
-    return { compliant: true, evidence: { monitoring_active: true }, remediation_steps: [] };
-  }
-
-  private async checkIncidentResponse(): Promise<any> {
-    return { compliant: true, evidence: { response_plan: true }, remediation_steps: [] };
-  }
-
-  private async checkDataProcessing(): Promise<any> {
-    return { compliant: true, evidence: { lawful_basis: true }, remediation_steps: [] };
-  }
-
-  private async checkConsent(): Promise<any> {
-    return { compliant: true, evidence: { consent_records: true }, remediation_steps: [] };
-  }
-
-  private async checkSubjectRights(): Promise<any> {
-    return { compliant: true, evidence: { rights_mechanism: true }, remediation_steps: [] };
-  }
-
-  private async checkPrivacyByDesign(): Promise<any> {
-    return { compliant: true, evidence: { privacy_controls: true }, remediation_steps: [] };
-  }
-
-  private async checkPHIProtection(): Promise<any> {
-    return { compliant: true, evidence: { phi_encrypted: true }, remediation_steps: [] };
-  }
-
-  private async checkAccessLogs(): Promise<any> {
-    return { compliant: true, evidence: { audit_logs: true }, remediation_steps: [] };
-  }
-
-  private async checkDataBackup(): Promise<any> {
-    return { compliant: true, evidence: { backup_encrypted: true }, remediation_steps: [] };
-  }
-
-  private async checkTraining(): Promise<any> {
-    return { compliant: true, evidence: { training_current: true }, remediation_steps: [] };
-  }
-}
-
-// Alert Manager Class
-class AlertManager {
-  private supabase: any;
-
-  constructor(supabaseClient: any) {
-    this.supabase = supabaseClient;
-  }
-
-  async createAlert(rule: ComplianceRule, finding: ComplianceFinding): Promise<void> {
-    const alert: ComplianceAlert = {
-      id: crypto.randomUUID(),
-      rule_id: rule.id,
-      severity: rule.severity,
-      message: `Compliance violation detected: ${rule.rule_name}`,
-      details: {
-        standard: rule.standard,
-        category: rule.category,
-        finding_status: finding.status,
-        evidence: finding.evidence,
-        remediation_steps: finding.remediation_steps
-      },
-      status: 'open',
-      created_at: new Date().toISOString()
-    };
-
-    const { error } = await this.supabase
-      .from('compliance_alerts')
-      .insert(alert);
-
-    if (error) throw error;
 
     // Send notifications
-    await this.sendNotifications(alert);
+    await this.sendComplianceNotifications(monitorId, complianceEvent);
   }
 
-  private async sendNotifications(alert: ComplianceAlert): Promise<void> {
-    // Email/Slack/Webhook notifications would be implemented here
-    console.log(`Alert sent: ${alert.message}`);
-  }
-}
+  private async initiateRemediation(eventId: string, complianceEvent: any): Promise<void> {
+    const remediationActions = [];
 
-// Audit Logger Class
-class AuditLogger {
-  private supabase: any;
-
-  constructor(supabaseClient: any) {
-    this.supabase = supabaseClient;
-  }
-
-  async log(action: string, details: Record<string, any>): Promise<void> {
-    const { error } = await this.supabase
-      .from('compliance_audit_logs')
-      .insert({
-        id: crypto.randomUUID(),
-        action,
-        details,
-        timestamp: new Date().toISOString(),
-        user_id: details.user_id || 'system'
-      });
-
-    if (error) throw error;
-  }
-}
-
-// Initialize Supabase
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
-// API Route Handlers
-export async function GET(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const action = searchParams.get('action') || 'get_status';
-
-    const monitor = new ComplianceMonitor(supabase);
-
-    switch (action) {
-      case 'get_status': {
-        const { data: sessions, error } = await supabase
-          .from('compliance_monitoring_sessions')
-          .select(`
-            *,
-            compliance_rules (
-              id,
-              standard,
-              rule_name,
-              severity
-            )
-          `)
-          .eq('status', 'active');
-
-        if (error) throw error;
-
-        return NextResponse.json({
-          success: true,
-          data: {
-            active_sessions: sessions,
-            total_rules: sessions.length
-          }
-        });
+    for (const violation of complianceEvent.violations) {
+      switch (violation.type) {
+        case 'inadequate_transfer':
+          remediationActions.push({
+            action: 'block_transfer',
+            priority: 'immediate',
+            description: 'Block data transfer to inadequate country'
+          });
+          break;
+        case 'missing_consent':
+          remediationActions.push({
+            action: 'request_consent',
+            priority: 'high',
+            description: 'Request user consent for data processing'
+          });
+          break;
+        case 'retention_violation':
+          remediationActions.push({
+            action: 'schedule_deletion',
+            priority: 'medium',
+            description: 'Schedule data deletion per retention policy'
+          });
+          break;
       }
-
-      case 'get_reports': {
-        const standard = searchParams.get('standard');
-        const limit = parseInt(searchParams.get('limit') || '10');
-
-        let query = supabase
-          .from('compliance_reports')
-          .select('*')
-          .order('generated_at', { ascending: false })
-          .limit(limit);
-
-        if (standard) {
-          query = query.eq('standard', standard);
-        }
-
-        const { data: reports, error } = await query;
-        if (error) throw error;
-
-        return NextResponse.json({
-          success: true,
-          data: reports
-        });
-      }
-
-      case 'get_alerts': {
-        const status = searchParams.get('status') || 'open';
-        const { data: alerts, error } = await supabase
-          .from('compliance_alerts')
-          .select('*')
-          .eq('status', status)
-          .order('created_at', { ascending: false });
-
-        if (error) throw error;
-
-        return NextResponse.json({
-          success: true,
-          data: alerts
-        });
-      }
-
-      default:
-        return NextResponse.json(
-          { success: false, error: 'Invalid action' },
-          { status: 400 }
-        );
     }
-  } catch (error) {
-    console.error('GET /api/compliance/monitor error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Internal server error' },
-      { status: 500 }
-    );
+
+    await this.supabase
+      .from('remediation_workflows')
+      .insert({
+        event_id: eventId,
+        actions: remediationActions,
+        status: 'pending',
+        created_at: new Date().toISOString()
+      });
+  }
+
+  private async updateAuditTrail(monitorId: string, event: any, riskScore: number, violations: any[]): Promise<void> {
+    await this.supabase
+      .from('compliance_audit_trail')
+      .insert({
+        monitor_id: monitorId,
+        event_id: event.event_id,
+        activity_type: event.activity_type,
+        user_id: event.user_id,
+        risk_score: riskScore,
+        violations_count: violations.length,
+        compliance_status: violations.length === 0 ? 'compliant' : 'non_compliant',
+        created_at: new Date().toISOString()
+      });
+  }
+
+  private async sendComplianceNotifications(monitorId: string, complianceEvent: any): Promise<void> {
+    // Get notification config for this monitor
+    const { data: monitor } = await this.supabase
+      .from('compliance_monitoring_sessions')
+      .select('config')
+      .eq('monitor_id', monitorId)
+      .single();
+
+    if (!monitor?.config?.notifications) return;
+
+    const notifications = monitor.config.notifications;
+    const severity = Math.max(...complianceEvent.violations.map((v: any) => 
+      v.severity === 'critical' ? 4 : v.severity === 'high' ? 3 : v.severity === 'medium' ? 2 : 1
+    ));
+
+    // Send webhook notification
+    if (notifications.webhook) {
+      try {
+        await fetch(notifications.webhook, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            monitor_id: monitorId,
+            event: complianceEvent,
+            severity: severity >= 3 ? 'high' : 'medium'
+          })
+        });
+      } catch (error) {
+        console.error('Webhook notification failed:', error);
+      }
+    }
+
+    // Store notification record
+    await this.supabase
+      .from('compliance_notifications')
+      .insert({
+        monitor_id: monitorId,
+        event_id: complianceEvent.event?.event_id,
+        notification_type: 'violation_detected',
+        severity,
+        sent_at: new Date().toISOString()
+      });
+  }
+
+  async generateComplianceReport(monitorId: string, period: string): Promise<any> {
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - (period === 'week' ? 7 : period === 'month' ? 30 : 1));
+
+    const { data: events } = await this.supabase
+      .from('compliance_events')
+      .select('*')
+      .eq('monitor_id', monitorId)
+      .gte('created_at', startDate.toISOString());
+
+    const { data: auditTrail } = await this.supabase
+      .from('compliance_audit_trail')
+      .select('*')
+      .eq('monitor_id', monitorId)
+      .gte('created_at', startDate.toISOString());
+
+    return {
+      period,
+      summary: {
+        total_events: auditTrail?.length || 0,
+        violations: events?.length || 0,
+        compliance_rate: ((auditTrail?.length || 0) - (events?.length || 0)) / (auditTrail?.length || 1) * 100,
+        avg_risk_score: auditTrail?.reduce((sum: number, item: any) => sum + item.risk_score, 0) / (auditTrail?.length || 1)
+      },
+      violations_by_type: this.groupViolationsByType(events || []),
+      risk_trends: this.calculateRiskTrends(auditTrail || []),
+      remediation_status: await this.getRemediationStatus(events?.map((e: any) => e.event_id) || [])
+    };
+  }
+
+  private groupViolationsByType(events: any[]): Record<string, number> {
+    const groups: Record<string, number> = {};
+    
+    events.forEach(event => {
+      event.violations?.forEach((violation: any) => {
+        groups[violation.type] = (groups[violation.type] || 0) + 1;
+      });
+    });
+
+    return groups;
+  }
+
+  private calculateRiskTrends(auditTrail: any[]): any[] {
+    const daily = auditTrail.reduce((acc: any, item: any) => {
+      const date = item.created_at.split('T')[0];
+      acc[date] = acc[date] || { date, risk_sum: 0, count: 0 };
+      acc[date].risk_sum += item.risk_score;
+      acc[date].count += 1;
+      return acc;
+    }, {});
+
+    return Object.values(daily).map((day: any) => ({
+      date: day.date,
+      avg_risk_score: day.risk_sum / day.count
+    }));
+  }
+
+  private async getRemediationStatus(eventIds: string[]): Promise<any> {
+    if (eventIds.length === 0) return { pending: 0, completed: 0, failed: 0 };
+
+    const { data } = await this.supabase
+      .from('remediation_workflows')
+      .select('status')
+      .in('event_id', eventIds);
+
+    return (data || []).reduce((acc: any, item: any) => {
+      acc[item.status] = (acc[item.status] || 0) + 1;
+      return acc;
+    }, { pending: 0, completed: 0, failed: 0 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
+    const supabase = createRouteHandlerClient({ cookies });
     const body = await request.json();
-    const validatedData = monitorRequestSchema.parse(body);
 
-    // Extract user ID from authorization header (implement JWT validation)
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
+    // Validate request based on endpoint
+    const url = new URL(request.url);
+    const action = url.searchParams.get('action') || 'start_monitoring';
 
-    const userId = 'user123'; // Replace with actual JWT validation
-
-    const monitor = new ComplianceMonitor(supabase);
-
-    switch (validatedData.action) {
+    switch (action) {
       case 'start_monitoring': {
-        if (!validatedData.standards?.length) {
+        const validatedData = MonitoringRequestSchema.parse(body);
+        const engine = new ComplianceEngine(supabase);
+        
+        const monitorId = await engine.startMonitoring(
+          validatedData.framework,
+          validatedData.scope,
+          {
+            priority: validatedData.priority,
+            realtime: validatedData.realtime,
+            notifications: validatedData.notifications
+          }
+        );
+
+        return NextResponse.json({
+          success: true,
+          monitor_id: monitorId,
+          framework: validatedData.framework,
+          status: 'monitoring_started'
+        });
+      }
+
+      case 'process_activity': {
+        const validatedEvent = ActivityEventSchema.parse(body);
+        const { monitor_id, framework } = body;
+        
+        if (!monitor_id || !framework) {
           return NextResponse.json(
-            { success: false, error: 'Standards required for monitoring' },
+            { error: 'monitor_id and framework are required' },
             { status: 400 }
           );
         }
 
-        const result = await monitor.startMonitoring(validatedData.standards, userId);
-        return NextResponse.json(result);
-      }
+        const engine = new ComplianceEngine(supabase);
+        await engine.processActivityEvent(monitor_id, framework, validatedEvent);
 
-      case 'check_compliance': {
-        const reports = await monitor.checkCompliance(validatedData.rule_ids);
         return NextResponse.json({
           success: true,
-          data: reports
+          event_id: validatedEvent.event_id,
+          status: 'processed'
         });
       }
 
       case 'generate_report': {
-        const reportType = validatedData.report_type || 'on_demand';
-        const reports = await monitor.checkCompliance();
+        const { monitor_id, period = 'week' } = body;
         
-        // Store report generation request
-        const { error } = await supabase
-          .from('compliance_report_requests')
-          .insert({
-            id: crypto.randomUUID(),
-            report_type: reportType,
-            requested_by: userId,
-            requested_at: new Date().toISOString(),
-            status: 'completed'
-          });
+        if (!monitor_id) {
+          return NextResponse.json(
+            { error: 'monitor_id is required' },
+            { status: 400 }
+          );
+        }
 
-        if (error) throw error;
+        const engine = new ComplianceEngine(supabase);
+        const report = await engine.generateComplianceReport(monitor_id, period);
 
         return NextResponse.json({
           success: true,
-          data: reports,
-          message: 'Compliance report generated successfully'
-        });
-      }
-
-      case 'stop_monitoring': {
-        const { error } = await supabase
-          .from('compliance_monitoring_sessions')
-          .update({
-            status: 'stopped',
-            stopped_at: new Date().toISOString(),
-            stopped_by: userId
-          })
-          .eq('status', 'active');
-
-        if (error) throw error;
-
-        return NextResponse.json({
-          success: true,
-          message: 'Compliance monitoring stopped'
+          report,
+          generated_at: new Date().toISOString()
         });
       }
 
       default:
         return NextResponse.json(
-          { success: false, error: 'Invalid action' },
+          { error: 'Invalid action specified' },
           { status: 400 }
         );
     }
+
   } catch (error) {
+    console.error('Compliance monitoring error:', error);
+
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        { success: false, error: 'Invalid request data', details: error.errors },
+        {
+          error: 'Validation failed',
+          details: error.errors
+        },
         { status: 400 }
       );
     }
 
-    console.error('POST /api/compliance/monitor error:', error);
     return NextResponse.json(
-      { success: false, error: 'Internal server error' },
+      {
+        error: 'Internal server error',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     );
   }
 }
 
-export async function PUT(request: NextRequest) {
+export async function GET(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { alert_id, status } = body;
+    const supabase = createRouteHandlerClient({ cookies });
+    const { searchParams } = new URL(request.url);
+    
+    const monitorId = searchParams.get('monitor_id');
+    const action = searchParams.get('action') || 'status';
 
-    if (!alert_id || !status) {
+    if (!monitorId) {
       return NextResponse.json(
-        { success: false, error: 'Alert ID and status required' },
+        { error: 'monitor_id parameter is required' },
         { status: 400 }
       );
     }
 
-    const updateData: any = { status };
-    if (status === '
+    switch (action) {
+      case 'status': {
+        const { data: session } = await supabase
+          .from('compliance_monitoring_sessions')
+          .select('*')
+          .eq('monitor_id', monitorId)
+          .single();
+
+        if (!session) {
+          return NextResponse.json(
+            { error: 'Monitor session not found' },
+            { status: 404 }
+          );
+        }
+
+        const { data: recentEvents } = await supabase
+          .from('compliance_events')
+          .select('*')
+          .eq('monitor_id', monitorId)
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        return NextResponse.json({
+          success: true,
+          session,
+          recent_events: recentEvents || [],
+          last_updated: new Date().toISOString()
+        });
+      }
+
+      case 'frameworks': {
+        return NextResponse.json({
+          success: true,
+          frameworks: Object.entries(REGULATORY_FRAMEWORKS).map(([key, config]) => ({
+            id: key,
+            name: config.name,
+            rules: Object.keys(config.rules),
+            risk_categories: Object.keys(config.risk_weights)
+          }))
+        });
+      }
+
+      default:
+        return NextResponse.json(
+          { error: 'Invalid action specified' },
+          { status: 400 }
+        );
+    }
+
+  } catch (error) {
+    console.error('Compliance monitoring GET error:', error);
+    
+    return NextResponse.json(
+      {
+        error: 'Internal server error',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const supabase = createRouteHandlerClient({ cookies });
+    const { searchParams } = new URL(request.url);
+    
+    const monitorId = searchParams.get('monitor_id');
+
+    if (!monitorId) {
+      return NextResponse.json(
+        { error: 'monitor_id parameter is required' },
+        { status: 400 }
+      );
+    }
+
+    // Update monitoring session status to stopped
+    const { error } = await supabase
+      .from('compliance_monitoring_sessions')
+      .update({ 
+        status: 'stopped',
+        stopped_at: new Date().toISOString()
+      })
+      .eq('monitor_id', monitorId);
+
+    if (error) throw error;
+
+    return NextResponse.json({
+      success: true,
+      monitor_id: monitorId,
+      status: 'monitoring_stopped'
+    });
+
+  } catch (error) {
+    console.error('Compliance monitoring DELETE error:', error);
+    
+    return NextResponse.json(
+      {
+        error: 'Internal server error',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      },
+      { status: 500 }
+    );
+  }
+}
+```
