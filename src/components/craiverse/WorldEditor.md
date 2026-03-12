@@ -1,60 +1,71 @@
-# Generate CRAIverse World Editor UI Component
+# Create CRAIverse World Editor Interface
 
-# CRAIverse World Editor UI Component
+```markdown
+# CRAIverse World Editor Interface
 
 ## Purpose
-The CRAIverse World Editor UI Component provides a graphical interface for users to create and manipulate 3D environments within a React application. It integrates with a 3D rendering engine (`@react-three/fiber`) and utilizes various UI elements for enhanced user experience and interaction.
+The CRAIverse World Editor Interface provides a component for creating and editing 3D worlds using React and Three.js. It allows users to manipulate objects, adjust terrain settings, configure lighting, and navigate within a 3D canvas.
 
 ## Usage
-To incorporate the World Editor into your application, import it and include it in your component tree. Ensure you have the necessary dependencies installed, including React, React Three Fiber, and other UI components.
+To utilize the `WorldEditor` component, import it into your React application and include it in your JSX. The component handles its own state and incorporates various UI elements for user interaction.
 
-```jsx
-import WorldEditor from './src/components/craiverse/WorldEditor';
+```tsx
+import WorldEditor from 'src/components/craiverse/WorldEditor';
 
-const App = () => {
+function App() {
   return (
     <div>
       <WorldEditor />
     </div>
   );
-};
+}
 ```
 
-## Parameters / Props
-The `WorldEditor` component does not take any props directly. It encapsulates its internal state and configurations, making it straightforward to use.
+## Parameters/Props
+The `WorldEditor` component does not accept any props. It manages its own internal state for user actions, object manipulation, and various settings.
 
-### Internal State Management
-- Utilizes state management through Zustand for managing various world objects, actions, and UI states.
-  
-### Components Utilized
-- Implements a series of UI components like Tabs, Cards, Buttons, Inputs, and Sliders for user interactions.
-- Provides tools for editing objects' properties, using TransformControls for transformation (move, rotate, scale).
+### Internal States
+- **User State**: Represents active users in the editor with their cursor positions.
+- **World Objects**: Array of objects representing different elements in the world, including their type, transformations, and visibility settings.
+- **Terrain Settings**: Parameters controlling terrain features (e.g., height scale, texture, erosion).
+- **Lighting Settings**: Configurations for ambient light and sun properties.
 
 ## Return Values
-This component does not explicitly return values in the traditional sense, as it is a UI component rendering within the React tree. It provides a visual interface for users to interact with a 3D world, managing state internally and updating the visual representation of the scene.
+The `WorldEditor` component returns a fully functional 3D editing interface rendered within a `<Canvas>` element, integrated with Three.js for 3D rendering. Users can interact with:
+- 3D objects (mesh, lights, cameras, groups)
+- Terrain and lighting settings
+- UI controls for object transformations (move, rotate, scale)
 
 ## Examples
-Here are some examples demonstrating key functions and usage of the World Editor:
+1. **Basic Use of WorldEditor**:
+   ```tsx
+   import React from 'react';
+   import WorldEditor from 'src/components/craiverse/WorldEditor';
 
-### Example 1: Basic Setup
-```jsx
-import React from 'react';
-import ReactDOM from 'react-dom';
-import WorldEditor from './src/components/craiverse/WorldEditor';
+   function My3DApp() {
+     return (
+       <div>
+         <h1>My CRAIverse World Editor</h1>
+         <WorldEditor />
+       </div>
+     );
+   }
+   ```
 
-ReactDOM.render(
-  <React.StrictMode>
-    <WorldEditor />
-  </React.StrictMode>,
-  document.getElementById('root')
-);
+2. **Handling User Interaction**:
+   The interface includes buttons, sliders, and other controls for users to manipulate the scene dynamically. Users can:
+   - Add new objects
+   - Adjust terrain and lighting settings using UI components
+   - Save changes or undo/redo actions
+
+3. **Navigating the 3D Space**:
+   Users can navigate in the 3D space using `OrbitControls`, allowing for immersive editing experiences.
+
+## Dependencies
+The CRAIverse World Editor uses several libraries:
+- `@react-three/fiber` for rendering 3D graphics
+- `@react-three/drei` for helper components like `OrbitControls` and `Environment`
+- UI components from a custom UI library (e.g., buttons, sliders, and cards) for creating a cohesive editing experience.
+
+Ensure you have the necessary packages installed in your project to utilize the editor component effectively.
 ```
-
-### Example 2: Manipulating Objects
-After integrating the `WorldEditor`, users can add, move, and delete 3D objects using the UI controls provided in the component. Users can select an object and adjust properties like position, scale, and rotation seamlessly.
-
-### Example 3: Real-Time Collaboration (with Supabase)
-While the component is integrated with `supabase`, it allows real-time updates to the 3D scene. Users can collaborate on editing the same world simultaneously, with changes reflected across clients instantly.
-
-## Conclusion
-The World Editor UI Component is a robust tool designed to facilitate the creation and management of 3D environments. By leveraging React, React Three Fiber, and Zustand, it provides a comprehensive set of features for interactive world building.
