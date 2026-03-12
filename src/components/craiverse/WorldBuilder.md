@@ -1,62 +1,101 @@
-# Generate CRAIverse World Builder UI Component
+# Create Craiverse World Builder Interface
 
 ```markdown
-# CRAIverse World Builder UI Component
+# Craiverse World Builder Interface
 
 ## Purpose
-The CRAIverse World Builder UI Component provides an interactive user interface for creating and managing 3D worlds. It leverages React and the @react-three/fiber library to render 3D scenes, allowing users to visualize, create, and manipulate virtual environments.
+The `WorldBuilder` component provides an interactive interface for users to build and customize 3D environments in the Craiverse platform. It leverages React features, 3D rendering via Three.js, and drag-and-drop functionalities to allow users to manipulate various world objects and environment settings effectively.
 
 ## Usage
-To use the WorldBuilder component, import it into your React application and include it in your JSX. It supports drag-and-drop functionality, various UI controls for world customization, and integrates with a backend storage solution.
+To use the `WorldBuilder` component, simply import it into your desired React component file and include it in your JSX:
 
-### Installation
-Ensure you have the required dependencies:
-```bash
-npm install @react-three/fiber @react-three/drei react-dnd react-dnd-html5-backend three
-```
-
-### Example
 ```tsx
-import React from 'react';
 import WorldBuilder from './src/components/craiverse/WorldBuilder';
 
 function App() {
-  const handleSave = (worldData) => {
-    console.log('World data saved:', worldData);
-  };
-
-  const handleLoad = (worldId) => {
-    console.log('Loading world with ID:', worldId);
-  };
-
   return (
-    <div className="App">
-      <WorldBuilder worldId="12345" onSave={handleSave} onLoad={handleLoad} />
+    <div>
+      <WorldBuilder />
     </div>
   );
 }
-
-export default App;
 ```
 
-## Parameters / Props
-The WorldBuilder component accepts the following props:
+## Parameters/Props
+The `WorldBuilder` component accepts the following props:
 
-- `worldId` (optional): A string representing the unique identifier for the world to load or edit.
-- `onSave` (optional): A callback function that is triggered when the user saves the world. It receives the `worldData` object as an argument.
-- `onLoad` (optional): A callback function that is invoked when loading a world by its `worldId`.
-- `className` (optional): A string for custom CSS class names for styling the component.
+| Prop         | Type           | Default     | Description                                     |
+|--------------|----------------|-------------|-------------------------------------------------|
+| initialObjects | Array<WorldObject> | []        | An array of initial world objects to be displayed. |
+| environment  | WorldEnvironment | Default values | Configuration for the initial environment settings.|
+
+### WorldObject Interface
+```typescript
+interface WorldObject {
+  id: string;                           // Unique identifier for the object.
+  type: 'terrain' | 'building' | 'vegetation' | 'prop' | 'light'; // Type of the object.
+  name: string;                         // Display name of the object.
+  position: [number, number, number];   // 3D position in the world.
+  rotation: [number, number, number];   // Rotation angles in radians.
+  scale: [number, number, number];      // Scale factors for resizing.
+  properties: Record<string, any>;      // Additional customizable properties.
+  visible: boolean;                      // Visibility state of the object.
+  locked: boolean;                       // Lock state of the object to prevent manipulation.
+}
+```
+
+### WorldEnvironment Interface
+```typescript
+interface WorldEnvironment {
+  skyType: 'sky' | 'hdri' | 'gradient'; // Type of sky rendering.
+  sunPosition: [number, number, number]; // Position of the sun in the scene.
+  sunIntensity: number;                   // Intensity of the sunlight.
+  ambientIntensity: number;               // Overall ambient light intensity.
+  fogDensity: number;                     // Density of fog in the scene.
+  fogColor: string;                       // Color of the fog.
+  gravity: number;                        // Gravity strength in the environment.
+  windSpeed: number;                      // Speed of wind affecting the environment.
+  timeOfDay: number;                     // Time of day in hours.
+}
+```
 
 ## Return Values
-The WorldBuilder component returns a JSX element that represents the interactive world-building interface. It encapsulates the rendering canvas, UI controls (like buttons, sliders, and input fields), and the event handlers for saving and loading worlds.
+The `WorldBuilder` component does not return any values directly, as it primarily serves to render the UI for world building and provides functionality in response to user interactions.
 
-## Features
-- 3D canvas rendering using `@react-three/fiber`.
-- Drag-and-drop functionality utilizing `react-dnd`.
-- Fully customizable UI with various components from a design system.
-- Integration with Supabase for world data storage and retrieval.
-- Tools for manipulation (move, rotate, scale) and environmental customization (add trees, mountains, etc.).
+## Examples
+### Basic Example
+```tsx
+const initialObjects: WorldObject[] = [
+  {
+    id: '1',
+    type: 'building',
+    name: 'House',
+    position: [0, 0, 0],
+    rotation: [0, 0, 0],
+    scale: [1, 1, 1],
+    properties: {},
+    visible: true,
+    locked: false,
+  },
+];
 
-## Notes
-Make sure to handle the callbacks (`onSave`, `onLoad`) to manage world data effectively when integrating with your app's state or backend services.
+const environmentSettings: WorldEnvironment = {
+  skyType: 'gradient',
+  sunPosition: [1, 1, 1],
+  sunIntensity: 1,
+  ambientIntensity: 0.5,
+  fogDensity: 0.1,
+  fogColor: '#ffffff',
+  gravity: -9.81,
+  windSpeed: 1,
+  timeOfDay: 12,
+};
+
+function App() {
+  return (
+    <WorldBuilder initialObjects={initialObjects} environment={environmentSettings} />
+  );
+}
+```
+This sets up a simple world with a single building object and specific environmental configurations.
 ```
