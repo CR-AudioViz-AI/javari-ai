@@ -2,370 +2,429 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
+import Redis from 'ioredis';
 
-// Initialize Supabase client
+// Validation schemas
+const ForecastRequestSchema = z.object({
+  metrics: z.array(z.object({
+    timestamp: z.string().datetime(),
+    cpu_usage: z.number().min(0).max(100),
+    memory_usage: z.number().min(0).max(100),
+    request_count: z.number().min(0),
+    response_time: z.number().min(0),
+    error_rate: z.number().min(0).max(100)
+  })),
+  forecast_horizon: z.number().min(1).max(168), // 1-168 hours
+  service_id: z.string().uuid(),
+  environment: z.enum(['production', 'staging', 'development'])
+});
+
+const ScaleRequestSchema = z.object({
+  service_id: z.string().uuid(),
+  scaling_action: z.enum(['scale_up', 'scale_down', 'auto']),
+  target_instances: z.number().min(1).max(100).optional(),
+  resource_limits: z.object({
+    cpu_cores: z.number().min(1).max(64).optional(),
+    memory_gb: z.number().min(1).max(512).optional(),
+    max_cost_per_hour: z.number().min(0).optional()
+  }).optional(),
+  force: z.boolean().default(false)
+});
+
+const PolicyUpdateSchema = z.object({
+  service_id: z.string().uuid(),
+  policies: z.object({
+    min_instances: z.number().min(1).max(10),
+    max_instances: z.number().min(1).max(100),
+    target_cpu: z.number().min(10).max(90),
+    target_memory: z.number().min(10).max(90),
+    scale_up_threshold: z.number().min(60).max(95),
+    scale_down_threshold: z.number().min(10).max(50),
+    cooldown_minutes: z.number().min(1).max(60),
+    cost_optimization: z.boolean(),
+    prediction_weight: z.number().min(0).max(1)
+  })
+});
+
+// Initialize clients
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-// Validation schemas
-const analyzeSchema = z.object({
-  service_id: z.string().uuid(),
-  time_range: z.object({
-    start: z.string().datetime(),
-    end: z.string().datetime()
-  }),
-  metrics: z.array(z.enum(['cpu', 'memory', 'requests', 'response_time'])),
-  forecast_horizon: z.number().min(1).max(168) // hours
-});
+const redis = new Redis(process.env.REDIS_URL!);
 
-const scaleSchema = z.object({
-  service_id: z.string().uuid(),
-  action: z.enum(['scale_up', 'scale_down', 'auto']),
-  target_instances: z.number().min(1).max(100).optional(),
-  trigger_reason: z.string().optional()
-});
-
-const configureSchema = z.object({
-  service_id: z.string().uuid(),
-  config: z.object({
-    cpu_threshold_up: z.number().min(0).max(100),
-    cpu_threshold_down: z.number().min(0).max(100),
-    memory_threshold_up: z.number().min(0).max(100),
-    memory_threshold_down: z.number().min(0).max(100),
-    min_instances: z.number().min(1).max(10),
-    max_instances: z.number().min(1).max(100),
-    cooldown_period: z.number().min(60).max(3600), // seconds
-    prediction_confidence: z.number().min(0.5).max(1.0),
-    enable_predictive: z.boolean()
-  })
-});
-
-// Time series forecasting service
-class ForecastingService {
-  private static async generateForecast(
-    historicalData: any[],
-    horizonHours: number
-  ): Promise<any[]> {
-    try {
-      // Simplified time series forecasting logic
-      // In production, integrate with ML service like AWS Forecast, Azure ML, or TensorFlow
-      const trends = this.calculateTrends(historicalData);
-      const seasonality = this.detectSeasonality(historicalData);
-      
-      const forecast = [];
-      const now = new Date();
-      
-      for (let i = 1; i <= horizonHours; i++) {
-        const timestamp = new Date(now.getTime() + i * 60 * 60 * 1000);
-        const predicted_value = this.predictValue(trends, seasonality, i);
-        const confidence = Math.max(0.6, 1 - (i / horizonHours) * 0.4);
-        
-        forecast.push({
-          timestamp: timestamp.toISOString(),
-          predicted_value,
-          confidence,
-          trend: trends.slope > 0 ? 'increasing' : 'decreasing',
-          seasonal_factor: seasonality.factor
-        });
-      }
-      
-      return forecast;
-    } catch (error) {
-      console.error('Forecasting error:', error);
-      throw new Error('Failed to generate forecast');
-    }
-  }
-
-  private static calculateTrends(data: any[]): { slope: number; intercept: number } {
-    if (data.length < 2) return { slope: 0, intercept: 0 };
-    
-    const n = data.length;
-    const x = data.map((_, i) => i);
-    const y = data.map(d => d.value);
-    
-    const sumX = x.reduce((a, b) => a + b, 0);
-    const sumY = y.reduce((a, b) => a + b, 0);
-    const sumXY = x.reduce((acc, xi, i) => acc + xi * y[i], 0);
-    const sumXX = x.reduce((acc, xi) => acc + xi * xi, 0);
-    
-    const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
-    const intercept = (sumY - slope * sumX) / n;
-    
-    return { slope, intercept };
-  }
-
-  private static detectSeasonality(data: any[]): { factor: number; period: number } {
-    // Simplified seasonality detection
-    // In production, use more sophisticated algorithms like FFT or autocorrelation
-    const hourlyAverages = new Array(24).fill(0);
-    const hourlyCounts = new Array(24).fill(0);
-    
-    data.forEach(d => {
-      const hour = new Date(d.timestamp).getHours();
-      hourlyAverages[hour] += d.value;
-      hourlyCounts[hour]++;
-    });
-    
-    for (let i = 0; i < 24; i++) {
-      if (hourlyCounts[i] > 0) {
-        hourlyAverages[i] /= hourlyCounts[i];
-      }
-    }
-    
-    const maxAvg = Math.max(...hourlyAverages);
-    const minAvg = Math.min(...hourlyAverages);
-    const factor = maxAvg > 0 ? (maxAvg - minAvg) / maxAvg : 0;
-    
-    return { factor, period: 24 };
-  }
-
-  private static predictValue(
-    trends: { slope: number; intercept: number },
-    seasonality: { factor: number; period: number },
-    hourOffset: number
-  ): number {
-    const baseValue = trends.intercept + trends.slope * hourOffset;
-    const seasonalAdjustment = 1 + Math.sin((2 * Math.PI * hourOffset) / seasonality.period) * seasonality.factor;
-    return Math.max(0, baseValue * seasonalAdjustment);
-  }
+// Types
+interface MetricDataPoint {
+  timestamp: string;
+  cpu_usage: number;
+  memory_usage: number;
+  request_count: number;
+  response_time: number;
+  error_rate: number;
 }
 
-// Scaling decision engine
-class ScalingEngine {
-  static async makeScalingDecision(
-    serviceId: string,
-    forecast: any[],
-    currentMetrics: any,
-    config: any
-  ): Promise<{
-    action: 'scale_up' | 'scale_down' | 'maintain';
-    target_instances: number;
+interface ForecastResult {
+  predictions: Array<{
+    timestamp: string;
+    predicted_cpu: number;
+    predicted_memory: number;
+    predicted_requests: number;
     confidence: number;
-    reasoning: string;
-  }> {
+  }>;
+  recommended_scaling: {
+    action: string;
+    target_instances: number;
+    estimated_cost: number;
+    confidence: number;
+  };
+}
+
+interface ScalingDecision {
+  action: 'scale_up' | 'scale_down' | 'maintain';
+  current_instances: number;
+  target_instances: number;
+  resource_changes: {
+    cpu_cores?: number;
+    memory_gb?: number;
+  };
+  cost_impact: {
+    current_cost_per_hour: number;
+    projected_cost_per_hour: number;
+    savings_percentage?: number;
+  };
+  confidence: number;
+  reasoning: string[];
+}
+
+class PredictiveScalingEngine {
+  private redis: Redis;
+  
+  constructor(redis: Redis) {
+    this.redis = redis;
+  }
+
+  async generateForecast(metrics: MetricDataPoint[], horizonHours: number): Promise<ForecastResult> {
     try {
-      const nearTermForecast = forecast.slice(0, 6); // Next 6 hours
-      const avgPredictedCpu = nearTermForecast.reduce((sum, f) => sum + f.predicted_value, 0) / nearTermForecast.length;
-      const maxPredictedCpu = Math.max(...nearTermForecast.map(f => f.predicted_value));
-      const minConfidence = Math.min(...nearTermForecast.map(f => f.confidence));
+      // Simple time-series forecasting using exponential smoothing
+      const predictions = this.performTimeSeriesForecasting(metrics, horizonHours);
+      const scalingRecommendation = await this.generateScalingRecommendation(predictions);
       
-      let action: 'scale_up' | 'scale_down' | 'maintain' = 'maintain';
-      let targetInstances = currentMetrics.current_instances;
-      let reasoning = 'No scaling needed based on predictions';
-
-      // Check if we should scale up
-      if (maxPredictedCpu > config.cpu_threshold_up && minConfidence > config.prediction_confidence) {
-        const scaleFactor = Math.ceil(maxPredictedCpu / config.cpu_threshold_up);
-        targetInstances = Math.min(
-          currentMetrics.current_instances * scaleFactor,
-          config.max_instances
-        );
-        action = 'scale_up';
-        reasoning = `Predicted CPU spike to ${maxPredictedCpu.toFixed(1)}% (threshold: ${config.cpu_threshold_up}%)`;
-      }
-      // Check if we should scale down
-      else if (avgPredictedCpu < config.cpu_threshold_down && minConfidence > config.prediction_confidence) {
-        const scaleFactor = Math.max(0.5, avgPredictedCpu / config.cpu_threshold_down);
-        targetInstances = Math.max(
-          Math.floor(currentMetrics.current_instances * scaleFactor),
-          config.min_instances
-        );
-        action = 'scale_down';
-        reasoning = `Predicted low CPU usage: ${avgPredictedCpu.toFixed(1)}% (threshold: ${config.cpu_threshold_down}%)`;
-      }
-
       return {
-        action,
-        target_instances: targetInstances,
-        confidence: minConfidence,
-        reasoning
+        predictions,
+        recommended_scaling: scalingRecommendation
       };
     } catch (error) {
-      console.error('Scaling decision error:', error);
-      throw new Error('Failed to make scaling decision');
+      throw new Error(`Forecasting failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+  }
+
+  private performTimeSeriesForecasting(metrics: MetricDataPoint[], horizonHours: number) {
+    const sortedMetrics = metrics.sort((a, b) => 
+      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+
+    const predictions = [];
+    const alpha = 0.3; // Smoothing parameter
+    
+    // Get baseline values from recent metrics
+    const recentMetrics = sortedMetrics.slice(-12); // Last 12 data points
+    let avgCpu = recentMetrics.reduce((sum, m) => sum + m.cpu_usage, 0) / recentMetrics.length;
+    let avgMemory = recentMetrics.reduce((sum, m) => sum + m.memory_usage, 0) / recentMetrics.length;
+    let avgRequests = recentMetrics.reduce((sum, m) => sum + m.request_count, 0) / recentMetrics.length;
+
+    const lastTimestamp = new Date(sortedMetrics[sortedMetrics.length - 1].timestamp);
+
+    for (let i = 1; i <= horizonHours; i++) {
+      const futureTimestamp = new Date(lastTimestamp.getTime() + (i * 60 * 60 * 1000));
+      
+      // Apply seasonal patterns and trend
+      const hourOfDay = futureTimestamp.getHours();
+      const dayOfWeek = futureTimestamp.getDay();
+      
+      // Simple seasonal adjustment
+      const seasonalFactor = this.getSeasonalFactor(hourOfDay, dayOfWeek);
+      
+      // Exponential smoothing with trend
+      avgCpu = alpha * (avgCpu * seasonalFactor) + (1 - alpha) * avgCpu;
+      avgMemory = alpha * (avgMemory * seasonalFactor) + (1 - alpha) * avgMemory;
+      avgRequests = alpha * (avgRequests * seasonalFactor) + (1 - alpha) * avgRequests;
+      
+      predictions.push({
+        timestamp: futureTimestamp.toISOString(),
+        predicted_cpu: Math.max(0, Math.min(100, avgCpu)),
+        predicted_memory: Math.max(0, Math.min(100, avgMemory)),
+        predicted_requests: Math.max(0, avgRequests),
+        confidence: Math.max(0.5, 1 - (i * 0.02)) // Confidence decreases over time
+      });
+    }
+
+    return predictions;
+  }
+
+  private getSeasonalFactor(hour: number, dayOfWeek: number): number {
+    // Business hours adjustment (higher traffic 9 AM - 5 PM on weekdays)
+    if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+      if (hour >= 9 && hour <= 17) {
+        return 1.3;
+      } else if (hour >= 18 && hour <= 23) {
+        return 1.1;
+      }
+    }
+    
+    // Weekend patterns
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      return 0.7;
+    }
+    
+    // Night hours
+    if (hour >= 0 && hour <= 6) {
+      return 0.5;
+    }
+    
+    return 1.0;
+  }
+
+  private async generateScalingRecommendation(predictions: any[]) {
+    const peakCpu = Math.max(...predictions.map(p => p.predicted_cpu));
+    const peakMemory = Math.max(...predictions.map(p => p.predicted_memory));
+    const peakRequests = Math.max(...predictions.map(p => p.predicted_requests));
+    
+    let action = 'maintain';
+    let targetInstances = 2; // Default
+    let estimatedCost = 50; // Base cost
+    
+    if (peakCpu > 80 || peakMemory > 85) {
+      action = 'scale_up';
+      targetInstances = Math.ceil(peakCpu / 70);
+      estimatedCost = targetInstances * 25;
+    } else if (peakCpu < 30 && peakMemory < 40) {
+      action = 'scale_down';
+      targetInstances = Math.max(1, Math.floor(peakCpu / 50));
+      estimatedCost = targetInstances * 25;
+    }
+    
+    const confidence = predictions.reduce((sum, p) => sum + p.confidence, 0) / predictions.length;
+    
+    return {
+      action,
+      target_instances: targetInstances,
+      estimated_cost: estimatedCost,
+      confidence
+    };
+  }
+
+  async makeScalingDecision(serviceId: string, currentMetrics: any, policies: any): Promise<ScalingDecision> {
+    // Get cached predictions
+    const cacheKey = `predictions:${serviceId}`;
+    const cachedPredictions = await this.redis.get(cacheKey);
+    
+    if (!cachedPredictions) {
+      throw new Error('No predictions available. Generate forecast first.');
+    }
+    
+    const predictions = JSON.parse(cachedPredictions);
+    const nextHourPrediction = predictions.predictions[0];
+    
+    let action: 'scale_up' | 'scale_down' | 'maintain' = 'maintain';
+    let targetInstances = policies.min_instances;
+    const reasoning: string[] = [];
+    
+    // Decision logic based on predictions and current state
+    if (nextHourPrediction.predicted_cpu > policies.scale_up_threshold) {
+      action = 'scale_up';
+      targetInstances = Math.min(
+        policies.max_instances,
+        Math.ceil(nextHourPrediction.predicted_cpu / policies.target_cpu)
+      );
+      reasoning.push(`Predicted CPU usage (${nextHourPrediction.predicted_cpu}%) exceeds scale-up threshold`);
+    } else if (nextHourPrediction.predicted_cpu < policies.scale_down_threshold) {
+      action = 'scale_down';
+      targetInstances = Math.max(
+        policies.min_instances,
+        Math.ceil(nextHourPrediction.predicted_cpu / policies.target_cpu)
+      );
+      reasoning.push(`Predicted CPU usage (${nextHourPrediction.predicted_cpu}%) below scale-down threshold`);
+    }
+    
+    // Cost optimization
+    const currentCost = policies.min_instances * 25;
+    const projectedCost = targetInstances * 25;
+    
+    return {
+      action,
+      current_instances: policies.min_instances,
+      target_instances: targetInstances,
+      resource_changes: {},
+      cost_impact: {
+        current_cost_per_hour: currentCost,
+        projected_cost_per_hour: projectedCost,
+        savings_percentage: ((currentCost - projectedCost) / currentCost) * 100
+      },
+      confidence: nextHourPrediction.confidence,
+      reasoning
+    };
   }
 }
 
+class MetricsCollector {
+  static async collectMetrics(serviceId: string, timeRange: string) {
+    const { data, error } = await supabase
+      .from('service_metrics')
+      .select('*')
+      .eq('service_id', serviceId)
+      .gte('created_at', timeRange)
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+    return data;
+  }
+
+  static async getScalingHistory(serviceId: string, limit: number = 50) {
+    const { data, error } = await supabase
+      .from('scaling_events')
+      .select('*')
+      .eq('service_id', serviceId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+    return data;
+  }
+}
+
+// Route handlers
 export async function POST(request: NextRequest) {
   try {
     const url = new URL(request.url);
-    const action = url.pathname.split('/').pop();
+    const pathname = url.pathname;
+    
+    const engine = new PredictiveScalingEngine(redis);
 
-    switch (action) {
-      case 'analyze': {
-        const body = await request.json();
-        const validatedData = analyzeSchema.parse(body);
+    if (pathname.endsWith('/forecast')) {
+      const body = await request.json();
+      const validatedData = ForecastRequestSchema.parse(body);
 
-        // Fetch historical metrics
-        const { data: metricsData, error: metricsError } = await supabase
-          .from('metrics_history')
-          .select('*')
-          .eq('service_id', validatedData.service_id)
-          .gte('timestamp', validatedData.time_range.start)
-          .lte('timestamp', validatedData.time_range.end)
-          .order('timestamp', { ascending: true });
+      const forecast = await engine.generateForecast(
+        validatedData.metrics,
+        validatedData.forecast_horizon
+      );
 
-        if (metricsError) throw metricsError;
+      // Cache the forecast
+      await redis.setex(
+        `predictions:${validatedData.service_id}`,
+        3600, // 1 hour TTL
+        JSON.stringify(forecast)
+      );
 
-        // Generate forecast for each metric
-        const analysis = {};
-        for (const metric of validatedData.metrics) {
-          const metricData = metricsData?.filter(m => m.metric_type === metric) || [];
-          if (metricData.length > 0) {
-            const forecast = await ForecastingService.generateForecast(
-              metricData,
-              validatedData.forecast_horizon
-            );
-            
-            analysis[metric] = {
-              historical_points: metricData.length,
-              forecast,
-              patterns: {
-                trend: forecast.length > 0 ? forecast[0].trend : 'stable',
-                seasonality_detected: forecast.some(f => f.seasonal_factor > 0.1)
-              }
-            };
-          }
-        }
+      // Store forecast in database
+      await supabase.from('scaling_forecasts').insert({
+        service_id: validatedData.service_id,
+        forecast_data: forecast,
+        horizon_hours: validatedData.forecast_horizon,
+        environment: validatedData.environment
+      });
 
-        // Store analysis results
-        const { error: insertError } = await supabase
-          .from('scaling_predictions')
-          .insert({
-            service_id: validatedData.service_id,
-            analysis_timestamp: new Date().toISOString(),
-            forecast_horizon: validatedData.forecast_horizon,
-            analysis_results: analysis,
-            created_at: new Date().toISOString()
-          });
-
-        if (insertError) throw insertError;
-
-        return NextResponse.json({
-          success: true,
-          service_id: validatedData.service_id,
-          analysis,
-          forecast_horizon_hours: validatedData.forecast_horizon,
-          generated_at: new Date().toISOString()
-        });
-      }
-
-      case 'scale': {
-        const body = await request.json();
-        const validatedData = scaleSchema.parse(body);
-
-        // Get current scaling configuration
-        const { data: configData, error: configError } = await supabase
-          .from('scaling_configs')
-          .select('*')
-          .eq('service_id', validatedData.service_id)
-          .single();
-
-        if (configError && configError.code !== 'PGRST116') throw configError;
-
-        if (!configData?.enable_predictive && validatedData.action === 'auto') {
-          return NextResponse.json({
-            success: false,
-            error: 'Predictive scaling is disabled for this service'
-          }, { status: 400 });
-        }
-
-        // Check cooldown period
-        const { data: recentEvents, error: eventsError } = await supabase
-          .from('scaling_events')
-          .select('timestamp')
-          .eq('service_id', validatedData.service_id)
-          .order('timestamp', { ascending: false })
-          .limit(1);
-
-        if (eventsError) throw eventsError;
-
-        if (recentEvents?.length > 0) {
-          const lastScaling = new Date(recentEvents[0].timestamp);
-          const cooldownEnd = new Date(lastScaling.getTime() + (configData?.cooldown_period || 300) * 1000);
-          
-          if (new Date() < cooldownEnd) {
-            return NextResponse.json({
-              success: false,
-              error: 'Scaling action is in cooldown period',
-              cooldown_ends_at: cooldownEnd.toISOString()
-            }, { status:429 });
-          }
-        }
-
-        // Execute scaling action
-        const scalingResult = await this.executeScaling(validatedData);
-
-        // Log scaling event
-        const { error: logError } = await supabase
-          .from('scaling_events')
-          .insert({
-            service_id: validatedData.service_id,
-            action: validatedData.action,
-            target_instances: validatedData.target_instances || scalingResult.instances,
-            trigger_reason: validatedData.trigger_reason || 'Manual trigger',
-            timestamp: new Date().toISOString(),
-            success: scalingResult.success,
-            metadata: scalingResult
-          });
-
-        if (logError) throw logError;
-
-        return NextResponse.json({
-          success: true,
-          scaling_result: scalingResult,
-          logged_at: new Date().toISOString()
-        });
-      }
-
-      case 'configure': {
-        const body = await request.json();
-        const validatedData = configureSchema.parse(body);
-
-        // Upsert scaling configuration
-        const { data, error } = await supabase
-          .from('scaling_configs')
-          .upsert({
-            service_id: validatedData.service_id,
-            ...validatedData.config,
-            updated_at: new Date().toISOString()
-          })
-          .select()
-          .single();
-
-        if (error) throw error;
-
-        return NextResponse.json({
-          success: true,
-          config: data,
-          updated_at: new Date().toISOString()
-        });
-      }
-
-      default:
-        return NextResponse.json({
-          success: false,
-          error: 'Invalid action'
-        }, { status: 400 });
+      return NextResponse.json({
+        success: true,
+        data: forecast
+      });
     }
+
+    if (pathname.endsWith('/scale')) {
+      const body = await request.json();
+      const validatedData = ScaleRequestSchema.parse(body);
+
+      // Get service policies
+      const { data: policies } = await supabase
+        .from('scaling_policies')
+        .select('*')
+        .eq('service_id', validatedData.service_id)
+        .single();
+
+      if (!policies) {
+        return NextResponse.json({
+          error: 'No scaling policies found for service'
+        }, { status: 404 });
+      }
+
+      const currentMetrics = await MetricsCollector.collectMetrics(
+        validatedData.service_id,
+        new Date(Date.now() - 60000).toISOString()
+      );
+
+      const decision = await engine.makeScalingDecision(
+        validatedData.service_id,
+        currentMetrics,
+        policies.policies
+      );
+
+      // Log scaling event
+      await supabase.from('scaling_events').insert({
+        service_id: validatedData.service_id,
+        action: decision.action,
+        previous_instances: decision.current_instances,
+        target_instances: decision.target_instances,
+        confidence: decision.confidence,
+        reasoning: decision.reasoning,
+        cost_impact: decision.cost_impact
+      });
+
+      return NextResponse.json({
+        success: true,
+        data: decision
+      });
+    }
+
+    if (pathname.endsWith('/simulate')) {
+      const body = await request.json();
+      const validatedData = ForecastRequestSchema.parse(body);
+
+      const forecast = await engine.generateForecast(
+        validatedData.metrics,
+        validatedData.forecast_horizon
+      );
+
+      // Simulate different scaling scenarios
+      const scenarios = [
+        { name: 'Conservative', multiplier: 0.8 },
+        { name: 'Recommended', multiplier: 1.0 },
+        { name: 'Aggressive', multiplier: 1.2 }
+      ];
+
+      const simulations = scenarios.map(scenario => ({
+        scenario: scenario.name,
+        estimated_instances: Math.ceil(forecast.recommended_scaling.target_instances * scenario.multiplier),
+        estimated_cost: forecast.recommended_scaling.estimated_cost * scenario.multiplier,
+        risk_level: scenario.multiplier < 1 ? 'High' : scenario.multiplier > 1 ? 'Low' : 'Medium'
+      }));
+
+      return NextResponse.json({
+        success: true,
+        data: {
+          baseline_forecast: forecast,
+          scenarios: simulations
+        }
+      });
+    }
+
+    return NextResponse.json({
+      error: 'Invalid endpoint'
+    }, { status: 404 });
+
   } catch (error) {
-    console.error('Predictive scaling API error:', error);
+    console.error('Predictive scaling error:', error);
     
     if (error instanceof z.ZodError) {
       return NextResponse.json({
-        success: false,
-        error: 'Invalid request data',
+        error: 'Validation failed',
         details: error.errors
       }, { status: 400 });
     }
 
     return NextResponse.json({
-      success: false,
       error: 'Internal server error',
-      message: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: error instanceof Error ? error.message : 'Unknown error'
     }, { status: 500 });
   }
 }
@@ -373,176 +432,106 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const url = new URL(request.url);
-    const action = url.pathname.split('/').pop();
-    const searchParams = url.searchParams;
-    
-    const serviceId = searchParams.get('service_id');
+    const pathname = url.pathname;
+    const serviceId = url.searchParams.get('service_id');
+
     if (!serviceId) {
       return NextResponse.json({
-        success: false,
-        error: 'service_id is required'
+        error: 'service_id parameter required'
       }, { status: 400 });
     }
 
-    switch (action) {
-      case 'forecast': {
-        const timeRange = searchParams.get('time_range') || '24'; // hours
-        const startTime = new Date();
-        const endTime = new Date(startTime.getTime() + parseInt(timeRange) * 60 * 60 * 1000);
+    if (pathname.endsWith('/metrics')) {
+      const timeRange = url.searchParams.get('time_range') || '1h';
+      const rangeMs = timeRange === '1h' ? 3600000 : 
+                     timeRange === '24h' ? 86400000 : 
+                     timeRange === '7d' ? 604800000 : 3600000;
+      
+      const metrics = await MetricsCollector.collectMetrics(
+        serviceId,
+        new Date(Date.now() - rangeMs).toISOString()
+      );
 
-        // Get latest prediction results
-        const { data: predictionData, error: predictionError } = await supabase
-          .from('scaling_predictions')
-          .select('*')
-          .eq('service_id', serviceId)
-          .order('analysis_timestamp', { ascending: false })
-          .limit(1);
+      // Get cached predictions
+      const predictions = await redis.get(`predictions:${serviceId}`);
 
-        if (predictionError) throw predictionError;
-
-        if (!predictionData?.length) {
-          return NextResponse.json({
-            success: false,
-            error: 'No forecast data available. Run analysis first.'
-          }, { status: 404 });
+      return NextResponse.json({
+        success: true,
+        data: {
+          current_metrics: metrics,
+          predictions: predictions ? JSON.parse(predictions) : null
         }
-
-        const forecast = predictionData[0];
-        
-        return NextResponse.json({
-          success: true,
-          service_id: serviceId,
-          forecast: forecast.analysis_results,
-          generated_at: forecast.analysis_timestamp,
-          valid_until: endTime.toISOString()
-        });
-      }
-
-      case 'metrics': {
-        const period = searchParams.get('period') || '24h';
-        
-        // Calculate time range based on period
-        const endTime = new Date();
-        const startTime = new Date();
-        
-        switch (period) {
-          case '1h':
-            startTime.setHours(startTime.getHours() - 1);
-            break;
-          case '6h':
-            startTime.setHours(startTime.getHours() - 6);
-            break;
-          case '24h':
-            startTime.setDate(startTime.getDate() - 1);
-            break;
-          case '7d':
-            startTime.setDate(startTime.getDate() - 7);
-            break;
-          default:
-            startTime.setDate(startTime.getDate() - 1);
-        }
-
-        // Fetch scaling events and metrics
-        const [eventsResult, metricsResult] = await Promise.all([
-          supabase
-            .from('scaling_events')
-            .select('*')
-            .eq('service_id', serviceId)
-            .gte('timestamp', startTime.toISOString())
-            .order('timestamp', { ascending: false }),
-          
-          supabase
-            .from('metrics_history')
-            .select('*')
-            .eq('service_id', serviceId)
-            .gte('timestamp', startTime.toISOString())
-            .order('timestamp', { ascending: true })
-        ]);
-
-        if (eventsResult.error) throw eventsResult.error;
-        if (metricsResult.error) throw metricsResult.error;
-
-        // Calculate scaling efficiency metrics
-        const events = eventsResult.data || [];
-        const metrics = metricsResult.data || [];
-        
-        const scalingEfficiency = {
-          total_scaling_events: events.length,
-          successful_scalings: events.filter(e => e.success).length,
-          scale_up_events: events.filter(e => e.action === 'scale_up').length,
-          scale_down_events: events.filter(e => e.action === 'scale_down').length,
-          avg_response_time: this.calculateAverageResponseTime(metrics),
-          resource_utilization: this.calculateResourceUtilization(metrics)
-        };
-
-        return NextResponse.json({
-          success: true,
-          service_id: serviceId,
-          period,
-          scaling_events: events,
-          metrics_summary: scalingEfficiency,
-          time_range: {
-            start: startTime.toISOString(),
-            end: endTime.toISOString()
-          }
-        });
-      }
-
-      default:
-        return NextResponse.json({
-          success: false,
-          error: 'Invalid action'
-        }, { status: 400 });
+      });
     }
-  } catch (error) {
-    console.error('Predictive scaling GET API error:', error);
-    
+
+    if (pathname.endsWith('/history')) {
+      const limit = parseInt(url.searchParams.get('limit') || '50');
+      const history = await MetricsCollector.getScalingHistory(serviceId, limit);
+
+      return NextResponse.json({
+        success: true,
+        data: history
+      });
+    }
+
     return NextResponse.json({
-      success: false,
+      error: 'Invalid endpoint'
+    }, { status: 404 });
+
+  } catch (error) {
+    console.error('GET error:', error);
+    return NextResponse.json({
       error: 'Internal server error',
-      message: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: error instanceof Error ? error.message : 'Unknown error'
     }, { status: 500 });
   }
 }
 
-// Helper methods for the class
-async function executeScaling(scalingData: any): Promise<any> {
+export async function PUT(request: NextRequest) {
   try {
-    // This would integrate with your container orchestration system
-    // Example: Docker Swarm, Kubernetes, AWS ECS, etc.
+    const url = new URL(request.url);
     
-    // Placeholder implementation
-    return {
-      success: true,
-      instances: scalingData.target_instances || 1,
-      action_taken: scalingData.action,
-      timestamp: new Date().toISOString()
-    };
+    if (url.pathname.endsWith('/policies')) {
+      const body = await request.json();
+      const validatedData = PolicyUpdateSchema.parse(body);
+
+      const { error } = await supabase
+        .from('scaling_policies')
+        .upsert({
+          service_id: validatedData.service_id,
+          policies: validatedData.policies,
+          updated_at: new Date().toISOString()
+        });
+
+      if (error) throw error;
+
+      // Invalidate cached predictions
+      await redis.del(`predictions:${validatedData.service_id}`);
+
+      return NextResponse.json({
+        success: true,
+        message: 'Scaling policies updated successfully'
+      });
+    }
+
+    return NextResponse.json({
+      error: 'Invalid endpoint'
+    }, { status: 404 });
+
   } catch (error) {
-    return {
-      success: false,
-      error: error.message,
-      timestamp: new Date().toISOString()
-    };
+    console.error('PUT error:', error);
+    
+    if (error instanceof z.ZodError) {
+      return NextResponse.json({
+        error: 'Validation failed',
+        details: error.errors
+      }, { status: 400 });
+    }
+
+    return NextResponse.json({
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
   }
-}
-
-function calculateAverageResponseTime(metrics: any[]): number {
-  const responseTimes = metrics.filter(m => m.metric_type === 'response_time');
-  if (responseTimes.length === 0) return 0;
-  
-  return responseTimes.reduce((sum, m) => sum + m.value, 0) / responseTimes.length;
-}
-
-function calculateResourceUtilization(metrics: any[]): any {
-  const cpuMetrics = metrics.filter(m => m.metric_type === 'cpu');
-  const memoryMetrics = metrics.filter(m => m.metric_type === 'memory');
-  
-  return {
-    avg_cpu: cpuMetrics.length > 0 ? cpuMetrics.reduce((sum, m) => sum + m.value, 0) / cpuMetrics.length : 0,
-    avg_memory: memoryMetrics.length > 0 ? memoryMetrics.reduce((sum, m) => sum + m.value, 0) / memoryMetrics.length : 0,
-    peak_cpu: cpuMetrics.length > 0 ? Math.max(...cpuMetrics.map(m => m.value)) : 0,
-    peak_memory: memoryMetrics.length > 0 ? Math.max(...memoryMetrics.map(m => m.value)) : 0
-  };
 }
 ```
