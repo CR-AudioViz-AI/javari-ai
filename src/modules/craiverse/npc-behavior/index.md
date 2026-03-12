@@ -1,103 +1,106 @@
-# Build Intelligent NPC Behavior Engine
+# Build Autonomous NPC Behavior Engine
 
 ```markdown
-# Intelligent NPC Behavior Engine
+# Autonomous NPC Behavior Engine
+
+The **Autonomous NPC Behavior Engine** is an AI-driven system designed to manage the behavior of non-player characters (NPCs) in a dynamic virtual environment. It incorporates goal-oriented planning, emotional modeling, and adaptive learning to create engaging and realistic NPC interactions.
 
 ## Purpose
-The Intelligent NPC Behavior Engine facilitates the creation of autonomous non-player characters (NPCs) with persistent personalities, goals, and adaptive behavior patterns. This engine enhances player interaction by generating responsive NPCs that react dynamically based on their defined characteristics, goals, and emotional states.
+
+This engine enables developers to create NPCs that can respond to player actions and environmental changes autonomously, providing a richer gameplay experience. It models emotions and personality traits to enhance interactions and decision-making processes.
 
 ## Usage
-To utilize the NPC Behavior Engine, integrate the provided interfaces and classes into your game or simulation project. The engine supports various aspects of NPC behavior including personality traits, goals, emotional states, and interactions with players.
 
-## Parameters/Props
+To utilize the NPC Behavior Engine, integrate it into your project by importing the necessary modules and initiating instances of NPCs with specific profiles. The components include memory management, emotional states, and procedural goal planning.
 
-### NPCPersonality
-Defines an NPC's personality traits and characteristics.  
-- `id`: Unique identifier for the NPC.
-- `name`: Name of the NPC.
-- `traits`: An object containing personality traits scores:
-  - `openness`: Openness to experience (0-1).
-  - `conscientiousness`: Organization and dependability (0-1).
-  - `extraversion`: Sociability and assertiveness (0-1).
-  - `agreeableness`: Compassionate and cooperative traits (0-1).
-  - `neuroticism`: Emotional stability (0-1).
-- `values`: Key-value pairs representing individual values.
-- `quirks`: Array of unique behaviors or habits.
-- `backstory`: Narrative background of the NPC.
-- `speechPatterns`: Array of typical speech styles.
-- `preferredTopics`: Topics the NPC enjoys discussing.
-- `dislikes`: Topics the NPC prefers to avoid.
+### Initialization Example
 
-### NPCGoal
-Structure representing the goals of an NPC.  
-- `id`: Unique identifier for the goal.
-- `type`: Type of goal (survival, social, achievement, exploration, creative).
-- `description`: Brief description of the goal.
-- `priority`: Integer representing the importance of the goal.
-- `deadline`: Optional deadline for goal completion.
-- `prerequisites`: Array of prerequisite goals.
-- `progress`: Current progress towards completion (0-100).
-- `context`: Additional context details for the goal.
-- `isActive`: Boolean indicating if the goal is active.
-- `createdAt`: Creation timestamp.
-- `updatedAt`: Last updated timestamp.
-
-### InteractionRecord
-Records details of player interactions with NPCs.  
-- `id`: Unique identifier for the interaction.
-- `playerId`: Identifier for the interacting player.
-- `npcId`: Identifier for the NPC involved.
-- `type`: Type of interaction (dialogue, action, gift, trade, combat, help).
-- `content`: Content of the interaction.
-- `sentiment`: Sentiment analysis score of the interaction.
-- `context`: Context details including:
-  - `location`: Interaction location.
-  - `timestamp`: Time of interaction.
-  - `witnesses`: Other NPCs present during interaction.
-  - `outcomes`: Results of the interaction.
-- `playerResponse`: Optional response from the player.
-- `npcResponse`: Response from the NPC.
-- `emotionalImpact`: Impact of the interaction on the NPC's emotions.
-- `memoryStrength`: Strength of memory related to the interaction.
-
-### EmotionalState
-Defines the emotional state of an NPC.  
-- `happiness`: Level of happiness (0-1).
-- `anger`: Level of anger (0-1).
-- `fear`: Level of fear (0-1).
-- `sadness`: Level of sadness (0-1).
-- `surprise`: Level of surprise (0-1).
-- `trust`: Level of trust towards the player (0-1).
-- `energy`: Energy level (0-1).
-- `stress`: Stress level (0-1).
-
-## Examples
-### Create an NPC
 ```typescript
-const npc: NPCPersonality = {
-  id: 'npc001',
-  name: 'Eldrin',
-  traits: { openness: 0.9, conscientiousness: 0.8, extraversion: 0.7, agreeableness: 0.6, neuroticism: 0.2 },
-  values: { knowledge: 5, creativity: 7 },
-  quirks: ['talks to animals', 'collects shiny objects'],
-  backstory: 'A wandering scholar with a love for nature.',
-  speechPatterns: ['highly articulate', 'poetic'],
-  preferredTopics: ['philosophy', 'nature'],
-  dislikes: ['violence']
+import { createClient } from '@supabase/supabase-js';
+import OpenAI from 'openai';
+import Redis from 'ioredis';
+import { NPCProfile, Goal, Action } from './npc-behavior'; // Example import
+
+// Create instances as required
+const supabase = createClient('your-supabase-url', 'your-supabase-key');
+const redis = new Redis();
+const npcProfile: NPCProfile = {
+  id: 'npc1',
+  name: 'Guardian',
+  personality: { openness: 0.7, conscientiousness: 0.8, extraversion: 0.5, agreeableness: 0.9, neuroticism: 0.2 },
+  emotionalState: { valence: 0.5, arousal: 0.2, dominance: 0.0, intensity: 1.0, timestamp: Date.now() }
 };
 ```
 
-### Define a Goal
+## Parameters/Props
+
+- **Vector3**: Represents a point in 3D space with properties `x`, `y`, and `z`.
+  
+- **EmotionalState**: Describes the NPC's emotional state with:
+  - `valence`: Emotional positivity or negativity (-1 to 1).
+  - `arousal`: Energy level (calm to excited; -1 to 1).
+  - `dominance`: Control or authority level (-1 to 1).
+  - `intensity`: Emotional strength (0 to 1).
+  - `timestamp`: Time of the recorded state.
+
+- **PersonalityTraits**: Describes an NPC's personality along five axes (0 to 1):
+  - `openness`
+  - `conscientiousness`
+  - `extraversion`
+  - `agreeableness`
+  - `neuroticism`
+
+- **MemoryType**: Enum for different memory types (working, episodic, semantic).
+
+- **Memory**: Structure for storing memories with properties like:
+  - `id`
+  - `type` (MemoryType)
+  - `content`
+  - `importance` (0 to 1)
+  - `timestamp`
+  - `decayRate`
+  - `associations`
+
+- **Goal**: Represents an NPC's objective with:
+  - `id`
+  - `type`
+  - `priority`
+  - `conditions` (Map)
+  - `deadline`
+  - `completed`
+
+- **Action**: Defines achievable actions with:
+  - `id`
+  - `name`
+  - `cost`
+  - `preconditions` (Map)
+  - `effects` (Map)
+  - `duration`
+
+- **Interaction**: Contains data about NPC interactions with properties such as:
+  - `playerId`
+  - `timestamp`
+  - `type`
+  - `content`
+  - `sentiment` (-1 to 1)
+  - `context`
+
+## Return Values
+
+The engine allows for dynamically calculated goals, actions, and emotional states that can be retrieved and updated based on ongoing interactions and state changes.
+
+## Example
+
 ```typescript
-const goal: NPCGoal = {
-  id: 'goal001',
-  type: 'exploration',
-  description: 'Explore the enchanted forest',
+const goal: Goal = {
+  id: 'goal1',
+  type: 'protect',
   priority: 1,
-  deadline: new Date('2023-12-31'),
-  prerequisites: [],
-  progress: 0,
-  context: {},
-  isActive: true,
-  createdAt: new Date(),
-  updatedAt: new Date()
+  conditions: new Map([['threatDetected', true]]),
+  completed: false
+};
+console.log(goal);
+```
+
+This structure allows for the creation of complex NPC behaviors driven by AI, fostering deeper engagement and interactivity for players.
+```
