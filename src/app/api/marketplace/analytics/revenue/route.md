@@ -1,70 +1,112 @@
-# Build Marketplace Revenue Analytics API
+# Create Marketplace Revenue Analytics API
 
 # Marketplace Revenue Analytics API Documentation
 
 ## Purpose
-The Marketplace Revenue Analytics API provides endpoints to analyze revenue metrics for a marketplace. It allows users to retrieve detailed revenue data, including gross and net revenue, commission breakdowns, revenue streams, and forecasting based on historical data.
+The Marketplace Revenue Analytics API provides endpoints for retrieving and analyzing revenue data from a marketplace. It enables users to obtain detailed insights into revenue metrics, vendor performance, and commission breakdowns.
 
 ## Usage
-Import the API module and utilize its endpoints in your server-side code to fetch or update revenue-related analytics. It requires an active Supabase authentication session to ensure secure access to revenue data.
+This API can be integrated into a web application to provide real-time or historical analytics on marketplace revenue. It can generate reports in multiple formats and allow filtering based on various criteria.
 
-## Parameters/Props
+## Endpoints
+### GET /api/marketplace/analytics/revenue
+This endpoint retrieves revenue metrics based on specified query parameters.
 
-### Query Parameters
-- **startDate** (string, optional): Start date for revenue analysis in YYYY-MM-DD format.
-- **endDate** (string, optional): End date for revenue analysis in YYYY-MM-DD format.
-- **period** (enum, optional): Time period for analysis. Defaults to 'month'. Options: `['day', 'week', 'month', 'quarter', 'year']`.
-- **streams** (string, optional): Comma-separated list of revenue stream IDs to include in the analysis.
-- **metrics** (string, optional): Comma-separated list of desired metrics to calculate.
-- **forecast** (boolean, optional): Whether to include revenue forecasting. Defaults to `false`.
-- **granularity** (enum, optional): Time granularity of the results. Defaults to 'daily'. Options: `['hourly', 'daily', 'weekly', 'monthly']`.
+#### Parameters
+- **vendor_id** (string, optional): The ID of the vendor to filter results.
+- **start_date** (string, optional): The start date for the analytics period, in ISO 8601 format.
+- **end_date** (string, optional): The end date for the analytics period, in ISO 8601 format.
+- **granularity** (string, optional): The time granularity of the data (options: 'hour', 'day', 'week', 'month', default: 'day').
+- **metrics** (array, optional): An array of metrics to include in the response (options: 'revenue', 'commission', 'transactions', 'avg_order_value').
+- **real_time** (boolean, optional): If true, fetches real-time data (default: false).
 
-### Body Parameters (for updates)
-- **transactionId** (string): Unique identifier for the transaction.
-- **amount** (number, positive): The amount of revenue to report.
-- **currency** (string, length 3): Currency code (ISO 4217 format).
-- **type** (enum): Type of revenue event. Options: `['subscription', 'transaction', 'commission', 'refund', 'chargeback']`.
-- **vendorId** (string, optional): Identifier for the vendor associated with the transaction.
-- **metadata** (object, optional): Additional metadata related to the transaction.
+#### Return Values
+Returns a JSON object containing the following structure:
+```json
+{
+  "total_revenue": number,
+  "commission_earned": number,
+  "vendor_payout": number,
+  "transaction_count": number,
+  "avg_order_value": number,
+  "top_vendors": [
+    {
+      "vendor_id": string,
+      "vendor_name": string,
+      "total_sales": number,
+      "commission_rate": number,
+      "commission_earned": number,
+      "transaction_count": number,
+      "avg_rating": number,
+      "growth_rate": number,
+      "rank": number
+    }
+  ],
+  "revenue_trends": [
+    {
+      "timestamp": string,
+      "revenue": number,
+      "commission": number,
+      "transactions": number
+    }
+  ]
+}
+```
 
-## Return Values
-### Successful Responses
-- Returns an object containing the requested revenue metrics, streams, and forecasting data, including:
-  - **RevenueMetrics**: Total and detailed revenue stats.
-  - **CommissionBreakdown**: Breakdown of commissions and platform fees.
-  - **RevenueStream[]**: List of identified revenue streams.
-  - **ForecastData**: Projections based on historical trends.
+### POST /api/marketplace/analytics/revenue/report
+This endpoint generates a detailed report based on provided filters.
 
-### Error Responses
-- Returns error messages with appropriate status codes for invalid inputs or processing issues.
+#### Request Body
+```json
+{
+  "type": "revenue_summary" | "vendor_performance" | "commission_breakdown",
+  "format": "json" | "csv" | "pdf",
+  "email": "user@example.com" (optional),
+  "filters": {
+    "vendor_ids": ["string"],
+    "product_categories": ["string"],
+    "date_range": {
+      "start": "ISO 8601 string",
+      "end": "ISO 8601 string"
+    }
+  }
+}
+```
+
+#### Return Values
+The API will return a confirmation of the report generation along with a link to access it, formatted based on the selected type and format.
 
 ## Examples
-
-### Fetching Revenue Data
+### Fetching Revenue Metrics
 ```javascript
-const response = await fetch('/api/marketplace/analytics/revenue?startDate=2023-01-01&endDate=2023-12-31&period=month&forecast=true');
-const revenueData = await response.json();
-console.log(revenueData);
+const response = await fetch('/api/marketplace/analytics/revenue?vendor_id=123&start_date=2023-01-01T00:00:00Z&end_date=2023-01-31T23:59:59Z&granularity=day');
+const data = await response.json();
+console.log(data);
 ```
 
-### Updating a Revenue Transaction
+### Generating a Report
 ```javascript
-const updateResponse = await fetch('/api/marketplace/analytics/revenue', {
+const reportRequest = {
+  type: "vendor_performance",
+  format: "pdf",
+  email: "user@example.com",
+  filters: {
+    vendor_ids: ["123", "456"],
+    product_categories: ["electronics"],
+    date_range: {
+      start: "2023-01-01T00:00:00Z",
+      end: "2023-01-31T23:59:59Z"
+    }
+  }
+};
+
+const response = await fetch('/api/marketplace/analytics/revenue/report', {
   method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify({
-    transactionId: 'trxn_123456',
-    amount: 100.00,
-    currency: 'USD',
-    type: 'transaction',
-    vendorId: 'vendor_abc'
-  })
+  body: JSON.stringify(reportRequest),
+  headers: { 'Content-Type': 'application/json' }
 });
-const updateResult = await updateResponse.json();
-console.log(updateResult);
-```
+const reportResponse = await response.json();
+console.log(reportResponse);
+``` 
 
-## Note
-Make sure to handle authentication properly and manage errors effectively in your application to ensure seamless data retrieval and updates.
+This documentation outlines how to leverage revenue analytics within the marketplace, with a focus on flexibility and ease of integration.
