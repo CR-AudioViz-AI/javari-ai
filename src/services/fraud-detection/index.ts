@@ -1,19 +1,23 @@
 ```typescript
 /**
- * Advanced Payment Fraud Detection Service
+ * ML-Powered Fraud Detection Service
  * 
- * Machine learning-powered fraud detection service that analyzes transaction patterns,
- * device fingerprinting, and behavioral biometrics to prevent fraudulent payments.
+ * Advanced fraud detection service using machine learning models trained on
+ * global transaction patterns to identify and prevent fraudulent activities
+ * in real-time with risk scoring and automated blocking capabilities.
  * 
- * @module FraudDetectionService
+ * @fileoverview Fraud Detection Service for CR AudioViz AI
+ * @author CR AudioViz AI Engineering Team
  * @version 1.0.0
  */
 
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import * as tf from '@tensorflow/tfjs';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import Redis from 'ioredis';
+import WebSocket from 'ws';
 
 /**
- * Transaction data structure
+ * Transaction data structure for fraud analysis
  */
 export interface Transaction {
   id: string;
@@ -23,712 +27,691 @@ export interface Transaction {
   merchantId: string;
   merchantCategory: string;
   timestamp: Date;
-  paymentMethod: PaymentMethod;
+  location: {
+    country: string;
+    city: string;
+    latitude?: number;
+    longitude?: number;
+  };
+  paymentMethod: 'card' | 'bank' | 'digital_wallet' | 'crypto';
+  deviceFingerprint: string;
   ipAddress: string;
   userAgent: string;
-  geolocation?: Geolocation;
-  deviceFingerprint?: DeviceFingerprint;
+  previousTransactionMinutes?: number;
+  accountAge: number; // days
+  metadata?: Record<string, unknown>;
 }
 
 /**
- * Payment method information
+ * Fraud detection result with risk assessment
  */
-export interface PaymentMethod {
-  type: 'credit_card' | 'debit_card' | 'bank_transfer' | 'digital_wallet';
-  last4Digits?: string;
-  brand?: string;
-  country: string;
-  isNewCard: boolean;
-}
-
-/**
- * Geolocation data
- */
-export interface Geolocation {
-  latitude: number;
-  longitude: number;
-  country: string;
-  region: string;
-  city: string;
-  accuracy: number;
-}
-
-/**
- * Device fingerprint data
- */
-export interface DeviceFingerprint {
-  visitorId: string;
-  browserName: string;
-  browserVersion: string;
-  os: string;
-  device: string;
-  screenResolution: string;
-  timezone: string;
-  language: string;
-  plugins: string[];
-  canvas: string;
-  webgl: string;
-  confidence: number;
-}
-
-/**
- * Behavioral biometrics data
- */
-export interface BehavioralBiometrics {
-  userId: string;
-  sessionId: string;
-  keystrokeDynamics: KeystrokeDynamics;
-  mouseDynamics: MouseDynamics;
-  touchDynamics?: TouchDynamics;
-  navigationPattern: NavigationPattern;
-  sessionDuration: number;
-}
-
-/**
- * Keystroke dynamics patterns
- */
-export interface KeystrokeDynamics {
-  dwellTimes: number[];
-  flightTimes: number[];
-  typingRhythm: number[];
-  pausePatterns: number[];
-  averageSpeed: number;
-}
-
-/**
- * Mouse movement dynamics
- */
-export interface MouseDynamics {
-  velocity: number[];
-  acceleration: number[];
-  trajectory: Array<{ x: number; y: number; timestamp: number }>;
-  clickPatterns: number[];
-  scrollBehavior: number[];
-}
-
-/**
- * Touch dynamics for mobile devices
- */
-export interface TouchDynamics {
-  pressure: number[];
-  touchArea: number[];
-  swipeVelocity: number[];
-  tapDuration: number[];
-  multiTouchPatterns: number[];
-}
-
-/**
- * User navigation patterns
- */
-export interface NavigationPattern {
-  pageSequence: string[];
-  timeOnPages: number[];
-  backButtonUsage: number;
-  tabSwitching: number;
-  formFillSpeed: number;
-}
-
-/**
- * Risk assessment result
- */
-export interface RiskAssessment {
+export interface FraudDetectionResult {
   transactionId: string;
-  riskScore: number;
-  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-  confidence: number;
-  factors: RiskFactor[];
-  recommendation: 'APPROVE' | 'REVIEW' | 'DECLINE' | 'CHALLENGE';
+  riskScore: number; // 0-1 scale
+  riskLevel: 'low' | 'medium' | 'high' | 'critical';
+  decision: 'approve' | 'review' | 'block';
+  flags: FraudFlag[];
   modelVersion: string;
-  processedAt: Date;
+  processingTime: number;
+  confidence: number;
+  recommendedAction: string;
+  metadata: {
+    features: Record<string, number>;
+    modelOutputs: Record<string, number>;
+    timestamp: Date;
+  };
 }
 
 /**
- * Individual risk factor
+ * Fraud flag indicating specific risk factors
  */
-export interface RiskFactor {
-  type: string;
-  score: number;
-  weight: number;
+export interface FraudFlag {
+  type: 'velocity' | 'location' | 'amount' | 'pattern' | 'device' | 'behavioral';
+  severity: 'low' | 'medium' | 'high';
   description: string;
-  evidence: Record<string, any>;
+  confidence: number;
+  value?: string | number;
 }
 
 /**
- * Fraud alert data
+ * ML model configuration and metadata
  */
-export interface FraudAlert {
+export interface MLModel {
   id: string;
-  transactionId: string;
-  userId: string;
-  alertType: 'HIGH_RISK' | 'VELOCITY_EXCEEDED' | 'DEVICE_MISMATCH' | 'GEOLOCATION_ANOMALY' | 'BEHAVIORAL_ANOMALY';
-  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-  message: string;
-  metadata: Record<string, any>;
-  createdAt: Date;
-  status: 'OPEN' | 'INVESTIGATING' | 'RESOLVED' | 'FALSE_POSITIVE';
-}
-
-/**
- * Whitelist entry
- */
-export interface WhitelistEntry {
-  id: string;
-  userId: string;
-  type: 'IP' | 'DEVICE' | 'MERCHANT' | 'GEOLOCATION';
-  value: string;
-  reason: string;
-  expiresAt?: Date;
-  createdAt: Date;
+  name: string;
+  version: string;
+  type: 'neural_network' | 'random_forest' | 'gradient_boosting' | 'ensemble';
+  accuracy: number;
+  precision: number;
+  recall: number;
+  f1Score: number;
+  trainingDate: Date;
+  features: string[];
+  modelPath: string;
   isActive: boolean;
 }
 
 /**
- * Velocity check configuration
+ * Feature vector for ML model input
  */
-export interface VelocityLimits {
-  transactionCount: { limit: number; windowMinutes: number };
-  totalAmount: { limit: number; windowMinutes: number };
-  newMerchants: { limit: number; windowMinutes: number };
-  newDevices: { limit: number; windowMinutes: number };
-  failedAttempts: { limit: number; windowMinutes: number };
+export interface FeatureVector {
+  // Amount features
+  amount: number;
+  amountNormalized: number;
+  amountZScore: number;
+  
+  // Time features
+  hourOfDay: number;
+  dayOfWeek: number;
+  isWeekend: number;
+  isBusinessHours: number;
+  
+  // Velocity features
+  transactionsLast1Hour: number;
+  transactionsLast24Hours: number;
+  amountLast1Hour: number;
+  amountLast24Hours: number;
+  
+  // Location features
+  isNewCountry: number;
+  isNewCity: number;
+  distanceFromLastTransaction: number;
+  
+  // User behavior features
+  accountAge: number;
+  avgTransactionAmount: number;
+  transactionFrequency: number;
+  typicalMerchantCategories: number[];
+  
+  // Device and session features
+  isNewDevice: number;
+  isNewIpAddress: number;
+  sessionLength: number;
+  
+  // Risk indicators
+  isHighRiskMerchant: number;
+  isHighRiskCountry: number;
+  hasChargebacks: number;
 }
 
 /**
- * ML model configuration
+ * Fraud analytics and statistics
  */
-export interface MLModelConfig {
-  modelUrl: string;
-  version: string;
-  threshold: number;
-  features: string[];
-  lastTrained: Date;
-  accuracy: number;
-}
-
-/**
- * Service configuration
- */
-export interface FraudDetectionConfig {
-  supabaseUrl: string;
-  supabaseKey: string;
-  stripeSecretKey?: string;
-  fingerprintApiKey?: string;
-  geolocationApiKey?: string;
-  mlModelConfig: MLModelConfig;
-  velocityLimits: VelocityLimits;
-  riskThresholds: {
+export interface FraudAnalytics {
+  period: {
+    start: Date;
+    end: Date;
+  };
+  totalTransactions: number;
+  flaggedTransactions: number;
+  blockedTransactions: number;
+  fraudRate: number;
+  falsePositiveRate: number;
+  falseNegativeRate: number;
+  averageRiskScore: number;
+  topFraudFlags: Array<{
+    type: string;
+    count: number;
+    percentage: number;
+  }>;
+  modelPerformance: {
+    accuracy: number;
+    precision: number;
+    recall: number;
+    f1Score: number;
+  };
+  riskDistribution: {
     low: number;
     medium: number;
     high: number;
     critical: number;
   };
-  enableRealTimeScoring: boolean;
-  enableBehavioralAnalysis: boolean;
-  enableDeviceFingerprinting: boolean;
+}
+
+/**
+ * Service configuration options
+ */
+export interface FraudDetectionConfig {
+  supabaseUrl: string;
+  supabaseKey: string;
+  redisUrl: string;
+  websocketPort: number;
+  modelUpdateInterval: number; // minutes
+  riskThresholds: {
+    review: number;
+    block: number;
+  };
+  enableRealTimeAlerts: boolean;
+  enableModelRetraining: boolean;
+  maxProcessingTime: number; // milliseconds
+}
+
+/**
+ * Feature extraction utility for ML model input
+ */
+class FeatureExtractor {
+  private redis: Redis;
+  private supabase: SupabaseClient;
+
+  constructor(redis: Redis, supabase: SupabaseClient) {
+    this.redis = redis;
+    this.supabase = supabase;
+  }
+
+  /**
+   * Extract features from transaction data
+   */
+  async extractFeatures(transaction: Transaction): Promise<FeatureVector> {
+    const [
+      userStats,
+      velocityStats,
+      locationStats,
+      deviceStats
+    ] = await Promise.all([
+      this.getUserStatistics(transaction.userId),
+      this.getVelocityStatistics(transaction.userId),
+      this.getLocationStatistics(transaction.userId, transaction.location),
+      this.getDeviceStatistics(transaction.deviceFingerprint)
+    ]);
+
+    const now = transaction.timestamp;
+    const hour = now.getHours();
+    const day = now.getDay();
+
+    return {
+      // Amount features
+      amount: transaction.amount,
+      amountNormalized: this.normalizeAmount(transaction.amount, transaction.currency),
+      amountZScore: this.calculateAmountZScore(transaction.amount, userStats.avgAmount, userStats.stdAmount),
+      
+      // Time features
+      hourOfDay: hour,
+      dayOfWeek: day,
+      isWeekend: day === 0 || day === 6 ? 1 : 0,
+      isBusinessHours: hour >= 9 && hour <= 17 ? 1 : 0,
+      
+      // Velocity features
+      transactionsLast1Hour: velocityStats.transactionsLast1Hour,
+      transactionsLast24Hours: velocityStats.transactionsLast24Hours,
+      amountLast1Hour: velocityStats.amountLast1Hour,
+      amountLast24Hours: velocityStats.amountLast24Hours,
+      
+      // Location features
+      isNewCountry: locationStats.isNewCountry ? 1 : 0,
+      isNewCity: locationStats.isNewCity ? 1 : 0,
+      distanceFromLastTransaction: locationStats.distanceFromLast,
+      
+      // User behavior features
+      accountAge: transaction.accountAge,
+      avgTransactionAmount: userStats.avgAmount,
+      transactionFrequency: userStats.frequency,
+      typicalMerchantCategories: this.encodeMerchantCategories(userStats.merchantCategories),
+      
+      // Device and session features
+      isNewDevice: deviceStats.isNewDevice ? 1 : 0,
+      isNewIpAddress: deviceStats.isNewIp ? 1 : 0,
+      sessionLength: deviceStats.sessionLength,
+      
+      // Risk indicators
+      isHighRiskMerchant: await this.isHighRiskMerchant(transaction.merchantId) ? 1 : 0,
+      isHighRiskCountry: await this.isHighRiskCountry(transaction.location.country) ? 1 : 0,
+      hasChargebacks: userStats.hasChargebacks ? 1 : 0
+    };
+  }
+
+  private async getUserStatistics(userId: string): Promise<any> {
+    const cacheKey = `user_stats:${userId}`;
+    let stats = await this.redis.get(cacheKey);
+    
+    if (!stats) {
+      const { data } = await this.supabase
+        .from('user_transaction_stats')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+      
+      stats = data || {};
+      await this.redis.setex(cacheKey, 300, JSON.stringify(stats));
+    } else {
+      stats = JSON.parse(stats);
+    }
+    
+    return stats;
+  }
+
+  private async getVelocityStatistics(userId: string): Promise<any> {
+    // Implementation for velocity calculations
+    return {
+      transactionsLast1Hour: 0,
+      transactionsLast24Hours: 0,
+      amountLast1Hour: 0,
+      amountLast24Hours: 0
+    };
+  }
+
+  private async getLocationStatistics(userId: string, location: Transaction['location']): Promise<any> {
+    // Implementation for location analysis
+    return {
+      isNewCountry: false,
+      isNewCity: false,
+      distanceFromLast: 0
+    };
+  }
+
+  private async getDeviceStatistics(deviceFingerprint: string): Promise<any> {
+    // Implementation for device analysis
+    return {
+      isNewDevice: false,
+      isNewIp: false,
+      sessionLength: 0
+    };
+  }
+
+  private normalizeAmount(amount: number, currency: string): number {
+    // Normalize amount to USD equivalent
+    return amount; // Simplified
+  }
+
+  private calculateAmountZScore(amount: number, mean: number, std: number): number {
+    return std > 0 ? (amount - mean) / std : 0;
+  }
+
+  private encodeMerchantCategories(categories: string[]): number[] {
+    // One-hot encoding of merchant categories
+    return new Array(20).fill(0); // Simplified
+  }
+
+  private async isHighRiskMerchant(merchantId: string): Promise<boolean> {
+    const { data } = await this.supabase
+      .from('merchant_risk_scores')
+      .select('risk_score')
+      .eq('merchant_id', merchantId)
+      .single();
+    
+    return data?.risk_score > 0.7;
+  }
+
+  private async isHighRiskCountry(country: string): Promise<boolean> {
+    const highRiskCountries = ['XX', 'YY']; // Simplified
+    return highRiskCountries.includes(country);
+  }
+}
+
+/**
+ * Risk score calculator with multiple algorithms
+ */
+class RiskScoreCalculator {
+  /**
+   * Calculate composite risk score from ML model outputs
+   */
+  calculateRiskScore(
+    modelOutputs: Record<string, number>,
+    flags: FraudFlag[],
+    features: FeatureVector
+  ): number {
+    // Weighted ensemble of different risk factors
+    const modelScore = this.calculateModelScore(modelOutputs);
+    const ruleScore = this.calculateRuleBasedScore(flags);
+    const velocityScore = this.calculateVelocityScore(features);
+    const anomalyScore = this.calculateAnomalyScore(features);
+
+    // Weighted combination
+    const weights = {
+      model: 0.5,
+      rules: 0.2,
+      velocity: 0.2,
+      anomaly: 0.1
+    };
+
+    return Math.min(1.0, 
+      modelScore * weights.model +
+      ruleScore * weights.rules +
+      velocityScore * weights.velocity +
+      anomalyScore * weights.anomaly
+    );
+  }
+
+  private calculateModelScore(outputs: Record<string, number>): number {
+    // Ensemble of ML model outputs
+    return Object.values(outputs).reduce((sum, score) => sum + score, 0) / Object.keys(outputs).length;
+  }
+
+  private calculateRuleBasedScore(flags: FraudFlag[]): number {
+    if (flags.length === 0) return 0;
+
+    const severityWeights = { low: 0.3, medium: 0.6, high: 1.0 };
+    const totalScore = flags.reduce((sum, flag) => 
+      sum + (severityWeights[flag.severity] * flag.confidence), 0
+    );
+
+    return Math.min(1.0, totalScore / flags.length);
+  }
+
+  private calculateVelocityScore(features: FeatureVector): number {
+    const velocityRisk = 
+      (features.transactionsLast1Hour * 0.4) +
+      (features.amountLast1Hour * 0.6) / 10000; // Normalized
+
+    return Math.min(1.0, velocityRisk);
+  }
+
+  private calculateAnomalyScore(features: FeatureVector): number {
+    // Simple anomaly detection based on feature deviations
+    let anomalies = 0;
+    
+    if (features.amountZScore > 3) anomalies += 0.3;
+    if (features.distanceFromLastTransaction > 1000) anomalies += 0.2;
+    if (features.isNewCountry) anomalies += 0.4;
+    if (features.isNewDevice) anomalies += 0.1;
+
+    return Math.min(1.0, anomalies);
+  }
+
+  /**
+   * Determine risk level from score
+   */
+  getRiskLevel(score: number): FraudDetectionResult['riskLevel'] {
+    if (score >= 0.8) return 'critical';
+    if (score >= 0.6) return 'high';
+    if (score >= 0.3) return 'medium';
+    return 'low';
+  }
+
+  /**
+   * Determine decision based on risk score and thresholds
+   */
+  getDecision(score: number, thresholds: { review: number; block: number }): FraudDetectionResult['decision'] {
+    if (score >= thresholds.block) return 'block';
+    if (score >= thresholds.review) return 'review';
+    return 'approve';
+  }
+}
+
+/**
+ * ML Model Manager for loading and managing fraud detection models
+ */
+class MLModelManager {
+  private models: Map<string, tf.LayersModel> = new Map();
+  private modelConfigs: Map<string, MLModel> = new Map();
+  private supabase: SupabaseClient;
+
+  constructor(supabase: SupabaseClient) {
+    this.supabase = supabase;
+  }
+
+  /**
+   * Load ML models from storage
+   */
+  async loadModels(): Promise<void> {
+    try {
+      const { data: modelConfigs } = await this.supabase
+        .from('fraud_models')
+        .select('*')
+        .eq('is_active', true);
+
+      if (!modelConfigs) throw new Error('No active models found');
+
+      for (const config of modelConfigs) {
+        await this.loadModel(config);
+      }
+    } catch (error) {
+      throw new Error(`Failed to load models: ${error}`);
+    }
+  }
+
+  /**
+   * Load individual model
+   */
+  private async loadModel(config: MLModel): Promise<void> {
+    try {
+      const modelUrl = `${this.supabase.supabaseUrl}/storage/v1/object/public/models/${config.modelPath}`;
+      const model = await tf.loadLayersModel(modelUrl);
+      
+      this.models.set(config.id, model);
+      this.modelConfigs.set(config.id, config);
+    } catch (error) {
+      console.error(`Failed to load model ${config.id}:`, error);
+    }
+  }
+
+  /**
+   * Run inference on all active models
+   */
+  async predict(features: FeatureVector): Promise<Record<string, number>> {
+    const predictions: Record<string, number> = {};
+
+    for (const [modelId, model] of this.models) {
+      try {
+        const inputTensor = tf.tensor2d([Object.values(features)]);
+        const prediction = model.predict(inputTensor) as tf.Tensor;
+        const score = await prediction.data();
+        
+        predictions[modelId] = score[0];
+        
+        inputTensor.dispose();
+        prediction.dispose();
+      } catch (error) {
+        console.error(`Model ${modelId} prediction failed:`, error);
+        predictions[modelId] = 0.5; // Default fallback
+      }
+    }
+
+    return predictions;
+  }
+
+  /**
+   * Update models periodically
+   */
+  async updateModels(): Promise<void> {
+    console.log('Checking for model updates...');
+    await this.loadModels();
+  }
+
+  /**
+   * Get model metadata
+   */
+  getModelInfo(): MLModel[] {
+    return Array.from(this.modelConfigs.values());
+  }
 }
 
 /**
  * Transaction analyzer for pattern detection
  */
 class TransactionAnalyzer {
-  constructor(private supabase: SupabaseClient) {}
+  private redis: Redis;
 
-  /**
-   * Analyze transaction patterns for anomalies
-   */
-  async analyzeTransaction(transaction: Transaction): Promise<RiskFactor[]> {
-    const factors: RiskFactor[] = [];
-
-    try {
-      // Amount analysis
-      const amountFactor = await this.analyzeAmount(transaction);
-      if (amountFactor) factors.push(amountFactor);
-
-      // Merchant analysis
-      const merchantFactor = await this.analyzeMerchant(transaction);
-      if (merchantFactor) factors.push(merchantFactor);
-
-      // Time pattern analysis
-      const timeFactor = await this.analyzeTimePattern(transaction);
-      if (timeFactor) factors.push(timeFactor);
-
-      // Payment method analysis
-      const paymentFactor = await this.analyzePaymentMethod(transaction);
-      if (paymentFactor) factors.push(paymentFactor);
-
-      return factors;
-    } catch (error) {
-      throw new Error(`Transaction analysis failed: ${error}`);
-    }
+  constructor(redis: Redis) {
+    this.redis = redis;
   }
 
   /**
-   * Analyze transaction amount patterns
+   * Analyze transaction for fraud flags
    */
-  private async analyzeAmount(transaction: Transaction): Promise<RiskFactor | null> {
-    const { data: recentTransactions } = await this.supabase
-      .from('transactions')
-      .select('amount')
-      .eq('user_id', transaction.userId)
-      .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
-      .order('created_at', { ascending: false });
+  async analyzeTransaction(transaction: Transaction, features: FeatureVector): Promise<FraudFlag[]> {
+    const flags: FraudFlag[] = [];
 
-    if (!recentTransactions || recentTransactions.length === 0) {
-      return {
-        type: 'NEW_USER',
-        score: 0.3,
-        weight: 0.2,
-        description: 'New user with no transaction history',
-        evidence: { transactionCount: 0 }
-      };
+    // Velocity analysis
+    if (features.transactionsLast1Hour > 5) {
+      flags.push({
+        type: 'velocity',
+        severity: 'high',
+        description: 'High transaction velocity detected',
+        confidence: Math.min(1.0, features.transactionsLast1Hour / 10),
+        value: features.transactionsLast1Hour
+      });
     }
 
-    const amounts = recentTransactions.map(t => t.amount);
-    const avgAmount = amounts.reduce((sum, amt) => sum + amt, 0) / amounts.length;
-    const maxAmount = Math.max(...amounts);
-
-    if (transaction.amount > avgAmount * 5) {
-      return {
-        type: 'AMOUNT_ANOMALY',
-        score: Math.min(transaction.amount / avgAmount / 5, 1),
-        weight: 0.4,
-        description: 'Transaction amount significantly higher than user average',
-        evidence: { currentAmount: transaction.amount, averageAmount: avgAmount }
-      };
+    // Amount analysis
+    if (features.amountZScore > 3) {
+      flags.push({
+        type: 'amount',
+        severity: 'medium',
+        description: 'Transaction amount significantly above normal',
+        confidence: Math.min(1.0, features.amountZScore / 5),
+        value: transaction.amount
+      });
     }
 
-    return null;
+    // Location analysis
+    if (features.isNewCountry) {
+      flags.push({
+        type: 'location',
+        severity: 'medium',
+        description: 'Transaction from new country',
+        confidence: 0.7,
+        value: transaction.location.country
+      });
+    }
+
+    // Device analysis
+    if (features.isNewDevice) {
+      flags.push({
+        type: 'device',
+        severity: 'low',
+        description: 'Transaction from new device',
+        confidence: 0.5,
+        value: transaction.deviceFingerprint
+      });
+    }
+
+    // Pattern analysis
+    await this.analyzePatterns(transaction, features, flags);
+
+    return flags;
   }
 
-  /**
-   * Analyze merchant patterns
-   */
-  private async analyzeMerchant(transaction: Transaction): Promise<RiskFactor | null> {
-    const { data: merchantStats } = await this.supabase
-      .from('merchant_fraud_stats')
-      .select('*')
-      .eq('merchant_id', transaction.merchantId)
-      .single();
-
-    if (merchantStats && merchantStats.fraud_rate > 0.05) {
-      return {
-        type: 'HIGH_RISK_MERCHANT',
-        score: Math.min(merchantStats.fraud_rate * 10, 1),
-        weight: 0.5,
-        description: 'Merchant has elevated fraud rates',
-        evidence: { 
-          fraudRate: merchantStats.fraud_rate,
-          totalTransactions: merchantStats.total_transactions 
-        }
-      };
+  private async analyzePatterns(
+    transaction: Transaction,
+    features: FeatureVector,
+    flags: FraudFlag[]
+  ): Promise<void> {
+    // Time-based pattern analysis
+    if (features.hourOfDay < 6 || features.hourOfDay > 23) {
+      flags.push({
+        type: 'pattern',
+        severity: 'low',
+        description: 'Unusual transaction time',
+        confidence: 0.4,
+        value: features.hourOfDay
+      });
     }
 
-    return null;
-  }
-
-  /**
-   * Analyze transaction timing patterns
-   */
-  private async analyzeTimePattern(transaction: Transaction): Promise<RiskFactor | null> {
-    const hour = transaction.timestamp.getHours();
-    const dayOfWeek = transaction.timestamp.getDay();
-
-    // Check for unusual hours (2 AM - 5 AM)
-    if (hour >= 2 && hour <= 5) {
-      return {
-        type: 'UNUSUAL_TIME',
-        score: 0.4,
-        weight: 0.2,
-        description: 'Transaction during unusual hours',
-        evidence: { hour, dayOfWeek }
-      };
-    }
-
-    return null;
-  }
-
-  /**
-   * Analyze payment method patterns
-   */
-  private async analyzePaymentMethod(transaction: Transaction): Promise<RiskFactor | null> {
-    if (transaction.paymentMethod.isNewCard) {
-      const { data: recentNewCards } = await this.supabase
-        .from('transactions')
-        .select('id')
-        .eq('user_id', transaction.userId)
-        .eq('payment_method->isNewCard', true)
-        .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
-
-      if (recentNewCards && recentNewCards.length > 2) {
-        return {
-          type: 'MULTIPLE_NEW_CARDS',
-          score: 0.7,
-          weight: 0.6,
-          description: 'Multiple new cards used in short timeframe',
-          evidence: { newCardCount: recentNewCards.length }
-        };
+    // Behavioral pattern analysis
+    const behaviorPattern = await this.redis.get(`behavior:${transaction.userId}`);
+    if (behaviorPattern) {
+      const pattern = JSON.parse(behaviorPattern);
+      
+      if (Math.abs(transaction.amount - pattern.avgAmount) > pattern.avgAmount * 2) {
+        flags.push({
+          type: 'behavioral',
+          severity: 'medium',
+          description: 'Amount deviates significantly from user behavior',
+          confidence: 0.6,
+          value: transaction.amount
+        });
       }
     }
-
-    return null;
   }
 }
 
 /**
- * Device fingerprint collector
+ * Decision engine for fraud detection actions
  */
-class DeviceFingerprintCollector {
-  private apiKey: string;
+class DecisionEngine {
+  private config: FraudDetectionConfig;
 
-  constructor(apiKey: string) {
-    this.apiKey = apiKey;
+  constructor(config: FraudDetectionConfig) {
+    this.config = config;
   }
 
   /**
-   * Collect device fingerprint
+   * Make fraud detection decision
    */
-  async collectFingerprint(): Promise<DeviceFingerprint> {
-    try {
-      // This would integrate with FingerprintJS or similar service
-      const fingerprint: DeviceFingerprint = {
-        visitorId: await this.generateVisitorId(),
-        browserName: this.getBrowserName(),
-        browserVersion: this.getBrowserVersion(),
-        os: this.getOS(),
-        device: this.getDevice(),
-        screenResolution: `${screen.width}x${screen.height}`,
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        language: navigator.language,
-        plugins: this.getPlugins(),
-        canvas: await this.getCanvasFingerprint(),
-        webgl: await this.getWebGLFingerprint(),
-        confidence: 0.95
-      };
+  makeDecision(
+    riskScore: number,
+    riskLevel: FraudDetectionResult['riskLevel'],
+    flags: FraudFlag[]
+  ): {
+    decision: FraudDetectionResult['decision'];
+    recommendedAction: string;
+  } {
+    let decision: FraudDetectionResult['decision'] = 'approve';
+    let recommendedAction = 'Process transaction normally';
 
-      return fingerprint;
-    } catch (error) {
-      throw new Error(`Device fingerprinting failed: ${error}`);
+    // Decision logic based on risk score and flags
+    if (riskScore >= this.config.riskThresholds.block) {
+      decision = 'block';
+      recommendedAction = 'Block transaction immediately and notify user';
+    } else if (riskScore >= this.config.riskThresholds.review) {
+      decision = 'review';
+      recommendedAction = 'Hold transaction for manual review';
+    } else if (flags.some(f => f.severity === 'high')) {
+      decision = 'review';
+      recommendedAction = 'Review due to high-severity flags';
     }
-  }
 
-  /**
-   * Generate unique visitor ID
-   */
-  private async generateVisitorId(): Promise<string> {
-    const components = [
-      navigator.userAgent,
-      screen.width + 'x' + screen.height,
-      new Date().getTimezoneOffset(),
-      navigator.language,
-      navigator.hardwareConcurrency || 0
-    ];
-
-    const hash = await crypto.subtle.digest(
-      'SHA-256',
-      new TextEncoder().encode(components.join('|'))
-    );
-
-    return Array.from(new Uint8Array(hash))
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('');
-  }
-
-  private getBrowserName(): string {
-    const ua = navigator.userAgent;
-    if (ua.includes('Chrome')) return 'Chrome';
-    if (ua.includes('Firefox')) return 'Firefox';
-    if (ua.includes('Safari')) return 'Safari';
-    if (ua.includes('Edge')) return 'Edge';
-    return 'Unknown';
-  }
-
-  private getBrowserVersion(): string {
-    const ua = navigator.userAgent;
-    const match = ua.match(/(?:Chrome|Firefox|Safari|Edge)\/([0-9.]+)/);
-    return match ? match[1] : 'Unknown';
-  }
-
-  private getOS(): string {
-    const ua = navigator.userAgent;
-    if (ua.includes('Windows')) return 'Windows';
-    if (ua.includes('Mac')) return 'macOS';
-    if (ua.includes('Linux')) return 'Linux';
-    if (ua.includes('Android')) return 'Android';
-    if (ua.includes('iOS')) return 'iOS';
-    return 'Unknown';
-  }
-
-  private getDevice(): string {
-    if (/Mobile|Android|iPhone|iPad/.test(navigator.userAgent)) {
-      return 'Mobile';
+    // Critical flags always trigger blocking
+    if (flags.some(f => f.type === 'velocity' && f.severity === 'high')) {
+      decision = 'block';
+      recommendedAction = 'Block due to suspicious velocity pattern';
     }
-    return 'Desktop';
-  }
 
-  private getPlugins(): string[] {
-    return Array.from(navigator.plugins).map(plugin => plugin.name);
-  }
-
-  private async getCanvasFingerprint(): Promise<string> {
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return '';
-
-    ctx.textBaseline = 'top';
-    ctx.font = '14px Arial';
-    ctx.fillText('Canvas fingerprint', 2, 2);
-
-    return canvas.toDataURL();
-  }
-
-  private async getWebGLFingerprint(): Promise<string> {
-    const canvas = document.createElement('canvas');
-    const gl = canvas.getContext('webgl');
-    if (!gl) return '';
-
-    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
-    if (!debugInfo) return '';
-
-    return gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+    return { decision, recommendedAction };
   }
 }
 
 /**
- * Behavioral biometrics tracker
+ * Fraud alert system for real-time notifications
  */
-class BehavioralBiometricsTracker {
-  private keystrokeData: Array<{ key: string; timestamp: number; type: 'down' | 'up' }> = [];
-  private mouseData: Array<{ x: number; y: number; timestamp: number }> = [];
-  private touchData: Array<{ x: number; y: number; pressure: number; timestamp: number }> = [];
-  private navigationData: Array<{ page: string; timestamp: number }> = [];
+class FraudAlertSystem {
+  private websocketServer?: WebSocket.Server;
+  private supabase: SupabaseClient;
+  private config: FraudDetectionConfig;
 
-  constructor() {
-    this.initializeTracking();
+  constructor(supabase: SupabaseClient, config: FraudDetectionConfig) {
+    this.supabase = supabase;
+    this.config = config;
+    
+    if (config.enableRealTimeAlerts) {
+      this.initializeWebSocket();
+    }
   }
 
   /**
-   * Initialize behavioral tracking
+   * Initialize WebSocket server for real-time alerts
    */
-  private initializeTracking(): void {
-    // Keystroke tracking
-    document.addEventListener('keydown', (e) => {
-      this.keystrokeData.push({ key: e.key, timestamp: Date.now(), type: 'down' });
+  private initializeWebSocket(): void {
+    this.websocketServer = new WebSocket.Server({ 
+      port: this.config.websocketPort 
     });
 
-    document.addEventListener('keyup', (e) => {
-      this.keystrokeData.push({ key: e.key, timestamp: Date.now(), type: 'up' });
-    });
-
-    // Mouse tracking
-    document.addEventListener('mousemove', (e) => {
-      this.mouseData.push({ x: e.clientX, y: e.clientY, timestamp: Date.now() });
-    });
-
-    // Touch tracking (mobile)
-    document.addEventListener('touchstart', (e) => {
-      Array.from(e.touches).forEach(touch => {
-        this.touchData.push({
-          x: touch.clientX,
-          y: touch.clientY,
-          pressure: touch.force || 1,
-          timestamp: Date.now()
-        });
+    this.websocketServer.on('connection', (ws) => {
+      console.log('Client connected to fraud alerts');
+      
+      ws.on('close', () => {
+        console.log('Client disconnected from fraud alerts');
       });
     });
-
-    // Navigation tracking
-    window.addEventListener('beforeunload', () => {
-      this.navigationData.push({ page: window.location.pathname, timestamp: Date.now() });
-    });
   }
 
   /**
-   * Analyze behavioral patterns
+   * Send fraud alert
    */
-  async analyzeBehavior(userId: string, sessionId: string): Promise<BehavioralBiometrics> {
-    return {
-      userId,
-      sessionId,
-      keystrokeDynamics: this.analyzeKeystrokeDynamics(),
-      mouseDynamics: this.analyzeMouseDynamics(),
-      touchDynamics: this.analyzeTouchDynamics(),
-      navigationPattern: this.analyzeNavigationPattern(),
-      sessionDuration: this.calculateSessionDuration()
-    };
-  }
+  async sendAlert(result: FraudDetectionResult, transaction: Transaction): Promise<void> {
+    if (result.decision === 'approve') return;
 
-  /**
-   * Analyze keystroke dynamics
-   */
-  private analyzeKeystrokeDynamics(): KeystrokeDynamics {
-    const dwellTimes: number[] = [];
-    const flightTimes: number[] = [];
-
-    for (let i = 0; i < this.keystrokeData.length - 1; i++) {
-      const current = this.keystrokeData[i];
-      const next = this.keystrokeData[i + 1];
-
-      if (current.type === 'down' && next.type === 'up' && current.key === next.key) {
-        dwellTimes.push(next.timestamp - current.timestamp);
-      }
-
-      if (current.type === 'up' && next.type === 'down') {
-        flightTimes.push(next.timestamp - current.timestamp);
-      }
-    }
-
-    const typingRhythm = this.calculateTypingRhythm();
-    const pausePatterns = this.calculatePausePatterns();
-    const averageSpeed = this.calculateAverageTypingSpeed();
-
-    return {
-      dwellTimes,
-      flightTimes,
-      typingRhythm,
-      pausePatterns,
-      averageSpeed
-    };
-  }
-
-  /**
-   * Analyze mouse dynamics
-   */
-  private analyzeMouseDynamics(): MouseDynamics {
-    const velocity: number[] = [];
-    const acceleration: number[] = [];
-    const trajectory = this.mouseData.map(point => ({ 
-      x: point.x, 
-      y: point.y, 
-      timestamp: point.timestamp 
-    }));
-
-    for (let i = 1; i < this.mouseData.length; i++) {
-      const prev = this.mouseData[i - 1];
-      const curr = this.mouseData[i];
-      
-      const distance = Math.sqrt(
-        Math.pow(curr.x - prev.x, 2) + Math.pow(curr.y - prev.y, 2)
-      );
-      const time = curr.timestamp - prev.timestamp;
-      
-      if (time > 0) {
-        velocity.push(distance / time);
-      }
-    }
-
-    for (let i = 1; i < velocity.length; i++) {
-      acceleration.push(velocity[i] - velocity[i - 1]);
-    }
-
-    return {
-      velocity,
-      acceleration,
-      trajectory,
-      clickPatterns: this.calculateClickPatterns(),
-      scrollBehavior: this.calculateScrollBehavior()
-    };
-  }
-
-  /**
-   * Analyze touch dynamics (mobile)
-   */
-  private analyzeTouchDynamics(): TouchDynamics | undefined {
-    if (this.touchData.length === 0) return undefined;
-
-    const pressure = this.touchData.map(touch => touch.pressure);
-    const touchArea = this.touchData.map(() => 1); // Simplified
-    const swipeVelocity = this.calculateSwipeVelocity();
-    const tapDuration = this.calculateTapDuration();
-    const multiTouchPatterns = this.calculateMultiTouchPatterns();
-
-    return {
-      pressure,
-      touchArea,
-      swipeVelocity,
-      tapDuration,
-      multiTouchPatterns
-    };
-  }
-
-  /**
-   * Analyze navigation patterns
-   */
-  private analyzeNavigationPattern(): NavigationPattern {
-    const pageSequence = this.navigationData.map(nav => nav.page);
-    const timeOnPages: number[] = [];
-
-    for (let i = 1; i < this.navigationData.length; i++) {
-      timeOnPages.push(this.navigationData[i].timestamp - this.navigationData[i - 1].timestamp);
-    }
-
-    return {
-      pageSequence,
-      timeOnPages,
-      backButtonUsage: this.calculateBackButtonUsage(),
-      tabSwitching: this.calculateTabSwitching(),
-      formFillSpeed: this.calculateFormFillSpeed()
-    };
-  }
-
-  private calculateTypingRhythm(): number[] {
-    // Implementation for typing rhythm calculation
-    return [];
-  }
-
-  private calculatePausePatterns(): number[] {
-    // Implementation for pause pattern calculation
-    return [];
-  }
-
-  private calculateAverageTypingSpeed(): number {
-    if (this.keystrokeData.length < 2) return 0;
-    
-    const totalTime = this.keystrokeData[this.keystrokeData.length - 1].timestamp - 
-                     this.keystrokeData[0].timestamp;
-    const keyCount = this.keystrokeData.filter(k => k.type === 'down').length;
-    
-    return keyCount / (totalTime / 60000); // WPM
-  }
-
-  private calculateClickPatterns(): number[] {
-    // Implementation for click pattern analysis
-    return [];
-  }
-
-  private calculateScrollBehavior(): number[] {
-    // Implementation for scroll behavior analysis
-    return [];
-  }
-
-  private calculateSwipeVelocity(): number[] {
-    // Implementation for swipe velocity calculation
-    return [];
-  }
-
-  private calculateTapDuration(): number[] {
-    // Implementation for tap duration calculation
-    return [];
-  }
-
-  private calculateMultiTouchPatterns(): number[] {
-    // Implementation for multi-touch pattern analysis
-    return [];
-  }
-
-  private calculateSessionDuration(): number {
-    if (this.navigationData.length === 0) return 0;
-    return Date.now() - this.navigationData[0].timestamp;
-  }
-
-  private calculateBackButtonUsage(): number {
-    // Implementation for back button usage tracking
-    return 0;
-  }
-
-  private calculateTabSwitching(): number {
-    // Implementation for tab switching tracking
-    return 0;
-  }
-
-  private calculateFormFillSpeed(): number {
-    // Implementation
+    const alert = {
+      id: `alert_${result.transactionId}_${Date.now()}`,
+      transactionId: result.transactionId,
+      userId: transaction.userId,
+      riskScore: result.riskScore,
+      riskLevel: result.riskLevel,
+      decision: result.decision,
+      flags: result.flags,
+      timestamp: new Date(),
+      transaction: {
+        amount: transaction.amount,
+        currency: transaction.currency,
+        merchantId: transaction.merchantId,
+        location: transaction.location
