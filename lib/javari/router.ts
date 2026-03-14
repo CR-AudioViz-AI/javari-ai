@@ -1,32 +1,34 @@
 // lib/javari/router.ts
-// Javari AI Router — cost-ordered model selection, Henderson Cost Law
-// Free → Low → Moderate → Expensive. Never skip tiers.
+// Javari AI Router - Henderson Cost Law: Free -> Low -> Moderate -> Expensive
+// Primary: OpenAI gpt-4o-mini (valid, $0.15/1M) -> Anthropic -> OpenRouter
 // Saturday, March 14, 2026
 import { getSecret } from '@/lib/platform-secrets/getSecret'
 
 export const COST_TIERS = { free: 0, low: 0.5, moderate: 3.0, expensive: 15.0 } as const
 export type ModelTier = keyof typeof COST_TIERS
 
+// Models ordered cheapest-first per task type.
+// OpenAI gpt-4o-mini is primary (confirmed valid March 2026, $0.15/1M in, $0.60/1M out).
 export const MODELS = {
   planning: [
-    { id: 'gemini-2.0-flash-exp',      provider: 'google',     tier: 'free'     as ModelTier, costPer1m: 0 },
-    { id: 'claude-haiku-4-5-20251001', provider: 'anthropic',  tier: 'low'      as ModelTier, costPer1m: 0.8 },
-    { id: 'claude-sonnet-4-6',         provider: 'anthropic',  tier: 'moderate' as ModelTier, costPer1m: 3.0 },
+    { id: 'gpt-4o-mini',               provider: 'openai',    tier: 'low'      as ModelTier, costPer1m: 0.15 },
+    { id: 'claude-haiku-4-5-20251001',  provider: 'anthropic', tier: 'low'      as ModelTier, costPer1m: 0.8 },
+    { id: 'claude-sonnet-4-6',          provider: 'anthropic', tier: 'moderate' as ModelTier, costPer1m: 3.0 },
   ],
   coding: [
-    { id: 'gemini-2.0-flash-exp',      provider: 'google',     tier: 'free'     as ModelTier, costPer1m: 0 },
-    { id: 'claude-haiku-4-5-20251001', provider: 'anthropic',  tier: 'low'      as ModelTier, costPer1m: 0.8 },
-    { id: 'claude-sonnet-4-6',         provider: 'anthropic',  tier: 'moderate' as ModelTier, costPer1m: 3.0 },
+    { id: 'gpt-4o-mini',               provider: 'openai',    tier: 'low'      as ModelTier, costPer1m: 0.15 },
+    { id: 'claude-haiku-4-5-20251001',  provider: 'anthropic', tier: 'low'      as ModelTier, costPer1m: 0.8 },
+    { id: 'claude-sonnet-4-6',          provider: 'anthropic', tier: 'moderate' as ModelTier, costPer1m: 3.0 },
   ],
   verification: [
-    { id: 'gemini-2.0-flash-exp',      provider: 'google',     tier: 'free'     as ModelTier, costPer1m: 0 },
-    { id: 'claude-haiku-4-5-20251001', provider: 'anthropic',  tier: 'low'      as ModelTier, costPer1m: 0.8 },
-    { id: 'claude-sonnet-4-6',         provider: 'anthropic',  tier: 'moderate' as ModelTier, costPer1m: 3.0 },
+    { id: 'gpt-4o-mini',               provider: 'openai',    tier: 'low'      as ModelTier, costPer1m: 0.15 },
+    { id: 'claude-haiku-4-5-20251001',  provider: 'anthropic', tier: 'low'      as ModelTier, costPer1m: 0.8 },
+    { id: 'claude-sonnet-4-6',          provider: 'anthropic', tier: 'moderate' as ModelTier, costPer1m: 3.0 },
   ],
   chat: [
-    { id: 'gemini-2.0-flash-exp',      provider: 'google',     tier: 'free'     as ModelTier, costPer1m: 0 },
-    { id: 'claude-haiku-4-5-20251001', provider: 'anthropic',  tier: 'low'      as ModelTier, costPer1m: 0.8 },
-    { id: 'claude-sonnet-4-6',         provider: 'anthropic',  tier: 'moderate' as ModelTier, costPer1m: 3.0 },
+    { id: 'gpt-4o-mini',               provider: 'openai',    tier: 'low'      as ModelTier, costPer1m: 0.15 },
+    { id: 'claude-haiku-4-5-20251001',  provider: 'anthropic', tier: 'low'      as ModelTier, costPer1m: 0.8 },
+    { id: 'claude-sonnet-4-6',          provider: 'anthropic', tier: 'moderate' as ModelTier, costPer1m: 3.0 },
   ],
 } as const
 export type TaskType = keyof typeof MODELS
@@ -52,9 +54,12 @@ export function selectModel(taskType: TaskType, maxTier: ModelTier = 'moderate')
 
 export async function resolveApiKey(provider: string): Promise<string | null> {
   const map: Record<string,string> = {
-    anthropic: 'ANTHROPIC_API_KEY', google: 'GOOGLE_GEMINI_API_KEY',
-    openai: 'OPENAI_API_KEY',       openrouter: 'OPENROUTER_API_KEY',
-    xai: 'XAI_API_KEY',             groq: 'GROQ_API_KEY',
+    openai:      'OPENAI_API_KEY',
+    anthropic:   'ANTHROPIC_API_KEY',
+    openrouter:  'OPENROUTER_API_KEY',
+    google:      'GOOGLE_GEMINI_API_KEY',
+    xai:         'XAI_API_KEY',
+    groq:        'GROQ_API_KEY',
   }
   const name = map[provider]
   if (!name) return null
@@ -78,22 +83,39 @@ export async function routeAndExecute(
   const queue    = (MODELS[taskType] as readonly RouterModel[]).filter(m => order.indexOf(m.tier) <= maxIdx)
 
   let attempts = 0
+  const errors: string[] = []
   for (const model of queue) {
     attempts++
     const apiKey = await resolveApiKey(model.provider)
-    if (!apiKey) continue
+    if (!apiKey) { errors.push(model.id + ': no key'); continue }
     try {
       const content = await callModel(model, prompt, apiKey, opts?.systemPrompt)
-      if (content) return { content, model: model.id, provider: model.provider,
-                            tier: model.tier, taskType, costPer1m: model.costPer1m, attempts }
+      if (content?.trim()) {
+        return { content, model: model.id, provider: model.provider,
+                 tier: model.tier, taskType, costPer1m: model.costPer1m, attempts }
+      }
+      errors.push(model.id + ': empty response')
     } catch (err) {
-      console.warn(`[router] ${model.id} failed:`, err instanceof Error ? err.message : err)
+      const msg = err instanceof Error ? err.message : String(err)
+      errors.push(model.id + ': ' + msg.slice(0, 80))
+      console.warn('[router]', model.id, 'failed:', msg)
     }
   }
-  throw new Error(`All ${queue.length} models exhausted for ${taskType}`)
+  throw new Error('All ' + queue.length + ' models exhausted. Errors: ' + errors.join(' | '))
 }
 
 async function callModel(m: RouterModel, prompt: string, key: string, sys?: string): Promise<string> {
+  if (m.provider === 'openai') {
+    const { default: OpenAI } = await import('openai')
+    const res = await new OpenAI({ apiKey: key }).chat.completions.create({
+      model: m.id, max_tokens: 4096,
+      messages: [
+        ...(sys ? [{ role: 'system' as const, content: sys }] : []),
+        { role: 'user' as const, content: prompt },
+      ],
+    })
+    return res.choices[0]?.message?.content ?? ''
+  }
   if (m.provider === 'anthropic') {
     const { default: Anthropic } = await import('@anthropic-ai/sdk')
     const res = await new Anthropic({ apiKey: key }).messages.create({
@@ -106,17 +128,21 @@ async function callModel(m: RouterModel, prompt: string, key: string, sys?: stri
     const { GoogleGenerativeAI } = await import('@google/generative-ai')
     const res = await new GoogleGenerativeAI(key)
       .getGenerativeModel({ model: m.id })
-      .generateContent(sys ? `${sys}\n\n${prompt}` : prompt)
+      .generateContent(sys ? sys + '\n\n' + prompt : prompt)
     return res.response.text()
   }
   const baseURL: Record<string,string> = {
-    xai: 'https://api.x.ai/v1', openrouter: 'https://openrouter.ai/api/v1',
-    groq: 'https://api.groq.com/openai/v1', mistral: 'https://api.mistral.ai/v1',
+    openrouter: 'https://openrouter.ai/api/v1',
+    xai:        'https://api.x.ai/v1',
+    groq:       'https://api.groq.com/openai/v1',
   }
   const { default: OpenAI } = await import('openai')
-  const res = await new OpenAI({ apiKey: key, baseURL: baseURL[m.provider] }).chat.completions.create({
+  const res = await new OpenAI({ apiKey: key, baseURL: baseURL[m.provider] ?? undefined }).chat.completions.create({
     model: m.id,
-    messages: [...(sys ? [{ role: 'system' as const, content: sys }] : []), { role: 'user' as const, content: prompt }],
+    messages: [
+      ...(sys ? [{ role: 'system' as const, content: sys }] : []),
+      { role: 'user' as const, content: prompt },
+    ],
   })
   return res.choices[0]?.message?.content ?? ''
 }
