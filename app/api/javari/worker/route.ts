@@ -1,3 +1,4 @@
+// env-pickup rebuild 2026-03-14T23:34:39.042851
 // app/api/javari/worker/route.ts
 // Javari Worker API — trigger batch processing of javari_jobs queue
 // Saturday, March 14, 2026
