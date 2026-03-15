@@ -5,5 +5,11 @@
     "autoAlias": false,
     "silent": false,
     "autoJobCancelation": true
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/autonomy/loop",
+      "schedule": "*/2 * * * *"
+    }
+  ]
 }
