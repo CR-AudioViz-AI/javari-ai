@@ -110,11 +110,12 @@ export async function GET() {
     job_id: string; pr: number; repo: string; ci: CIStatus; action: string
   }> = []
 
-  // Find all javari_jobs with status='pr_open'
+  // Find all javari_jobs from phase1 (triggered_by=pr_workflow_phase1, status=running)
   const { data: openJobs } = await supabase
     .from('javari_jobs')
     .select('id, task, metadata, started_at')
-    .eq('status', 'pr_open')
+    .eq('triggered_by', 'pr_workflow_phase1')
+    .eq('status', 'running')
     .order('started_at', { ascending: true })
     .limit(10)
 
