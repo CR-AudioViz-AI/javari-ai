@@ -186,7 +186,7 @@ export async function POST(req: NextRequest) {
   let taskId     = body.task_id as string | undefined
   let taskRecord: {
     id: string; title: string; description: string
-    metadata: { repo?: string; issue_type?: string; file?: string; task_type?: string }
+    metadata: { repo?: string; issue_type?: string; file?: string; task_type?: string }; source?: string
   } | null = null
 
   if (taskId) {
@@ -194,14 +194,26 @@ export async function POST(req: NextRequest) {
       .select('id, title, description, metadata').eq('id', taskId).single()
     taskRecord = data
   } else {
-    const { data } = await supabase.from('roadmap_tasks')
+    // Priority 1: scanner tasks with fixable issue_type
+    const { data: scannerTask } = await supabase.from('roadmap_tasks')
       .select('id, title, description, metadata')
       .eq('status', 'pending')
       .filter('metadata->>issue_type', 'in', '("failing_build","stub_file","todo","unimplemented_route")')
       .order('id', { ascending: true })
       .limit(1)
       .single()
-    taskRecord = data
+
+    // Priority 2: roadmap_master build tasks (source='roadmap_master')
+    const { data: roadmapTask } = scannerTask ? { data: null } :
+      await supabase.from('roadmap_tasks')
+        .select('id, title, description, metadata')
+        .eq('status', 'pending')
+        .eq('source', 'roadmap_master')
+        .order('id', { ascending: true })
+        .limit(1)
+        .single()
+
+    taskRecord = scannerTask ?? roadmapTask ?? null
   }
 
   if (!taskRecord) {
