@@ -1,7 +1,7 @@
 // app/api/autonomy/loop/route.ts
 // Javari Autonomous Loop — cron trigger every 2 minutes
 // Respects SYSTEM_MODE from javari_system_config:
-//   BUILD: pulls from roadmap_tasks WHERE source='roadmap_master_v2' first, then any pending
+//   BUILD: pulls from roadmap_tasks WHERE source='roadmap_master' first, then any pending
 //   SCAN:  standard queue execution
 //   MAINTAIN: no-op
 // Concurrent build limit: MAX_CONCURRENT_BUILDS config key
@@ -54,7 +54,7 @@ export async function GET() {
   }
 
   // BUILD mode: prioritise roadmap_master tasks
-  const taskSource = mode === 'BUILD' ? 'roadmap_master_v2' : null
+  const taskSource = mode === 'BUILD' ? 'roadmap_master' : null
 
   for (let i = 0; i < maxPerRun; i++) {
     const currentSpend = await getDailySpend()
