@@ -10,6 +10,10 @@
     {
       "path": "/api/autonomy/loop",
       "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/autonomy/scan",
+      "schedule": "*/10 * * * *"
     }
   ]
 }
