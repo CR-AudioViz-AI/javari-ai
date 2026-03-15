@@ -1,18 +1,21 @@
 // app/api/autonomy/loop/route.ts
-// Javari Autonomous Loop — fires on every cron trigger
-// Pulls one pending roadmap task, executes it, returns result.
-// Budget-gated: stops if daily spend >= $1.00
+// Javari Autonomous Loop — cron trigger every 2 minutes
+// Respects SYSTEM_MODE from javari_system_config:
+//   BUILD: pulls from roadmap_tasks WHERE source='roadmap_master_v2' first, then any pending
+//   SCAN:  standard queue execution
+//   MAINTAIN: no-op
+// Concurrent build limit: MAX_CONCURRENT_BUILDS config key
 // Saturday, March 14, 2026
 import { NextResponse }  from 'next/server'
 import { createClient }  from '@supabase/supabase-js'
 import { route }         from '@/lib/javari/model-router'
 import { getDailySpend } from '@/lib/javari/model-router'
-export const dynamic = 'force-dynamic'
-export const runtime = 'nodejs'
-export const maxDuration = 60   // Vercel function max (Pro plan)
+export const dynamic   = 'force-dynamic'
+export const runtime   = 'nodejs'
+export const maxDuration = 60
 
 const DAILY_BUDGET  = 1.00
-const MAX_PER_CYCLE = 3    // tasks per cron invocation
+const DEFAULT_MAX   = 3
 
 function db() {
   return createClient(
@@ -21,66 +24,96 @@ function db() {
   )
 }
 
-// ── GET — called by Vercel cron every 2 minutes ───────────────────────────────
+async function getConfig(supabase: ReturnType<typeof db>): Promise<Record<string, string>> {
+  const { data } = await supabase.from('javari_system_config').select('key,value')
+  return Object.fromEntries((data ?? []).map((r: { key: string; value: string }) => [r.key, r.value]))
+}
+
 export async function GET() {
   const cycleStart = Date.now()
   const supabase   = db()
   const executed: unknown[] = []
 
-  // Step 5: Budget gate
+  // Load system config
+  const config    = await getConfig(supabase)
+  const mode      = config['SYSTEM_MODE'] ?? 'SCAN'
+  const maxPerRun = parseInt(config['MAX_CONCURRENT_BUILDS'] ?? '3', 10)
+
+  // MAINTAIN mode — no execution
+  if (mode === 'MAINTAIN') {
+    return NextResponse.json({ status: 'maintain_mode', message: 'System in MAINTAIN mode — no execution', mode })
+  }
+
+  // Budget gate
   const spent = await getDailySpend()
   if (spent >= DAILY_BUDGET) {
     return NextResponse.json({
-      status:      'budget_reached',
-      daily_spend: `$${spent.toFixed(4)}`,
-      limit:       `$${DAILY_BUDGET}`,
-      cycle_ms:    Date.now() - cycleStart,
+      status: 'budget_reached', daily_spend: `$${spent.toFixed(4)}`,
+      limit: `$${DAILY_BUDGET}`, mode,
     })
   }
 
-  // Step 2: Loop — execute up to MAX_PER_CYCLE tasks per invocation
-  for (let i = 0; i < MAX_PER_CYCLE; i++) {
-    // Re-check budget each iteration
+  // BUILD mode: prioritise roadmap_master tasks
+  const taskSource = mode === 'BUILD' ? 'roadmap_master_v2' : null
+
+  for (let i = 0; i < maxPerRun; i++) {
     const currentSpend = await getDailySpend()
     if (currentSpend >= DAILY_BUDGET) break
 
-    // Pull next pending task
-    const { data: tasks } = await supabase
+    // Fetch next task — BUILD mode prioritises roadmap_master source
+    let taskQuery = supabase
       .from('roadmap_tasks')
       .select('id, title, description, phase_id, metadata')
       .eq('status', 'pending')
       .order('id', { ascending: true })
       .limit(1)
 
-    if (!tasks?.length) break  // No more pending — go idle
+    if (taskSource) {
+      taskQuery = taskQuery.eq('source', taskSource)
+    }
+
+    const { data: tasks } = await taskQuery
+    if (!tasks?.length) {
+      // If BUILD mode and no roadmap_master tasks, try any pending
+      if (mode === 'BUILD') break
+      break
+    }
 
     const task     = tasks[0]
-    const taskType = detectType(task.title + ' ' + (task.description ?? ''))
-    const prompt   = `Task: ${task.title}\n\nDescription:\n${task.description ?? ''}`
+    const meta     = (task.metadata ?? {}) as Record<string, unknown>
+    const taskType = (meta.task_type as string) ?? detectType(task.title + ' ' + (task.description ?? ''))
 
-    // Mark running
     await supabase.from('roadmap_tasks')
       .update({ status: 'running', updated_at: Date.now() })
       .eq('id', task.id)
 
     let taskResult: unknown = null
     try {
+      const prompt = [
+        `Task: ${task.title}`,
+        task.description ? `Description: ${task.description}` : '',
+        meta.target_url ? `Target URL: ${meta.target_url}` : '',
+        meta.milestone ? `Milestone: ${meta.milestone}` : '',
+      ].filter(Boolean).join('\n')
+
       const result = await route(taskType as any, prompt, {
         systemPrompt: [
           'You are Javari AI, the autonomous operating system for CR AudioViz AI.',
-          'Execute the task precisely. Mission: "Your Story. Our Design."',
+          'Mission: "Your Story. Our Design." Owned by Roy & Cindy Henderson.',
+          'Execute the task and return specific, actionable output.',
+          'For deployment tasks: return the exact steps, files, and commands needed.',
+          'For coding tasks: return complete, production-ready code.',
         ].join('\n'),
-        maxTier: 'low',
+        maxTier: meta.priority === 'critical' ? 'moderate' : 'low',
       })
 
       if (result.blocked) {
         await supabase.from('roadmap_tasks')
           .update({ status: 'pending', error: result.reason, updated_at: Date.now() })
           .eq('id', task.id)
-        break  // Budget hit — stop cycle
+        break
       }
 
-      // Update roadmap_tasks — completed with assigned_model
       await supabase.from('roadmap_tasks').update({
         status:         'completed',
         assigned_model: result.model,
@@ -90,14 +123,14 @@ export async function GET() {
         updated_at:     Date.now(),
       }).eq('id', task.id)
 
-      // Write job record
+      // Write job
       const { data: job } = await supabase.from('javari_jobs').insert({
         task:         task.title,
-        priority:     'normal',
+        priority:     (meta.priority as string) ?? 'normal',
         status:       'complete',
         dry_run:      false,
-        triggered_by: 'cron_autonomous_loop',
-        metadata:     { roadmap_task_id: task.id, task_type: taskType },
+        triggered_by: `cron_${mode.toLowerCase()}_loop`,
+        metadata:     { roadmap_task_id: task.id, task_type: taskType, mode },
         started_at:   new Date(cycleStart).toISOString(),
         completed_at: new Date().toISOString(),
         result:       { output: result.content.slice(0, 2000), model: result.model, cost: result.cost },
@@ -109,22 +142,23 @@ export async function GET() {
         memory_type: memType,
         key:         `roadmap:${task.id}`,
         value:       result.content.slice(0, 2000),
-        source:      'cron_autonomous_loop',
+        source:      `${mode.toLowerCase()}_loop`,
         task_id:     job?.id ?? task.id,
         content:     result.content.slice(0, 8000),
       })
 
-      taskResult = {
-        roadmap_task_id: task.id,
-        title:           task.title,
-        task_type:       taskType,
-        model:           result.model,
-        cost:            result.cost,
-        job_id:          job?.id,
+      // Update javari_roadmap_progress if milestone matches
+      if (meta.milestone) {
+        await supabase.from('javari_roadmap_progress')
+          .update({ status: 'complete', notes: `Executed by Javari AI: ${result.model}`, updated_at: new Date().toISOString() })
+          .eq('item_id', meta.milestone as string)
+          .eq('status', 'pending')
       }
+
+      taskResult = { roadmap_task_id: task.id, title: task.title, task_type: taskType,
+                     model: result.model, cost: result.cost, job_id: job?.id }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
-      // Re-queue on failure (up to retry logic in worker)
       await supabase.from('roadmap_tasks')
         .update({ status: 'pending', error: msg, updated_at: Date.now() })
         .eq('id', task.id)
@@ -135,9 +169,9 @@ export async function GET() {
   }
 
   const finalSpend = await getDailySpend()
-
   return NextResponse.json({
     status:      executed.length > 0 ? 'executed' : 'idle',
+    mode,
     tasks_run:   executed.length,
     executed,
     daily_spend: `$${finalSpend.toFixed(4)}`,
@@ -153,6 +187,5 @@ function detectType(text: string): string {
   if (/code|implement|write|build|fix|debug|refactor|function|component|deploy/.test(t)) return 'coding'
   if (/verify|validate|check|review|test|audit|confirm|ensure/.test(t)) return 'verification'
   if (/analys|research|investig|examine|evaluat/.test(t)) return 'analysis'
-  if (/document|readme|spec|guide|explain/.test(t)) return 'documentation'
   return 'chat'
 }
