@@ -18,6 +18,10 @@
     {
       "path": "/api/autonomy/pr-workflow",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/autonomy/pr-merge",
+      "schedule": "*/3 * * * *"
     }
   ]
 }
