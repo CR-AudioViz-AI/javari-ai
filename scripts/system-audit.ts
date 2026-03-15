@@ -1,7 +1,17 @@
-// scripts/system-audit.ts
-// Registry Lifecycle Audit — CI Safe Version
-// Scans ONLY app/ and lib/
-// 2026-03-02
-import { readdirSync, readFileSync, statSync } from "fs";
-import { join, relative } from "path";
-export default {}
+// [JAVARI-FIX] .github/workflows/audit.yml
+name: Registry Lifecycle Audit
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Run Audit
+        run: npm install && npm audit
