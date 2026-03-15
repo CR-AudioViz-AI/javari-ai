@@ -293,7 +293,7 @@ export async function POST(req: NextRequest) {
     await supabase.from('javari_jobs').insert({
       task:         taskRecord.title,
       priority:     meta.priority ?? 'normal',
-      status:       'pr_open',    // custom status — pr-merge cron watches for this
+      status:       'running',    // pr-merge queries triggered_by=pr_workflow_phase1
       dry_run:      false,
       triggered_by: 'pr_workflow_phase1',
       metadata: {
@@ -314,7 +314,7 @@ export async function POST(req: NextRequest) {
     // (already set to running above — do not change here)
 
     return NextResponse.json({
-      status:      'pr_opened',
+      status:      'pr_opened',  // response only — job stored as 'running'
       task_id:     taskRecord.id,
       task_title:  taskRecord.title,
       task_source: taskRecord.source,
