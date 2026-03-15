@@ -1,0 +1,25 @@
+{
+  "version": "1.0",
+  "description": "Javari Model Router configuration — Henderson Cost Law",
+  "updated": "2026-03-14",
+  "cost_ceilings": {
+    "max_cost_per_task_usd": 0.02,
+    "daily_budget_usd": 1.00,
+    "default_max_tier": "low"
+  },
+  "model_priority": [
+    { "rank": 1, "id": "gpt-4o-mini",              "provider": "openai",    "tier": "low",      "cost_per_1m": 0.15, "confirmed_valid": "2026-03-14" },
+    { "rank": 2, "id": "claude-haiku-4-5-20251001", "provider": "anthropic", "tier": "low",      "cost_per_1m": 0.80, "confirmed_valid": "2026-03-14" },
+    { "rank": 3, "id": "claude-sonnet-4-6",          "provider": "anthropic", "tier": "moderate", "cost_per_1m": 3.00, "confirmed_valid": "2026-03-14", "use_only_if": "lower_cost_fail" }
+  ],
+  "task_type_map": {
+    "planning":      "planning",
+    "coding":        "coding",
+    "verification":  "verification",
+    "validation":    "verification",
+    "chat":          "chat",
+    "analysis":      "planning",
+    "documentation": "chat"
+  },
+  "reject_models": ["gpt-4o", "claude-opus", "gpt-4-turbo"]
+}

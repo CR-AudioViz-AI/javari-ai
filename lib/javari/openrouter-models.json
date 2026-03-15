@@ -1,0 +1,12 @@
+{
+  "description": "OpenRouter model catalog — free/low-cost models for Javari fallback",
+  "updated": "2026-03-14",
+  "note": "These are fallback models if OpenAI and Anthropic are unavailable. Add OPENROUTER_API_KEY to activate.",
+  "models": [
+    { "id": "openai/gpt-4o-mini",                  "tier": "low",  "cost_per_1m": 0.15, "notes": "Same as direct OpenAI but via OpenRouter" },
+    { "id": "deepseek/deepseek-chat",               "tier": "low",  "cost_per_1m": 0.27, "notes": "Strong coder, very cheap" },
+    { "id": "mistralai/mistral-small",              "tier": "low",  "cost_per_1m": 0.20, "notes": "Fast, good for short tasks" },
+    { "id": "google/gemini-flash-1.5",              "tier": "low",  "cost_per_1m": 0.075,"notes": "Gemini via OpenRouter" },
+    { "id": "anthropic/claude-haiku",               "tier": "low",  "cost_per_1m": 0.80, "notes": "Anthropic via OpenRouter" }
+  ]
+}
