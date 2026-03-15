@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
 
     // Step 1 - Planner: break down the task (free model)
     const planPrompt = 'Break down this task into 3-5 concrete steps. Be brief.\n\nTask: ' + message
-    const plan = await routeAndExecute(planPrompt, { taskType: 'planning', maxTier: 'free', systemPrompt: SYSTEM })
+    const plan = await routeAndExecute(planPrompt, { taskType: 'planning', maxTier: 'low', systemPrompt: SYSTEM })
     steps.push({ role: 'planner', model: plan.model, tier: plan.tier, content: plan.content })
 
     // Step 2 - Builder: execute the plan (low-cost model)
