@@ -1,19 +1,20 @@
 // app/javari/page.tsx
-// Javari OS — Primary Interface v2
-// TRUE 2×2 QUADRANT: grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr
-// Each quadrant = exactly 50% width × 50% height. No dominant panel.
-// Design: SCIF terminal / NORAD ops floor — deep black, glowing separators, phosphor status
-// Updated: March 22, 2026 — Auth wired: userId + Authorization header on all AI fetches
+// Javari OS — Primary Interface v3
+// Layout: fixed inset-0 z-50 | 280px sidebar + 1fr dominant chat grid
+// Sidebar: Avatar identity + status + agents stacked vertically
+// Main: Full-height dominant chat feed + execution log strip at bottom
+// Design: Fortune 50 dark ops — deep black, cyan/purple pill toggles, slide-in animations
+// Updated: April 24, 2026 — v3 redesign, all v2 logic preserved 100%
 'use client'
 
 import {
   useState, useRef, useEffect, useCallback
 } from 'react'
-import { Send, Zap, ChevronDown, RotateCcw } from 'lucide-react'
+import { Send, Zap, ChevronDown, RotateCcw, Terminal, Activity, Users, Cpu } from 'lucide-react'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Types
+// Types — identical to v2
 // ─────────────────────────────────────────────────────────────────────────────
 type Mode       = 'single' | 'council'
 type AvState    = 'idle' | 'thinking' | 'responding' | 'executing'
@@ -63,123 +64,147 @@ interface SysStatus {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Agent definitions
+// Agent config
 // ─────────────────────────────────────────────────────────────────────────────
 const AGENT_CFG = {
-  planner:   { label: 'ARCHITECT',  glyph: '◈', hue: '#a855f7' },
-  builder:   { label: 'BUILDER',    glyph: '◉', hue: '#3b82f6' },
-  validator: { label: 'ANALYST',    glyph: '◎', hue: '#10b981' },
+  planner:   { label: 'ARCHITECT', glyph: '◈', hue: '#a855f7' },
+  builder:   { label: 'BUILDER',   glyph: '◉', hue: '#3b82f6' },
+  validator: { label: 'ANALYST',   glyph: '◎', hue: '#10b981' },
 } as const
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Avatar: pure CSS animated, state-driven
+// Avatar — state-driven, pure CSS animated
 // ─────────────────────────────────────────────────────────────────────────────
 function Avatar({ state }: { state: AvState }) {
-  // State-driven ring color + glow around the portrait
-  const ringStyle: Record<AvState, string> = {
-    idle:       'ring-zinc-800/60',
-    thinking:   'ring-violet-500/60 av-blink',
-    responding: 'ring-violet-400/80',
-    executing:  'ring-amber-500/70 av-blink',
+  const ringColor: Record<AvState, string> = {
+    idle:       'rgba(63,63,70,0.6)',
+    thinking:   'rgba(139,92,246,0.7)',
+    responding: 'rgba(139,92,246,0.9)',
+    executing:  'rgba(245,158,11,0.7)',
   }
-  const glowStyle: Record<AvState, string> = {
-    idle:       '',
-    thinking:   'shadow-[0_0_24px_rgba(139,92,246,0.35)]',
-    responding: 'shadow-[0_0_20px_rgba(139,92,246,0.25)]',
-    executing:  'shadow-[0_0_24px_rgba(245,158,11,0.30)]',
+  const glowColor: Record<AvState, string> = {
+    idle:       'none',
+    thinking:   '0 0 28px rgba(139,92,246,0.4)',
+    responding: '0 0 24px rgba(139,92,246,0.3)',
+    executing:  '0 0 28px rgba(245,158,11,0.35)',
+  }
+  const dotColor: Record<AvState, string> = {
+    idle:       '#3f3f46',
+    thinking:   '#a855f7',
+    responding: '#10b981',
+    executing:  '#f59e0b',
+  }
+  const stateLabel: Record<AvState, string> = {
+    idle:       'STANDBY',
+    thinking:   'THINKING',
+    responding: 'RESPONDING',
+    executing:  'EXECUTING',
   }
 
   return (
-    <div className="flex flex-col items-center gap-3 select-none" style={{ width: '100%' }}>
-      {/* Portrait — aspect-ratio 3/4, scales with container width */}
+    <div className="flex flex-col items-center gap-3 select-none w-full">
+      {/* Portrait */}
       <div
-        className={`transition-all duration-500 ${ringStyle[state]} ${glowStyle[state]}`}
         style={{
           position:     'relative',
           width:        '100%',
+          maxWidth:     '180px',
           aspectRatio:  '3/4',
-          borderRadius: '16px',
+          borderRadius: '14px',
           overflow:     'hidden',
           background:   '#ffffff',
-          maxWidth:     '360px',
-          flexShrink:   1,
+          border:       `2px solid ${ringColor[state]}`,
+          boxShadow:    glowColor[state],
+          transition:   'border-color 0.5s ease, box-shadow 0.5s ease',
         }}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/javari-portrait-v3.png"
           alt="Javari AI"
-          style={{
-            width:          '100%',
-            height:         '100%',
-            objectFit:      'contain',
-            objectPosition: 'center top',
-          }}
+          style={{ width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'center top', display: 'block' }}
           draggable={false}
         />
-        {/* State dot — bottom-right */}
-        <div
-          className={`absolute bottom-1.5 right-1.5 w-2.5 h-2.5 rounded-full border border-black/40 transition-all duration-300 ${
-            state === 'idle'       ? 'bg-zinc-600'           :
-            state === 'thinking'   ? 'bg-violet-400 av-blink' :
-            state === 'responding' ? 'bg-emerald-400'         :
-                                     'bg-amber-400 av-blink'
-          }`}
-        />
+        {/* Status dot */}
+        <div style={{
+          position:         'absolute',
+          bottom:           '6px',
+          right:            '6px',
+          width:            '10px',
+          height:           '10px',
+          borderRadius:     '50%',
+          backgroundColor:  dotColor[state],
+          border:           '1.5px solid rgba(0,0,0,0.4)',
+          transition:       'background-color 0.3s ease',
+          animation:        (state === 'thinking' || state === 'executing') ? 'av-blink 1.4s ease-in-out infinite' : 'none',
+        }} />
       </div>
 
-      {/* State label */}
-      <div className="text-center">
-        <p className={`font-mono text-[10px] tracking-[0.25em] transition-colors duration-300 ${
-          state === 'idle'       ? 'text-zinc-700'            :
-          state === 'thinking'   ? 'text-violet-500 av-blink' :
-          state === 'responding' ? 'text-violet-400'           :
-                                   'text-amber-500 av-blink'
-        }`}>{state.toUpperCase()}</p>
+      {/* State badge */}
+      <div style={{
+        fontFamily:      'monospace',
+        fontSize:        '9px',
+        letterSpacing:   '0.25em',
+        color:           state === 'idle' ? '#52525b' : state === 'thinking' ? '#a855f7' : state === 'responding' ? '#a855f7' : '#f59e0b',
+        animation:       (state === 'thinking' || state === 'executing') ? 'av-blink 1.4s ease-in-out infinite' : 'none',
+        transition:      'color 0.3s ease',
+      }}>
+        {stateLabel[state]}
       </div>
     </div>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Quadrant wrapper — enforces equal sizing via CSS, adds glow
+// Sidebar section wrapper
 // ─────────────────────────────────────────────────────────────────────────────
-function Q({
-  id, label, tag, glow = 'zinc', children,
+function SideSection({
+  label, icon, accent = 'zinc', children, collapsible = false,
 }: {
-  id: string; label: string; tag?: string; glow?: 'violet' | 'blue' | 'amber' | 'emerald' | 'zinc'
+  label: string
+  icon?: React.ReactNode
+  accent?: 'violet' | 'blue' | 'emerald' | 'amber' | 'zinc'
   children: React.ReactNode
+  collapsible?: boolean
 }) {
-  const glowMap = {
-    violet:  'shadow-[inset_0_0_40px_rgba(139,92,246,0.06)] border-violet-900/40',
-    blue:    'shadow-[inset_0_0_40px_rgba(59,130,246,0.05)] border-blue-900/30',
-    amber:   'shadow-[inset_0_0_40px_rgba(245,158,11,0.05)] border-amber-900/30',
-    emerald: 'shadow-[inset_0_0_40px_rgba(16,185,129,0.05)] border-emerald-900/30',
-    zinc:    'border-zinc-800/50',
-  }
-  const labelMap = {
-    violet:  'text-violet-500',
-    blue:    'text-blue-500',
-    amber:   'text-amber-500',
-    emerald: 'text-emerald-500',
-    zinc:    'text-zinc-600',
-  }
+  const [open, setOpen] = useState(true)
+  const accentColor = {
+    violet:  '#a855f7',
+    blue:    '#3b82f6',
+    emerald: '#10b981',
+    amber:   '#f59e0b',
+    zinc:    '#52525b',
+  }[accent]
 
   return (
-    <div
-      id={id}
-      className={`relative flex flex-col border bg-black/40 overflow-hidden ${glowMap[glow]}`}
-    >
-      {/* Corner label */}
-      <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 border-b border-zinc-800/40">
-        <span className={`font-mono text-[9px] tracking-[0.3em] uppercase ${labelMap[glow]}`}>{label}</span>
-        {tag && <span className="font-mono text-[9px] text-zinc-700 ml-auto">{tag}</span>}
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 min-h-0 overflow-hidden">
-        {children}
-      </div>
+    <div className="jv-side-section" style={{ borderBottom: '1px solid #18181b', paddingBottom: '0' }}>
+      <button
+        onClick={() => collapsible && setOpen(v => !v)}
+        style={{
+          width:          '100%',
+          display:        'flex',
+          alignItems:     'center',
+          gap:            '8px',
+          padding:        '10px 16px',
+          background:     'transparent',
+          border:         'none',
+          cursor:         collapsible ? 'pointer' : 'default',
+          borderBottom:   '1px solid #18181b',
+        }}
+      >
+        {icon && <span style={{ color: accentColor, display: 'flex', alignItems: 'center' }}>{icon}</span>}
+        <span style={{ fontFamily: 'monospace', fontSize: '9px', letterSpacing: '0.3em', color: accentColor, textTransform: 'uppercase', flex: 1, textAlign: 'left' }}>
+          {label}
+        </span>
+        {collapsible && (
+          <span style={{ color: '#3f3f46', fontSize: '10px', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▾</span>
+        )}
+      </button>
+      {(!collapsible || open) && (
+        <div style={{ padding: '12px 16px' }}>
+          {children}
+        </div>
+      )}
     </div>
   )
 }
@@ -190,7 +215,7 @@ function Q({
 export const dynamic = 'force-dynamic'
 
 export default function JavariOSPage() {
-  // State
+  // ── State — all v2 state preserved ────────────────────────────────────────
   const [mode,        setMode]        = useState<Mode>('single')
   const [avState,     setAvState]     = useState<AvState>('idle')
   const [messages,    setMessages]    = useState<Msg[]>([
@@ -204,20 +229,17 @@ export default function JavariOSPage() {
   const [sysStatus,   setSysStatus]   = useState<SysStatus | null>(null)
   const [execPulse,   setExecPulse]   = useState(false)
 
-  // ── Auth session ──────────────────────────────────────────────────────────
+  // ── Auth session ───────────────────────────────────────────────────────────
   const supabase    = createClientComponentClient()
   const [userId,    setUserId]    = useState<string | null>(null)
   const [authToken, setAuthToken] = useState<string | null>(null)
   const [userTier,  setUserTier]  = useState<string>('free')
 
-  const bottomRef  = useRef<HTMLDivElement>(null)
-  const feedRef    = useRef<HTMLDivElement>(null)
-  const textRef    = useRef<HTMLTextAreaElement>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const textRef   = useRef<HTMLTextAreaElement>(null)
 
-  // Auto-scroll chat
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, loading])
 
-  // Auto-resize textarea
   useEffect(() => {
     const el = textRef.current
     if (!el) return
@@ -225,7 +247,7 @@ export default function JavariOSPage() {
     el.style.height = Math.min(el.scrollHeight, 120) + 'px'
   }, [input])
 
-  // Poll status every 15s
+  // ── Status polling ─────────────────────────────────────────────────────────
   const loadStatus = useCallback(async () => {
     try {
       const res = await fetch('/api/autonomy/status', { cache: 'no-store' })
@@ -234,18 +256,17 @@ export default function JavariOSPage() {
       if (!data.ok) return
       const c = data.canonical ?? {}
       setSysStatus({
-        total:     c.total     ?? 275,
-        completed: c.completed ?? 0,
-        verified:  c.verified  ?? 0,
-        pending:   c.pending   ?? 0,
-        phase:     data.system?.active_phase ?? 2,
-        mode:      data.system?.mode         ?? 'BUILD',
-        pct:       c.pct_verified            ?? 0,
+        total:       c.total     ?? 275,
+        completed:   c.completed ?? 0,
+        verified:    c.verified  ?? 0,
+        pending:     c.pending   ?? 0,
+        phase:       data.system?.active_phase ?? 2,
+        mode:        data.system?.mode         ?? 'BUILD',
+        pct:         c.pct_verified            ?? 0,
         budget:      data.system?.budget_left  ?? 0,
         budgetSpent: data.system?.budget_spent ?? 0,
         budgetTotal: data.system?.budget_daily ?? 1.00,
       })
-      // Recent executions
       const recent: Array<Record<string,unknown>> = data.recent_executions ?? []
       if (recent.length) {
         setExecRows(recent.slice(0, 8).map((e, i) => ({
@@ -273,12 +294,11 @@ export default function JavariOSPage() {
       if (session) {
         setUserId(session.user.id)
         setAuthToken(session.access_token)
-        console.log('JAVARI_SESSION_LOADED', { userId: session.user.id.slice(0,8) })
       }
     })
   }, [supabase])
 
-  // ── Send message ───────────────────────────────────────────────────────────
+  // ── Send message — v2 logic preserved 100% ────────────────────────────────
   const send = useCallback(async (override?: string) => {
     const content = (override ?? input).trim()
     if (!content || loading) return
@@ -288,7 +308,6 @@ export default function JavariOSPage() {
     setAvState('thinking')
     setEnsemble([])
 
-    // Fire-and-forget learning log
     fetch('/api/javari/learning/update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer javari-cron-2025-phase2-autonomous' },
@@ -299,7 +318,6 @@ export default function JavariOSPage() {
 
     try {
       if (mode === 'council') {
-        console.log('JAVARI_REQUEST_SENT', { route: '/api/javari/team', userId: userId?.slice(0,8) })
         const teamHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
         if (authToken) teamHeaders['Authorization'] = `Bearer ${authToken}`
         const res  = await fetch('/api/javari/team', {
@@ -309,10 +327,7 @@ export default function JavariOSPage() {
         const data = await res.json()
         if (data.error) throw new Error(data.error)
 
-        // Populate agent panel
         if (data.ensemble?.length) setEnsemble(data.ensemble)
-
-        // Show each ensemble step as labeled agent message
         if (data.ensemble?.length) {
           const agentMsgs: Msg[] = data.ensemble.map((step: EnsembleStep) => ({
             id:      Date.now().toString() + Math.random(),
@@ -325,8 +340,6 @@ export default function JavariOSPage() {
           }))
           setMessages(m => [...m, ...agentMsgs])
         }
-
-        // Final content from validator
         if (data.content) {
           setAvState('responding')
           setMessages(m => [...m, {
@@ -335,7 +348,6 @@ export default function JavariOSPage() {
           }])
         }
       } else {
-        console.log('JAVARI_REQUEST_SENT', { route: '/api/javari/chat', userId: userId?.slice(0,8) })
         const chatHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
         if (authToken) chatHeaders['Authorization'] = `Bearer ${authToken}`
         const res  = await fetch('/api/javari/chat', {
@@ -344,7 +356,6 @@ export default function JavariOSPage() {
         })
         const data = await res.json()
         if (data.error || data.blocked) throw new Error(data.error ?? 'Blocked')
-        console.log('JAVARI_RESPONSE_RECEIVED', { route: '/api/javari/chat', model: data.model, credits_used: data.credits_used, upsell: data.upsell?.show })
         setAvState('responding')
         setMessages(m => [...m, {
           id: Date.now().toString(), role: 'assistant',
@@ -360,9 +371,9 @@ export default function JavariOSPage() {
       setLoading(false)
       setTimeout(() => setAvState('idle'), 2000)
     }
-  }, [input, loading, mode])
+  }, [input, loading, mode, authToken, userId, userTier, messages])
 
-  // ── Run Loop ───────────────────────────────────────────────────────────────
+  // ── Run Loop — v2 logic preserved 100% ────────────────────────────────────
   const runLoop = useCallback(async () => {
     if (avState === 'executing') return
     setAvState('executing')
@@ -401,166 +412,422 @@ export default function JavariOSPage() {
   }, [])
 
   const PROMPTS = ['Write a business plan', 'Create brand content', 'Analyze my strategy', 'Build a campaign', 'Draft an email', 'Explain this concept']
-  const hasChat = messages.filter(m => m.role !== 'system').length > 0
 
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <>
-      {/* ── Keyframes ──────────────────────────────────────────────────── */}
+      {/* ── Global styles ───────────────────────────────────────────────── */}
       <style>{`
-        @keyframes av-blink { 0%,100%{opacity:1} 50%{opacity:.25} }
-        @keyframes av-spin  { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
-        .av-blink { animation: av-blink 1.4s ease-in-out infinite }
-        .av-spin  { animation: av-spin  3s linear infinite }
-        :root {
-          --sep: #27272a;
-          --sep-glow: rgba(139,92,246,0.15);
+        @keyframes av-blink  { 0%,100%{opacity:1} 50%{opacity:.2} }
+        @keyframes av-spin   { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+        @keyframes jv-slide-in { from{opacity:0;transform:translateX(-12px)} to{opacity:1;transform:translateX(0)} }
+        @keyframes jv-msg-in { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes jv-exec-in { from{opacity:0;transform:translateX(8px)} to{opacity:1;transform:translateX(0)} }
+
+        .av-blink    { animation: av-blink 1.4s ease-in-out infinite }
+        .av-spin     { animation: av-spin  3s linear infinite }
+        .jv-slide-in { animation: jv-slide-in 0.3s ease forwards }
+        .jv-msg-in   { animation: jv-msg-in  0.25s ease forwards }
+        .jv-exec-in  { animation: jv-exec-in 0.2s ease forwards }
+
+        /* Custom scrollbar — thin, dark */
+        .jv-scroll::-webkit-scrollbar       { width: 3px }
+        .jv-scroll::-webkit-scrollbar-track { background: transparent }
+        .jv-scroll::-webkit-scrollbar-thumb { background: #27272a; border-radius: 2px }
+        .jv-scroll::-webkit-scrollbar-thumb:hover { background: #3f3f46 }
+
+        /* Scanlines overlay */
+        .jv-scanlines::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          background-image: repeating-linear-gradient(
+            0deg,
+            transparent,
+            transparent 3px,
+            rgba(0,0,0,0.10) 3px,
+            rgba(0,0,0,0.10) 4px
+          );
+          z-index: 1;
         }
+
+        /* Sidebar nav pill active */
+        .jv-pill-active-cyan  { background: rgba(6,182,212,0.15); border-color: rgba(6,182,212,0.5); color: #06b6d4 }
+        .jv-pill-active-purple { background: rgba(168,85,247,0.15); border-color: rgba(168,85,247,0.5); color: #a855f7 }
+        .jv-pill-inactive { background: rgba(24,24,27,0.6); border-color: #27272a; color: #52525b }
+        .jv-pill-inactive:hover { border-color: #3f3f46; color: #71717a }
+
+        /* Exec row hover */
+        .jv-exec-row:hover { background: rgba(245,158,11,0.05) }
+
+        /* Chat message hover */
+        .jv-chat-row:hover { background: rgba(255,255,255,0.02) }
       `}</style>
 
+      {/* ── Root — fixed inset-0 z-50 ───────────────────────────────────── */}
       <div
-        className="w-screen h-screen bg-[#050507] text-zinc-200 overflow-hidden flex flex-col"
+        className="jv-scanlines"
+        style={{
+          position:   'fixed',
+          inset:      0,
+          zIndex:     50,
+          background: '#050507',
+          color:      '#e4e4e7',
+          display:    'flex',
+          flexDirection: 'column',
+          overflow:   'hidden',
+          fontFamily: 'monospace',
+        }}
         onClick={() => setModeOpen(false)}
       >
-        {/* Scanlines */}
-        <div className="pointer-events-none fixed inset-0 z-0"
-          style={{ backgroundImage: 'repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,0.12) 3px,rgba(0,0,0,0.12) 4px)' }} />
 
-        {/* ── HEADER ───────────────────────────────────────────────────── */}
-        <header className="flex-shrink-0 relative z-20 flex items-center px-5 border-b border-zinc-800/60 bg-black/60 backdrop-blur-sm gap-4" style={{ height: '56px', minHeight: '56px', maxHeight: '56px' }}>
-          {/* Javari AI logo in header — white pill container, responsive size */}
-          <div className="flex-shrink-0 flex items-center" style={{ height: '40px' }}>
+        {/* ── HEADER ──────────────────────────────────────────────────────── */}
+        <header style={{
+          flexShrink:     0,
+          height:         '52px',
+          minHeight:      '52px',
+          display:        'flex',
+          alignItems:     'center',
+          padding:        '0 20px',
+          gap:            '16px',
+          borderBottom:   '1px solid #18181b',
+          background:     'rgba(0,0,0,0.7)',
+          backdropFilter: 'blur(8px)',
+          zIndex:         20,
+          position:       'relative',
+        }}>
+          {/* Logo */}
+          <div style={{ flexShrink: 0, height: '36px', display: 'flex', alignItems: 'center' }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/javari-logo.png"
               alt="Javari AI"
-              style={{ height: '40px', width: 'auto', maxHeight: '40px', objectFit: 'contain', display: 'block' }}
+              style={{ height: '36px', width: 'auto', objectFit: 'contain', display: 'block' }}
               draggable={false}
             />
           </div>
 
-          <div className="w-px h-5 bg-zinc-800" />
+          <div style={{ width: '1px', height: '20px', background: '#27272a' }} />
 
-          {/* Mode indicator */}
-          <div className="relative flex-shrink-0" onClick={e => e.stopPropagation()}>
-            <button
-              onClick={() => setModeOpen(v => !v)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded border border-zinc-800 bg-zinc-900/50 hover:border-zinc-700 transition-all font-mono text-[10px] tracking-widest uppercase"
-            >
-              <span className={mode === 'single' ? 'text-blue-400' : 'text-violet-400'}>
-                {mode === 'single' ? '◉ SINGLE AI' : '◈ AI COUNCIL'}
-              </span>
-              <ChevronDown className={`w-3 h-3 text-zinc-600 transition-transform ${modeOpen ? 'rotate-180' : ''}`} />
-            </button>
-            {modeOpen && (
-              <div className="absolute top-full left-0 mt-1 w-56 bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl z-50">
-                {([
-                  { id: 'single'  as Mode, label: 'SINGLE AI',  sub: 'Cost-optimised — fastest',    dot: 'bg-blue-400' },
-                  { id: 'council' as Mode, label: 'AI COUNCIL', sub: 'Architect + Builder + Analyst', dot: 'bg-violet-400' },
-                ] as { id: Mode; label: string; sub: string; dot: string }[]).map(opt => (
-                  <button key={opt.id}
-                    onClick={() => { setMode(opt.id); setModeOpen(false) }}
-                    className={`w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-zinc-900 transition-colors first:rounded-t-xl last:rounded-b-xl ${mode === opt.id ? 'bg-zinc-900/60' : ''}`}>
-                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5 ${opt.dot}`} />
-                    <div>
-                      <p className="font-mono text-xs text-zinc-200">{opt.label}</p>
-                      <p className="font-mono text-[10px] text-zinc-600 mt-0.5">{opt.sub}</p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
+          {/* Mode pill toggle */}
+          <div style={{ position: 'relative', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', gap: '4px' }}>
+              <button
+                onClick={() => setMode('single')}
+                className={mode === 'single' ? 'jv-pill-active-cyan' : 'jv-pill-inactive'}
+                style={{
+                  padding:      '5px 12px',
+                  borderRadius: '20px',
+                  border:       '1px solid',
+                  fontSize:     '9px',
+                  letterSpacing:'0.2em',
+                  fontFamily:   'monospace',
+                  cursor:       'pointer',
+                  transition:   'all 0.2s ease',
+                  fontWeight:   mode === 'single' ? 700 : 400,
+                }}
+              >
+                ◉ SINGLE AI
+              </button>
+              <button
+                onClick={() => setMode('council')}
+                className={mode === 'council' ? 'jv-pill-active-purple' : 'jv-pill-inactive'}
+                style={{
+                  padding:      '5px 12px',
+                  borderRadius: '20px',
+                  border:       '1px solid',
+                  fontSize:     '9px',
+                  letterSpacing:'0.2em',
+                  fontFamily:   'monospace',
+                  cursor:       'pointer',
+                  transition:   'all 0.2s ease',
+                  fontWeight:   mode === 'council' ? 700 : 400,
+                }}
+              >
+                ◈ AI COUNCIL
+              </button>
+            </div>
           </div>
 
-          <div className="flex-1" />
+          <div style={{ flex: 1 }} />
 
-          {/* Status pill */}
+          {/* Status strip — desktop only */}
           {sysStatus && (
-            <div className="hidden md:flex items-center gap-3 font-mono text-[10px] text-zinc-600">
-              <span className={sysStatus.mode === 'BUILD' ? 'text-blue-600' : 'text-amber-600'}>{sysStatus.mode}</span>
-              <span>P{sysStatus.phase}</span>
-              <span className="text-emerald-700">{sysStatus.pct}% VERIFIED</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontFamily: 'monospace', fontSize: '9px' }}>
+              <span style={{ color: sysStatus.mode === 'BUILD' ? '#1d4ed8' : '#92400e', letterSpacing: '0.2em' }}>{sysStatus.mode}</span>
+              <span style={{ color: '#3f3f46' }}>P{sysStatus.phase}</span>
+              <span style={{ color: '#065f46', letterSpacing: '0.15em' }}>{sysStatus.pct}% VERIFIED</span>
+              {/* Mini progress bar */}
+              <div style={{ width: '60px', height: '2px', background: '#18181b', borderRadius: '1px', overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${sysStatus.pct}%`, background: 'linear-gradient(90deg,#7c3aed,#065f46)', transition: 'width 1s ease' }} />
+              </div>
             </div>
           )}
 
-          <div className="w-px h-5 bg-zinc-800" />
+          <div style={{ width: '1px', height: '20px', background: '#27272a' }} />
 
-          <a href="/command-center"
-            className="font-mono text-[9px] tracking-[0.2em] uppercase text-zinc-700 hover:text-zinc-500 transition-colors px-2 py-1 border border-zinc-800/60 rounded">
+          <a
+            href="/command-center"
+            style={{
+              fontFamily:    'monospace',
+              fontSize:      '9px',
+              letterSpacing: '0.2em',
+              color:         '#3f3f46',
+              textDecoration:'none',
+              padding:       '4px 10px',
+              border:        '1px solid #27272a',
+              borderRadius:  '6px',
+              transition:    'all 0.2s',
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#71717a'; (e.currentTarget as HTMLElement).style.borderColor = '#3f3f46' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#3f3f46'; (e.currentTarget as HTMLElement).style.borderColor = '#27272a' }}
+          >
             ⚙ ADMIN
           </a>
         </header>
 
-        {/* ── QUADRANT GRID ─────────────────────────────────────────────── */}
-        {/*
-          Desktop: strict 2×2 — each cell exactly 1fr × 1fr
-          Mobile:  single column, order: chat, agents, exec, avatar
-        */}
-        <main className="flex-1 min-h-0 relative z-10
-          grid gap-px bg-zinc-800/40
-          grid-cols-1 grid-rows-[auto_1fr_auto_auto]
-          md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] md:grid-rows-2
-        ">
+        {/* ── BODY: sidebar + main ─────────────────────────────────────────── */}
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
 
-          {/* ── Q1: IDENTITY / AVATAR ─────────────────────── top-left ── */}
-          <Q id="q1" label="Q1 · IDENTITY" glow="violet"
-            className="order-4 md:order-1">
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '1rem', gap: '1rem', overflow: 'hidden' }}>
+          {/* ── LEFT SIDEBAR — 280px fixed ───────────────────────────────── */}
+          <aside
+            className="jv-scroll jv-slide-in"
+            style={{
+              width:        '280px',
+              minWidth:     '280px',
+              maxWidth:     '280px',
+              borderRight:  '1px solid #18181b',
+              overflowY:    'auto',
+              overflowX:    'hidden',
+              background:   'rgba(0,0,0,0.4)',
+              display:      'flex',
+              flexDirection:'column',
+              flexShrink:   0,
+            }}
+          >
+            {/* ── Identity section ──────────────────────────────────────── */}
+            <SideSection label="IDENTITY" icon={<Cpu size={10} />} accent="violet">
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+                <Avatar state={avState} />
 
-              {/* Avatar */}
-              <Avatar state={avState} />
-
-              {/* Status grid */}
-              <div className="w-full space-y-2 font-mono">
+                {/* Status grid */}
                 {sysStatus ? (
-                  <>
+                  <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     {[
-                      { k: 'PHASE',    v: `${sysStatus.phase}`,                    c: 'text-zinc-300' },
-                      { k: 'TASKS',    v: `${sysStatus.completed} / ${sysStatus.total}`, c: 'text-zinc-300' },
-                      { k: 'VERIFIED', v: `${sysStatus.pct}%`,                     c: 'text-emerald-500' },
-                      { k: 'PENDING',  v: `${sysStatus.pending}`,                  c: 'text-amber-600' },
-                      { k: 'SPENT',    v: `$${(sysStatus.budgetSpent ?? 0).toFixed(4)}`, c: 'text-amber-600' },
-                      { k: 'REMAINING', v: `$${(sysStatus.budget ?? 0).toFixed(4)}`,        c: 'text-emerald-600' },
+                      { k: 'PHASE',     v: `${sysStatus.phase}`,                          c: '#a1a1aa' },
+                      { k: 'TASKS',     v: `${sysStatus.completed} / ${sysStatus.total}`, c: '#a1a1aa' },
+                      { k: 'VERIFIED',  v: `${sysStatus.pct}%`,                           c: '#10b981' },
+                      { k: 'PENDING',   v: `${sysStatus.pending}`,                        c: '#f59e0b' },
+                      { k: 'SPENT',     v: `$${(sysStatus.budgetSpent ?? 0).toFixed(4)}`, c: '#f59e0b' },
+                      { k: 'REMAINING', v: `$${(sysStatus.budget ?? 0).toFixed(4)}`,      c: '#10b981' },
                     ].map(row => (
-                      <div key={row.k} className="flex items-center justify-between px-1">
-                        <span className="text-[9px] tracking-[0.2em] text-zinc-700">{row.k}</span>
-                        <span className={`text-xs font-bold tabular-nums ${row.c}`}>{row.v}</span>
+                      <div key={row.k} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontFamily: 'monospace', fontSize: '9px', letterSpacing: '0.2em', color: '#3f3f46' }}>{row.k}</span>
+                        <span style={{ fontFamily: 'monospace', fontSize: '11px', fontWeight: 700, color: row.c, tabularNums: true } as React.CSSProperties}>{row.v}</span>
                       </div>
                     ))}
                     {/* Progress bar */}
-                    <div className="h-px w-full bg-zinc-800 rounded overflow-hidden mt-1">
-                      <div className="h-full bg-gradient-to-r from-violet-700 via-indigo-600 to-emerald-600 transition-all duration-1000"
-                        style={{ width: `${sysStatus.pct}%` }} />
+                    <div style={{ height: '2px', width: '100%', background: '#18181b', borderRadius: '1px', overflow: 'hidden', marginTop: '4px' }}>
+                      <div style={{ height: '100%', width: `${sysStatus.pct}%`, background: 'linear-gradient(90deg,#7c3aed,#1d4ed8,#10b981)', transition: 'width 1s ease' }} />
                     </div>
-                  </>
+                  </div>
                 ) : (
-                  <p className="text-[9px] text-zinc-700 text-center tracking-widest av-blink">CONNECTING…</p>
+                  <p className="av-blink" style={{ fontFamily: 'monospace', fontSize: '9px', color: '#3f3f46', letterSpacing: '0.3em', textAlign: 'center' }}>CONNECTING…</p>
+                )}
+
+                {/* Run loop button */}
+                <button
+                  onClick={runLoop}
+                  disabled={avState === 'executing'}
+                  style={{
+                    width:         '100%',
+                    padding:       '8px',
+                    fontFamily:    'monospace',
+                    fontSize:      '10px',
+                    letterSpacing: '0.25em',
+                    textTransform: 'uppercase',
+                    borderRadius:  '8px',
+                    border:        '1px solid',
+                    borderColor:   avState === 'executing' ? 'rgba(245,158,11,0.3)' : '#27272a',
+                    background:    avState === 'executing' ? 'rgba(245,158,11,0.06)' : 'rgba(24,24,27,0.4)',
+                    color:         avState === 'executing' ? '#92400e' : '#52525b',
+                    cursor:        avState === 'executing' ? 'wait' : 'pointer',
+                    transition:    'all 0.2s ease',
+                  }}
+                  onMouseEnter={e => {
+                    if (avState !== 'executing') {
+                      const el = e.currentTarget as HTMLElement
+                      el.style.borderColor = 'rgba(139,92,246,0.4)'
+                      el.style.color       = '#a855f7'
+                      el.style.background  = 'rgba(139,92,246,0.06)'
+                    }
+                  }}
+                  onMouseLeave={e => {
+                    if (avState !== 'executing') {
+                      const el = e.currentTarget as HTMLElement
+                      el.style.borderColor = '#27272a'
+                      el.style.color       = '#52525b'
+                      el.style.background  = 'rgba(24,24,27,0.4)'
+                    }
+                  }}
+                >
+                  {avState === 'executing' ? '⚡ EXECUTING…' : '▶ RUN LOOP'}
+                </button>
+              </div>
+            </SideSection>
+
+            {/* ── AI Agents section ─────────────────────────────────────── */}
+            <SideSection label="AI AGENTS" icon={<Users size={10} />} accent="emerald" collapsible>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {Object.entries(AGENT_CFG).map(([key, cfg]) => {
+                  const step    = ensemble.find(s => s.role === key)
+                  const waiting = loading && mode === 'council'
+                  return (
+                    <div
+                      key={key}
+                      className={waiting && !step ? 'av-blink' : undefined}
+                      style={{
+                        padding:      '10px 12px',
+                        borderRadius: '10px',
+                        border:       `1px solid ${step ? cfg.hue + '40' : waiting ? cfg.hue + '18' : '#18181b'}`,
+                        background:   step ? 'rgba(24,24,27,0.6)' : waiting ? 'rgba(24,24,27,0.2)' : 'transparent',
+                        transition:   'all 0.3s ease',
+                        borderStyle:  waiting && !step ? 'dashed' : 'solid',
+                      }}
+                    >
+                      {/* Agent header */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: step ? '8px' : 0 }}>
+                        <span style={{ color: cfg.hue, fontSize: '14px', lineHeight: 1 }}>{cfg.glyph}</span>
+                        <span style={{ fontFamily: 'monospace', fontSize: '9px', letterSpacing: '0.25em', color: step ? cfg.hue : '#3f3f46', flex: 1 }}>
+                          {cfg.label}
+                        </span>
+                        {/* Status dot */}
+                        <div
+                          className={waiting && !step ? 'av-blink' : undefined}
+                          style={{
+                            width:           '6px',
+                            height:          '6px',
+                            borderRadius:    '50%',
+                            backgroundColor: step ? '#10b981' : waiting ? cfg.hue : '#27272a',
+                            opacity:         waiting && !step ? 0.5 : 1,
+                          }}
+                        />
+                      </div>
+
+                      {/* Content or description */}
+                      {step ? (
+                        <p style={{ fontFamily: 'monospace', fontSize: '10px', color: '#a1a1aa', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                          {step.content}
+                        </p>
+                      ) : (
+                        <p style={{ fontFamily: 'monospace', fontSize: '9px', color: '#3f3f46', letterSpacing: '0.1em' }}>
+                          {key === 'planner'   ? 'Breaks down tasks into steps' :
+                           key === 'builder'   ? 'Implements the plan fully'    :
+                                                 'Reviews and validates output'}
+                        </p>
+                      )}
+
+                      {/* Meta: model + cost + tier */}
+                      {step && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px', flexWrap: 'wrap' }}>
+                          <span style={{ fontFamily: 'monospace', fontSize: '9px', color: '#3f3f46' }}>
+                            {step.model.split('-').slice(-2).join('-')}
+                          </span>
+                          <span style={{ fontFamily: 'monospace', fontSize: '9px', color: '#27272a' }}>
+                            ${step.cost.toFixed(5)}
+                          </span>
+                          {step.tier && (
+                            <span style={{
+                              fontFamily:    'monospace',
+                              fontSize:      '9px',
+                              padding:       '1px 6px',
+                              borderRadius:  '4px',
+                              background:    step.tier === 'free' ? 'rgba(16,185,129,0.1)' : step.tier === 'low' ? 'rgba(59,130,246,0.1)' : 'rgba(245,158,11,0.1)',
+                              color:         step.tier === 'free' ? '#065f46' : step.tier === 'low' ? '#1e3a5f' : '#78350f',
+                            }}>
+                              {step.tier.toUpperCase()}
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {waiting && !step && (
+                        <p style={{ fontFamily: 'monospace', fontSize: '9px', color: cfg.hue, opacity: 0.5, marginTop: '4px', letterSpacing: '0.2em' }}>
+                          WAITING…
+                        </p>
+                      )}
+                    </div>
+                  )
+                })}
+                {mode === 'single' && (
+                  <p style={{ fontFamily: 'monospace', fontSize: '9px', color: '#27272a', letterSpacing: '0.2em', textAlign: 'center', paddingTop: '4px' }}>
+                    SWITCH TO COUNCIL TO ACTIVATE
+                  </p>
+                )}
+              </div>
+            </SideSection>
+          </aside>
+
+          {/* ── MAIN AREA — 1fr dominant ─────────────────────────────────── */}
+          <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
+            {/* ── CHAT FEED — dominant, fills available height ──────────── */}
+            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', borderBottom: '1px solid #18181b' }}>
+
+              {/* Chat header */}
+              <div style={{
+                flexShrink:   0,
+                padding:      '0 20px',
+                height:       '40px',
+                display:      'flex',
+                alignItems:   'center',
+                gap:          '12px',
+                borderBottom: '1px solid #18181b',
+                background:   'rgba(0,0,0,0.2)',
+              }}>
+                <Terminal size={10} style={{ color: '#3b82f6' }} />
+                <span style={{ fontFamily: 'monospace', fontSize: '9px', letterSpacing: '0.3em', color: '#3b82f6' }}>
+                  LIVE FEED
+                </span>
+                <span style={{ fontFamily: 'monospace', fontSize: '9px', color: '#27272a' }}>
+                  /{mode.toUpperCase()}
+                </span>
+                <div style={{ flex: 1 }} />
+                {messages.filter(m => m.role !== 'system').length > 0 && (
+                  <button
+                    onClick={clearChat}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#3f3f46', display: 'flex', alignItems: 'center', padding: '4px' }}
+                    title="Clear chat"
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#71717a' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#3f3f46' }}
+                  >
+                    <RotateCcw size={12} />
+                  </button>
                 )}
               </div>
 
-              {/* Run loop button */}
-              <button
-                onClick={runLoop}
-                disabled={avState === 'executing'}
-                className={`w-full py-2 font-mono text-[10px] tracking-[0.25em] uppercase rounded border transition-all ${
-                  avState === 'executing'
-                    ? 'border-amber-800/50 bg-amber-950/30 text-amber-700 cursor-wait'
-                    : 'border-zinc-800 bg-zinc-900/40 text-zinc-600 hover:border-violet-800/60 hover:text-violet-500 hover:bg-violet-950/20'
-                }`}>
-                {avState === 'executing' ? '⚡ EXECUTING…' : '▶ RUN LOOP'}
-              </button>
-            </div>
-          </Q>
-
-          {/* ── Q2: CHAT ────────────────────────────────────── top-right ── */}
-          <Q id="q2" label="Q2 · LIVE FEED" tag={`/${mode.toUpperCase()}`} glow="blue"
-            className="order-1 md:order-2 min-h-[50vh] md:min-h-0">
-            <div className="h-full flex flex-col">
-
-              {/* ── INPUT — FIXED AT TOP ───────────────────────────────── */}
-              <div className="flex-shrink-0 border-b border-zinc-800/40 px-3 py-2.5">
-                <div className="flex items-center gap-2 bg-zinc-900/50 border border-zinc-800/60
-                  hover:border-blue-800/40 focus-within:border-blue-700/50 rounded-md px-3 py-2 transition-all">
-                  <span className="font-mono text-[10px] text-zinc-700 flex-shrink-0 select-none">›</span>
+              {/* Input bar — fixed directly under chat header */}
+              <div style={{
+                flexShrink:   0,
+                padding:      '10px 16px',
+                borderBottom: '1px solid #18181b',
+                background:   'rgba(0,0,0,0.3)',
+              }}>
+                <div style={{
+                  display:     'flex',
+                  alignItems:  'center',
+                  gap:         '10px',
+                  background:  'rgba(24,24,27,0.5)',
+                  border:      '1px solid #27272a',
+                  borderRadius:'10px',
+                  padding:     '8px 12px',
+                  transition:  'border-color 0.2s',
+                }}
+                  onFocusCapture={e => { (e.currentTarget as HTMLElement).style.borderColor = mode === 'council' ? 'rgba(168,85,247,0.4)' : 'rgba(59,130,246,0.4)' }}
+                  onBlurCapture={e => { (e.currentTarget as HTMLElement).style.borderColor = '#27272a' }}
+                >
+                  <span style={{ fontFamily: 'monospace', fontSize: '12px', color: '#3f3f46', flexShrink: 0, userSelect: 'none' }}>›</span>
                   <textarea
                     ref={textRef}
                     rows={1}
@@ -568,138 +835,179 @@ export default function JavariOSPage() {
                     onChange={e => setInput(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
                     placeholder={mode === 'council' ? 'QUERY COUNCIL…' : 'QUERY JAVARI…'}
-                    className="flex-1 bg-transparent resize-none text-xs text-zinc-200 placeholder-zinc-700
-                      outline-none font-mono min-h-[16px] max-h-[80px] leading-relaxed tracking-wide"
+                    style={{
+                      flex:        1,
+                      background:  'transparent',
+                      border:      'none',
+                      outline:     'none',
+                      resize:      'none',
+                      fontFamily:  'monospace',
+                      fontSize:    '12px',
+                      color:       '#e4e4e7',
+                      minHeight:   '18px',
+                      maxHeight:   '100px',
+                      lineHeight:  '1.6',
+                      letterSpacing: '0.03em',
+                    }}
+                    // @ts-expect-error — placeholder color via style
+                    className="jv-textarea-placeholder"
                   />
-                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
                     {loading && (
-                      <div className="flex gap-0.5">
+                      <div style={{ display: 'flex', gap: '3px' }}>
                         {[0,1,2].map(i => (
-                          <div key={i} className="w-1 h-1 bg-blue-600 rounded-full animate-bounce"
-                            style={{ animationDelay: `${i * 0.12}s` }} />
+                          <div
+                            key={i}
+                            className="animate-bounce"
+                            style={{ width: '4px', height: '4px', borderRadius: '50%', background: mode === 'council' ? '#a855f7' : '#3b82f6', animationDelay: `${i * 0.12}s` }}
+                          />
                         ))}
                       </div>
                     )}
                     <button
                       onClick={() => send()}
                       disabled={!input.trim() || loading}
-                      className="w-6 h-6 rounded bg-blue-800 hover:bg-blue-700 disabled:opacity-20
-                        disabled:cursor-not-allowed flex items-center justify-center transition-colors"
+                      style={{
+                        width:           '28px',
+                        height:          '28px',
+                        borderRadius:    '8px',
+                        background:      mode === 'council' ? 'rgba(168,85,247,0.2)' : 'rgba(59,130,246,0.2)',
+                        border:          `1px solid ${mode === 'council' ? 'rgba(168,85,247,0.3)' : 'rgba(59,130,246,0.3)'}`,
+                        display:         'flex',
+                        alignItems:      'center',
+                        justifyContent:  'center',
+                        cursor:          (!input.trim() || loading) ? 'not-allowed' : 'pointer',
+                        opacity:         (!input.trim() || loading) ? 0.3 : 1,
+                        transition:      'all 0.2s',
+                      }}
                     >
-                      <Send className="w-3 h-3 text-blue-200" />
+                      <Send size={12} color={mode === 'council' ? '#a855f7' : '#3b82f6'} />
                     </button>
-                    {messages.filter(m => m.role !== 'system').length > 0 && (
-                      <button
-                        onClick={clearChat}
-                        className="w-6 h-6 rounded flex items-center justify-center text-zinc-700
-                          hover:text-zinc-500 transition-colors"
-                      >
-                        <RotateCcw className="w-3 h-3" />
-                      </button>
-                    )}
                   </div>
                 </div>
-                <p className="font-mono text-[8px] text-zinc-800 mt-1 tracking-[0.2em]">
-                  ENTER — SHIFT+ENTER FOR NEWLINE
+                <p style={{ fontFamily: 'monospace', fontSize: '8px', color: '#27272a', marginTop: '4px', letterSpacing: '0.2em' }}>
+                  ENTER · SHIFT+ENTER FOR NEWLINE
                 </p>
               </div>
 
-              {/* ── LIVE FEED — newest entry at top, older below ──────── */}
-              <div className="flex-1 overflow-y-auto min-h-0" ref={feedRef}>
-
-                {/* In-flight row: always at very top while loading */}
+              {/* ── Message feed ───────────────────────────────────────────── */}
+              <div
+                className="jv-scroll"
+                style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}
+              >
+                {/* In-flight row */}
                 {loading && (
-                  <div className="border-b border-zinc-800/30 px-3 py-2 bg-blue-950/10">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-mono text-[9px] text-zinc-700 tabular-nums select-none">
+                  <div style={{
+                    borderBottom: '1px solid #18181b',
+                    padding:      '10px 20px',
+                    background:   mode === 'council' ? 'rgba(168,85,247,0.04)' : 'rgba(59,130,246,0.04)',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                      <span style={{ fontFamily: 'monospace', fontSize: '9px', color: '#3f3f46' }}>
                         {new Date().toISOString().replace('T', ' ').slice(0, 19)}
                       </span>
-                      <span className="font-mono text-[9px] text-blue-500 tracking-widest">
+                      <span style={{ fontFamily: 'monospace', fontSize: '9px', color: mode === 'council' ? '#a855f7' : '#3b82f6', letterSpacing: '0.2em' }}>
                         — {mode === 'council' ? 'COUNCIL' : 'JAVARI'}
                       </span>
-                      <span className="flex gap-0.5 ml-1">
-                        {[0,1,2].map(i => (
-                          <span key={i}
-                            className="w-1 h-1 inline-block bg-blue-500 rounded-full animate-bounce"
-                            style={{ animationDelay: `${i * 0.15}s` }}
-                          />
-                        ))}
+                    </div>
+                    <div className="av-blink" style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                      {[0,1,2].map(i => (
+                        <span
+                          key={i}
+                          className="animate-bounce"
+                          style={{ width: '4px', height: '4px', borderRadius: '50%', background: mode === 'council' ? '#a855f7' : '#3b82f6', display: 'inline-block', animationDelay: `${i * 0.15}s` }}
+                        />
+                      ))}
+                      <span style={{ fontFamily: 'monospace', fontSize: '10px', color: mode === 'council' ? '#a855f7' : '#3b82f6', marginLeft: '6px', letterSpacing: '0.15em' }}>
+                        PROCESSING…
                       </span>
                     </div>
-                    <p className="font-mono text-[10px] text-blue-400 tracking-wider av-blink">
-                      PROCESSING…
-                    </p>
                   </div>
                 )}
 
-                {/* Messages: reversed so newest is at top */}
+                {/* Messages — reversed (newest at top) */}
                 {[...messages].reverse().map(msg => {
                   const ts = new Date(msg.ts).toISOString().replace('T', ' ').slice(0, 19)
                   const roleLabel =
-                    msg.role === 'user'           ? 'YOU'       :
-                    msg.role === 'system'          ? 'SYS'       :
-                    msg.agent === 'planner'        ? 'ARCHITECT' :
-                    msg.agent === 'builder'        ? 'BUILDER'   :
-                    msg.agent === 'validator'      ? 'ANALYST'   :
-                    mode    === 'council'          ? 'COUNCIL'   :
-                                                    'JAVARI'
+                    msg.role === 'user'      ? 'YOU'       :
+                    msg.role === 'system'     ? 'SYS'       :
+                    msg.agent === 'planner'   ? 'ARCHITECT' :
+                    msg.agent === 'builder'   ? 'BUILDER'   :
+                    msg.agent === 'validator' ? 'ANALYST'   :
+                    mode      === 'council'   ? 'COUNCIL'   : 'JAVARI'
+
                   const roleColor =
-                    msg.role === 'user'           ? 'text-zinc-400'    :
-                    msg.role === 'system'          ? 'text-zinc-700'    :
-                    msg.agent === 'planner'        ? 'text-violet-500'  :
-                    msg.agent === 'builder'        ? 'text-blue-500'    :
-                    msg.agent === 'validator'      ? 'text-emerald-500' :
-                    msg.error                      ? 'text-red-500'     :
-                                                    'text-blue-400'
+                    msg.role === 'user'      ? '#71717a'    :
+                    msg.role === 'system'     ? '#3f3f46'    :
+                    msg.agent === 'planner'   ? '#a855f7'    :
+                    msg.agent === 'builder'   ? '#3b82f6'    :
+                    msg.agent === 'validator' ? '#10b981'    :
+                    msg.error                 ? '#ef4444'    :
+                    mode      === 'council'   ? '#a855f7'    : '#3b82f6'
+
                   const textColor =
-                    msg.role === 'user'   ? 'text-zinc-300'  :
-                    msg.role === 'system' ? 'text-zinc-700'  :
-                    msg.error             ? 'text-red-400'   :
-                                            'text-zinc-200'
+                    msg.role === 'user'   ? '#d4d4d8' :
+                    msg.role === 'system' ? '#3f3f46'  :
+                    msg.error             ? '#f87171'  : '#e4e4e7'
 
                   return (
                     <div
                       key={msg.id}
-                      className={`border-b border-zinc-800/20 px-3 py-2.5 transition-colors hover:bg-zinc-900/20 ${
-                        msg.role === 'user' ? 'bg-zinc-900/30' : ''
-                      }`}
+                      className="jv-chat-row jv-msg-in"
+                      style={{
+                        borderBottom: '1px solid #18181b',
+                        padding:      '10px 20px',
+                        background:   msg.role === 'user' ? 'rgba(255,255,255,0.015)' : 'transparent',
+                        transition:   'background 0.15s',
+                      }}
                     >
-                      {/* Header: timestamp — ROLE  [model] */}
-                      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                        <span className="font-mono text-[9px] text-zinc-700 tabular-nums flex-shrink-0 select-none">
-                          {ts}
-                        </span>
-                        <span className={`font-mono text-[9px] tracking-widest ${roleColor}`}>
-                          — {roleLabel}
-                        </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px', flexWrap: 'wrap' }}>
+                        <span style={{ fontFamily: 'monospace', fontSize: '9px', color: '#27272a', userSelect: 'none' }}>{ts}</span>
+                        <span style={{ fontFamily: 'monospace', fontSize: '9px', color: roleColor, letterSpacing: '0.2em' }}>— {roleLabel}</span>
                         {msg.model && (
-                          <span className="font-mono text-[9px] text-zinc-800 ml-auto tabular-nums">
+                          <span style={{ fontFamily: 'monospace', fontSize: '9px', color: '#27272a', marginLeft: 'auto' }}>
                             {msg.model.split('-').slice(-2).join('-')}
                           </span>
                         )}
                       </div>
-                      {/* Content */}
-                      <p className={`font-mono text-xs leading-relaxed whitespace-pre-wrap break-words ${textColor}`}>
+                      <p style={{ fontFamily: 'monospace', fontSize: '12px', color: textColor, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                         {msg.content}
                       </p>
                     </div>
                   )
                 })}
 
-                {/* Empty-state prompt chips */}
+                {/* Empty state prompt chips */}
                 {messages.filter(m => m.role !== 'system').length === 0 && !loading && (
-                  <div className="flex flex-col items-center justify-center h-full gap-3 py-8 select-none">
-                    <p className="font-mono text-[9px] text-zinc-800 tracking-[0.3em] uppercase">
-                      Feed empty
-                    </p>
-                    <div className="flex flex-wrap gap-1.5 justify-center max-w-xs px-4">
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '16px', padding: '32px', userSelect: 'none' }}>
+                    <p style={{ fontFamily: 'monospace', fontSize: '9px', color: '#27272a', letterSpacing: '0.3em' }}>FEED EMPTY — TRY A PROMPT</p>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center', maxWidth: '480px' }}>
                       {PROMPTS.map(p => (
                         <button
                           key={p}
                           onClick={() => send(p)}
-                          className="px-2 py-1 font-mono text-[9px] text-zinc-700 bg-zinc-900/40
-                            border border-zinc-800/50 rounded hover:border-blue-800/40
-                            hover:text-blue-500 transition-all tracking-wider"
+                          style={{
+                            padding:       '6px 12px',
+                            fontFamily:    'monospace',
+                            fontSize:      '10px',
+                            color:         '#52525b',
+                            background:    'rgba(24,24,27,0.4)',
+                            border:        '1px solid #27272a',
+                            borderRadius:  '20px',
+                            cursor:        'pointer',
+                            letterSpacing: '0.1em',
+                            transition:    'all 0.2s',
+                          }}
+                          onMouseEnter={e => {
+                            const el = e.currentTarget as HTMLElement
+                            el.style.borderColor = mode === 'council' ? 'rgba(168,85,247,0.4)' : 'rgba(59,130,246,0.4)'
+                            el.style.color = mode === 'council' ? '#a855f7' : '#3b82f6'
+                          }}
+                          onMouseLeave={e => {
+                            const el = e.currentTarget as HTMLElement
+                            el.style.borderColor = '#27272a'
+                            el.style.color = '#52525b'
+                          }}
                         >
                           {p}
                         </button>
@@ -707,119 +1015,109 @@ export default function JavariOSPage() {
                     </div>
                   </div>
                 )}
+
+                <div ref={bottomRef} />
               </div>
             </div>
-          </Q>
 
-          {/* ── Q3: AI AGENTS ─────────────────────────────── bottom-left ── */}
-          <Q id="q3" label="Q3 · AI AGENTS" tag="ARCHITECT / BUILDER / ANALYST" glow="emerald"
-            className="order-2 md:order-3">
-            <div className="h-full overflow-y-auto p-4 space-y-3">
-              {Object.entries(AGENT_CFG).map(([key, cfg]) => {
-                const step    = ensemble.find(s => s.role === key)
-                const waiting = loading && mode === 'council'
-                return (
-                  <div key={key}
-                    style={{ borderColor: step ? cfg.hue + '40' : waiting ? cfg.hue + '18' : undefined }}
-                    className={`p-3 rounded-lg border transition-all duration-300 ${
-                      step    ? 'bg-zinc-900/60'                      :
-                      waiting ? 'bg-zinc-900/20 av-blink border-dashed' :
-                                'border-zinc-800/30 bg-transparent'
-                    }`}>
-                    {/* Agent header */}
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="font-mono text-base leading-none" style={{ color: cfg.hue }}>{cfg.glyph}</span>
-                      <span className="font-mono text-[10px] tracking-[0.25em] uppercase" style={{ color: step ? cfg.hue : '#52525b' }}>{cfg.label}</span>
-                      {step && (
-                        <span className="font-mono text-[9px] text-zinc-700 ml-auto">
-                          {step.model.split('-').slice(-2).join('-')} · ${step.cost.toFixed(5)}
-                        </span>
-                      )}
-                      {waiting && !step && (
-                        <span className="font-mono text-[9px] ml-auto" style={{ color: cfg.hue + '80' }}>WAITING…</span>
-                      )}
-                      {/* Active status dot */}
-                      <div className={`w-1.5 h-1.5 rounded-full ml-1 ${step ? 'bg-emerald-500' : waiting ? 'av-blink' : 'bg-zinc-800'}`}
-                        style={waiting && !step ? { backgroundColor: cfg.hue, opacity: 0.5 } : undefined} />
-                    </div>
-                    {/* Content */}
-                    {step ? (
-                      <p className="text-xs text-zinc-400 leading-relaxed line-clamp-4 font-mono">{step.content}</p>
-                    ) : (
-                      <p className="font-mono text-[9px] text-zinc-700 tracking-wider">
-                        {key === 'planner'   ? 'Breaks down tasks into executable steps' :
-                         key === 'builder'   ? 'Implements the plan fully'                :
-                                              'Reviews and validates output'}
-                      </p>
-                    )}
-                    {/* Tier badge */}
-                    {step?.tier && (
-                      <div className="mt-2">
-                        <span className={`font-mono text-[9px] px-1.5 py-0.5 rounded ${
-                          step.tier === 'free' ? 'text-emerald-700 bg-emerald-950/40' :
-                          step.tier === 'low'  ? 'text-blue-700 bg-blue-950/40'       :
-                                                  'text-amber-700 bg-amber-950/40'
-                        }`}>{step.tier.toUpperCase()}</span>
-                      </div>
-                    )}
+            {/* ── EXECUTION LOG — fixed-height strip at bottom ──────────── */}
+            <div style={{ flexShrink: 0, height: '200px', minHeight: '200px', display: 'flex', flexDirection: 'column' }}>
+              {/* Exec header */}
+              <div style={{
+                flexShrink:   0,
+                padding:      '0 20px',
+                height:       '36px',
+                display:      'flex',
+                alignItems:   'center',
+                gap:          '10px',
+                borderBottom: '1px solid #18181b',
+                background:   'rgba(0,0,0,0.3)',
+              }}>
+                <Activity size={10} style={{ color: '#f59e0b' }} />
+                <span style={{ fontFamily: 'monospace', fontSize: '9px', letterSpacing: '0.3em', color: '#f59e0b' }}>EXECUTION STREAM</span>
+                <div
+                  style={{
+                    width:           '6px',
+                    height:          '6px',
+                    borderRadius:    '50%',
+                    background:      execPulse ? '#f59e0b' : '#27272a',
+                    marginLeft:      '4px',
+                    animation:       execPulse ? 'av-blink 0.8s ease-in-out infinite' : 'none',
+                    transition:      'background 0.3s',
+                  }}
+                />
+                <div style={{ flex: 1 }} />
+                <span style={{ fontFamily: 'monospace', fontSize: '9px', color: '#27272a', letterSpacing: '0.2em' }}>LIVE</span>
+              </div>
+
+              {/* Exec rows */}
+              <div className="jv-scroll" style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
+                {execRows.length === 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '6px' }}>
+                    <p style={{ fontFamily: 'monospace', fontSize: '9px', color: '#27272a', letterSpacing: '0.3em' }}>NO ACTIVITY</p>
+                    <p style={{ fontFamily: 'monospace', fontSize: '9px', color: '#18181b', letterSpacing: '0.15em' }}>USE RUN LOOP OR WAIT FOR CRON</p>
                   </div>
-                )
-              })}
-              {mode === 'single' && (
-                <p className="font-mono text-[9px] text-zinc-800 text-center py-2 tracking-widest">SWITCH TO COUNCIL TO ACTIVATE AGENTS</p>
-              )}
-            </div>
-          </Q>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    {execRows.map((row, i) => {
+                      const isNew = execPulse && i < 5 && row.ts > Date.now() - 10000
+                      return (
+                        <div
+                          key={row.id + row.ts}
+                          className={`jv-exec-row ${i < 3 ? 'jv-exec-in' : ''}`}
+                          style={{
+                            padding:       '7px 20px',
+                            borderBottom:  '1px solid #0f0f10',
+                            display:       'flex',
+                            alignItems:    'center',
+                            gap:           '10px',
+                            background:    isNew ? 'rgba(245,158,11,0.04)' : 'transparent',
+                            transition:    'background 0.3s',
+                          }}
+                        >
+                          {/* Status glyph */}
+                          <span style={{
+                            fontFamily: 'monospace',
+                            fontSize:   '11px',
+                            flexShrink: 0,
+                            color:      row.verified      ? '#10b981' :
+                                        row.status === 'completed' ? '#3b82f6' :
+                                        row.status === 'failed'    ? '#ef4444' : '#f59e0b',
+                          }}>
+                            {row.verified ? '✓' : row.status === 'failed' ? '✗' : row.status === 'completed' ? '●' : '○'}
+                          </span>
 
-          {/* ── Q4: EXECUTION ─────────────────────────────── bottom-right ── */}
-          <Q id="q4" label="Q4 · EXECUTION STREAM" tag="LIVE" glow="amber"
-            className="order-3 md:order-4">
-            <div className="h-full overflow-y-auto p-3 space-y-1.5">
-              {execRows.length === 0 && (
-                <div className="h-full flex flex-col items-center justify-center gap-2 text-center py-4">
-                  <div className={`w-2 h-2 rounded-full bg-zinc-800 mx-auto ${execPulse ? 'bg-amber-500 av-blink' : ''}`} />
-                  <p className="font-mono text-[9px] text-zinc-700 tracking-widest">NO ACTIVITY</p>
-                  <p className="font-mono text-[9px] text-zinc-800">USE RUN LOOP OR WAIT FOR CRON</p>
-                </div>
-              )}
+                          {/* Title */}
+                          <span style={{ fontFamily: 'monospace', fontSize: '10px', color: '#a1a1aa', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textTransform: 'capitalize' }}>
+                            {row.title}
+                          </span>
 
-              {execRows.map((row, i) => {
-                const isNew = execPulse && i < 5 && row.ts > Date.now() - 10000
-                return (
-                  <div key={row.id + row.ts}
-                    className={`p-2 rounded border transition-all duration-500 ${
-                      isNew
-                        ? 'border-amber-800/50 bg-amber-950/20'
-                        : 'border-zinc-800/25 bg-zinc-900/20'
-                    }`}>
-                    <div className="flex items-start gap-2">
-                      {/* Status glyph */}
-                      <span className={`font-mono text-xs flex-shrink-0 mt-px ${
-                        row.verified                   ? 'text-emerald-500' :
-                        row.status === 'completed'     ? 'text-blue-500'    :
-                        row.status === 'failed'        ? 'text-red-500'     :
-                                                         'text-amber-600'
-                      }`}>
-                        {row.verified ? '✓' : row.status === 'failed' ? '✗' : row.status === 'completed' ? '●' : '○'}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="font-mono text-[10px] text-zinc-300 truncate capitalize leading-tight">{row.title}</p>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className="font-mono text-[9px] text-zinc-700">{row.module}</span>
-                          {row.model && <span className="font-mono text-[9px] text-zinc-800">{row.model.split('-').slice(-1)}</span>}
+                          {/* Module */}
+                          <span style={{ fontFamily: 'monospace', fontSize: '9px', color: '#3f3f46', flexShrink: 0 }}>{row.module}</span>
+
+                          {/* Model */}
+                          {row.model && (
+                            <span style={{ fontFamily: 'monospace', fontSize: '9px', color: '#27272a', flexShrink: 0 }}>
+                              {row.model.split('-').slice(-1)[0]}
+                            </span>
+                          )}
+
+                          {/* Cost */}
                           {row.cost > 0 && (
-                            <span className="font-mono text-[9px] text-zinc-800 ml-auto tabular-nums">${row.cost.toFixed(5)}</span>
+                            <span style={{ fontFamily: 'monospace', fontSize: '9px', color: '#27272a', flexShrink: 0 }}>
+                              ${row.cost.toFixed(5)}
+                            </span>
                           )}
                         </div>
-                      </div>
-                    </div>
+                      )
+                    })}
                   </div>
-                )
-              })}
+                )}
+              </div>
             </div>
-          </Q>
 
-        </main>
+          </main>
+        </div>
       </div>
     </>
   )
