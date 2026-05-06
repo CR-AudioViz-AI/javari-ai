@@ -16,15 +16,9 @@ import type {
   TaskNode,
 } from './execution-contract'
 
-import {
-  createExecution,
-  saveTaskResult,
-  finalizeExecution,
-} from './execution-store'
-
-import { createAdminClient }  from '@/lib/supabase/server'
-
-const supabaseAdmin = createAdminClient()
+// execution-store and Supabase removed — engine is stateless.
+// javari-ai does not write to any database.
+// craudiovizai receives ExecutionOutput and handles all DB writes.
 import { dispatchAI }         from '../dispatcher/ai-dispatcher'
 import type { AIResponse }    from '../dispatcher/ai-dispatcher'
 import type { ExecutionPlan } from './execution-contract'
@@ -47,9 +41,18 @@ export interface TaskResult {
 
 export interface ExecutionContext {
   plan_id:      string
-  execution_id: string
   results:      Map<string, TaskResult>
   total_cost:   number
+}
+
+// ExecutionOutput — full result payload returned to craudiovizai.
+// craudiovizai uses this to write DB records, deduct credits, update billing.
+export interface ExecutionOutput {
+  plan_id:    string
+  status:     'complete' | 'partial' | 'failed' | 'aborted'
+  tasks:      TaskResult[]
+  total_cost: number
+  aborted:    boolean
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -113,30 +116,9 @@ function generateFixContext(
 // Abort signal
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function abortExecution(execution_id: string): Promise<void> {
-  const { error } = await supabaseAdmin
-    .from('javari_team_executions')
-    .update({ status: 'aborting' })
-    .eq('id', execution_id)
-
-  if (error) {
-    throw new Error(
-      `abortExecution failed for "${execution_id}": ${error.message} (code: ${error.code})`
-    )
-  }
-}
-
-async function checkAborted(execution_id: string): Promise<boolean> {
-  try {
-    const { data } = await supabaseAdmin
-      .from('javari_team_executions')
-      .select('status')
-      .eq('id', execution_id)
-      .single()
-    return data?.status === 'aborting'
-  } catch {
-    return false
-  }
+// Stateless abort — signal passed from caller via AbortController
+function checkAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -286,18 +268,16 @@ function deriveFinalStatus(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function executePlan(
-  graph: ExecutionGraph,
-  plan:  ExecutionPlan,
-  hooks: ExecutionHooks = {},
-): Promise<ExecutionContext> {
+  graph:   ExecutionGraph,
+  plan:    ExecutionPlan,
+  hooks:   ExecutionHooks = {},
+  signal?: AbortSignal,
+): Promise<ExecutionOutput> {
   const { executionOrder, taskMap } = graph
   const { onTaskStart, onTaskComplete, onEngineError } = hooks
 
-  const execution_id = await createExecution(plan)
-
   const context: ExecutionContext = {
     plan_id:    plan.plan_id,
-    execution_id,
     results:    new Map<string, TaskResult>(),
     total_cost: 0,
   }
@@ -312,7 +292,7 @@ export async function executePlan(
   try {
     while (remaining.length > 0) {
       // ── Abort check ────────────────────────────────────────────────────────
-      if (await checkAborted(execution_id)) {
+      if (checkAborted(signal)) {
         aborted = true
         throw new Error('Execution aborted by user')
       }
@@ -359,7 +339,6 @@ export async function executePlan(
               started_at:   now,
               completed_at: now,
             }
-            await saveTaskResult(execution_id, cascadeResult, task.role)
             try { onTaskComplete?.(cascadeResult) } catch { /* never propagate */ }
             return cascadeResult
           }
@@ -402,8 +381,7 @@ export async function executePlan(
           }
           // ── End self-healing loop ─────────────────────────────────────────
 
-          // Persist the final result (success or final failure after retries)
-          await saveTaskResult(execution_id, result, task.role)
+          // Result held in memory — craudiovizai handles DB persistence
           try { onTaskComplete?.(result) } catch { /* never propagate */ }
           return result
         })
@@ -419,13 +397,18 @@ export async function executePlan(
   } catch (err: unknown) {
     const engineError = err instanceof Error ? err : new Error(String(err))
     try { onEngineError?.(engineError) } catch { /* never propagate */ }
-    throw engineError
-  } finally {
-    const finalStatus = deriveFinalStatus(context.results, aborted)
-    await finalizeExecution(execution_id, finalStatus, context.total_cost)
   }
 
-  return context
+  const tasks       = Array.from(context.results.values())
+  const finalStatus = deriveFinalStatus(context.results, aborted)
+
+  return {
+    plan_id:    plan.plan_id,
+    status:     finalStatus,
+    tasks,
+    total_cost: context.total_cost,
+    aborted,
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -1,16 +1,15 @@
 // app/api/execute/route.ts
 // ─────────────────────────────────────────────────────────────────────────────
 // Javari AI Engine — Primary execution endpoint
-// Accepts an execution plan from craudiovizai, runs it through the TEAM engine,
-// streams SSE results back, writes to javari-ai's own Supabase.
-// craudiovizai handles auth + billing. javari-ai handles AI execution only.
+// Accepts a validated execution plan from craudiovizai.
+// Runs the plan through the stateless TEAM engine.
+// Streams SSE results back. ZERO database writes.
+// craudiovizai receives ExecutionOutput and handles all DB, billing, credits.
 // Created: May 1, 2026
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { NextRequest, NextResponse } from 'next/server'
-import {
-  executePlanStreaming,
-} from '@/lib/javari/engine/execution-engine'
+import { executePlanStreaming }   from '@/lib/javari/engine/execution-engine'
 import {
   validateExecutionPlan,
   buildExecutionGraph,
@@ -19,84 +18,96 @@ import {
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-// ── CORS — craudiovizai is the only allowed caller ────────────────────────────
+// ── CORS — only craudiovizai may call this endpoint ───────────────────────────
 const ALLOWED_ORIGINS = [
   'https://craudiovizai.com',
   'https://www.craudiovizai.com',
   process.env.CRAUDIOVIZAI_URL ?? '',
 ].filter(Boolean)
 
-function withCors(res: NextResponse, origin: string | null): NextResponse {
+function corsHeaders(origin: string | null): Record<string, string> {
   if (origin && ALLOWED_ORIGINS.includes(origin)) {
-    res.headers.set('Access-Control-Allow-Origin', origin)
+    return {
+      'Access-Control-Allow-Origin':  origin,
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, x-javari-caller-key',
+    }
   }
-  res.headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS')
-  res.headers.set('Access-Control-Allow-Headers', 'Content-Type, x-javari-caller-key')
-  return res
+  return {}
 }
 
-// ── Caller key — craudiovizai must present this to authenticate ───────────────
+// ── Caller key — shared secret between craudiovizai and javari-ai ─────────────
 const CALLER_KEY = process.env.JAVARI_CALLER_KEY ?? ''
 
 export async function OPTIONS(req: NextRequest) {
   const origin = req.headers.get('origin')
-  return withCors(new NextResponse(null, { status: 200 }), origin)
+  return new NextResponse(null, { status: 200, headers: corsHeaders(origin) })
 }
 
 export async function POST(req: NextRequest) {
   const origin = req.headers.get('origin')
 
-  // ── Auth: verify caller key ─────────────────────────────────────────────────
+  // ── Auth ─────────────────────────────────────────────────────────────────────
   const callerKey = req.headers.get('x-javari-caller-key') ?? ''
   if (!CALLER_KEY || callerKey !== CALLER_KEY) {
-    return withCors(
-      NextResponse.json({ error: 'Unauthorized', status: 'failed' }, { status: 401 }),
-      origin
+    return NextResponse.json(
+      { error: 'Unauthorized', status: 'failed' },
+      { status: 401, headers: corsHeaders(origin) }
     )
   }
 
-  // ── Parse + validate plan ───────────────────────────────────────────────────
+  // ── Parse + validate plan ────────────────────────────────────────────────────
   let rawBody: unknown
   try {
     rawBody = await req.json()
   } catch {
-    return withCors(
-      NextResponse.json({ error: 'Invalid JSON body', status: 'failed' }, { status: 400 }),
-      origin
+    return NextResponse.json(
+      { error: 'Invalid JSON', status: 'failed' },
+      { status: 400, headers: corsHeaders(origin) }
     )
   }
 
   const planResult = validateExecutionPlan(rawBody)
   if (!planResult.success) {
-    return withCors(
-      NextResponse.json({ error: planResult.error, status: 'failed' }, { status: 422 }),
-      origin
+    return NextResponse.json(
+      { error: planResult.error, status: 'failed' },
+      { status: 422, headers: corsHeaders(origin) }
     )
   }
 
   const plan  = planResult.plan
   const graph = buildExecutionGraph(plan)
 
-  // ── Stream execution via SSE ────────────────────────────────────────────────
+  // ── Stream SSE — no DB writes happen here ────────────────────────────────────
+  // The stream emits:
+  //   { type: 'task_start',    task_id }
+  //   { type: 'task_complete', task_id, result }
+  //   { type: 'task_error',    task_id, error }
+  //   { type: 'error',         error }
+  //   { type: 'complete',      plan_id, status, total_cost, tasks }
+  //
+  // craudiovizai listens for 'complete' and uses the payload to:
+  //   - write javari_team_executions to its Supabase
+  //   - deduct credits
+  //   - update billing records
   const stream = executePlanStreaming(graph, plan)
 
-  const response = new NextResponse(stream, {
-    status: 200,
+  return new NextResponse(stream, {
+    status:  200,
     headers: {
-      'Content-Type':  'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection':    'keep-alive',
+      'Content-Type':      'text/event-stream',
+      'Cache-Control':     'no-cache',
+      'Connection':        'keep-alive',
       'X-Accel-Buffering': 'no',
+      ...corsHeaders(origin),
     },
   })
-
-  if (origin && ALLOWED_ORIGINS.includes(origin)) {
-    response.headers.set('Access-Control-Allow-Origin', origin)
-  }
-
-  return response
 }
 
 export async function GET() {
-  return NextResponse.json({ status: 'javari-ai execution engine online' })
+  return NextResponse.json({
+    status:   'javari-ai execution engine online',
+    db_writes: false,
+    note:     'zero database writes — craudiovizai owns all persistence',
+  })
 }
