@@ -67,15 +67,36 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const planResult = validateExecutionPlan(rawBody)
-  if (!planResult.success) {
-    return NextResponse.json(
-      { error: planResult.error, status: 'failed' },
-      { status: 422, headers: corsHeaders(origin) }
-    )
+  // ── Diagnostic logging — captures the exact plan received and any validation error
+  console.log('[PLAN RECEIVED]', JSON.stringify(rawBody, null, 2))
+
+  let plan: ReturnType<typeof validateExecutionPlan>['plan']
+  try {
+    const planResult = validateExecutionPlan(rawBody)
+    if (!planResult.success) {
+      console.error('[PLAN VALIDATION ERROR]', planResult.error)
+      return new Response(JSON.stringify({
+        status:        'validation_failed',
+        error:         planResult.error,
+        plan_received: rawBody,
+      }), {
+        status:  400,
+        headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
+      })
+    }
+    plan = planResult.plan
+  } catch (err) {
+    console.error('[PLAN VALIDATION ERROR]', err)
+    return new Response(JSON.stringify({
+      status:        'validation_failed',
+      error:         String(err),
+      plan_received: rawBody,
+    }), {
+      status:  400,
+      headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
+    })
   }
 
-  const plan  = planResult.plan
   const graph = buildExecutionGraph(plan)
 
   // ── Stream SSE — no DB writes happen here ────────────────────────────────────
