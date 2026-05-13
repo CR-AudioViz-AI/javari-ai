@@ -15,8 +15,9 @@ import {
   buildExecutionGraph,
 } from '@/lib/javari/engine/execution-contract'
 
-export const dynamic = 'force-dynamic'
-export const runtime = 'nodejs'
+export const dynamic    = 'force-dynamic'
+export const runtime    = 'nodejs'
+export const maxDuration = 300  // 5 min — AI execution needs long timeout
 
 // ── CORS — only craudiovizai may call this endpoint ───────────────────────────
 const ALLOWED_ORIGINS = [
