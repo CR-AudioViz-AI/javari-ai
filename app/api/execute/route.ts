@@ -2,10 +2,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Javari AI Engine — Primary execution endpoint
 // Accepts a validated execution plan from craudiovizai.
-// Runs the plan via executePlanStreaming(graph, plan, send) callback pattern.
-// Wraps the callback in a ReadableStream for SSE delivery.
-// ZERO database writes — craudiovizai handles all persistence on complete event.
-// Created: May 1, 2026
+// Creates ReadableStream, passes send() callback into executePlanStreaming().
+// Guarantees complete event. Zero database writes.
+// craudiovizai handles all DB persistence on complete event.
+// Created: May 1, 2026 | Stabilized: May 12, 2026
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { NextRequest, NextResponse }    from 'next/server'
@@ -19,7 +19,7 @@ import type { ExecutionPlan }          from '@/lib/javari/engine/execution-contr
 
 export const dynamic     = 'force-dynamic'
 export const runtime     = 'nodejs'
-export const maxDuration = 300
+export const maxDuration = 60
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
 const ALLOWED_ORIGINS = [
@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  // ── Validate plan ─────────────────────────────────────────────────────────
+  // ── Validate plan — validateExecutionPlan throws on failure ───────────────
   console.log('[PLAN RECEIVED]', JSON.stringify(rawBody, null, 2))
 
   let plan: ExecutionPlan
@@ -89,9 +89,9 @@ export async function POST(req: NextRequest) {
   }
 
   const graph = buildExecutionGraph(plan)
-  console.log('[EXECUTION START]', { plan_id: plan.plan_id, tasks: plan.tasks.length })
 
-  // ── Build SSE ReadableStream wrapping the callback-based executePlanStreaming
+  // ── Build SSE ReadableStream ───────────────────────────────────────────────
+  // executePlanStreaming uses callback pattern — we wrap it in ReadableStream
   const encoder = new TextEncoder()
 
   const stream = new ReadableStream<Uint8Array>({
@@ -100,39 +100,45 @@ export async function POST(req: NextRequest) {
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))
         } catch {
-          // Client disconnected — ignore
+          // Client disconnected
         }
       }
 
+      let completed = false
       try {
-        // Emit start event
+        // Emit start
         send({ type: 'start', plan_id: plan.plan_id } as SSEEvent)
 
-        // Run the execution engine with send callback
-        const result = await executePlanStreaming(graph, plan, send)
+        // Run engine with send callback
+        const ctx = await executePlanStreaming(graph, plan, send)
 
-        // Emit final complete event with full result payload
-        const tasks  = Array.from(result.results.values())
-        const total  = tasks.reduce((s, t) => s + (t.cost_used ?? 0), 0)
-        const failed = tasks.filter(t => t.status === 'failed').length
-        const status = failed === tasks.length ? 'failed'
-                     : failed > 0             ? 'partial'
-                                               : 'complete'
-
-        console.log('[EXECUTION COMPLETE]', { plan_id: plan.plan_id, status, tasks: tasks.length, total_cost: total })
+        // Guaranteed complete event with full result payload
+        const tasks      = Array.from(ctx.results.values())
+        const totalCost  = tasks.reduce((s, t) => s + (t.cost_used ?? 0), 0)
+        const failed     = tasks.filter(t => t.status === 'failed').length
+        const status     = failed === tasks.length ? 'failed'
+                         : failed > 0             ? 'partial'
+                                                  : 'complete'
 
         send({
           type:       'complete',
           plan_id:    plan.plan_id,
           status,
           tasks,
-          total_cost: total,
+          total_cost: totalCost,
         } as SSEEvent)
+
+        completed = true
 
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         console.error('[EXECUTION ERROR]', msg)
         send({ type: 'error', error: msg } as SSEEvent)
+
+        // Guaranteed complete even on error
+        if (!completed) {
+          send({ type: 'complete', plan_id: plan.plan_id, status: 'failed', tasks: [], total_cost: 0 } as SSEEvent)
+        }
       } finally {
         try { controller.close() } catch { /* already closed */ }
       }
