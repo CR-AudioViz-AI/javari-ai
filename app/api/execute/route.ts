@@ -102,7 +102,19 @@ export async function POST(req: NextRequest) {
   //   - write javari_team_executions to its Supabase
   //   - deduct credits
   //   - update billing records
-  const stream = executePlanStreaming(graph, plan)
+  let stream: ReadableStream<Uint8Array>
+  try {
+    console.log('[EXECUTION START]', { plan_id: plan.plan_id, tasks: plan.tasks.length })
+    stream = executePlanStreaming(graph, plan)
+    console.log('[STREAM CREATED]', { plan_id: plan.plan_id })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[STREAM CREATE ERROR]', msg)
+    return new NextResponse(JSON.stringify({ status: 'engine_error', error: msg }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
+    })
+  }
 
   return new NextResponse(stream, {
     status:  200,
