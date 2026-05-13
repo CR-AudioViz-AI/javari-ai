@@ -203,7 +203,7 @@ async function callDispatcher(
 
 export async function executeTask(
   task:    TaskNode,
-  _context: ExecutionContext,
+  context: ExecutionContext,
   fixCtx?: FixContext,
 ): Promise<TaskResult> {
   const started_at = new Date().toISOString()
@@ -425,23 +425,33 @@ export interface SSEEvent {
 }
 
 export async function executePlanStreaming(
-  graph: ExecutionGraph,
-  plan:  ExecutionPlan,
-  send:  (event: SSEEvent) => void,
+  graph:   ExecutionGraph,
+  plan:    ExecutionPlan,
+  send:    (event: SSEEvent) => void,
+  signal?: AbortSignal,
 ): Promise<ExecutionContext> {
-  return executePlan(graph, plan, {
-    onTaskStart:    (task)   => send({ type: 'task_start', task_id: task.id }),
-    onTaskComplete: (result) => send({
-      type:    result.status === 'complete' ? 'task_complete' : 'task_error',
-      task_id: result.task_id,
-      result,
-      error:   result.error,
-    }),
+  console.log('[EXECUTION START]', { plan_id: plan.plan_id, tasks: plan.tasks.length })
+  const ctx = await executePlan(graph, plan, {
+    onTaskStart: (task) => {
+      console.log('[TASK START]', task.id)
+      send({ type: 'task_start', task_id: task.id })
+    },
+    onTaskComplete: (result) => {
+      console.log('[TASK COMPLETE]', result.task_id, result.status)
+      send({
+        type:    result.status === 'complete' ? 'task_complete' : 'task_error',
+        task_id: result.task_id,
+        result,
+        error:   result.error,
+      })
+    },
     onEngineError: (err) => send({
       type:    err.message === 'Execution aborted by user' ? 'aborted' : 'error',
       message: err.message,
     }),
-  })
+  }, signal)
+  console.log('[EXECUTION COMPLETE]', { plan_id: plan.plan_id })
+  return ctx
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
