@@ -88,7 +88,15 @@ export async function POST(req: NextRequest) {
     })
   }
 
-  const graph = buildExecutionGraph(plan)
+  let graph
+  try {
+    graph = buildExecutionGraph(plan)
+    console.log('[GRAPH BUILT]', { plan_id: plan.plan_id, tasks: plan.tasks.length })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[GRAPH BUILD ERROR]', msg)
+    return NextResponse.json({ error: msg, status: 'graph_error' }, { status: 500, headers: corsHeaders(origin) })
+  }
 
   // ── Build SSE ReadableStream ───────────────────────────────────────────────
   // executePlanStreaming uses callback pattern — we wrap it in ReadableStream
