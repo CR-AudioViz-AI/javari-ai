@@ -63,13 +63,13 @@ const MODEL_POLICY: Record<AgentRole, ModelPolicy> = {
   architect: { primary: 'gpt-4o-mini',          fallback: 'gpt-4o-mini'  },
   builder:   { primary: 'gpt-4o-mini',          fallback: 'gpt-4o-mini'  },
   tester:    { primary: 'gpt-4o-mini',          fallback: 'gpt-4o-mini'  },
-  reviewer:  { primary: 'claude-3-haiku-20240307',   fallback: 'gpt-4o-mini' },
+  reviewer:  { primary: 'claude-haiku-4-5',   fallback: 'gpt-4o-mini' },
   deployer:  { primary: 'gpt-4o-mini',          fallback: 'gpt-4o-mini'  },
 }
 
 const COST_PER_1K_TOKENS: Record<string, number> = {
   'gpt-4o-mini':               0.000150,
-  'claude-3-haiku-20240307':   0.000250,
+  'claude-haiku-4-5':   0.000250,
 }
 
 const SIMULATED_OUTPUT_TOKENS: Record<AgentRole, number> = {
@@ -242,7 +242,7 @@ async function callModel(
   // Attempt order:
   // 1. Primary model (as specified by role)
   // 2. gpt-4o-mini (OpenAI fallback)
-  // 3. claude-3-haiku-20240307 (Anthropic fallback)
+  // 3. claude-haiku-4-5 (Anthropic fallback)
   // 4. Structured soft response — NEVER throws, NEVER returns empty
   const attempts: Array<{ label: string; fn: () => Promise<{ text: string; cost: number }> }> = [
     {
@@ -259,8 +259,8 @@ async function callModel(
       fn: () => callOpenAI(systemPrompt, userPrompt, 'gpt-4o-mini', maxCost),
     },
     {
-      label: 'claude-3-haiku-20240307',
-      fn: () => callAnthropic(systemPrompt, userPrompt, 'claude-3-haiku-20240307', maxCost),
+      label: 'claude-haiku-4-5',
+      fn: () => callAnthropic(systemPrompt, userPrompt, 'claude-haiku-4-5', maxCost),
     },
   ]
 
@@ -441,7 +441,7 @@ async function executeAgent(
     const { text, cost: aiCost, modelUsed } = await callModel(
       SYSTEM_PROMPTS.reviewer,
       prompt,
-      'claude-3-haiku-20240307',
+      'claude-haiku-4-5',
       request.max_cost,
     )
     return {
