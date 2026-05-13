@@ -67,29 +67,19 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  // ── Diagnostic logging — captures the exact plan received and any validation error
+  // ── Diagnostic logging + validation ─────────────────────────────────────────
+  // validateExecutionPlan() throws on failure — it does NOT return { success }
   console.log('[PLAN RECEIVED]', JSON.stringify(rawBody, null, 2))
 
-  let plan: ReturnType<typeof validateExecutionPlan>['plan']
+  let plan: ExecutionPlan
   try {
-    const planResult = validateExecutionPlan(rawBody)
-    if (!planResult.success) {
-      console.error('[PLAN VALIDATION ERROR]', planResult.error)
-      return new Response(JSON.stringify({
-        status:        'validation_failed',
-        error:         planResult.error,
-        plan_received: rawBody,
-      }), {
-        status:  400,
-        headers: { 'Content-Type': 'application/json', ...corsHeaders(origin) },
-      })
-    }
-    plan = planResult.plan
+    plan = validateExecutionPlan(rawBody)
   } catch (err) {
-    console.error('[PLAN VALIDATION ERROR]', err)
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[PLAN VALIDATION ERROR]', msg)
     return new Response(JSON.stringify({
       status:        'validation_failed',
-      error:         String(err),
+      error:         msg,
       plan_received: rawBody,
     }), {
       status:  400,
