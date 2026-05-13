@@ -109,22 +109,38 @@ export async function POST(req: NextRequest) {
         // Emit start
         send({ type: 'start', plan_id: plan.plan_id } as SSEEvent)
 
-        // Run engine with send callback
-        const ctx = await executePlanStreaming(graph, plan, send)
+        // Accumulate task results from callbacks for the complete event
+        const completedTasks: unknown[] = []
+        let   totalCost = 0
 
-        // Guaranteed complete event with full result payload
-        const tasks      = Array.from(ctx.results.values())
-        const totalCost  = tasks.reduce((s, t) => s + (t.cost_used ?? 0), 0)
-        const failed     = tasks.filter(t => t.status === 'failed').length
-        const status     = failed === tasks.length ? 'failed'
-                         : failed > 0             ? 'partial'
-                                                  : 'complete'
+        // Wrap send to accumulate task_complete results
+        const wrappedSend = (event: SSEEvent) => {
+          if (event.type === 'task_complete' || event.type === 'task_error') {
+            const result = (event as Record<string, unknown>)['result']
+            if (result && typeof result === 'object') {
+              completedTasks.push(result)
+              totalCost += ((result as Record<string, number>)['cost_used'] ?? 0)
+            }
+          }
+          send(event)
+        }
+
+        // Run engine with wrapped send callback
+        await executePlanStreaming(graph, plan, wrappedSend)
+
+        // Guaranteed complete event
+        const failed = completedTasks.filter(
+          (t) => (t as Record<string,string>)['status'] === 'failed'
+        ).length
+        const status = failed === completedTasks.length && completedTasks.length > 0 ? 'failed'
+                     : failed > 0 ? 'partial'
+                     : 'complete'
 
         send({
           type:       'complete',
           plan_id:    plan.plan_id,
           status,
-          tasks,
+          tasks:      completedTasks,
           total_cost: totalCost,
         } as SSEEvent)
 
