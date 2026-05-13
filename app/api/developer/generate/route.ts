@@ -1,15 +1,10 @@
 export const dynamic = 'force-dynamic'
 import { NextRequest, NextResponse } from 'next/server';
-import OpenAI from 'openai';
+import { dispatchAI } from '@/lib/javari/dispatcher/ai-dispatcher'
 import { createClient } from '@supabase/supabase-js';
 import { getErrorMessage, logError, formatApiError } from '@/lib/utils/error-utils';
 
-// Lazy initialization to prevent build-time execution
-function getOpenAI() {
-  return new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-  });
-}
+// AI calls routed through dispatchAI — single OpenAI call path
 
 function getSupabase() {
   return createClient(
@@ -19,7 +14,6 @@ function getSupabase() {
 }
 
 export async function POST(request: NextRequest) {
-  const openai = getOpenAI();
   const supabase = getSupabase();
   
   try {
