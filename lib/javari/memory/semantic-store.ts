@@ -47,3 +47,9 @@ export async function clearMemory(userId: string): Promise<void> {
 export async function getMemoryCount(userId: string): Promise<number> {
   return (sessionStore.get(userId) ?? []).length
 }
+
+// Alias exports for backward compatibility
+export const searchSimilar = retrieveMemory
+export async function searchMemory(userId: string, query: string, limit = 5) {
+  return retrieveMemory(userId, query, limit)
+}
