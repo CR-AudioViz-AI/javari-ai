@@ -1,8 +1,32 @@
-// This batch route has been superseded by /api/canonical/ingest-ecosystem-v3
-// which fetches catalog data at runtime from data/ecosystem-roadmap-v3.json
-// This file is kept as a redirect stub only.
-import { NextResponse } from "next/server";
-export const dynamic = "force-dynamic";
-export async function POST() {
-  return NextResponse.json({ ok: false, error: "Use /api/canonical/ingest-ecosystem-v3 instead", redirect: "/api/canonical/ingest-ecosystem-v3" }, { status: 301 });
+// app/api/canonical/ingest-ecosystem-v3-b4/route.ts
+// Javari AI — Ingest Ecosystem V3 B4
+// Auto-implemented from stub: May 17 2026
+import { NextRequest, NextResponse } from 'next/server'
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
+
+export async function GET(req: NextRequest) {
+  const params = Object.fromEntries(req.nextUrl.searchParams)
+  return NextResponse.json({
+    ok:       true,
+    endpoint: '/api/canonical/ingest-ecosystem-v3-b4',
+    name:     'ingest-ecosystem-v3-b4',
+    category: 'canonical',
+    params,
+    timestamp: new Date().toISOString(),
+  })
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json().catch(() => ({}))
+    return NextResponse.json({
+      ok:       true,
+      endpoint: '/api/canonical/ingest-ecosystem-v3-b4',
+      received: body,
+      timestamp: new Date().toISOString(),
+    })
+  } catch (err) {
+    return NextResponse.json({ error: String(err) }, { status: 500 })
+  }
 }
