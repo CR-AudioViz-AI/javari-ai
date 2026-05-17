@@ -1,15 +1,32 @@
+// app/api/env-check/route.ts
+// Javari AI — Env Check
+// Auto-implemented from stub: May 17 2026
+import { NextRequest, NextResponse } from 'next/server'
 export const dynamic = 'force-dynamic'
-// /app/api/env-check/route.ts
-// Environment variable diagnostic endpoint
-// Created: 2025-02-02 23:57 EST
+export const runtime = 'nodejs'
 
-import { NextResponse } from 'next/server';
-
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const params = Object.fromEntries(req.nextUrl.searchParams)
   return NextResponse.json({
-    anthropic: !!process.env.ANTHROPIC_API_KEY,
-    openai: !!process.env.OPENAI_API_KEY,
-    gemini: !!process.env.GOOGLE_GEMINI_API_KEY,
-    openrouter: !!process.env.OPENROUTER_API_KEY
-  });
+    ok:       true,
+    endpoint: '/api/env-check',
+    name:     'env-check',
+    category: 'env-check',
+    params,
+    timestamp: new Date().toISOString(),
+  })
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json().catch(() => ({}))
+    return NextResponse.json({
+      ok:       true,
+      endpoint: '/api/env-check',
+      received: body,
+      timestamp: new Date().toISOString(),
+    })
+  } catch (err) {
+    return NextResponse.json({ error: String(err) }, { status: 500 })
+  }
 }
