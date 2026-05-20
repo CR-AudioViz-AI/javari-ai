@@ -23,7 +23,7 @@ function selectChatModel(messageLength: number, isComplex: boolean): { model: st
 }
 
 // ── Call Groq (free) ─────────────────────────────────────────────────────────
-async function callGroq(messages: Array<{ role: string; content: string }>, model: string): Promise<Response> {
+async function callGroq(messages: Array<{ role: string; content: string }>, model: string, useStream = true): Promise<Response> {
   const key = process.env.GROQ_API_KEY
   if (!key) throw new Error('GROQ_API_KEY not set')
 
@@ -34,7 +34,7 @@ async function callGroq(messages: Array<{ role: string; content: string }>, mode
       model,
       max_tokens:  2048,
       temperature: 0.7,
-      stream:      true,
+      stream:      useStream,
       messages: [
         {
           role:    'system',
@@ -129,7 +129,7 @@ export async function POST(req: NextRequest) {
 
     // ── Non-streaming response ────────────────────────────────────────────────
     try {
-      const groqRes = await callGroq(messages, model)
+      const groqRes = await callGroq(messages, model, false)
       if (groqRes.ok) {
         const data = await groqRes.json() as { choices?: Array<{ message?: { content?: string } }> }
         const content = data.choices?.[0]?.message?.content ?? ''
